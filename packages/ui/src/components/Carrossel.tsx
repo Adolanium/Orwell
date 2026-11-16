@@ -2,6 +2,7 @@ import { useRef, useState } from "react"
 import type { MediaItem } from "../types.js"
 import { strings } from "../strings.js"
 import { ImagemAPedido } from "./AnexoAPedido.js"
+import { MediaLazy } from "./MediaLazy.js"
 import { eVideo, VideoDaPublicacao } from "./VideoDaPublicacao.js"
 
 /**
@@ -139,6 +140,27 @@ export function Carrossel({
           <VideoDaPublicacao key={indice} item={item} />
         ) : item.evicted ? (
           <ImagemAPedido item={item} onOpen={onOpen} />
+        ) : item.ref ? (
+          /* In the media store: `MediaLazy` makes the open button (without it when
+             the original is missing, so "Fetch" does not end up inside another
+             button). The same drag brake, through the click `detail`. */
+          <MediaLazy
+            key={indice}
+            item={item}
+            eager
+            draggable={false}
+            onOpen={
+              onOpen
+                ? (aberto, event) => {
+                    if (event && event.detail !== 0 && arrastou.current) {
+                      arrastou.current = false
+                      return
+                    }
+                    onOpen(aberto)
+                  }
+                : undefined
+            }
+          />
         ) : onOpen ? (
           <button
             type="button"

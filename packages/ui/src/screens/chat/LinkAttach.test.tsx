@@ -65,8 +65,8 @@ describe("LinkAttach — um vídeo do YouTube não espera por botão nenhum", ()
   })
 
   it("o título e a miniatura entram sozinhos, sem ninguém carregar em nada", async () => {
-    // The owner's request: "YouTube video and link previews should preview
-    // automatically".
+    // YouTube video and link previews preview
+    // automatically.
     hostPreview.mockResolvedValue({ title: "Big Buck Bunny", image: PNG })
     render(<Harness url={VIDEO} />)
 

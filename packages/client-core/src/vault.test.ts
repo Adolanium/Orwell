@@ -10,8 +10,6 @@ import {
   hasTransmitterEvidence,
   noteTransmitter,
   HISTORY_MAX_PER_CHANNEL,
-  HISTORY_MEDIA_BUDGET_BYTES,
-  HISTORY_MEDIA_RECENT,
   mayRepair,
   MANIFESTOS_LEMBRADOS,
   mergeOlderHistory,
@@ -23,11 +21,13 @@ import {
   upsertDirectory,
   Vault,
   VERSAO_DO_COFRE,
+  versaoLegivel,
   type StoredChatMessage,
   type VaultBackend,
   type VaultContents,
 } from "./vault.js"
 import { moradaDeTeste } from "../testes/moradas.js"
+import { cofreV2 } from "../testes/cofre-v2.js"
 import { chaveDoEvento } from "./dobras.js"
 
 const MURAL_ANA = moradaDeTeste("mural ana", "s")
@@ -39,8 +39,8 @@ const MURAL_OUTRO = moradaDeTeste("mural outro", "orwell.pt")
  * The history rules, exercised as the pure mutations they are.
  *
  * No socket, no ratchet, no React: `appendHistory` and friends are plain
- * functions over `VaultContents`, which is exactly what makes the cap, the
- * media window and the global budget testable at all.
+ * functions over `VaultContents`, which is exactly what makes the caps
+ * testable at all. Since version 3 there is no media window or budget.
  */
 
 function message(seq: number, body = `mensagem ${seq}`): StoredChatMessage {
@@ -231,86 +231,62 @@ describe("appendHistory", () => {
     expect(guardadas.some((entrada) => entrada.payload["t"] === "redact")).toBe(true)
   })
 
-  it("keeps media only in the newest entries of a channel", () => {
+  /**
+   * Since version 3 the vault does not evict media (design §0): the bytes live
+   * in the store, which has its own ceiling, and the vault keeps the
+   * references. An entry that still carries bytes (a vault left to migrate, an
+   * old sibling) stays as it is: there is no longer a window of 40 per room nor
+   * a 4 MB budget.
+   */
+  it("guarda os media de todas as entradas: já não há janela por sala", () => {
     const contents = newVaultContents()
-    const total = HISTORY_MEDIA_RECENT + 5
+    const total = 45
     for (let seq = 0; seq < total; seq++) appendHistory(contents, "!sala:s", imageMessage(seq, 100))
 
     const list = entradasDoCanal(contents, "!sala:s")
-    for (let index = 0; index < 5; index++) {
-      expect(attachmentsOf(list[index]!)[0]).toEqual({ evicted: true, name: `foto-${index}.png`, mediaType: "image/png" })
-    }
-    for (let index = 5; index < total; index++) {
-      expect(attachmentsOf(list[index]!)[0]?.inline).toBe("x".repeat(100))
-    }
+    for (let index = 0; index < total; index++) expect(attachmentsOf(list[index]!)[0]?.inline).toBe("x".repeat(100))
   })
 
-  /**
-   * The window is per ROOM, not per entire channel (report from owner,
-   * 3/11/2026: "YouTube thumbnails appear in direct messages, but not in
-   * community rooms").
-   *
-   * Rooms in a community are labels (`room`) inside a single MLS channel. With
-   * the window counted by channel, 41 messages in the "announcements" room
-   * stripped the thumbnail from a video stated in the "chat" room. In a direct
-   * this does not happen: a direct is one conversation, with its 40.
-   */
-  it("a janela dos media é por sala: a conversa de outra sala não despeja a miniatura desta", () => {
+  it("a conversa de outra sala não tira a miniatura desta, nem a da sala por omissão", () => {
     const contents = newVaultContents()
-    const video = linkMessage(0, 100, "sala-conversa")
-    appendHistory(contents, "!comunidade:s", video)
-    for (let seq = 1; seq <= HISTORY_MEDIA_RECENT + 1; seq++) {
-      appendHistory(contents, "!comunidade:s", imageMessage(seq, 10, "@abc:localhost", "sala-anuncios"))
+    appendHistory(contents, "!comunidade:s", linkMessage(0, 100, "sala-conversa"))
+    appendHistory(contents, "!comunidade:s", linkMessage(1, 100))
+    for (let seq = 2; seq <= 45; seq++) appendHistory(contents, "!comunidade:s", imageMessage(seq, 10, "@abc:localhost", "sala-anuncios"))
+
+    for (const seq of [0, 1]) {
+      const guardado = entradasDoCanal(contents, "!comunidade:s").find((entrada) => entrada.seq === seq)!
+      expect(linksOf(guardado)[0]?.thumbnail).toBe(`data:image/jpeg;base64,${"x".repeat(100)}`)
     }
-
-    const guardado = entradasDoCanal(contents, "!comunidade:s").find((entrada) => entrada.seq === 0)!
-    expect(linksOf(guardado)[0]?.thumbnail).toBe(`data:image/jpeg;base64,${"x".repeat(100)}`)
-    // And in the full room the rule holds: the oldest loses its bytes.
-    const primeiraDosAnuncios = entradasDoCanal(contents, "!comunidade:s").find((entrada) => entrada.seq === 1)!
-    expect(attachmentsOf(primeiraDosAnuncios)[0]?.evicted).toBe(true)
+    const primeiraDosAnuncios = entradasDoCanal(contents, "!comunidade:s").find((entrada) => entrada.seq === 2)!
+    expect(attachmentsOf(primeiraDosAnuncios)[0]?.inline).toBe("x".repeat(10))
   })
 
-  it("a sala por omissão (sem etiqueta) é uma sala como as outras", () => {
-    const contents = newVaultContents()
-    appendHistory(contents, "!comunidade:s", linkMessage(0, 100))
-    for (let seq = 1; seq <= HISTORY_MEDIA_RECENT + 1; seq++) appendHistory(contents, "!comunidade:s", message(seq))
-    expect(linksOf(entradasDoCanal(contents, "!comunidade:s")[0]!)[0]?.thumbnail).toBeUndefined()
-
-    const outra = newVaultContents()
-    appendHistory(outra, "!comunidade:s", linkMessage(0, 100))
-    for (let seq = 1; seq <= HISTORY_MEDIA_RECENT + 1; seq++) appendHistory(outra, "!comunidade:s", { ...message(seq), payload: { ...message(seq).payload, room: "sala-x" } })
-    expect(linksOf(entradasDoCanal(outra, "!comunidade:s")[0]!)[0]?.thumbnail).toBe(`data:image/jpeg;base64,${"x".repeat(100)}`)
-  })
-
-  it("os bytes de um irmão pedem-se pela janela da sala, não pela do canal", () => {
+  it("os bytes de um irmão pedem-se para qualquer entrada, mesmo fora das 40 mais recentes", () => {
     const contents = newVaultContents()
     const semMiniatura = linkMessage(0, 100, "sala-conversa")
     delete (semMiniatura.payload.links as Record<string, unknown>[])[0]!.thumbnail
     appendHistory(contents, "!comunidade:s", semMiniatura)
-    for (let seq = 1; seq <= HISTORY_MEDIA_RECENT + 1; seq++) appendHistory(contents, "!comunidade:s", { ...message(seq), payload: { ...message(seq).payload, room: "sala-anuncios" } })
+    for (let seq = 1; seq <= 45; seq++) appendHistory(contents, "!comunidade:s", { ...message(seq), payload: { ...message(seq).payload, room: "sala-conversa" } })
     const chave = chaveDoEvento(entradasDoCanal(contents, "!comunidade:s")[0]!)!
     expect(faltaMediaDaEntrada(contents, "!comunidade:s", chave, 100)).toBe(true)
+    // And what is already here with the same bytes is not asked for.
+    expect(faltaMediaDaEntrada(contents, "!comunidade:s", chave, 0)).toBe(false)
   })
 
-  it("evicts the oldest media across channels once over the global budget, keeping the text", () => {
+  it("passar os 4 MB já não despeja: os bytes e as palavras ficam", () => {
     const contents = newVaultContents()
     const megabyte = 1_000_000
-    // 6 MB across two channels against a 4 MB budget: the two oldest lose
-    // their bytes, everything keeps its words.
-    appendHistory(contents, "!a:s", imageMessage(1, megabyte))
-    appendHistory(contents, "!a:s", imageMessage(2, megabyte))
-    appendHistory(contents, "!a:s", imageMessage(3, megabyte))
-    appendHistory(contents, "!b:s", imageMessage(4, megabyte))
-    appendHistory(contents, "!b:s", imageMessage(5, megabyte))
-    appendHistory(contents, "!b:s", imageMessage(6, megabyte))
+    for (let seq = 1; seq <= 3; seq++) appendHistory(contents, "!a:s", imageMessage(seq, megabyte))
+    for (let seq = 4; seq <= 6; seq++) appendHistory(contents, "!b:s", imageMessage(seq, megabyte))
+    appendHistory(contents, MURAL_ANA, linkPostMessage(7, megabyte))
 
     const all = [...entradasDoCanal(contents, "!a:s"), ...entradasDoCanal(contents, "!b:s")]
-    const totalBytes = all.reduce((sum, entry) => sum + entryMediaBytes(entry), 0)
-    expect(totalBytes).toBeLessThanOrEqual(HISTORY_MEDIA_BUDGET_BYTES)
-
-    const evicted = all.filter((entry) => attachmentsOf(entry)[0]?.evicted === true).map((entry) => entry.seq)
-    expect(evicted).toEqual([1, 2])
-    for (const entry of all) expect(entry.payload.body).toBe(`imagem ${entry.seq}`)
+    expect(all.reduce((sum, entry) => sum + entryMediaBytes(entry), 0)).toBe(6 * megabyte)
+    for (const entry of all) {
+      expect(attachmentsOf(entry)[0]?.evicted).toBeUndefined()
+      expect(entry.payload.body).toBe(`imagem ${entry.seq}`)
+    }
+    expect(linksOf(entradasDoCanal(contents, MURAL_ANA)[0]!)[0]?.thumbnail).toBe(`data:image/png;base64,${"x".repeat(megabyte)}`)
   })
 
   it("conta as miniaturas dos cartões de link como os bytes que são", () => {
@@ -320,54 +296,27 @@ describe("appendHistory", () => {
     expect(entryMediaBytes(linkPostMessage(1, 100_000))).toBeGreaterThanOrEqual(100_000)
   })
 
-  it("despeja as miniaturas dos links fora da janela recente, e o cartão fica", () => {
-    // The math that makes this urgent: 100 KB per thumbnail, up to 4 per post,
-    // 400 posts per channel. Without eviction it grows on its own and never stops
-    //, but what gets evicted is the image, not the card: the address and title
-    // are words, and words survive.
+  it("as miniaturas dos links ficam todas, e o cartão com elas", () => {
     const contents = newVaultContents()
-    const total = HISTORY_MEDIA_RECENT + 5
+    const total = 45
     for (let seq = 0; seq < total; seq++) appendHistory(contents, MURAL_ANA, linkPostMessage(seq, 100))
 
     const list = entradasDoCanal(contents, MURAL_ANA)
-    for (let index = 0; index < 5; index++) {
+    for (let index = 0; index < total; index++) {
       const card = linksOf(list[index]!)[0]
-      expect(card?.thumbnail).toBeUndefined()
-      expect(card?.url).toBe(`https://exemplo.pt/${index}`)
+      expect(card?.thumbnail).toBe(`data:image/png;base64,${"x".repeat(100)}`)
       expect(card?.title).toBe(`título ${index}`)
     }
-    for (let index = 5; index < total; index++) {
-      expect(linksOf(list[index]!)[0]?.thumbnail).toBe(`data:image/png;base64,${"x".repeat(100)}`)
-    }
-  })
-
-  it("as miniaturas contam para o orçamento global e são despejadas por idade", () => {
-    const contents = newVaultContents()
-    const megabyte = 1_000_000
-    appendHistory(contents, MURAL_ANA, linkPostMessage(1, megabyte))
-    appendHistory(contents, MURAL_ANA, linkPostMessage(2, megabyte))
-    appendHistory(contents, MURAL_BRU, imageMessage(3, megabyte))
-    appendHistory(contents, MURAL_BRU, imageMessage(4, megabyte))
-    appendHistory(contents, MURAL_BRU, imageMessage(5, megabyte))
-
-    const all = [...entradasDoCanal(contents, MURAL_ANA), ...entradasDoCanal(contents, MURAL_BRU)]
-    const totalBytes = all.reduce((sum, entry) => sum + entryMediaBytes(entry), 0)
-    expect(totalBytes).toBeLessThanOrEqual(HISTORY_MEDIA_BUDGET_BYTES)
-    // The two oldest are posts with links, and they pay the price.
-    expect(linksOf(all[0]!)[0]?.thumbnail).toBeUndefined()
-    expect(all[0]?.payload.caption).toBe("publicação 1")
   })
 
   it("clones what it stores, so the caller's payload is never mutated later", () => {
     const contents = newVaultContents()
     const original = imageMessage(1, 10)
     appendHistory(contents, "!sala:s", original)
-    for (let seq = 2; seq < HISTORY_MEDIA_RECENT + 5; seq++) {
-      appendHistory(contents, "!sala:s", imageMessage(seq, 10))
-    }
-    // The stored copy of seq 1 was evicted; the object handed in was not.
+    const guardada = entradasDoCanal(contents, "!sala:s")[0]!
+    expect(guardada.payload).not.toBe(original.payload)
+    attachmentsOf(guardada)[0]!.inline = "mudado"
     expect(attachmentsOf(original)[0]?.inline).toBe("x".repeat(10))
-    expect(attachmentsOf(entradasDoCanal(contents, "!sala:s")[0]!)[0]?.evicted).toBe(true)
   })
 })
 
@@ -487,8 +436,8 @@ function escreverFicheiro(backend: MemoryBackend, file: Record<string, unknown>)
  * See `VERSAO_DO_COFRE` in `vault.ts`: the number always existed and decided
  * nothing, so a vault written by a future version was opened with today's rules
  * and rewritten on top. While the format was a single blob, that cost almost
- * nothing; the day the history leaves the blob, which is the proposal in
- * `docs/PENDENTES.md`, conversion costs everything.
+ * nothing; the day the history leaves the blob, which is a proposal on the table,
+ * conversion costs everything.
  */
 describe("a versão do cofre", () => {
   it("um cofre de uma versão futura não se abre, e fica intacto no disco", async () => {
@@ -557,7 +506,72 @@ describe("a versão do cofre", () => {
     expect(vault.contents.profile.displayName).toBe("Ana")
   })
 
-  /** A vault written before any field existed reads as the initial format. */
+  it("um cofre da versão 2 abre, marca a migração dos media, e grava-se como 3", async () => {
+    const backend = new BackendComChaveDoSistema()
+    const primeiro = new Vault(backend)
+    await primeiro.create(null)
+    await primeiro.update((contents) => {
+      contents.profile.displayName = "Ana"
+    })
+    escreverFicheiro(backend, { ...ficheiroDe(backend), version: 2 })
+
+    const vault = new Vault(backend)
+    await vault.unlock()
+    expect(vault.contents.profile.displayName).toBe("Ana")
+    expect(vault.contents.armazem?.porMigrar).toBe(true)
+    await vault.update(() => {})
+    expect(ficheiroDe(backend).version).toBe(3)
+
+    // The mark stays until the migration removes it: the next opening, already on 3, still sees it.
+    const outra = new Vault(backend)
+    await outra.unlock()
+    expect(outra.contents.armazem?.porMigrar).toBe(true)
+  })
+
+  it("o cofre da versão 2 congelado abre e grava-se como 3 sem perder nada: só ganha armazem", async () => {
+    const backend = new BackendComChaveDoSistema()
+    await new Vault(backend).create(null, cofreV2())
+    escreverFicheiro(backend, { ...ficheiroDe(backend), version: 2 })
+
+    const vault = new Vault(backend)
+    await vault.unlock()
+    await vault.update(() => {})
+    expect(ficheiroDe(backend).version).toBe(3)
+
+    const reaberto = new Vault(backend)
+    await reaberto.unlock()
+    const antes = cofreV2()
+    const depois = reaberto.contents
+    expect(depois.armazem).toEqual({ porMigrar: true })
+    expect(depois.history).toEqual(antes.history)
+    expect(depois.estadoDoCanal).toEqual(antes.estadoDoCanal)
+    expect(depois.videos).toEqual(antes.videos)
+    expect(depois.directory).toEqual(antes.directory)
+    expect(depois.spaceMeta).toEqual(antes.spaceMeta)
+    expect(depois.channelRooms).toEqual(antes.channelRooms)
+    expect(depois.profile).toEqual(antes.profile)
+    const { armazem: _armazem, ...resto } = depois
+    // And the rest too: the only difference is `armazem`.
+    expect(JSON.parse(JSON.stringify(resto))).toEqual(antes)
+  })
+
+  it("um cofre novo nasce na versão 3, sem nada por migrar", async () => {
+    const backend = new BackendComChaveDoSistema()
+    await new Vault(backend).create(null)
+    expect(VERSAO_DO_COFRE).toBe(3)
+    expect(ficheiroDe(backend).version).toBe(3)
+    const vault = new Vault(backend)
+    await vault.unlock()
+    expect(vault.contents.armazem?.porMigrar).toBeUndefined()
+  })
+
+  it("um bundle da versão 2 recusa um cofre da versão 3", () => {
+    expect(() => versaoLegivel({ version: 3 }, 2)).toThrow("this vault was written by a newer version of the app")
+    expect(versaoLegivel({ version: 2 }, 2)).toBe(2)
+    expect(versaoLegivel({ version: 3 })).toBe(3)
+  })
+
+  /** A vault written before there was any field reads as the initial format. */
   it("um cofre sem o campo da versão continua a abrir", async () => {
     const backend = new BackendComChaveDoSistema()
     await new Vault(backend).create(null)
@@ -864,7 +878,7 @@ describe("criar um cofre que não chega ao disco", () => {
  * its history.
  *
  * This test is the guard: whoever inverts the order breaks it, and learns why
- * before doing it. See `docs/PENDENTES.md`.
+ * before doing it.
  */
 describe("uma gravação falhada, e o que tem de sobreviver a ela", () => {
   it("a memória fica à frente do disco, e a gravação seguinte leva as duas alterações", async () => {
@@ -912,7 +926,7 @@ describe("uma gravação falhada, e o que tem de sobreviver a ela", () => {
  * has no middle ground. Many records do.
  *
  * That is why it is the kind of thing that gets lost without anyone noticing.
- * `docs/PENDENTES.md` proposes splitting the file into keyed records, identity
+ * The plan is splitting the file into keyed records, identity
  * and groups in one, history per channel in others, metadata in their own, so
  * one conversation line no longer costs the entire vault. The day that happens,
  * nothing fails and nothing warns: the suite turns green, the app works, and the

@@ -69,8 +69,7 @@ export const NOME_SALA_DE_AVARIAS = "avarias"
 export const NOME_SALA_DE_ANUNCIOS = "anuncios"
 
 /**
- * The names the room can have. "Release notes" since 2 November 2026
- * (owner's order); "anúncios" still works, so the room doesn't lose its
+ * The names the room can have. "Release notes" is the current name; "anúncios" still works, so the room doesn't lose its
  * place between the new version and the name change. With hyphen or
  * space, because a room's name is written both ways.
  */

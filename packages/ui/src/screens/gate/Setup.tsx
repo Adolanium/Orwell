@@ -137,7 +137,7 @@ export function Setup({
   const useOs = false
   /** The platform has a place to memorize the session (F1). See `MemorizarSessao.tsx`. */
   const [memoriaDisponivel, setMemoriaDisponivel] = useState(false)
-  /** "Memorize the session", on by default (owner's decision 1). */
+  /** "Memorize the session", on by default. */
   const [memorizar, setMemorizar] = useState(true)
   const memorizarDepoisDeAbrir = useMemorizarDepoisDeAbrir(bridge)
   /** "Join the Orwell channel", on the last step. See `ENTRAR_NO_CANAL_OFICIAL_POR_OMISSAO`. */

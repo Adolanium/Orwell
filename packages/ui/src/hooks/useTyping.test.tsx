@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook } from "@testing-library/react"
 import { TYPING_TTL_MS } from "@enclave/protocol"
 import type { EnclaveBridge } from "../bridge.js"
-import { useTyping, TYPING_BURST_MS, TYPING_INTERVAL_MS } from "./useTyping.js"
+import { useTyping, TYPING_BURST_MS, TYPING_INTERVAL_MS, TYPING_INTERVAL_SALA_GRANDE_MS } from "./useTyping.js"
 
 /**
  * The typing indicator, proven by the three things that can break it.
@@ -63,6 +63,34 @@ describe("a enviar o sinal", () => {
     act(() => vi.advanceTimersByTime(TYPING_INTERVAL_MS + 1))
     act(() => result.current.noteTyping())
     expect(typing).toHaveBeenCalledTimes(2)
+  })
+
+  it("com mais de três pessoas a escrever no mesmo sítio, o nosso sinal não sai (12/11/2026)", () => {
+    // Owner: the line then says "several people", and in a big room each signal
+    // is one copy per member online.
+    const { bridge, typing, emitir } = ponte()
+    const { result } = renderHook(() => useTyping(bridge, "!geral:s", "", "@eu:s"))
+    act(() => {
+      for (const quem of ["@a:s", "@b:s", "@c:s", "@d:s"]) emitir({ channel: "!geral:s", from: quem, room: "", until: Date.now() + 60_000 })
+    })
+    expect(result.current.typists).toHaveLength(4)
+    act(() => result.current.noteTyping())
+    act(() => vi.advanceTimersByTime(TYPING_INTERVAL_MS + 1))
+    act(() => result.current.noteTyping())
+    expect(typing).toHaveBeenCalledTimes(0)
+  })
+
+  it("na sala comum, o sinal sai com mais espaço, ainda dentro do prazo", () => {
+    const { bridge, typing } = ponte()
+    const { result } = renderHook(() => useTyping(bridge, "!984:s", "", "@eu:s", "online", true))
+    act(() => result.current.noteTyping())
+    act(() => vi.advanceTimersByTime(TYPING_INTERVAL_MS + 1))
+    act(() => result.current.noteTyping())
+    expect(typing).toHaveBeenCalledTimes(1)
+    act(() => vi.advanceTimersByTime(TYPING_INTERVAL_SALA_GRANDE_MS - TYPING_INTERVAL_MS))
+    act(() => result.current.noteTyping())
+    expect(typing).toHaveBeenCalledTimes(2)
+    expect(TYPING_INTERVAL_SALA_GRANDE_MS).toBeLessThan(TYPING_TTL_MS)
   })
 
   it("a renovação chega antes de o prazo anterior expirar", () => {

@@ -4,7 +4,7 @@ import { epochOf, type GroupSession } from "./group.js"
 
 /**
  * The key for ephemeral signals on a channel (phase S4 of absolute sync,
- * `docs/planos/2026-10-20-sincronia-absoluta.md`, section 4.5).
+ * section 4.5).
  *
  * Digests and anti-entropy requests travel in the `channel.sinal` frame, which
  * the server relays to whoever is connected and does not store. They cannot go through

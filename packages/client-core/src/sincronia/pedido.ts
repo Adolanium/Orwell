@@ -11,7 +11,7 @@ import {
   type RelatosNoFio,
   verificarAutoria,
 } from "@enclave/protocol"
-import type { StoredPayload, VaultContents } from "../vault.js"
+import { cederAVez, type StoredPayload, type VaultContents } from "../vault.js"
 import {
   anexoComBytes,
   anexoConfere,
@@ -73,8 +73,7 @@ import {
 } from "./resumo.js"
 
 /**
- * Anti-entropy between accounts (phase S4 of absolute sync,
- * `docs/planos/2026-10-20-sincronia-absoluta.md`, §4).
+ * Anti-entropy between accounts (phase S4 of absolute sync, §4).
  *
  * **What it does.** Each device announces, in an ephemeral signal, the level 0 de
  * summary of a channel (`r0`). Whoever sees a different summary descends: asks for level 1
@@ -170,6 +169,15 @@ export interface PortaDaAntiEntropia {
   bytesDoVideo?(sha: string): Uint8Array | null
   /** An attachment request failed because of a fault, not because nobody has it. For the log. */
   aoFalharAnexo?(canal: string, detalhe: string): void
+  /** This device has the bytes of this video (in memory or in the store). Without this, `bytesDoVideo`. */
+  temVideo?(sha: string): boolean
+  /**
+   * The stored payload with the bytes again (design §5, outgoing): each
+   * `{ ref }` in the vault becomes again the exact `inline` the authorship
+   * signed. Without the blob, the attachment goes as an `evicted` marker.
+   * Without this, the payload goes as it is (the tests from before the store).
+   */
+  inflar?(payload: StoredPayload): Promise<StoredPayload>
   /**
    * Resend the parts of a video to the requester (`q`). `vez` decides
    * if each part can go out. Returns whether all parts were sent.
@@ -191,9 +199,12 @@ export interface PortaDaAntiEntropia {
   /** Profiles of these accounts that this device can report, signed by the authors. */
   perfisParaRelatar?(canal: string, contas: readonly string[]): ItemRelatado[]
   /** This device is on the list of a profile request: publish ours (the session locks repetition). */
-  republicarPerfil?(canal: string): void
+  /** `quem`: the device that asked. The session caps this once per requester and channel. */
+  republicarPerfil?(canal: string, quem: string): void
   /** Reported profiles stored (`light`: without portrait bytes), for the session to notify the interface. */
   aoPerfisRelatados?(canal: string, perfis: { autor: string; versao: unknown; leve: boolean }[]): void
+  /** Someone is typing in this channel (`ty`), with the room and the deadline they sent. */
+  aoEscrever?(canal: string, de: string, sala: string, ate: number): void
 }
 
 // ------------------------------------------------------------ what travels
@@ -313,7 +324,17 @@ interface PP {
   id: string
   c: string[]
 }
-type Corpo = R0 | P1 | N1 | P2 | N2 | PI | RI | PT | PA | PP
+/**
+ * "Is typing" (12/11/2026): `r` the room, `u` the deadline. It was an expired
+ * MLS `typing`, stored 30 days and decrypted by every member in every recovery.
+ * An old client reads an unknown `k` as an illegible signal and drops it.
+ */
+interface TY {
+  k: "ty"
+  r?: string
+  u: number
+}
+type Corpo = R0 | P1 | N1 | P2 | N2 | PI | RI | PT | PA | PP | TY
 
 /** The prefix of the `q` of a report of requested profiles (`PP`). */
 const Q_DOS_PERFIS = "pf."
@@ -324,6 +345,14 @@ const Q_DOS_PERFIS = "pf."
 export const PERFIS_POR_PEDIDO = 100
 /** The leaves that respond to a profile request, by turn; the others stay silent. */
 const VEZES_DOS_PERFIS = 6
+/** How many typing `ref`s are remembered to route a refusal. See `AntiEntropia.escrever`. */
+const REFS_DA_ESCRITA_MAX = 64
+/** How far ahead a typing deadline may reach on the receiving side. */
+const ESCRITA_MAX_A_FRENTE_MS = 10_000
+/** After the last relay turn, how long a named account still waits for the relay before saying its own profile. */
+const ESPERA_DO_PROPRIO_PERFIL_MS = 1_500
+/** Relay turns a named account waits before saying its own profile: the first two relayers. */
+const TURNOS_A_ESPERAR_PELO_RELATO = 2
 
 /** The prefix of the `q` of a report that carries the bytes of an attachment. A descent id never has a dot. */
 const Q_DO_ANEXO = "anx."
@@ -397,6 +426,8 @@ function lerCorpo(bruto: unknown): Corpo | null {
         c["tipos"].length <= TIPOS_DO_RESUMO.length
         ? (c as unknown as PT)
         : null
+    case "ty":
+      return inteiro(c["u"]) && (c["r"] === undefined || textoCurto(c["r"], 128)) ? (c as unknown as TY) : null
     case "pp":
       return textoCurto(id) &&
         Array.isArray(c["c"]) &&
@@ -444,8 +475,14 @@ function emPartes<T>(entradas: readonly T[]): T[][] {
 
 /** Time between profile requests in the same channel. */
 const INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS = 60_000
-/** How long a requested account waits before requesting it again. */
-const LEMBRAR_PERFIS_PEDIDOS_MS = 10 * 60_000
+/**
+ * How long a requested account waits before it is requested again (24 h since
+ * 12/11/2026, was 10 min). An account that nobody could say (never published a
+ * profile, or nobody holds it signed) went back to the head of the sorted list
+ * every ten minutes, and with a hundred of them the request never reached the
+ * others.
+ */
+const LEMBRAR_PERFIS_PEDIDOS_MS = 24 * 3_600_000
 /** Profile request responses per channel, per minute, from each device. */
 const RESPOSTAS_DE_PERFIS_POR_MINUTO = 6
 
@@ -632,11 +669,17 @@ export class AntiEntropia {
   }
 
   /** Profiles to third parties, from the requester: the last request per channel and accounts already requested. */
-  readonly #perfisPedidos = new Map<string, { em: number; contas: Set<string> }>()
+  readonly #perfisPedidos = new Map<string, { em: number; contas: Map<string, number> }>()
   /** From the responder: the answer scheduled by turn, by `canal|id`. */
   readonly #respostasDePerfis = new Map<string, ReturnType<typeof setTimeout>>()
   /** Profile requests that someone has already answered (`canal|id`), so others stay silent. */
   readonly #perfisRespondidos = new Set<string>()
+  /**
+   * Per profile request (`canal|id`), the accounts whose profile a relay already
+   * carried, and whether with the picture. Read by a named account before it
+   * publishes its own (`#aoPedidoDePerfis`). Bounded like `#perfisRespondidos`.
+   */
+  readonly #perfisRelatadosPorPedido = new Map<string, Map<string, "completo" | "leve">>()
 
   /**
    * Channels with the snapshot to request (S5): who joined via Welcome and
@@ -1019,7 +1062,9 @@ export class AntiEntropia {
    * and only in channels with events since their last summary. Never in directs.
    */
   async aPassagem(canais: readonly string[]): Promise<void> {
-    for (const canal of canais) {
+    for (const [i, canal] of canais.entries()) {
+      // One channel at a time, yielding between them (1.3.15): the pass runs on the return to the foreground.
+      if (i > 0) await cederAVez()
       if (!this.#porta.elegivel(canal) || this.#porta.ehDirecta(canal)) continue
       if (!this.#mudouDesdeOUltimo(canal) || !this.#souOEleito(canal)) continue
       await this.enviarResumo(canal).catch(() => false)
@@ -1146,8 +1191,58 @@ export class AntiEntropia {
     return proxima
   }
 
+  /**
+   * "Is typing" as an ephemeral signal (12/11/2026). Its own budget and its own
+   * backoff (`ty|<canal>`): it never spends what the sync needs, and a refused
+   * typing signal never holds back a sync signal. Says whether it went out.
+   */
+  async escrever(canal: string, sala: string, ate: number): Promise<boolean> {
+    if (!this.#porta.podeSinalizar() || !this.#porta.elegivel(canal)) return false
+    const agora = this.#porta.agora()
+    if (this.#recuo.bloqueado(`ty|${canal}`, agora)) return false
+    const corpo: TY = { k: "ty", u: ate, ...(sala ? { r: sala } : {}) }
+    const chave = await this.#chave(canal)
+    if (!chave) return false
+    const eu = this.#porta.eu
+    const envelope: Envelope = {
+      ap: toBase64(eu.aparelho),
+      as: toBase64(eu.assinar(mensagemDoSinal(canal, eu.address, chave.epoca, corpo))),
+      c: corpo,
+    }
+    const sinal = toBase64(selarSinal(chave, canal, new TextEncoder().encode(JSON.stringify(envelope))))
+    const custo = sinal.length * this.#copias(canal)
+    if (!this.#tectos.gastar(`bytes-ty|${canal}`, custo, TECTOS_DA_SINCRONIA.bytesDeEscritaPorCanalPorMinuto, agora)) return false
+    /*
+      A random `ref`, like every other signal (12/11/2026). It carried the prefix
+      `ty-`, and the server reads the `ref`: it learned, in clear, who was typing
+      where and when. Which refs are typing stays here, to route a refusal.
+    */
+    const ref = novoId()
+    this.#refsDaEscrita.add(ref)
+    while (this.#refsDaEscrita.size > REFS_DA_ESCRITA_MAX) {
+      const [antiga] = this.#refsDaEscrita
+      if (antiga === undefined) break
+      this.#refsDaEscrita.delete(antiga)
+    }
+    try {
+      this.#porta.enviarSinal(canal, sinal, ref)
+    } catch {
+      this.#refsDaEscrita.delete(ref)
+      return false
+    }
+    return true
+  }
+
+  /** The refs of the typing signals sent lately. Memory only. See `escrever`. */
+  readonly #refsDaEscrita = new Set<string>()
+
   /** A server refusal: back off (§4.4). */
-  aoRecusa(frame: { channel: string; code: string; retryAfterMs?: number | undefined }): void {
+  aoRecusa(frame: { channel: string; code: string; retryAfterMs?: number | undefined; ref?: string | undefined }): void {
+    // A refused typing signal backs off typing only. See `escrever`.
+    if (frame.ref !== undefined && this.#refsDaEscrita.delete(frame.ref)) {
+      this.#recuo.recusado(`ty|${frame.channel}`, this.#porta.agora(), frame.retryAfterMs ?? TECTOS_DA_SINCRONIA.recuoMaximoMs)
+      return
+    }
     this.estatisticas.recusasDoServidor += 1
     if (frame.code === "sinal-rate-limited" || frame.code === "sinal-channel-busy") {
       this.#recuo.recusado(frame.channel, this.#porta.agora(), frame.retryAfterMs)
@@ -1229,6 +1324,10 @@ export class AntiEntropia {
         return
       case "pp":
         return this.#aoPedidoDePerfis(canal, folha, corpo)
+      case "ty":
+        // Capped at one typing window ahead: a sender's clock cannot keep the line on all afternoon.
+        this.#porta.aoEscrever?.(canal, frame.from, corpo.r ?? "", Math.min(corpo.u, this.#porta.agora() + ESCRITA_MAX_A_FRENTE_MS))
+        return
       case "n1":
       case "n2":
         return this.#aoNivel(canal, folha, corpo)
@@ -1833,8 +1932,10 @@ export class AntiEntropia {
    */
   async #relatar(canal: string, id: string, escolhidos: ItemDoResumo[], naoDadas: string[], autores: Set<string>): Promise<void> {
     escolhidos.sort(porOrdemDoRelato)
-    const relatados = escolhidos.flatMap((item) => {
-      const fonte = item.fonte!
+    // The bytes the signed shape reads (a sign's icon) and those of an item still to be signed come back from the store.
+    const fontes = await Promise.all(escolhidos.map((item) => this.#fonteInflada(item.fonte!, false)))
+    const relatados = escolhidos.flatMap((item, indice) => {
+      const fonte = fontes[indice]!
       const autoria = (fonte.payload as Record<string, unknown>)["autoria"] as { ap?: string } | undefined
       const aparelho = autoria?.ap ?? (fonte.autor === this.#porta.eu.address ? this.#meuAparelho : undefined)
       const cadeia = aparelho ? this.#porta.cadeiaDe(canal, fonte.autor, aparelho) : null
@@ -1999,9 +2100,14 @@ export class AntiEntropia {
     const anexo = payload ? anexoEm(payload, indice) : undefined
     if (!fonte || !payload || anexo === undefined) return { ok: false, motivo: "sem-prova" }
     if (anexoComBytes(anexo)) return { ok: true, anexo }
-    // A video: the bytes are separate. They are already here, nothing to request.
+    // A store reference with the blob here: nothing to ask.
+    if (refDoAnexo(anexo) !== null && this.#porta.inflar) {
+      const inflado = anexoEm(await this.#porta.inflar(payload as StoredPayload), indice)
+      if (anexoComBytes(inflado)) return { ok: true, anexo: inflado }
+    }
+    // A video: the bytes are separate. They are already here, nothing to ask.
     const video = partesDoAnexo(anexo)
-    if (video && this.#porta.bytesDoVideo?.(video.sha256)) return { ok: true, anexo: anexo as Record<string, unknown> }
+    if (video && this.#temVideo(video.sha256)) return { ok: true, anexo: anexo as Record<string, unknown> }
     const m = (payload["autoria"] as { m?: unknown } | undefined)?.m
     const resumo = Array.isArray(m) ? m[indice] : undefined
     if (typeof resumo !== "string") return { ok: false, motivo: "sem-prova" }
@@ -2209,7 +2315,7 @@ export class AntiEntropia {
     }
     this.#porta.esperarVideo?.(canal, anexo)
     if (this.#anexoEmCurso !== pedido) return
-    if (this.#porta.bytesDoVideo?.(sha)) {
+    if (this.#temVideo(sha)) {
       this.estatisticas.anexosRecebidos += 1
       this.#fecharAnexo(pedido, { ok: true, anexo })
       return
@@ -2253,6 +2359,31 @@ export class AntiEntropia {
     return null
   }
 
+  /** This device has the bytes of this video. */
+  #temVideo(sha: string): boolean {
+    return this.#porta.temVideo ? this.#porta.temVideo(sha) : this.#porta.bytesDoVideo?.(sha) != null
+  }
+
+  /**
+   * The source of an item with the bytes it needs to go out (design §5). With
+   * `tudo`, all the media (S5 serves an attachment). Without `tudo`, only when
+   * the shape that goes out reads them: the portrait and the icon (which a
+   * report carries), or an item without authorship, which is signed now with
+   * the attachment digests.
+   */
+  async #fonteInflada<F extends { payload: StoredPayload }>(fonte: F, tudo: boolean): Promise<F> {
+    const inflar = this.#porta.inflar
+    if (!inflar) return fonte
+    const p = fonte.payload as Record<string, unknown>
+    const precisa = tudo || p["autoria"] === undefined || refDoAnexo(p["avatar"]) !== null || refDoAnexo(p["icon"]) !== null
+    if (!precisa) return fonte
+    try {
+      return { ...fonte, payload: await inflar(fonte.payload) }
+    } catch {
+      return fonte
+    }
+  }
+
   /**
    * Serve the bytes of an attachment to whoever requested them. Only if we have
    * them, and only if they give the `m` that authorship signed; the stream only
@@ -2283,16 +2414,18 @@ export class AntiEntropia {
       */
     const d = pedido.l
     const item = this.#itens(canal, d).find((candidato) => chaveCurta(candidato.chave) === pedido.c)
-    const fonte = item?.fonte
-    if (!item || !fonte || (comJanela(item) && (fonte.seq < 0 || fonte.seq < d))) {
+    const guardada = item?.fonte
+    if (!item || !guardada || (comJanela(item) && (guardada.seq < 0 || guardada.seq < d))) {
       await naoTenho()
       return
     }
+    // The bytes come from the store: the vault keeps references (design §5, S5 is one of the outputs).
+    const fonte = await this.#fonteInflada(guardada, true)
     const normal = normalizar(fonte.payload as Record<string, unknown>)
     const anexo = normal ? anexoEm(normal, pedido.i) : undefined
     const video = anexoComBytes(anexo) ? null : partesDoAnexo(anexo)
-    // A video is only served if this device has the bytes: otherwise the caller moves to the next leaf.
-    if (video && !this.#porta.bytesDoVideo?.(video.sha256)) {
+    // A video is only given if this device has the bytes: otherwise the requester moves on to the next leaf.
+    if (video && !this.#temVideo(video.sha256)) {
       await naoTenho()
       return
     }
@@ -2451,18 +2584,34 @@ export class AntiEntropia {
     const agora = this.#porta.agora()
     const antes = this.#perfisPedidos.get(canal)
     if (antes && agora - antes.em < INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS) return false
-    const lembradas = antes && agora - antes.em < LEMBRAR_PERFIS_PEDIDOS_MS ? antes.contas : new Set<string>()
-    const eu = this.#porta.eu.address
-    const contas = [...new Set(semNome)].filter((conta) => conta !== eu && !lembradas.has(conta)).sort().slice(0, PERFIS_POR_PEDIDO)
+    const contas = this.contasPorPedir(canal, semNome).sort().slice(0, PERFIS_POR_PEDIDO)
     if (contas.length === 0) return false
+    const eu = this.#porta.eu.address
     // No one alive from another account, nobody to respond: the request is not spent.
     if (!this.#porta.folhas(canal).some((folha) => folha.address !== eu && this.#viva(folha))) return false
     const saiu = await this.#enviar(canal, { k: "pp", id: novoId(), c: contas })
     if (!saiu) return false
-    this.#perfisPedidos.set(canal, { em: agora, contas: new Set([...lembradas, ...contas]) })
+    const lembradas = new Map([...(antes?.contas ?? [])].filter(([, em]) => agora - em < LEMBRAR_PERFIS_PEDIDOS_MS))
+    for (const conta of contas) lembradas.set(conta, agora)
+    this.#perfisPedidos.set(canal, { em: agora, contas: lembradas })
     this.estatisticas.pedidosDePerfis += 1
     return true
   }
+
+  /** Of these nameless accounts, the ones not asked for in the last 24 h (`LEMBRAR_PERFIS_PEDIDOS_MS`). Not us. */
+  contasPorPedir(canal: string, semNome: readonly string[]): string[] {
+    const agora = this.#porta.agora()
+    const pedidas = this.#perfisPedidos.get(canal)?.contas
+    const eu = this.#porta.eu.address
+    return [...new Set(semNome)].filter((conta) => {
+      if (conta === eu) return false
+      const em = pedidas?.get(conta)
+      return em === undefined || agora - em >= LEMBRAR_PERFIS_PEDIDOS_MS
+    })
+  }
+
+  /** Between two profile requests in the same channel. The session re-arms its own request on this. */
+  static readonly INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS = INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS
 
   /**
    * A profile request. The people on the list publish theirs (the session caps it to
@@ -2476,13 +2625,38 @@ export class AntiEntropia {
     if (this.#porta.perfisATerceiros?.(canal) !== true) return
     const eu = this.#porta.eu.address
     const contas = new Set(corpo.c)
-    if (contas.has(eu)) this.#porta.republicarPerfil?.(canal)
+    const chave = `${canal}|${corpo.id}`
+    /*
+      Named in the request: publish our own profile, but only if no relay
+      carried it with its picture by the end of the relay turns (12/11/2026).
+      It used to go out at once, from every named account that was online: in
+      the common room the newcomer names everyone, so one join cost one profile
+      per online member, and the wave of 11/11 put ~220 events in `!984` per join.
+      A relay strips the picture bytes (`semBytesDoRetrato`), so an account with
+      a picture still says its own, once per ten minutes (the session's cap).
+    */
+    if (contas.has(eu)) {
+      // Nobody alive but the requester and us: no relay can come, so say it now.
+      const relatores = this.#porta.folhas(canal).filter((folha) => folha.address !== eu && folha.address !== de.address && this.#viva(folha))
+      const espera = relatores.length === 0 ? 0 : TURNOS_A_ESPERAR_PELO_RELATO * TECTOS_DA_SINCRONIA.passoDaSupressaoMs + ESPERA_DO_PROPRIO_PERFIL_MS
+      this.#mais(espera, () => {
+        const relatado = this.#perfisRelatadosPorPedido.get(chave)?.get(eu)
+        this.#perfisRelatadosPorPedido.delete(chave)
+        /*
+          Carried by a relay, with or without the picture: the newcomer has the
+          name, and that is what was asked. Without the picture the profile is
+          `parcial` there, and the picture comes the next time we publish. Not
+          carried (the relayer cannot relay itself, or had nothing of ours): say it.
+        */
+        if (relatado !== undefined) return
+        this.#porta.republicarPerfil?.(canal, de.aparelho)
+      })
+    }
     contas.delete(eu)
     contas.delete(de.address)
     const membros = new Set(this.#porta.membros(canal))
     const pedidas = [...contas].filter((conta) => membros.has(conta))
     if (pedidas.length === 0) return
-    const chave = `${canal}|${corpo.id}`
     if (this.#perfisRespondidos.has(chave) || this.#respostasDePerfis.has(chave)) return
     const meu = this.#meuAparelho
     const fila = this.#porta
@@ -2543,6 +2717,25 @@ export class AntiEntropia {
     if (agendada) {
       this.#cancelar(agendada)
       this.#respostasDePerfis.delete(chave)
+    }
+  }
+
+  /** The accounts a profile relay carried, for the named accounts to stay quiet. See `#aoPedidoDePerfis`. */
+  #notarPerfisRelatados(canal: string, relatos: RelatosNoFio): void {
+    const id = lerQ(relatos.q)?.id.slice(Q_DOS_PERFIS.length)
+    if (!id) return
+    const chave = `${canal}|${id}`
+    const vistos = this.#perfisRelatadosPorPedido.get(chave) ?? new Map<string, "completo" | "leve">()
+    for (const item of relatos.itens) {
+      const p = item.p as Record<string, unknown> | undefined
+      if (!p || p["t"] !== "profile" || typeof item.a !== "string") continue
+      const retrato = p["avatar"] as { evicted?: unknown } | undefined
+      if (vistos.get(item.a) !== "completo") vistos.set(item.a, retrato?.evicted === true ? "leve" : "completo")
+    }
+    this.#perfisRelatadosPorPedido.set(chave, vistos)
+    if (this.#perfisRelatadosPorPedido.size > 256) {
+      const [primeiro] = this.#perfisRelatadosPorPedido.keys()
+      if (primeiro !== undefined) this.#perfisRelatadosPorPedido.delete(primeiro)
     }
   }
 
@@ -2648,6 +2841,7 @@ export class AntiEntropia {
       }
     }
     if (aplicados > 0) await this.#porta.escoar()
+    if (relatos.q?.startsWith(Q_DOS_PERFIS)) this.#notarPerfisRelatados(canal, relatos)
     if (perfis.length > 0) {
       this.estatisticas.perfisAplicados += perfis.length
       this.#porta.aoPerfisRelatados?.(canal, perfis)
@@ -2692,3 +2886,10 @@ export function comAutoria<T extends Payload>(canal: string, payload: T, eu: Que
 
 /** For tests: the body of a signal, unencrypted. */
 export const _paraTestes = { lerCorpo, emPartes, mensagemDoSinal }
+
+/** The `sha` of an attachment stored as a store reference (`{ ref }`), or null. */
+function refDoAnexo(anexo: unknown): string | null {
+  if (typeof anexo !== "object" || anexo === null) return null
+  const ref = (anexo as Record<string, unknown>)["ref"]
+  return typeof ref === "string" ? ref : null
+}

@@ -238,7 +238,7 @@ for (let i = 0; i < 60 && !abanou; i++) {
 }
 check("a cotovelada da Ana abana o ecrã do Bruno", abanou)
 
-// The 5-second interval, with time showing, owner's request.
+// The 5-second interval, with the time showing.
 const rotulo = await ana.page.evaluate(() => {
   const b = document.querySelector('button[title^="Podes dar outra dentro de"]')
   return b ? { texto: b.textContent.trim(), fechado: b.disabled } : null

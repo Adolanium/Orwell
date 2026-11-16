@@ -1,5 +1,4 @@
-; The installer doesn't ask "for everyone or just me". Owner's decision Nov 3,
-; 2026: always installs per-user, in %LOCALAPPDATA%\Programs\Orwell, and
+; The installer doesn't ask "for everyone or just me". It always installs per-user, in %LOCALAPPDATA%\Programs\Orwell, and
 ; whoever is there updates without admin.
 ;
 ; Why this is a macro and not an option in `electron-builder.yml`: with

@@ -140,8 +140,8 @@ describe("o motor levanta-se", () => {
    *
    * **What this still does NOT prove**, stated so no one reads too much into it: that
    * a client from outside crosses Docker's NAT and connects. That requires a
-   * container with a bridge and a client on the outside, and remains unmeasured
-   * (see `PENDENTES.md`). What stopped being a guess is that the field works and
+   * container with a bridge and a client on the outside, and remains unmeasured.
+   * What stopped being a guess is that the field works and
    * where it comes out.
    */
   it("anuncia o endereço configurado nos candidatos ICE, e não o de escuta", async () => {
@@ -423,7 +423,7 @@ describe("os tectos", () => {
      * The number written, not read from the constant: a test that reads
      * `PARTICIPANTES_POR_AMBITO` passes with whatever number is there, and what we
      * want kept is the 50 that the load test measured
-     * (`docs/planos/limites-media-relatorio.md`). It was 16 until 3/11/2026.
+     * in the load test.
      */
     const chave = ambito()
     for (let i = 0; i < 50; i++) await motor.entrar(chave, `${eu()}-${i}`)
@@ -476,7 +476,7 @@ describe("os tectos", () => {
    * BITES. Biting is the worker sending REMB/TWCC to a real sender and the sender
    * lowering the rate, and that is not measured without a browser on the other side
    * trying to send too much. It is proven that the cap is applied to the right transport,
-   * with the right number, on the server side. See `PENDENTES.md`.
+   * with the right number, on the server side.
    */
   it("aplica o tecto de banda no transporte de envio, e o worker confirma-o", async () => {
     const chave = ambito()

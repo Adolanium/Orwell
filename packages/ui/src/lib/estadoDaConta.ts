@@ -165,10 +165,10 @@ export function marcarLido(channel: string, at: number): void {
   const { estado, aoFalhar } = ligacao
   void estado.marcarLido(channel, at).catch((erro: Error) => {
     /*
-      Hidden on owner's orders (October 28, 2026): Error 720 ("read mark
+      Hidden: Error 720 ("read mark
       channel is invalid") appeared as a warning to read-only users. The read
       mark is a sync detail between devices; missing one breaks nothing visible.
-      It stays in the diagnostic log and pending tasks (`docs/planos/depois-da-1-0.md`)
+      It stays in the diagnostic log
       until we find the cause.
     */
     if (erro.message === "read mark channel is invalid") {

@@ -1,14 +1,14 @@
 import { strings } from "../../strings.js"
 
 /**
- * The sections of channel properties (3/11/2026, plan
- * `docs/planos/paridade-discord-plano.md` §5.3).
+ * The sections of channel properties (§5.3 of the
+ * Discord-parity plan).
  *
- * Owner request: channel properties are now arranged in tabs or a side column,
+ * Channel properties are now arranged in tabs or a side column,
  * like Discord settings. On a wide screen it is the column on the left; on
  * mobile it is the row of tabs on top. See `RoomProperties`.
  *
- * The order is as requested. A section with no content yet (Members, Invites,
+ * The order follows Discord settings. A section with no content yet (Members, Invites,
  * Moderation, Events) shows a line saying what will go there, only to those who
  * can edit the channel: these sections are for admins, and they should see the
  * new structure early. Read-only users do not see empty sections, and with one

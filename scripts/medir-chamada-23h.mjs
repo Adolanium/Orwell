@@ -1,5 +1,5 @@
 /**
- * Requests from the owner of 27 October 2026, at 23h, measured in a real
+ * The call's visual features, measured in a real
  * browser (jsdom does not draw, does not play, does not count frames).
  *
  * Mounts the real components with the real stylesheet, 1280 e to 390 px, and

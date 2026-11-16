@@ -214,7 +214,7 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "the browser was not ready": 409,
   "the browser blocked this for safety": 410,
   "this browser cannot do that": 411,
-  // A chamada (`call.ts`, e as pontes).
+  // The call (`call.ts`, and the bridges).
   "could not open the microphone": 412,
   "could not open the camera or the microphone": 413,
   "call signalling failed": 414,
@@ -291,6 +291,8 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "audio-invalid-threshold": 490,
   "audio-meter-denied": 491,
   "audio-meter-failed": 492,
+  // A direct call with no STUN or TURN from the homeserver (1.3.15): no third-party fallback.
+  "no stun or turn server for a direct call": 493,
 
   "this device cannot shrink images": 501,
   "this is not an image this device can read": 502,
@@ -309,6 +311,10 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "the video upload failed": 514,
   // Asking for an attachment's bytes failed because of a fault, not because nobody has it (1.3.7).
   "the attachment request failed": 515,
+  // This device's media store (media out of the vault). 520-522.
+  "media store is full": 520,
+  "media store failed": 521,
+  "media blob is damaged": 522,
 
   "a friend request is already pending": 601,
   "that person is blocked": 602,

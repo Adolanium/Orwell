@@ -16,8 +16,8 @@ import type { FonteDoRetrato, RetratoMontado } from "./retrato.js"
 import { Session } from "./session.js"
 
 /**
- * The channel portrait in Welcome, with server and sessions for real (phase 1 of
- * `docs/planos/estado-cifrado-plano.md`).
+ * The channel portrait in Welcome, with server and sessions for real (phase 1 of the
+ * encrypted-state plan).
  *
  * Whoever joins must see the whole channel in the first `channels`, with nobody
  * connected on the other side: no anti-entropy, no handoff and no cascade from
@@ -305,7 +305,11 @@ describe("o retrato no Welcome, com ninguém do outro lado", () => {
     expect(perfil?.["displayName"]).toBe("Bruno")
     expect(perfil?.["autoria"]).toBeDefined()
     expect(vista.parcial).toBeUndefined()
-    expect((perfil?.["avatar"] as { inline?: string } | undefined)?.inline).toBe(RETRATO_DO_PERFIL)
+    // The portrait came whole (as in 1.3) and went to the media store: the vault keeps the reference.
+    const sha = (perfil?.["avatar"] as { ref?: string } | undefined)?.ref
+    expect(sha).toBeDefined()
+    const bytes = await telemovel.session.bytesDeMedia(sha!)
+    expect(`data:image/png;base64,${Buffer.from(bytes!).toString("base64")}`).toBe(RETRATO_DO_PERFIL)
     expect(vista.salas).toEqual(expect.arrayContaining(SALAS))
     expect(vista.fundador).toBe(ana!.address)
   }, 180_000)

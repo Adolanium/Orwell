@@ -731,7 +731,11 @@ describe("duas ofertas do mesmo par, ao mesmo tempo", () => {
     const ana = chamadas.get(ANA)!
 
     const erros: string[] = []
-    ana.on("error", (evento) => erros.push(evento.detail))
+    // This room's bridge offers no ICE servers, so the call warns once that a
+    // direct call reaches only the same network. That is not a signalling error.
+    ana.on("error", (evento) => {
+      if (evento.detail !== "no stun or turn server for a direct call") erros.push(evento.detail)
+    })
 
     const oferta = {
       t: "voice.offer",

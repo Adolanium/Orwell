@@ -16,6 +16,22 @@ export interface MediaItem {
   duration?: number
   /** The size the sender states. In a video it is what shows before any bytes arrive. */
   byteLength?: number
+  /**
+   * The media out of the vault (Task 10): the bytes are in this device's store,
+   * by the reference `sha`, and are asked for with `bridge.media.bytes`
+   * (`useMedia`). The fields below come from the core, for the screen: they
+   * never go on the wire.
+   */
+  ref?: string
+  /** The `sha` of the permanent thumbnail. Equal to `ref` for an image that is its own thumbnail. */
+  mini?: string
+  /** The dimensions in pixels, for the box reserved before loading. */
+  w?: number
+  h?: number
+  /** Plaintext bytes of the original. */
+  b?: number
+  /** The original is not on this device (it left through the ceiling, or never arrived). The thumbnail stays. */
+  falta?: boolean
 }
 
 export interface ChatMessage {

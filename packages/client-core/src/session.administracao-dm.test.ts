@@ -7,8 +7,8 @@ import { darFicha, moradaNova } from "../testes/moradas.js"
 /**
  * Administration in a conversation between two people: does not exist, it is a rule.
  *
- * Owner's order, word for word: "It must not be possible to make admin in the private
- * conversation between two users." Until now only the screen enforced it,  * `admiteAdministracao`, in `packages/ui/src/lib/format.ts`, whose comment promises that
+ * The rule: it must not be possible to make admin in the private
+ * conversation between two users. Until now only the screen enforced it,  * `admiteAdministracao`, in `packages/ui/src/lib/format.ts`, whose comment promises that
  * "the real refusal lives in the core, which trusts no screen". These tests exist for
  * that promise to be true and stay true.
  *

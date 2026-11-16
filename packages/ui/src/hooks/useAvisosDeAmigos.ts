@@ -42,7 +42,7 @@ interface Relogio {
 
 /**
  * The stack of friend cards. Each card has its own 2 s timer
- * (`AVISO_DO_AMIGO_MS`, owner's order 2 November 2026), even those not visible:
+ * (`AVISO_DO_AMIGO_MS`), even those not visible:
  * "+N" counts who arrived, and anyone who arrived more than 2 s ago is no longer arriving.
  */
 export function useAvisosDeAmigos(): {

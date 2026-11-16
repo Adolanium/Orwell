@@ -31,6 +31,9 @@ vi.mock("@enclave/client-core", () => ({
     reset(): void {
       feito.push("esquecer-grupos")
     }
+    async drenarArmazem(): Promise<void> {
+      feito.push("drenar-armazem")
+    }
   },
   Vault: class {
     async abrirMemorizada(): Promise<boolean> {
@@ -60,6 +63,8 @@ vi.mock("@enclave/client-core", () => ({
   },
 }))
 vi.mock("@enclave/crypto", () => ({ kindOf: () => "application" }))
+// The media store is born with the bridge; like the vault, without IndexedDB here.
+vi.mock("./armazem-backend.js", () => ({ BrowserArmazemBackend: class {} }))
 vi.mock("./vault-backend.js", () => ({ BrowserVaultBackend: class {} }))
 
 const { createBrowserBridge } = await import("./bridge.js")
@@ -95,7 +100,8 @@ describe("a ponte do browser e a sessão memorizada", () => {
     const ponte = createBrowserBridge()
     await ponte.vault.lock()
     expect(feito.indexOf("esquecer-sessao")).toBe(0)
-    expect(feito).toEqual(["esquecer-sessao", "desligar", "esquecer-grupos", "trancar"])
+    // The blobs in the store queue reach the disk before locking.
+    expect(feito).toEqual(["esquecer-sessao", "desligar", "esquecer-grupos", "drenar-armazem", "trancar"])
     expect(memorizada).toBe(false)
   })
 

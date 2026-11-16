@@ -1,6 +1,5 @@
 /**
- * The folds of a channel's content, in one place (phase S1 of absolute sync,
- * `docs/planos/2026-10-20-sincronia-absoluta.md` §7).
+ * The folds of a channel's content, in one place (phase S1 of absolute sync).
  *
  * A fold reads a list of events and returns the state they create: the conversation with
  * edits, the wall, likes and comments, votes. Before they lived in the UI (`feedOf`,
@@ -28,7 +27,20 @@
  * same output.
  */
 
-/** The minimum a fold reads from an entry. Used by the vault and the UI. */
+import { entryMediaBytes } from "./medidaDeMedia.js"
+import type { RefDeMedia } from "./vault.js"
+
+/**
+ * How a copy's media are weighed (`entryMediaBytes`): the vault references
+ * (`contents.media`) and what is in the store (`armazem.tem`). Without
+ * `media`, a reference weighs 1 and loses to an `inline` from an old sibling.
+ */
+export interface PesoDosMedia {
+  presente?: (sha: string) => boolean
+  media?: Readonly<Record<string, RefDeMedia>>
+}
+
+/** The minimum a fold reads from an entry. It serves the vault and the interface. */
 export interface EntradaDeDobra {
   seq: number
   sender: string
@@ -235,11 +247,13 @@ function temAnexos(entrada: EntradaDeDobra): boolean {
 /**
  * A post by `id` and author, no matter how many times it was said.
  *
- * The first one stays. The exception is photos: the vault dumps old media, and
- * a repost can bring images that the stored copy has already lost. When the
- * stored one is empty and the next one has something, the next one stays.
+ * The first one stays. The exception is media: a copy stored without the bytes
+ * (an `evicted` marker from an old sibling, or from a version 2 vault) and a
+ * republication that brings them. The most complete copy stays
+ * (`entryMediaBytes`, which counts references and thumbnails); on a tie, the
+ * one with attachments over the one with none, and then the first.
  */
-function colapsarCopias<E extends EntradaDeDobra>(posts: readonly E[]): E[] {
+function colapsarCopias<E extends EntradaDeDobra>(posts: readonly E[], peso: PesoDosMedia): E[] {
   const porChave = new Map<string, E>()
   for (const post of posts) {
     const chave = `${post.sender} ${texto(campo(post, "id")) ?? ""}`
@@ -248,8 +262,9 @@ function colapsarCopias<E extends EntradaDeDobra>(posts: readonly E[]): E[] {
       porChave.set(chave, post)
       continue
     }
-    if (temAnexos(guardada) || !temAnexos(post)) continue
-    porChave.set(chave, post)
+    const aqui = entryMediaBytes(guardada, peso.presente, peso.media)
+    const la = entryMediaBytes(post, peso.presente, peso.media)
+    if (la > aqui || (la === aqui && !temAnexos(guardada) && temAnexos(post))) porChave.set(chave, post)
   }
   return [...porChave.values()]
 }
@@ -265,7 +280,11 @@ function colapsarCopias<E extends EntradaDeDobra>(posts: readonly E[]): E[] {
  * The final order is by the author's `postedAt`, and a post's place does not
  * change with an edit: boosting what you edit was a sign of highlight.
  */
-export function dobrarMural<E extends EntradaDeDobra>(entradas: readonly E[], donoDoFeed: (canal: string) => string | null): E[] {
+export function dobrarMural<E extends EntradaDeDobra>(
+  entradas: readonly E[],
+  donoDoFeed: (canal: string) => string | null,
+  peso: PesoDosMedia = {},
+): E[] {
   const posts = colapsarCopias(
     entradas.filter(
       (entrada) =>
@@ -273,6 +292,7 @@ export function dobrarMural<E extends EntradaDeDobra>(entradas: readonly E[], do
         entrada.channel !== undefined &&
         donoDoFeed(entrada.channel) === entrada.sender,
     ),
+    peso,
   )
   const autor = new Map<string, string>()
   for (const post of posts) {

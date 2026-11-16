@@ -217,7 +217,12 @@ export function lerComoDataUrl(file: File): Promise<string> {
  * happens because someone clicked a button.
  */
 export function descarregar(dataUrl: string, nome: string): void {
-  const blob = new Blob([bytesDeDataUrl(dataUrl) as BlobPart], { type: "application/octet-stream" })
+  descarregarBytes(bytesDeDataUrl(dataUrl), nome)
+}
+
+/** The same, with the bytes already in hand (a file from the media store, Task 10). */
+export function descarregarBytes(bytes: Uint8Array, nome: string): void {
+  const blob = new Blob([bytes as BlobPart], { type: "application/octet-stream" })
   const endereco = URL.createObjectURL(blob)
   const ligacao = document.createElement("a")
   ligacao.href = endereco

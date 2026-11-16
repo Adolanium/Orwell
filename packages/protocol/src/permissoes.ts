@@ -1,7 +1,7 @@
 import { IRREVERSIBLE_POWERS, POWERS, type Power, type Sobreposicao } from "./payload.js"
 
 /**
- * The permissions model (1.2), stateless: `docs/planos/paridade-discord-plano.md`, §4.
+ * The permissions model (1.2), stateless.
  *
  * Everything here is a pure function of an `EstadoDePermissoes`. The session builds
  * the state from the vault and asks. It lives in the protocol so there is ONE rule:

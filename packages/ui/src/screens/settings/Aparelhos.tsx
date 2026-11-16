@@ -8,6 +8,7 @@ import { useConfirmar } from "../../hooks/useConfirmar.js"
 import { formatShortDate } from "../../lib/format.js"
 import { strings, traduzirErro } from "../../strings.js"
 import { AcrescentarAparelho } from "./AcrescentarAparelho.js"
+import { Armazem } from "./Armazem.js"
 import { JuntarContas } from "./JuntarContas.js"
 
 /** What we know of the account and server, to decide which buttons to show. */
@@ -188,6 +189,10 @@ export function Aparelhos(): React.JSX.Element {
           <p className="field-note">{strings.settings.revokeServerUnsupported}</p>
         )}
       </section>
+
+      {/* The room for media on this device: after the list, before
+          "This device" (export and delete the account). */}
+      <Armazem />
 
       {/* The sheet mounts beside the card: the card glass (`backdrop-filter`)
           pinned it to its box. */}

@@ -1,7 +1,7 @@
 /**
  * DJ capture sources, end-to-end: tab, system sound and window.
  *
- * Phase 9 of `docs/planos/definicoes-0-9.md`, the second slice (owner, 2/11/2026).
+ * Phase 9, the second slice.
  * The subject is the product: two accounts created on screen, a channel with
  * invite accepted, voice room clicked, the "Share audio" sheet open, the source
  * chosen in the footer and "Choose and share" pressed.

@@ -17,8 +17,8 @@
  * goes with the closer one). Each center is the center of its bounding rectangle,
  * and the difference is `dx`/`dy`, in device pixels: at 125%, 1 CSS px is 1.25 px.
  *
- * Born on 4 November 2026, for the "Remember session" checkbox, which the owner
- * saw with the checkmark low on Windows (see `docs/planos/checkbox-centro-relatorio.md`).
+ * Born for the "Remember session" checkbox, whose
+ * checkmark showed low on Windows.
  */
 import { writeFileSync } from "node:fs"
 import { chromium } from "playwright"

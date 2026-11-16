@@ -51,8 +51,6 @@ export const en: Traducao = {
     copyFailed: "could not copy",
     unsupported: "this version of the app does not do that yet",
     cancel: "Cancel",
-    mediaEvicted: "image is no longer on this device",
-    fileEvicted: "file is no longer on this device",
     connectionOnline: "connected",
     connectionConnecting: "connecting…",
     connectionReconnecting: "reconnecting…",
@@ -63,6 +61,14 @@ export const en: Traducao = {
       `The GIF is ${tem}. To stay animated, the maximum is ${maximo}. It is now still.`,
     imagesShrunk: (n: number, de: string, para: string): string => `${n} images reduced from ${de} to ${para}.`,
     spoilerShow: "Show hidden text",
+  },
+
+  media: {
+    noutroAparelho: "This image is stored on another device.",
+    ficheiroNoutroAparelho: "This file is stored on another device.",
+    trazer: "Fetch",
+    aTrazer: "Fetching...",
+    ninguemTem: "No device of this account and no connected member has this image. Try again later.",
   },
 
   connection: {
@@ -184,6 +190,10 @@ export const en: Traducao = {
       perfil: "Profile",
     },
     importLead: "Do you have the account file (.enclave)? Import it here.",
+    importImagensEmFalta: (n: number): string =>
+      n === 1
+        ? "The account is in. 1 image did not stay on this device. You can get it from another device."
+        : `The account is in. ${n} images did not stay on this device. You can get them from another device.`,
     importPick: "Import account",
     importPassLabel: "File password",
     importing: "Importing…",
@@ -377,11 +387,14 @@ export const en: Traducao = {
     removeChannelConfirm:
       "The channel disappears for all members. You cannot undo this. The app of each member deletes the messages of the channel, but a changed app can keep them.",
     removedChannel: (nome: string): string => `"${nome}" deleted.`,
+    /** The channel is catching up; a message waits for it (12/11/2026). */
+    aPorEmDia: "Catching up on this conversation…",
     typing: (nomes: string[]): string => {
       if (nomes.length === 1) return `${nomes[0] ?? ""} is typing…`
       if (nomes.length === 2) return `${nomes[0] ?? ""} and ${nomes[1] ?? ""} are typing…`
       if (nomes.length === 3) return `${nomes[0] ?? ""}, ${nomes[1] ?? ""} and ${nomes[2] ?? ""} are typing…`
-      return `${nomes.length} people are typing…`
+      // More than three (owner, 12/11/2026): no names and no count.
+      return "Several people are typing…"
     },
     unreadMark: "unread",
     unreadJump: (n: number): string => (n === 1 ? "1 unread message: go there" : `${n} unread messages: go there`),
@@ -1070,6 +1083,14 @@ export const en: Traducao = {
     aReceber: "Receiving the channel…",
     historico: (feitas: number, total: number): string => `Getting the history: ${feitas} of ${total} messages.`,
     historicoMedia: (feitas: number, total: number): string => `Getting the files: ${feitas} of ${total}.`,
+    historicoSemIrmao: "The main device does not answer. The older messages come when it is on.",
+    historicoParado: (faltam: number): string =>
+      `The main device stopped answering. ${faltam === 1 ? "1 older message is missing" : `${faltam} older messages are missing`}. They come when it is on.`,
+    historicoPerdidas: (perdidas: number): string =>
+      perdidas === 1
+        ? "1 older message did not come: the main device could not send it."
+        : `${perdidas} older messages did not come: the main device could not send them.`,
+    historicoFechar: "Close the history notice",
     parte: (nome: string, recebidos: number, esperados: number): string => `${nome}: ${recebidos} of ${esperados}`,
     tipos: {
       fundador: "Founding",
@@ -1342,6 +1363,18 @@ export const en: Traducao = {
 
   settings: {
     media: "Microphone and camera",
+    armazem: {
+      titulo: "Space for images and files on this device",
+      emUso: (usados: string, minis: string): string => `In use: ${usados}, plus ${minis} of thumbnails that always stay.`,
+      libertar: "Free up space",
+      semTecto: "No limit",
+      nota: "This choice is for this device only. The thumbnails do not count for the limit.",
+      quota: (efectivo: string): string => `This browser limits what this app can keep. On this device, the limit is ${efectivo}.`,
+      libertarTitulo: "Free up space?",
+      libertarCorpo:
+        "The app deletes from this device the originals of the images and files that are not on the screen. The thumbnails stay. An original that no device of the account and no member has does not come back.",
+      libertado: "The originals left this device. The thumbnails stayed.",
+    },
     voz: {
       lead: "The app processes your voice on this device, before it encrypts it. Your voice does not leave the device for processing.",
       perfil: "Noise reduction",
@@ -1444,6 +1477,8 @@ export const en: Traducao = {
     exportAction: "Export account",
     exportPassLabel: "Password for the file",
     exported: "account exported. The file is the account, keep it safe",
+    exportImagens: "Include the images",
+    exportImagensNota: (tamanho: string): string => `The file grows by ${tamanho}.`,
     exportNeedsAccountKey: "Make the backup on the main device of the account.",
     importReplacesDevice:
       "Importing moves the account to this device. The old device can no longer use it. To use the account on two devices, select \"Add device\" on the main device and \"Yes, pair this device\" on the new one.",
@@ -2752,6 +2787,8 @@ export const errosEn: Record<string, FraseDeErro> = {
   "the network blocks the call to that person":
     "Could not connect to a person in the call. The network on one side blocks the call.",
   "no relay server for the call": "No relay server. The call can fail for people on another network.",
+  "no stun or turn server for a direct call":
+    "This server has no STUN or TURN. The direct call connects only to people on the same network. We do not use third-party servers.",
   "you are not in a call": "You are not in a call. Join a call, then share the screen.",
   "this call server carries only voice":
     "The server of this call carries only voice. The image does not go through. Nothing was shared.",
@@ -2845,6 +2882,11 @@ export const errosEn: Record<string, FraseDeErro> = {
   "a video upload is already in progress": "A video is already uploading. Wait until it ends.",
   "the video upload failed": "The video upload stopped. The post was deleted. Publish it again.",
   "the attachment request failed": "The request for the file failed. Try again.",
+
+  /* The media store on this device (520 to 522). */
+  "media store is full": "The image storage on this device is full. New images are not stored here.",
+  "media store failed": "Could not store the image on this device.",
+  "media blob is damaged": "The image on this device is damaged. Use \"Fetch\" to get it again.",
 
   /* Friends and feed. */
   "too many friend lists in a row":

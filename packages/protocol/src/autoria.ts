@@ -5,7 +5,7 @@ import { fromBase64, toBase64 } from "./canonical.js"
 
 /**
  * Authorship of an event: the signature of the device that wrote it (phase S4
- * of absolute sync, `docs/planos/2026-10-20-sincronia-absoluta.md`, §4.1).
+ * of absolute sync, §4.1).
  *
  * **The problem.** MLS authenticates the leaf that SENDS. If I relay Ana's
  * comment, it arrives signed by my leaf and gets my name. So until now, only
@@ -42,8 +42,8 @@ import { fromBase64, toBase64 } from "./canonical.js"
  *
  * **What this costs in deniability.** Authorship makes a payload portable
  * proof of who wrote it. MLS was already not deniable (each message carries
- * the leaf's signature), but the proof needed the group context. This is the
- * owner's decision 1 (§12), approved on 20/10/2026: authorship on everything,
+ * the leaf's signature), but the proof needed the group context. This is a
+ * deliberate choice: authorship on everything,
  * messages included.
  */
 
@@ -73,8 +73,8 @@ export type Autoria = z.infer<typeof Autoria>
 
 /**
  * The types that carry authorship. The relayable ones (§4.3), the channel state
- * with its own log entry and, since 1.1 (decision D1 of
- * `docs/planos/estado-cifrado-plano.md`), the profile: the Welcome snapshot
+ * with its own log entry and, since 1.1 (decision D1 of the
+ * encrypted-state plan), the profile: the Welcome snapshot
  * carries member names, and a name without authorship was the inviter's word.
  * Left out: ephemeral events (`typing`, `buzz`, `voice.*`), the friendship and invite
  * book (it controls access, and only what came from the server counts, §7.8), shown

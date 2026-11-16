@@ -35,7 +35,6 @@
   the app on a real phone. Targets and hover are in `screens.css` (under `pointer: coarse`), long
   press in `hooks/useToqueLongo.ts`, and the keyboard at the end of this file. What stays out is
   the touch redesign of `docs/PLANO_MOVEL.md`: bottom navigation bar, edge drag, landscape.
-  See `docs/PENDENTES.md`.
   */
 
 :root {

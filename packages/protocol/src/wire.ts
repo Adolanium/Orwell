@@ -110,7 +110,7 @@ export const CAPACIDADE_EMPARELHAMENTO = "pairing"
  * second.
  *
  * What it is for: the digests and requests of sync between accounts
- * (`docs/planos/2026-10-20-sincronia-absoluta.md`, section 4.5). They are
+ * (section 4.5 of the absolute-sync plan). They are
  * small, only valid while they are true, and should not go through the MLS
  * ratchet or stay 30 days on the server.
  *
@@ -311,10 +311,9 @@ export type FonteDeMedia = z.infer<typeof FonteDeMedia>
  * or twenty, and it fits on any home connection with room to spare.
  *
  * **The bottleneck moved: it is now the SERVER OUTPUT**, and the formula is
- * `saída = bitrate × número de espectadores`. Twenty is where it adds up, since 3
- * November 2026 (it was eleven, against an output of ~50 Mbit/s that had never
+ * `saída = bitrate × número de espectadores`. Twenty is where it adds up (it was eleven, against an output of ~50 Mbit/s that had never
  * been measured). With the most expensive call the product allows at twenty,
- * measured in the load test (`docs/planos/limites-media-relatorio.md`):
+ * measured in the load test:
  *
  *   2 screens with audio  2 × 19 viewers × 2.56 Mbit/s     =  97 Mbit/s
  *   4 cameras             4 × 19 × 1.2 Mbit/s              =  91 Mbit/s
@@ -322,8 +321,7 @@ export type FonteDeMedia = z.infer<typeof FonteDeMedia>
  *                                                         ---------
  *                     measured on the wire, with headers:       209 Mbit/s
  *
- * against a measured output of 300 to 745 Mbit/s (`docs/planos/depois-da-1-0.md`,
- * "VPS bandwidth"), shared with magnuslab.pt. At 25 the same call measures 265
+ * against a measured output of 300 to 745 Mbit/s (VPS bandwidth), shared with magnuslab.pt. At 25 the same call measures 265
  * Mbit/s, and at 30 it measures 323: above the lowest measured output. Twenty leaves
  * headroom for the website and for broadcasts. The CPU copes: ~61 % of
  * one VPS core, estimated.
@@ -1126,7 +1124,7 @@ const TramasDoClienteSemCofre = z.discriminatedUnion("t", [
    * and it returns to the asker how many devices the account has and when it added them
    * (`addedAt`, `signedAt`). The server sees who asks about whom and does not log it. Restricting
    * this to those who share a channel, or to those holding a claimed KeyPackage, is being considered
-   * for the next slice (docs/PENDENTES.md).
+   * for the next slice.
    */
   z.object({ t: z.literal("manifest.get"), address: Address }),
 
@@ -1760,7 +1758,7 @@ export function parseServerFrame(raw: unknown): ServerFrame {
 //
 // One block only, at the end of the file, on purpose: vault frames join the
 // unions here below, and whoever adds frames to the other unions does not touch
-// these lines. See `docs/planos/estado-cifrado-plano.md`, phase 3a.
+// these lines. See phase 3a of the encrypted-state plan.
 
 /**
  * The capability that says "this server holds the encrypted vault" (`cofre.*`).

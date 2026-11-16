@@ -3,7 +3,7 @@ import { Emitter } from "./emitter.js"
 /**
  * The music player for a call: files or playlists, played on this device.
  *
- * Phase 9 de `docs/planos/definicoes-0-9.md`, the first source of "Share audio". The DJ picks files (or a folder), the player queues them, and the
+ * The first source of "Share audio". The DJ picks files (or a folder), the player queues them, and the
  * sound goes out through ONE stereo track (`faixa`) that the call puts on the air with
  * `Call.partilharMusica`. The track stays the same from start to end of the queue: changing
  * a file does not create a new producer or renegotiate anything.

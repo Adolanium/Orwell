@@ -1,7 +1,7 @@
 /**
  * The presence rings, measured in a real layout engine.
  *
- * The ring is the owner's request from October 27, 2026: 2 px around each
+ * The ring is 2 px around each
  * thumbnail face, green online, yellow away, red busy, gray offline, stopped
  * outside a call and pulsing inside one. Tests run in jsdom, which does not
  * apply stylesheets: they say the attributes are there, they do not say what

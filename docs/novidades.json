@@ -1,5 +1,143 @@
 [
   {
+    "versao": "1.3.15",
+    "nome": "Carmelo",
+    "data": "2026-11-16",
+    "itens": [
+      {
+        "tipo": "nova",
+        "texto": "Settings › Devices has \"Space for images and files on this device\": pick a ceiling (250 MB to 2 GB, or none), see what is in use, and \"Free up space\". An image that left this device keeps its sharp thumbnail and a \"Fetch\" button, which asks your other devices first and then the members."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Exporting the account can include the images. Off by default: the file stays the vault alone. Importing reads both kinds of file, and says how many images did not fit."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Images and files no longer live inside the vault. Each device keeps them in its own encrypted media store, and the vault keeps only references and keys. On a loaded account the vault went from 7.4 MB to 2.8 MB and the longest save from 287 ms to 96 ms. An older vault moves its media on the first unlock, one piece at a time, and a crash halfway loses nothing. What goes on the wire is unchanged, so older versions keep reading it."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Typing lag on large accounts: every key redrew the whole app (the sidebar, the member list and the conversation). The draft now lives in the composer and only goes up when you switch channel or send, so drafts still survive a channel switch. @ suggestions no longer refold every name on each key."
+      },
+      {
+        "tipo": "fix",
+        "texto": "The first click created 28 audio contexts at once, about 60 MB. Sounds now share one context, and each sound is built the first time it plays."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Coming back after the app was minimized: the sync clock that fires late now joins the catch-up already running instead of starting a second full pass, and the catch-up yields between channels. The diagnostic log records each return (time the page was held, vault saves, late timers, how long the desktop main process was held, whether the connection dropped), with no message content."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "The diagnostic log endpoint now requires a signed request from a signed-in session, like the report routes. An anonymous request is refused."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Direct calls no longer fall back to a third-party STUN server. If the homeserver offers no STUN or TURN, the call says so with Erro 493 instead of leaking your address to an outside service."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Dependencies updated (fastify, zod, fast-uri, Electron). `npm audit` reports no vulnerabilities in production dependencies."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "CI on GitHub: every push and pull request installs, typechecks, runs the test suites and audits the production dependencies."
+      }
+    ]
+  },
+  {
+    "versao": "1.3.14",
+    "nome": "Carmelo",
+    "data": "2026-11-13",
+    "itens": [
+      {
+        "tipo": "fix",
+        "texto": "Login freeze on large accounts: when the profile repair round failed in one channel, every login sent the profile again to every channel. The round now tracks each channel, so a failing channel is retried alone, and an unchanged profile is not sent at all."
+      },
+      {
+        "tipo": "fix",
+        "texto": "An admin who logs in after someone joined the public community by the invite card no longer sends the community state during login. It waits until the app is idle, goes out in small pieces, and is skipped if another admin already sent it. The newcomer still gets it."
+      }
+    ]
+  },
+  {
+    "versao": "1.3.13",
+    "nome": "Carmelo",
+    "data": "2026-11-12",
+    "itens": [
+      {
+        "tipo": "melhoria",
+        "texto": "Less memory and CPU when the local vault is saved. A save now builds the encrypted file in one buffer, instead of holding five to eleven copies of the vault at once. The file on disk is byte for byte the same."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Fewer vault saves at startup: the profile goes to all channels at once, and sends that leave in the same moment share one save. On a loaded account the profile publish went from two saves per channel to one or two in total."
+      }
+    ]
+  },
+  {
+    "versao": "1.3.12",
+    "nome": "Carmelo",
+    "data": "2026-11-12",
+    "itens": [
+      {
+        "tipo": "fix",
+        "texto": "Mobile restarts and the desktop freeze after login: every admin device re-sent the whole state of every channel it runs (roles, every role assignment, rooms, categories, banner) on every connection and on every join. In a large community that was ~176 messages per connection, each one a full write of the local vault on the sender and a decrypt, write and render on every member. Channel state is no longer re-sent on connect. On a join it is sent once: by the inviter, or in the public community by one admin, taking turns. Anything still missing arrives by sync from one member."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Bursts from older versions are now cheap to receive: a role, assignment, room, category or banner identical to what the device already has is dropped on arrival, and live messages enter the list in one render per frame instead of one per message."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Startup writes the local vault once after catching up all channels, instead of once per channel."
+      }
+    ]
+  },
+  {
+    "versao": "1.3.10",
+    "nome": "Carmelo",
+    "data": "2026-11-12",
+    "itens": [
+      {
+        "tipo": "fix",
+        "texto": "Mobile crash loop after \"Sync the account\": the button clears the list of invites that can no longer be opened, and on the next start the server sends all of them again (up to 200). Each one that failed wrote the whole local vault at once, in parallel, and a phone browser ran out of memory before any write finished, so the page crashed at every start (\"A problem repeatedly occurred\" on iOS). Those invites are now marked in one write, and the vault never runs two full writes at the same time: writes that arrive during one share the next. An account in this state recovers on its own at the next start, and no data is deleted."
+      },
+      {
+        "tipo": "fix",
+        "texto": "History from the main device no longer stands still: an entry that cannot be sent is skipped and counted instead of failing the whole page, lost entries leave the total, and with no progress for 3 minutes the notice closes with the reason and the transfer retries quietly every 5 minutes."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "The catch-up notice in a conversation now only says \"Catching up on this conversation…\". Messages typed meanwhile still wait for the catch-up."
+      }
+    ]
+  },
+  {
+    "versao": "1.3.8",
+    "nome": "Carmelo",
+    "data": "2026-11-12",
+    "itens": [
+      {
+        "tipo": "fix",
+        "texto": "Faster startup: the app opens as soon as the vault is unlocked, and catch-up runs four channels at once, starting with the channels you used last. On a throttled phone with a busy common room, time to a usable screen went from 30.9 s to 1.3 s."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Faster startup in large rooms: catching up on history saves the local vault once per room (and at most every 10 s) instead of once per page of 100 events. The server now allows 300 history pages per minute per account instead of 60."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Joining the common room no longer makes every online member republish their profile and the room's join card. The member who made the commit publishes the card once per epoch, and named members only republish when no relay carried their profile."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Typing indicators are sent as ephemeral encrypted signals and are no longer stored on the server. With more than 3 people typing, the line says \"Several people are typing…\"."
+      }
+    ]
+  },
+  {
     "versao": "1.3.7",
     "nome": "Carmelo",
     "data": "2026-11-11",

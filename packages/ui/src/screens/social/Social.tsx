@@ -7,7 +7,7 @@ import {
   caracteresDeBase64,
   caracteresDeDataUrl,
   FICHEIRO_MAX_BYTES,
-  HISTORY_MEDIA_BUDGET_BYTES,
+  VIDEO_NO_COFRE_MAX_CARACTERES,
 } from "@enclave/client-core"
 import { useBridge } from "../../App.js"
 import type { ConnectionState, LinkCard, Profile } from "../../bridge.js"
@@ -603,12 +603,12 @@ export function Social({
   }, [envioDoVideo])
 
   /**
-   * A video that doesn't fit in this device's vault (the media budget is 4
-   * million characters for everything) stays only in this session's memory. It's
-   * flagged before posting: after closing the app, this device only sees it if
-   * it asks the other members.
+   * A video that does not fit in this device's vault (up to 4 million
+   * characters per video, `VIDEO_NO_COFRE_MAX_CARACTERES`) stays only in the session memory. This is said
+   * before posting: after the app closes, this device only sees it if it asks
+   * the other members for it.
    */
-  const videoSoNaSessao = video !== undefined && caracteresDeBase64(video.bytes) > HISTORY_MEDIA_BUDGET_BYTES
+  const videoSoNaSessao = video !== undefined && caracteresDeBase64(video.bytes) > VIDEO_NO_COFRE_MAX_CARACTERES
 
   return (
     <main className="main">

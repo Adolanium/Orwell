@@ -1,6 +1,5 @@
 /**
- * What is muted, and what that silences (request from the owner 27 October
- * 2026: "any user should be able to mute these notifications").
+ * What is muted, and what that silences (any user can mute these notifications).
  *
  * **The keys.** An entire channel, or a direct conversation, is the channel address
  * (`!lagar:casa.pt`). A room is `canal/sala` (`!lagar:casa.pt/vinha`; the default room is

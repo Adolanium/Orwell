@@ -43,8 +43,7 @@ export interface ServerConfig {
    *
    * For a whole version, this spot held the line "Where the SFU lives. Media
    * never touches this process.", hanging over no member, because the member
-   * was never written. The decision of 15 August 2026
-   * (`docs/PENDENTES.md`, "SFU always") flipped it: media now crosses THIS
+   * was never written. The "SFU always" decision flipped it: media now crosses THIS
    * process. What stays true, and is the part that matters, is that it crosses
    * **encrypted with a key this process does not have**: only the clients open
    * the SFrame. See `media.ts`.
@@ -78,8 +77,9 @@ export interface ServerConfig {
    *
    * `turnSecret` is coturn's `static-auth-secret` and never reaches a client:
    * the gateway mints a short-lived username and HMAC per session. Empty means
-   * clients fall back to a public STUN, which leaks the time and IP of every
-   * call to a third party and cannot traverse symmetric NAT.
+   * direct (mesh) calls get no ICE servers: they reach only the same network,
+   * and the app says so. The app never asks a third-party STUN. SFU calls do
+   * not need these.
    */
   turnUrls: string[]
   turnSecret: string
@@ -212,7 +212,7 @@ function readVersaoMinima(raw: string | undefined): string {
  * The caps for `channel.sinal`, the ephemeral sync frame between accounts.
  *
  * The server does not decide who replies to whom: the clients do, through the
- * plan's election (`docs/planos/2026-10-20-sincronia-absoluta.md`, §4.4). The
+ * election between devices. The
  * server only limits, so a broken or hostile client cannot use up everyone's
  * egress. The numbers start from the plan's estimates for an honest device and
  * leave at least 2x headroom.

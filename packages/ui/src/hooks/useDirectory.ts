@@ -1,5 +1,8 @@
-import { useCallback, useMemo } from "react"
+import { useCallback, useContext, useEffect, useMemo, useState } from "react"
+import { useMesmoValor } from "./useMesmoValor.js"
+import { BridgeContext } from "../App.js"
 import type { Profile } from "../bridge.js"
+import { cacheDeMedia } from "../lib/cacheDeMedia.js"
 import type { ChatMessage } from "../types.js"
 import { nomeEmFalta, palavrasRepetidas } from "../lib/format.js"
 
@@ -21,9 +24,13 @@ export function profileFromPayload(payload: unknown): Profile {
     donations?: Profile["donations"]
     updatedAt?: number
     avatarDataUrl?: string
-    avatar?: { inline?: string; url?: string }
+    avatarRef?: string
+    avatar?: { inline?: string; url?: string; ref?: string; mini?: string }
   }
   const avatarDataUrl = raw.avatarDataUrl ?? raw.avatar?.inline
+  // The portrait in the media store (Task 10): by reference, and the thumbnail when it is another image.
+  const avatarRef = avatarDataUrl === undefined ? (raw.avatarRef ?? raw.avatar?.ref) : undefined
+  const avatarMini = avatarRef !== undefined && raw.avatar?.mini !== undefined && raw.avatar.mini !== avatarRef ? raw.avatar.mini : undefined
   return {
     displayName: raw.displayName ?? "",
     donations: raw.donations ?? [],
@@ -32,7 +39,58 @@ export function profileFromPayload(payload: unknown): Profile {
     ...(raw.email !== undefined ? { email: raw.email } : {}),
     ...(raw.updatedAt !== undefined ? { updatedAt: raw.updatedAt } : {}),
     ...(avatarDataUrl !== undefined ? { avatarDataUrl } : {}),
+    ...(avatarRef !== undefined ? { avatarRef } : {}),
+    ...(avatarMini !== undefined ? { avatarMini } : {}),
   }
+}
+
+/** The `sha` the lists ask for the portrait: the thumbnail, or the portrait itself. Null if there is already an `avatarDataUrl`. */
+function shaDoRetrato(perfil: Profile): string | null {
+  if (perfil.avatarDataUrl || !perfil.avatarRef) return null
+  return perfil.avatarMini ?? perfil.avatarRef
+}
+
+/**
+ * The directory portraits that are in the media store (Task 10): each `sha` is
+ * asked for once through the session cache, stays held while the directory
+ * shows it, and is asked for again when the core says it arrived.
+ */
+function useRetratos(perfis: ReadonlyMap<string, Profile>): ReadonlyMap<string, string> {
+  const bridge = useContext(BridgeContext)
+  const media = bridge?.media
+  const [resolvidos, setResolvidos] = useState<ReadonlyMap<string, string>>(new Map())
+  const [volta, setVolta] = useState(0)
+  const chave = useMemo(() => {
+    const shas = new Set<string>()
+    for (const perfil of perfis.values()) {
+      const sha = shaDoRetrato(perfil)
+      if (sha) shas.add(sha)
+    }
+    return [...shas].sort().join(" ")
+  }, [perfis])
+
+  useEffect(() => {
+    if (!media || !chave) return
+    let vivo = true
+    const shas = chave.split(" ")
+    for (const sha of shas) {
+      cacheDeMedia.prender(sha)
+      void cacheDeMedia.obter(sha, "", (s) => media.bytes(s)).then((url) => {
+        if (!vivo || !url) return
+        setResolvidos((antes) => (antes.get(sha) === url ? antes : new Map(antes).set(sha, url)))
+      })
+    }
+    const largar = bridge?.on?.media?.((evento) => {
+      if ((evento.estado === "chegou" || evento.estado === "guardado") && shas.includes(evento.sha)) setVolta((n) => n + 1)
+    })
+    return () => {
+      vivo = false
+      largar?.()
+      for (const sha of shas) cacheDeMedia.soltar(sha)
+    }
+  }, [bridge, media, chave, volta])
+
+  return resolvidos
 }
 
 /**
@@ -57,7 +115,7 @@ export function useDirectory(
   directory: Map<string, Profile>
   nameFor: (sender: string) => string
 } {
-  const directory = useMemo(() => {
+  const base = useMemo(() => {
     // The vault's copy first; anything published live overlays it, with the
     // same freshest-wins rule the vault itself applies.
     const byAddress = new Map<string, Profile>(seed ?? [])
@@ -79,6 +137,21 @@ export function useDirectory(
     return byAddress
   }, [messages, seed, self?.address, self?.profile])
 
+  // The portraits by reference, resolved to `avatarDataUrl` only here: the profile that came from outside does not change.
+  const retratos = useRetratos(base)
+  // The same map while no profile changed (1.3.15): each message rebuilds `base`, and
+  // a new directory made `nameFor` new, and the memoized sidebar render again.
+  const directory = useMesmoValor(useMemo(() => {
+    if (retratos.size === 0) return base
+    const comCaras = new Map(base)
+    for (const [conta, perfil] of base) {
+      const sha = shaDoRetrato(perfil)
+      const url = sha ? retratos.get(sha) : undefined
+      if (url) comCaras.set(conta, { ...perfil, avatarDataUrl: url })
+    }
+    return comCaras
+  }, [base, retratos]))
+
   /*
     No published name means the first word of the address (`nomeEmFalta`), and
     the second too when another account on the same screen with no name starts
@@ -86,7 +159,7 @@ export function useDirectory(
     the directory and the neighbors. Looking beyond the screen only adds one
     more word, never merges two people.
   */
-  const repetidas = useMemo(() => {
+  const repetidas = useMesmoValor(useMemo(() => {
     const semNome = new Set<string>()
     const considerar = (conta: string): void => {
       if (!directory.get(conta)?.displayName) semNome.add(conta)
@@ -95,7 +168,7 @@ export function useDirectory(
     for (const message of messages) considerar(message.sender)
     for (const conta of vizinhos ?? []) considerar(conta)
     return palavrasRepetidas(semNome)
-  }, [directory, messages, vizinhos])
+  }, [directory, messages, vizinhos]))
 
   const nameFor = useCallback(
     (sender: string): string => directory.get(sender)?.displayName || nomeEmFalta(sender, repetidas),

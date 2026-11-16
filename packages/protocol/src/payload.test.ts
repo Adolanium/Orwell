@@ -334,7 +334,7 @@ describe("cotovelada", () => {
 /**
  * Roles: named, with separate responsibilities.
  *
- * What the schema must allow to be stated, and what it must refuse, is the owner's request
+ * What the schema must allow to be stated, and what it must refuse, is the requirement
  * translated into types. A role can grant no power at all; it can serve only to
  * mark who has access to the channel.
  *

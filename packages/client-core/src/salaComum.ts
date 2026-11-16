@@ -1,7 +1,7 @@
 /**
  * The account's choice about the shared room (the "Orwell" channel).
  *
- * Request from the owner on November 3, 2026: in sign-up, each person decides whether
+ * In sign-up, each person decides whether
  * to enter the shared channel. Until now one entered always, alone, at each connection.
  *
  * A preference, not a new vault field, for the reason in `PREFERENCIA_CONTAS_JUNTADAS`:

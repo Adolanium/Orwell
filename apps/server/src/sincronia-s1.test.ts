@@ -13,8 +13,7 @@ import {
 } from "../testes/cliente-de-teste.js"
 
 /**
- * Absolute sync, phases S1 and S2, with real accounts (§8.1 of the plan
- * `docs/planos/2026-10-20-sincronia-absoluta.md`).
+ * Absolute sync, phases S1 and S2, with real accounts (§8.1 of the plan).
  *
  * The real server, the MLS groups, `Session`s with their own vaults. Each
  * test locks a goal of S1 or S2 that the S0 measurement showed failing.
@@ -559,7 +558,7 @@ describe("S1, F12: a directa aberta pelos dois lados ao mesmo tempo", () => {
    * Two crossed friend requests, each with a message written before the two groups converge:
    * the friendship is made on both sides, and the loser's message reaches the winner,
    * once. (The winner's message, read by the loser before adopting, stays a gap
-   * until the next connection: it's in `docs/PENDENTES.md`.)
+   * until the next connection: a known limit.)
    */
   it("dois pedidos de amizade cruzados: amigos dos dois lados, e o que quem perdeu escreveu antes chega", async () => {
     const [ana, bruno] = await contas("Ana", "Bruno")

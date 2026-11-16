@@ -2,7 +2,7 @@
  * The slash commands in the input box: `/me`, `/away`, `/estado`, and the
  * three that do nothing yet (`/nick`, `/topic`, `/kick`).
  *
- * Request from the owner, 28 October 2026: the millennial features of
+ * The millennial features of
  * IRC. Pure and without React, so the input only has to decide what to do with the
  * result, and so the rules can be tested without rendering anything.
  *

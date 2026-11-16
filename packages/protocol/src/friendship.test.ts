@@ -395,7 +395,7 @@ describe("cancelar um pedido", () => {
   /**
    * The 0.5.x client does not know `withdrawn`: its Zod drops it and what the
    * fold reads is a plain `friend.decline`. This measures what that does, so the
-   * cost is on record (see `docs/PENDENTES.md`).
+   * cost is on record.
    */
   it("um cliente antigo lê o cancelamento como recusa de um pedido que não fez: no-op", () => {
     const comoOAntigoLe = [evento(DM, EU, "friend.request", { sentAt: 10 }), evento(DM, EU, "friend.decline")]

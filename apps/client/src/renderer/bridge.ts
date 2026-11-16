@@ -135,8 +135,9 @@ interface HostApi {
     memorizar?: (ligar: boolean) => Promise<{ ok: boolean }>
     definirPalavraPasse?: (frase: string) => Promise<{ ok: boolean }>
     destroy: () => Promise<{ ok: boolean }>
-    export: (passphrase?: string) => Promise<{ data: string }>
-    import: (data: string, passphrase: string) => Promise<{ ok: boolean }>
+    export: EnclaveBridge["vault"]["export"]
+    import: EnclaveBridge["vault"]["import"]
+    escolherFicheiroDeConta?: NonNullable<EnclaveBridge["vault"]["escolherFicheiroDeConta"]>
     createProvisional?: (passphrase: string | null) => Promise<{ ok: boolean }>
   }
   /** "Switch account". Optional: an old `preload` does not bring it. */
@@ -290,6 +291,10 @@ interface HostApi {
   anexo?: NonNullable<EnclaveBridge["anexo"]>
   /** The video for posts. Optional for the same reason. */
   video?: NonNullable<EnclaveBridge["video"]>
+  /** The media store. Optional for the same reason. */
+  media?: NonNullable<EnclaveBridge["media"]>
+  /** The counters for the diagnostic log. Optional for the same reason. */
+  diagnostico?: NonNullable<EnclaveBridge["diagnostico"]>
   on: Omit<EnclaveBridge["on"], "typing" | "buzz" | "pair"> & {
     voice: (handler: (payload: unknown) => void) => () => void
     /** Crosses the IPC as a plain object; the shape is restored in the bridge. */
@@ -298,6 +303,7 @@ interface HostApi {
     sfu: (handler: (payload: unknown) => void) => () => void
     /** Cross the IPC as plain objects; the shape is restored in the bridge. */
     typing: (handler: (payload: unknown) => void) => () => void
+    recuperacao?: (handler: (payload: unknown) => void) => () => void
     buzz: (handler: (payload: unknown) => void) => () => void
     noticeOpen: (handler: (payload: unknown) => void) => () => void
     windowState: (handler: (payload: unknown) => void) => () => void
@@ -1084,6 +1090,9 @@ export function createDesktopBridge(): EnclaveBridge {
     ...(host.sincronia ? { sincronia: host.sincronia } : {}),
     ...(host.anexo ? { anexo: host.anexo } : {}),
     ...(host.video ? { video: host.video } : {}),
+    // Raw: without a `preload` to bring it, the interface keeps whatever text the vault still has.
+    ...(host.media ? { media: host.media } : {}),
+    ...(host.diagnostico ? { diagnostico: host.diagnostico } : {}),
     session: host.session,
     channels: canais,
     social: host.social,
@@ -1100,6 +1109,7 @@ export function createDesktopBridge(): EnclaveBridge {
       presence: host.on.presence,
       typing: (handler) =>
         host.on.typing((raw) => handler(raw as { channel: string; from: string; room: string; until: number })),
+      recuperacao: (handler) => host.on.recuperacao?.((raw) => handler(raw as { canais: string[] })) ?? (() => {}),
       buzz: (handler) => host.on.buzz((raw) => handler(raw as { channel: string; from: string; at: number })),
       callActivity: (handler) => {
         activityHandlers.add(handler)
@@ -1117,6 +1127,7 @@ export function createDesktopBridge(): EnclaveBridge {
       ...(host.on.historico ? { historico: host.on.historico } : {}),
       ...(host.on.sincronia ? { sincronia: host.on.sincronia } : {}),
       ...(host.on.video ? { video: host.on.video } : {}),
+      ...(host.on.media ? { media: host.on.media } : {}),
     },
     call,
   }

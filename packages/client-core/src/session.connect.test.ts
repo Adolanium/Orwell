@@ -240,7 +240,7 @@ afterEach(() => {
    * The product finding that was recorded here, that deferred `flush` does not
    * handle the failure anywhere, and `disconnect()` does not cancel the timer,    * **is fixed**: the failure is handled in `#falhaAoGravar` and the exit
    * disarms the clock. See the `describe("o flush adiado")` down below, which
-   * guards it, and `docs/PENDENTES.md`, point 5 of the vault.
+   * guards it.
    *
    * This line stays the same, and is not redundant: a vault refusing writes is
    * a test leaving traps set up for the next one, and restoring it is file

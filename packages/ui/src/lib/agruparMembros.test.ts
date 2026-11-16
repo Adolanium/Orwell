@@ -4,8 +4,8 @@ import { agruparMembros, type CargoDoMembro } from "./agruparMembros.js"
 /**
  * The member list for a channel, organized like a Discord server.
  *
- * Request from the owner on 10 September 2026: *"users on the right should be organized by
- * role. Online/offline, just like Discord"*. Today the list comes out in ADDRESS order,
+ * Users on the right should be organized by
+ * role, online/offline, like Discord. Today the list comes out in ADDRESS order,
  * which means nothing to anyone: a random string deciding who shows first.
  *
  * The rules that hold here, and why each one:

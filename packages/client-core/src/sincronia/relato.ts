@@ -16,7 +16,7 @@ import { TIPOS_COM_JANELA, type FonteDoItem, type ItemDoResumo, type TipoDoResum
 
 /**
  * The report: what is sent to the requester, and what is accepted from the reporter
- * (phase S4 of absolute sync, `docs/planos/2026-10-20-sincronia-absoluta.md`,
+ * (phase S4 of absolute sync,
  * section 4.3, section 5.2 and section 7).
  *
  * A report is the original payload, with the author's authorship, and the origin `seq`.
@@ -35,7 +35,7 @@ export interface QuemRelata {
   assinar: (mensagem: Uint8Array) => Uint8Array
 }
 
-/** An attachment without bytes: the marker that `evictEntryMedia` leaves in the vault. */
+/** An attachment without its bytes: the `evicted` marker (`EvictedMedia`), which an old sibling sends. */
 function semBytes(item: unknown): unknown {
   if (typeof item !== "object" || item === null) return item
   const anexo = item as Record<string, unknown>

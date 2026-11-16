@@ -5,7 +5,7 @@ import { ChaoDeRuido, dbDeRms, emPassos, inicioDaEscala, nivelDaVoz } from "../l
 /**
  * How much each person is speaking, written on their card.
  *
- * Owner's request on August 13, 2026: the call's cards respond to sound. In
+ * The call's cards respond to sound. In
  * a grid of still faces it is not clear who is speaking, the information
  * exists (it comes in the audio), it just was not on the screen anywhere.
  *

@@ -15,8 +15,7 @@
  * it received. That proves it ran detached and with the right arguments, and
  * nothing more.
  *
- * WHAT CAN ONLY BE PROVED ON REAL WINDOWS (see the report
- * `docs/planos/actualizacao-windows-relatorio.md`): the splash screen in view,
+ * WHAT CAN ONLY BE PROVED ON REAL WINDOWS (it needs a real Windows machine): the splash screen in view,
  * NSIS installing silently over the running version, the application reopening
  * in the new version, and no UAC or SmartScreen.
  *
@@ -191,4 +190,4 @@ if (falhas.length > 0) {
   console.error(`${falhas.length} provas falharam.`)
   process.exit(1)
 }
-console.log("Todas as provas passaram. O que falta prova-se num Windows real: ver docs/planos/actualizacao-windows-relatorio.md.")
+console.log("Todas as provas passaram. O que falta prova-se num Windows real.")

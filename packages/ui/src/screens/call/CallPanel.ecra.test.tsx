@@ -157,7 +157,7 @@ describe("CallPanel — o palco de quem partilha", () => {
 /**
  * An offer to share the screen, and the choice to view it.
  *
- * Request from the owner on 5 October 2026: *when someone shares the screen,
+ * *When someone shares the screen,
  * others should join the stream only if they want to.* The stage used to open
  * on its own and bring 2.5 Mbps with it, there is no simulcast or layers, so
  * there is no small version to request, and there was nowhere to refuse.

@@ -12,10 +12,20 @@
  * - requests made inside the `onsuccess` of another request belong to the same
  *   transaction (this is how the owner's token is read and written without races).
  *
- * `reter` lets the test decide when each transaction completes.
+ * `reter` deixa o teste decidir quando cada transacção acaba.
+ *
+ * O armazém de media (`armazem-backend.ts`) usa mais: vários stores numa base,
+ * `getAll`, várias bases com nome (`BasesFalsas`, com `deleteDatabase`) e uma
+ * quota (`aoGravar` atira o `QuotaExceededError` do browser). O store `vault`
+ * continua a ser `dados`, para os testes do cofre.
  */
 
-type Op = { fazer: (dados: Map<string, unknown>) => unknown; pedido: PedidoFalso }
+type Stores = Map<string, Map<string, unknown>>
+type Op = { fazer: (stores: Stores) => unknown; pedido: PedidoFalso }
+
+function copiaDe(stores: Stores): Stores {
+  return new Map([...stores].map(([nome, dados]) => [nome, new Map(dados)]))
+}
 
 interface PedidoFalso {
   result: unknown
@@ -33,7 +43,7 @@ class TxFalsa {
   abortada = false
   activa = false
   aCorrer = false
-  staging: Map<string, unknown> | null = null
+  staging: Stores | null = null
   puts = 0
   putsDoCofre = 0
 
@@ -42,7 +52,12 @@ class TxFalsa {
     readonly modo: string,
   ) {}
 
-  objectStore(): unknown {
+  objectStore(nome = "vault"): unknown {
+    const doStore = (stores: Stores): Map<string, unknown> => {
+      let dados = stores.get(nome)
+      if (!dados) stores.set(nome, (dados = new Map()))
+      return dados
+    }
     const pedir = (fazer: Op["fazer"]): PedidoFalso => {
       if (this.abortada) throw new DOMException("transaction aborted", "TransactionInactiveError")
       const pedido: PedidoFalso = { result: undefined, error: null, onsuccess: null, onerror: null }
@@ -51,18 +66,28 @@ class TxFalsa {
       return pedido
     }
     return {
-      get: (chave: string) => pedir((dados) => dados.get(chave)),
+      get: (chave: string) => pedir((stores) => doStore(stores).get(chave)),
+      getAll: () => pedir((stores) => [...doStore(stores).values()]),
+      getAllKeys: () => pedir((stores) => [...doStore(stores).keys()]),
       put: (valor: unknown, chave: string) =>
-        pedir((dados) => {
+        pedir((stores) => {
           if (this.modo !== "readwrite") throw new DOMException("read only", "ReadOnlyError")
+          this.idb.aoGravar?.(nome, chave, valor)
           this.puts += 1
-          if (chave === "current") this.putsDoCofre += 1
-          dados.set(chave, valor)
+          if (nome === "vault" && chave === "current") this.putsDoCofre += 1
+          doStore(stores).set(chave, valor)
           return chave
         }),
       delete: (chave: string) =>
-        pedir((dados) => {
-          dados.delete(chave)
+        pedir((stores) => {
+          if (this.modo !== "readwrite") throw new DOMException("read only", "ReadOnlyError")
+          doStore(stores).delete(chave)
+          return undefined
+        }),
+      clear: () =>
+        pedir((stores) => {
+          if (this.modo !== "readwrite") throw new DOMException("read only", "ReadOnlyError")
+          doStore(stores).clear()
           return undefined
         }),
     }
@@ -76,8 +101,20 @@ class TxFalsa {
 }
 
 export class IdbFalso {
-  readonly dados = new Map<string, unknown>()
-  /** How many `put` calls reached disk (complete transactions). */
+  /** Os stores desta base, por nome. */
+  readonly stores: Stores = new Map([["vault", new Map<string, unknown>()]])
+  /** The `vault` store (the vault's). */
+  get dados(): Map<string, unknown> {
+    return this.store("vault")
+  }
+  store(nome: string): Map<string, unknown> {
+    let dados = this.stores.get(nome)
+    if (!dados) this.stores.set(nome, (dados = new Map()))
+    return dados
+  }
+  /** Called on each `put`: a test throws the browser error here (the quota). */
+  aoGravar: ((store: string, chave: string, valor: unknown) => void) | null = null
+  /** How many `put` calls reached the disk (completed transactions). */
   putsGravados = 0
   /** Of those, how many came from the vault itself (the `current` key), not counting the token. */
   putsDoCofre = 0
@@ -133,7 +170,7 @@ export class IdbFalso {
     }
     this.#activa = tx
     tx.activa = true
-    tx.staging = new Map(this.dados)
+    tx.staging = copiaDe(this.stores)
     this.processar(tx)
   }
 
@@ -170,8 +207,11 @@ export class IdbFalso {
     if (tx.abortada || this.#activa !== tx) return
     const acabar = (): void => {
       if (tx.abortada) return
-      if (tx.staging) for (const chave of [...this.dados.keys()]) if (!tx.staging.has(chave)) this.dados.delete(chave)
-      for (const [chave, valor] of tx.staging ?? []) this.dados.set(chave, valor)
+      for (const [nome, dados] of tx.staging ?? []) {
+        const gravados = this.store(nome)
+        gravados.clear()
+        for (const [chave, valor] of dados) gravados.set(chave, valor)
+      }
       this.putsGravados += tx.puts
       this.putsDoCofre += tx.putsDoCofre
       tx.activa = false
@@ -191,5 +231,34 @@ export class IdbFalso {
       tx.onabort?.()
       this.#seguinte()
     }, 0)
+  }
+}
+
+/**
+ * Several named databases, like an origin's `indexedDB`: `open(nome)` always
+ * opens the same database for the same name, and `deleteDatabase` deletes it.
+ */
+export class BasesFalsas {
+  readonly bases = new Map<string, IdbFalso>()
+  /** Quantas vezes se chamou `deleteDatabase`, por nome. */
+  readonly apagadas: string[] = []
+
+  base(nome: string): IdbFalso {
+    let base = this.bases.get(nome)
+    if (!base) this.bases.set(nome, (base = new IdbFalso()))
+    return base
+  }
+
+  readonly indexedDB = {
+    open: (nome: string) => this.base(nome).indexedDB.open(),
+    deleteDatabase: (nome: string) => {
+      this.apagadas.push(nome)
+      const pedido = { result: undefined, error: null, onsuccess: null as (() => void) | null, onerror: null, onblocked: null }
+      setTimeout(() => {
+        this.bases.delete(nome)
+        pedido.onsuccess?.()
+      }, 0)
+      return pedido
+    },
   }
 }

@@ -10774,6 +10774,26 @@ button.message-citacao:focus-visible {
   height: 4px;
 }
 
+/* The history notice that stopped short (12/11/2026): one line and a close button. */
+.barra-historico-aviso .barra-sincronia-texto {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.barra-historico-fechar {
+  flex: none;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: var(--font-md, 16px);
+  line-height: 1;
+  cursor: pointer;
+}
+
 /* An image with no bytes that you can request: the same marker, now a button. */
 .anexo-a-pedido {
   flex-direction: column;

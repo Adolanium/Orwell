@@ -928,8 +928,7 @@ describe("uma chamada de voz a quatro, pelo SFU", () => {
   /**
    * The screen by choice, for four, measured by what the SFU routes.
    *
-   * Request from the owner on October 5, 2026, after a call with other people:
-   * *when someone shares the screen, the others should enter the stream only if
+   * *When someone shares the screen, the others should enter the stream only if
    * they want.* It was automatic, any new producer was consumed without looking
    * at the source, and whoever received it got 2.5 Mbps forced: there is no
    * simulcast or layers (see `media.ts`), so there is no small version of the

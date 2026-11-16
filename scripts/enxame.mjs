@@ -59,7 +59,7 @@ const BOTS = Number(argumento("bots", 6))
 const MINUTOS = Number(argumento("minutos", 3))
 const SEMENTE = Number(argumento("semente", Date.now() % 1_000_000))
 const FORCAR = process.argv.includes("--forcar")
-const FRASE = process.env.ORWELL_ENXAME_PASSPHRASE ?? "enxame-2026"
+const FRASE = process.env.ORWELL_ENXAME_PASSPHRASE ?? "enxame-orwell-diag-2026"
 const ID = `${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}-s${SEMENTE}`
 
 /** Proofs live outside version control: captures and databases are not committed. */

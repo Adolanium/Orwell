@@ -4,12 +4,15 @@ import {
   enviarRelato,
   erroDaChamada,
   mensagemAEnviar,
+  fonteDeBlob,
   Session,
   transmissaoDoAnuncio,
   Vault,
+  type ArmazemBackend,
   type ConnectionState,
   type DerivarChaveDoCofre,
   type MediaKeyMaterial,
+  type Miniaturista,
   type Transmissao,
 } from "@enclave/client-core"
 // By its own path: accounts are pure logic, and bridge tests that swap the
@@ -20,6 +23,8 @@ import { CAPACIDADE_REVOGACAO, TYPING_TTL_MS, type Payload, type Sobreposicao, t
 import { Device } from "mediasoup-client"
 import { ehIos, type EnclaveBridge, type Profile } from "@enclave/ui"
 import { BrowserVaultBackend, type MotivoDaPerda } from "./vault-backend.js"
+import { BrowserArmazemBackend } from "./armazem-backend.js"
+import { miniaturistaDaWeb } from "./miniaturista.js"
 import { derivarNoWorker } from "./kdf.js"
 import pacote from "../package.json" with { type: "json" }
 
@@ -167,6 +172,9 @@ export interface OpcoesDaPonte {
   /** For tests: storage and derivation, without IndexedDB or Worker. */
   backend?: BrowserVaultBackend
   derivar?: DerivarChaveDoCofre
+  /** For tests: the media store and the thumbnails, without IndexedDB or a Worker. */
+  armazem?: ArmazemBackend
+  miniaturista?: Miniaturista | null
   /**
    * For tests only: returns the true session and vault that the bridge created.
    * This is how `bridge.invariante.test.ts` leaves work pending before requesting
@@ -201,8 +209,18 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
     opcoes.backend ??
     new BrowserVaultBackend({ ...(opcoes.aoPerderPosse ? { aoPerderPosse: opcoes.aoPerderPosse } : {}), conta })
   const vault = new Vault(backend, opcoes.derivar ?? derivarNoWorker)
-  // The version goes in both `hello` calls for the 1.0 server to verify. See `Session`.
-  const session = new Session(vault, { versaoDaApp: pacote.version })
+  // The version goes in both `hello` messages, for the 1.0 server to check. See `Session`.
+  /*
+    The media store (design §4): a database separate from the vault, for the
+    same account. The session ties it to the vault: it opens with it, locks with
+    it, and `destroy` deletes it. The seal comes from `pararDeEscrever`, with
+    the vault's.
+  */
+  const session = new Session(vault, {
+    versaoDaApp: pacote.version,
+    armazem: opcoes.armazem ?? new BrowserArmazemBackend({ conta }),
+    miniaturista: "miniaturista" in opcoes ? (opcoes.miniaturista ?? null) : miniaturistaDaWeb(),
+  })
   opcoes.aoCriar?.({ session, vault })
 
   /*
@@ -602,6 +620,8 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         largarPreferenciasDeVoz()
         session.disconnect()
         session.reset()
+        // The blobs in the queue reach the disk before locking: once locked, the queue no longer touches it.
+        await session.drenarArmazem()
         vault.lock()
         clearSessionKey(chaveDoSeparador)
         if (opcoes.canalDaConta) avisarBloqueio(opcoes.canalDaConta)
@@ -623,17 +643,32 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         await contas.esquecerActiva()
         return { ok: true }
       },
-      export: async (passphrase) => ({
-        data: new TextDecoder().decode(await vault.exportVault(passphrase)),
-      }),
-      import: async (data, passphrase) => {
+      export: async (passphrase, opcoes) => {
+        // Without the checkbox, the usual file, as text.
+        if (opcoes?.incluirImagens !== true) return { data: new TextDecoder().decode(await vault.exportVault(passphrase)) }
+        /*
+          With the images (Task 11b), a container that can be hundreds of MB.
+          Each part becomes a Blob at once, which the browser can keep outside
+          the tab's memory, and the file is their concatenation, with no copy.
+        */
+        await session.drenarArmazem()
+        const partes: Blob[] = []
+        for await (const parte of await vault.exportarComImagens(passphrase, session.armazem)) partes.push(new Blob([parte as Uint8Array<ArrayBuffer>]))
+        return { ficheiro: new Blob(partes, { type: "application/octet-stream" }) }
+      },
+      import: async (ficheiro, passphrase) => {
+        // The file is read in slices (`Blob.slice`): the container with the images never enters a string whole.
+        // The `{ escolhido }` mark belongs to the desktop (the main-process dialog): there is no file chosen that way here.
+        if (typeof ficheiro !== "string" && !(ficheiro instanceof Blob)) throw new Error("this is not an enclave account file")
+        const dados = typeof ficheiro === "string" ? new TextEncoder().encode(ficheiro) : fonteDeBlob(ficheiro)
         largarPreferenciasDeVoz()
         session.disconnect()
         session.reset()
-        await vault.importVault(new TextEncoder().encode(data), passphrase)
+        // Once the vault is in, the images never make this throw: the missing ones are counted.
+        const resultado = await vault.importVault(dados, passphrase, { armazem: session.armazem })
         // The imported account has its own passphrase; the old tab key is void.
         clearSessionKey(chaveDoSeparador)
-        return { ok: true }
+        return { ok: true, ...resultado }
       },
       // Without `cacheSessionKey`: the tab key stays the tab key of whatever account
       // is on disk until the provisional is written (`pairing.done`).
@@ -810,6 +845,29 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       cancelar: async () => session.cancelarEnvioDeVideo(),
       estado: async (sha) => session.estadoDoVideo(sha),
       bytes: async (sha) => session.bytesDoVideo(sha),
+    },
+
+    // The counters for the diagnostic log, read on the return to the foreground (1.3.15).
+    diagnostico: {
+      contadores: async () => session.diagnostico(),
+    },
+    /*
+      This device's media store (design §8). `bytes` never throws: a failing
+      backend is a media item that is not there, and the interface shows the
+      thumbnail with "Fetch" (Review Focus 1).
+    */
+    media: {
+      bytes: (sha) => session.bytesDeMedia(sha).catch(() => null),
+      fixar: async (sha) => session.fixarMedia(sha),
+      soltar: async (sha) => session.soltarMedia(sha),
+      estado: async () => {
+        // Right after opening, the inventory may still be being read.
+        await vault.armazemPronto()
+        return session.estadoDoArmazem()
+      },
+      definirTecto: (bytes) => session.definirTectoDoArmazem(bytes),
+      libertar: () => session.libertarArmazem(),
+      trazer: (id) => session.trazerMedia(id),
     },
 
     anexo: {
@@ -993,17 +1051,13 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       },
       send: async (channel, body, room, extras) => {
         // The same function on the computer host: a message, an image, a poll or a reply must arrive the same from both sides.
-        await session.send(channel, mensagemAEnviar(body, room, extras, { id: crypto.randomUUID(), sentAt: Date.now() }))
+        await session.send(channel, mensagemAEnviar(body, room, extras, { id: crypto.randomUUID(), sentAt: Date.now() }), { daPessoa: true })
         return { ok: true }
       },
       typing: async (channel, room) => {
-        await session.send(channel, {
-          t: "typing",
-          ...(room ? { room } : {}),
-          // The timeout travels with the signal. The receiver clears the indicator when it passes, without waiting
-          // for an end message that may never come, see `useTyping.ts`.
-          until: Date.now() + TYPING_TTL_MS,
-        })
+        // The timeout travels with the signal. The receiver clears the indicator when it passes, without waiting
+        // for an end message that may never come, see `useTyping.ts`. By the ephemeral signal: `sinalizarEscrita`.
+        await session.sinalizarEscrita(channel, room, Date.now() + TYPING_TTL_MS)
         return { ok: true }
       },
       editMessage: async (channel, target, body) => {
@@ -1218,6 +1272,8 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
           ...(profile.bio !== undefined ? { bio: profile.bio } : {}),
           ...(profile.email !== undefined ? { email: profile.email } : {}),
           ...(profile.avatarDataUrl !== undefined ? { avatarDataUrl: profile.avatarDataUrl } : {}),
+          // The portrait already in the store (Task 10): without this, changing the status deleted it.
+          ...(profile.avatarDataUrl === undefined && profile.avatarRef !== undefined ? { avatarRef: profile.avatarRef } : {}),
         })
         return { ok: true }
       },
@@ -1232,6 +1288,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       channels: (handler) => session.on("channels", handler),
       presence: (handler) => session.on("presence", handler),
       typing: (handler) => session.on("typing", handler),
+      recuperacao: (handler) => session.on("recuperacao", handler),
       buzz: (handler) => session.on("buzz", handler),
       callActivity: (handler) => {
         activityHandlers.add(handler)
@@ -1242,6 +1299,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       lidas: (handler) => session.on("lidas", ({ lidas }) => handler({ lidas: { ...lidas } })),
       sincronia: (handler) => session.on("sincronia", (estado) => handler(estado)),
       video: (handler) => session.on("video", (evento) => handler(evento)),
+      media: (handler) => session.on("media", (evento) => handler({ ...evento })),
       arquivo: (handler) => session.on("arquivo", ({ arquivo }) => handler({ arquivo: { ...arquivo } })),
       preferencias: (handler) =>
         session.on("preferencias", ({ preferencias }) => handler({ preferencias: { ...preferencias } })),
@@ -1262,7 +1320,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       */
     relato: {
       enviar: ({ texto, versao }) =>
-        enviarRelato(window.location.origin, { endereco: session.identity.address, versao, texto }),
+        enviarRelato(window.location.origin, session.identity, { versao, texto }),
     },
 
     /*
@@ -1290,7 +1348,8 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
           of the other one. What was pending to save is lost on this side; the server has the frames.
           */
         backend.selar()
-        session.disconnect()
+        // The media store too, in the same order (design §9, Ruling R17), and then it disconnects.
+        session.pararDeEscrever()
         await backend.escritasAcabadas()
         return
       }
@@ -1302,6 +1361,10 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         1. `disconnect` closes the socket (what would touch the state stops arriving) and saves
            the pending batch. The core encrypts synchronously, and with the IndexedDB connection open
            the transaction is born inside the call.
+        1b. The blobs that were in the media store's queue reach the disk: the batch that just
+           left may already reference them (a portrait set right before giving up ownership).
+           Sealed first, the new owner read a reference without a blob, and this tab showed an
+           Error 521 that was not true.
         2. The seal rejects anything that comes after: the batch timer, `pagehide`, a frame still
            halfway through.
         3. Wait for the write that already left, until `oncomplete`. Only after that can the caller
@@ -1313,7 +1376,15 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       */
       if (call.active) void call.leave().catch(() => {})
       session.disconnect()
+      await session.drenarArmazem()
       backend.selar()
+      /*
+        2b. The session stops writing, and seals the media store with the vault:
+            a tab without ownership neither writes nor deletes blobs, nor
+            migrates nor collects on open (Rulings R17 and R23). The
+            `disconnect` it does here has nothing left to write.
+      */
+      session.pararDeEscrever()
       await backend.escritasAcabadas()
     },
 

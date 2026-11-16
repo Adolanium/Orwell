@@ -21,7 +21,7 @@ export interface CanalFundado {
 }
 
 /**
- * "Channels I founded", on your own profile (owner's request, October 27, 2026).
+ * "Channels I founded", on your own profile.
  *
  * Only on your own: whoever founded a channel is a fact the core knows about each
  * channel (`channels.founder`), but the list of channels of SOMEONE ELSE would be

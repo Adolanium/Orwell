@@ -1,5 +1,5 @@
 /**
- * Global shortcuts (1.0.6, points 5 and 8 of `docs/planos/depois-da-1-0.md`)
+ * Global shortcuts (1.0.6)
  * in the built desktop app, with the real main process.
  *
  *   npm run build && node scripts/e2e-atalhos-globais.mjs

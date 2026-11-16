@@ -317,7 +317,7 @@ describe("Timeline — quem está a escrever", () => {
 
   it("acima de três pessoas conta-as em vez de as nomear", () => {
     render(timeline({ typists: ["Ana", "Rui", "Zé", "Luís"] }))
-    expect(screen.getByText("4 pessoas estão a escrever…")).toBeTruthy()
+    expect(screen.getByText("Várias pessoas estão a escrever…")).toBeTruthy()
   })
 })
 
@@ -403,8 +403,8 @@ describe("MessageRow — ficheiros", () => {
       />,
     )
     expect(screen.getByText("contrato.pdf")).toBeTruthy()
-    expect(screen.getByText(strings.common.fileEvicted)).toBeTruthy()
-    // Showing empty state was worse than not offering it.
+    expect(screen.getByText(strings.media.ficheiroNoutroAparelho)).toBeTruthy()
+    // Downloading nothing was worse than not offering.
     expect(screen.queryByLabelText(strings.chat.fileDownloadOf("contrato.pdf"))).toBeNull()
   })
 

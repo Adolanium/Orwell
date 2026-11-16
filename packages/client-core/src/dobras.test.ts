@@ -12,6 +12,10 @@ import {
   type EntradaDeDobra,
 } from "./dobras.js"
 import { moradaDeTeste } from "../testes/moradas.js"
+import { ArmazemDeMedia } from "./armazem/armazem.js"
+import { ArmazemEmMemoria } from "./armazem/emMemoria.js"
+import { absorverPayload } from "./armazem/referencias.js"
+import { newVaultContents } from "./vault.js"
 
 const ANA = "@ana:x"
 const BRUNO = "@bruno:x"
@@ -130,6 +134,25 @@ describe("dobrarMural", () => {
     expect(mural.map((p) => p.payload["id"])).toEqual(["p2", "p1"])
     expect(mural[1]?.payload["caption"]).toBe("novo #tag")
     expect(mural[1]?.payload["tags"]).toEqual(["tag"])
+  })
+})
+
+describe("dobrarMural: a cópia mais completa, na unidade do inline", () => {
+  it("a cópia com a fotografia em referência vence a de um irmão antigo com a fotografia despejada e uma miniatura em texto", async () => {
+    const armazem = new ArmazemDeMedia(new ArmazemEmMemoria(), null)
+    await armazem.abrir()
+    const contents = newVaultContents()
+    const foto = `data:image/png;base64,${Buffer.alloc(30_000, 7).toString("base64")}`
+    const cartao = { url: "https://example.org/", kind: "link", thumbnail: `data:image/png;base64,${Buffer.alloc(900, 3).toString("base64")}` }
+    const comFoto = { t: "post", id: "p1", postedAt: 1, caption: "a", media: [{ name: "f.png", mediaType: "image/png", kind: "image", byteLength: 30_000, inline: foto }], links: [] }
+    const absorvida = e(1, ANA, absorverPayload(contents, comFoto, armazem) as E["payload"])
+    const doIrmao = e(2, ANA, { t: "post", id: "p1", postedAt: 1, caption: "a", media: [{ evicted: true, name: "f.png", mediaType: "image/png" }], links: [cartao] })
+
+    for (const lista of [[absorvida, doIrmao], [doIrmao, absorvida]]) {
+      const mural = dobrarMural(lista, dono, { presente: (sha) => armazem.tem(sha), media: contents.media })
+      expect(mural).toHaveLength(1)
+      expect((mural[0]!.payload["media"] as Record<string, unknown>[])[0]).toHaveProperty("ref")
+    }
   })
 })
 

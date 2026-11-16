@@ -50,7 +50,11 @@ describe("terminologia — o que é canal", () => {
 
   it('nenhuma frase visível volta a chamar "espaço" a coisa nenhuma', () => {
     for (const linha of frasesVisiveis()) {
-      expect(linha.toLowerCase()).not.toMatch(/\bespaços?\b/)
+      // The only exception is the media store disk space (design §8, the owner's
+      // decision): "Espaço para imagens e ficheiros neste aparelho" and
+      // "Libertar espaço". It is not a channel, and the sentences are these and only these.
+      const semDisco = linha.toLowerCase().replace("espaço para imagens e ficheiros neste aparelho", "").replace("libertar espaço", "")
+      expect(semDisco).not.toMatch(/\bespaços?\b/)
     }
   })
 })

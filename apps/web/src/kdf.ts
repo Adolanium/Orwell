@@ -1,5 +1,5 @@
 import { argon2id } from "@noble/hashes/argon2.js"
-import type { DerivarChaveDoCofre } from "@enclave/client-core"
+import { marcarArranque, type DerivarChaveDoCofre } from "@enclave/client-core"
 import type { PedidoDeDerivacao, RespostaDeDerivacao } from "./kdf-worker.js"
 
 /**
@@ -106,6 +106,15 @@ function derivarNestaThread(frase: string, sal: Uint8Array, parametros: PedidoDe
 }
 
 export const derivarNoWorker: DerivarChaveDoCofre = async (frase, sal, parametros) => {
+  marcarArranque("kdf-inicio")
+  try {
+    return await derivar(frase, sal, parametros)
+  } finally {
+    marcarArranque("kdf-fim")
+  }
+}
+
+const derivar: DerivarChaveDoCofre = async (frase, sal, parametros) => {
   const worker = arrancar()
   if (!worker) return derivarNestaThread(frase, sal, parametros)
   const id = proximoId++

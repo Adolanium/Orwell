@@ -9,6 +9,7 @@ import { Field } from "../../components/Field.js"
 import { Interruptor } from "../../components/Interruptor.js"
 import { Modal } from "../../components/Modal.js"
 import { useConfirmar } from "../../hooks/useConfirmar.js"
+import { useMedia } from "../../hooks/useMedia.js"
 import { podeEnquadrar } from "../../lib/enquadrar.js"
 import { avisoDeAnimacaoPerdida, compressImage, IMAGE_BUDGETS, type CompressedImage } from "../../lib/images.js"
 import { strings, traduzirErro } from "../../strings.js"
@@ -89,6 +90,9 @@ export function ProfileEditor({
     (mostrados.length !== mostradosAntes.length || mostrados.some((quem) => !mostradosAntes.includes(quem)))
 
   const patch = (changes: Partial<Profile>): void => setDraft((current) => ({ ...current, ...changes }))
+  // The portrait in the media store (Task 10): the original, by reference. The `blob:` is only drawn, never saved.
+  const retrato = useMedia({ ...(draft.avatarRef ? { ref: draft.avatarRef } : {}) }, { visivel: true, tamanho: "original" })
+  const cara = draft.avatarDataUrl ?? (draft.avatarRef ? retrato.src : null)
 
   /**
    * The face, compressed in this device before leaving it.
@@ -127,7 +131,8 @@ export function ProfileEditor({
   }
 
   const aplicarAvatar = (file: File, imagem: CompressedImage): void => {
-    patch({ avatarDataUrl: imagem.dataUrl })
+    // A new portrait replaces the one in the store (`avatarRef`): the core absorbs it and gives it the new reference.
+    setDraft(({ avatarRef: _antigo, ...rest }) => ({ ...rest, avatarDataUrl: imagem.dataUrl }))
     setAvisoDoGif(avisoDeAnimacaoPerdida(file, imagem, IMAGE_BUDGETS.avatar))
   }
 
@@ -187,8 +192,8 @@ export function ProfileEditor({
       <div className="sheet-body">
         <div className="avatar-row">
           <div className="avatar-preview">
-            {draft.avatarDataUrl ? (
-              <img src={draft.avatarDataUrl} alt="" />
+            {cara ? (
+              <img src={cara} alt="" />
             ) : (
               <span>{(draft.displayName[0] ?? address?.[1] ?? "?").toUpperCase()}</span>
             )}
@@ -206,13 +211,13 @@ export function ProfileEditor({
                 }}
               />
             </label>
-            {draft.avatarDataUrl && (
+            {(draft.avatarDataUrl || draft.avatarRef) && (
               <Button
                 variant="ghost"
                 // Drop the key rather than set it to undefined: with
                 // exactOptionalPropertyTypes those are different things.
                 onClick={() => {
-                  setDraft(({ avatarDataUrl: _removed, ...rest }) => rest)
+                  setDraft(({ avatarDataUrl: _removed, avatarRef: _ref, ...rest }) => rest)
                   setAvisoDoGif(null)
                 }}
               >
@@ -238,7 +243,7 @@ export function ProfileEditor({
         </Field>
 
         {/* No Status field: status changes on the account card, through the "How you appear"
-            menu and "Custom…" (owner's order, October 27, 2026). Two places for the same
+            menu and "Custom…". Two places for the same
             line kept disagreeing. Text already there stays in the draft and saves as is:
             leaving the editor does not erase it. */}
         <Field label={strings.profileEditor.bio}>
@@ -249,8 +254,7 @@ export function ProfileEditor({
             onChange={(event) => patch({ bio: event.target.value })}
           />
         </Field>
-        {/* The difference from status, shown below the field: owner's request,
-            October 27, 2026, labeled "Bio". */}
+        {/* The difference from status, shown below the field, labeled "Bio". */}
         <p className="field-note">{strings.profileEditor.bioNote}</p>
 
         <Field
@@ -389,7 +393,7 @@ export function ProfileEditor({
       )}
 
       <footer className="sheet-actions">
-        {/* The id is not read, it is copied (owner's order, October 27, 2026). The
+        {/* The id is not read, it is copied. The
             empty `<span>` holds the space on the left: "Save" stays on the right. */}
         {address ? <BotaoCopiarId id={address} rotulo={strings.copiarId.proprio} /> : <span />}
         <Button variant="primary" disabled={busy} onClick={save}>

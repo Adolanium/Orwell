@@ -1,6 +1,6 @@
 import { readPrefs, type Prefs } from "../hooks/usePrefs.js"
 import { hostWindowInFront } from "../lib/notifications.js"
-import { renderizar as renderizarDaFamilia, SONS, TIPOS_DE_SOM, type TipoDeSom } from "./familia.js"
+import { renderizar as renderizarDaFamilia, SONS, type TipoDeSom } from "./familia.js"
 import { lerPreferenciasDeSom, type PreferenciasDeSom } from "./preferencias.js"
 import { caladoPelaPausa } from "./acontecimentos.js"
 
@@ -139,7 +139,7 @@ const CALADOS_AO_ENSURDECER: ReadonlySet<TipoDeSom> = new Set(["a-chamar"])
 /**
  * Mention with the conversation visible: plays at half amplitude.
  *
- * Decision by the owner (November 3, 2026), as in Discord: being named is being
+ * As in Discord: being named is being
  * called, even with the room open. The user who is reading already sees the
  * message; the quieter sound just says "this is for you", without startling.
  */
@@ -625,8 +625,13 @@ export function criarSaidaWebAudio(opcoes: OpcoesDaSaida = {}): Saida {
       }
     },
     preparar() {
-      if (!garantir()) return
-      for (const tipo of TIPOS_DE_SOM) void buffer(tipo)
+      /*
+        Only the context that plays. Each sound renders the first time it plays
+        (`tocar`), in its own short `OfflineAudioContext`. Rendering all 27 here
+        made 28 contexts on the first gesture, ~60 MB of physical footprint
+        (13/11/2026).
+      */
+      garantir()
     },
   }
 }

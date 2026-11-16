@@ -461,6 +461,18 @@ afterEach(() => {
 
 const RETRATO = `data:image/png;base64,${"R".repeat(4_000)}`
 
+/**
+ * The profile as the interface sees it: the portrait lives in the media store
+ * (`avatarRef`, design "media fora do cofre" §5), and is read from there into
+ * the place of `avatarDataUrl`.
+ */
+async function perfilComRetrato(session: Session): Promise<Record<string, unknown>> {
+  const { avatarRef, ...resto } = session.profile
+  if (!avatarRef) return resto
+  const bytes = await session.bytesDeMedia(avatarRef)
+  return { ...resto, avatarDataUrl: bytes ? `data:image/png;base64,${Buffer.from(bytes).toString("base64")}` : undefined }
+}
+
 describe("o perfil no emparelhamento (fase 1e, parte 1)", () => {
   it("o telemóvel nasce com o nome e o retrato do PC, e não publica outro", async () => {
     const ana = await conta("Ana")
@@ -469,7 +481,7 @@ describe("o perfil no emparelhamento (fase 1e, parte 1)", () => {
     })
     const telemovel = await emparelhar(ana)
     expect(telemovel.fases).toContain("certificado:inteiro")
-    expect(telemovel.session.profile).toEqual({ displayName: "Ana", bio: "do PC", donations: [], avatarDataUrl: RETRATO, updatedAt: 1_000 })
+    expect(await perfilComRetrato(telemovel.session)).toEqual({ displayName: "Ana", bio: "do PC", donations: [], avatarDataUrl: RETRATO, updatedAt: 1_000 })
     await settle(40)
     // What the mobile device publishes is the SAME version as the PC, never an empty one.
     expect(telemovel.perfisEnviados.every((enviado) => enviado.displayName === "Ana" && enviado.updatedAt === 1_000)).toBe(true)
@@ -491,7 +503,7 @@ describe("o perfil pelo canal da conta (fase 1e, parte 2)", () => {
     const novo = telemovel.session.profile.updatedAt
 
     await ate(() => ana.session.profile.displayName === "Ana B", "o perfil novo chegar ao PC")
-    expect(ana.session.profile).toEqual({ displayName: "Ana B", donations: [], avatarDataUrl: RETRATO, updatedAt: novo })
+    expect(await perfilComRetrato(ana.session)).toEqual({ displayName: "Ana B", donations: [], avatarDataUrl: RETRATO, updatedAt: novo })
     expect(avisos).toEqual(["Ana B"])
     // And the PC republishes it on its channels, with the same version.
     await ate(
@@ -522,7 +534,7 @@ describe("o perfil pelo canal da conta (fase 1e, parte 2)", () => {
     await ate(() => telemovel.vault.contents.groups[proprio] !== undefined, "o telemóvel entrar no canal da conta")
     await telemovel.session.send(proprio, { t: "profile", displayName: "", donations: [], updatedAt: Date.now() + 60_000 })
     await esperar(1_500)
-    expect(ana.session.profile.avatarDataUrl).toBe(RETRATO)
+    expect((await perfilComRetrato(ana.session))["avatarDataUrl"]).toBe(RETRATO)
   }, 90_000)
 })
 
@@ -545,6 +557,6 @@ describe("sem perfil a tempo (fase 1e, parte 3)", () => {
     await ate(() => telemovel.vault.contents.groups[proprio] !== undefined, "o telemóvel entrar no canal da conta")
     await ana.session.updateProfile({ displayName: "Ana", donations: [], avatarDataUrl: RETRATO })
     await ate(() => telemovel.session.profile.displayName === "Ana", "o perfil chegar ao telemóvel")
-    expect(telemovel.session.profile.avatarDataUrl).toBe(RETRATO)
+    expect((await perfilComRetrato(telemovel.session))["avatarDataUrl"]).toBe(RETRATO)
   }, 90_000)
 })

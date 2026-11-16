@@ -60,6 +60,8 @@ vi.mock("@enclave/client-core", () => ({
 }))
 
 vi.mock("@enclave/crypto", () => ({ kindOf: () => "application" }))
+// The media store is born with the bridge; like the vault, without IndexedDB here.
+vi.mock("./armazem-backend.js", () => ({ BrowserArmazemBackend: class {} }))
 vi.mock("./vault-backend.js", () => ({ BrowserVaultBackend: class {} }))
 
 const { createBrowserBridge } = await import("./bridge.js")
@@ -81,7 +83,7 @@ describe("a ponte do browser não apaga uma conta que continua nos canais", () =
   })
 
   it("se a saída falhar, NÃO destrói o cofre e deixa o erro subir ao ecrã", async () => {
-    // The decision recorded in `docs/PENDENTES.md`: destroying the vault without
+    // The rule: destroying the vault without
     // leaving is the worst of both worlds, because the person stays convinced they
     // left and stays in everyone's member list, with the epoch frozen and no device
     // in the world able to request the leave.

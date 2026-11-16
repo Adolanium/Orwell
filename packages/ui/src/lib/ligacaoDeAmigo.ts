@@ -2,8 +2,7 @@ import { FRIEND_PATH, friendLink, parseFriendLink, sameHomeserver } from "@encla
 import { parseAddress } from "@enclave/protocol"
 
 /**
- * The short friend link (1.0 "Arca", `docs/planos/moradas-opacas-e-corte.md`
- * section 1.6): `https://orwell.pt/a#<id>` instead of
+ * The short friend link (1.0 "Arca"): `https://orwell.pt/a#<id>` instead of
  * `https://orwell.pt/app/amigo#@<id>:orwell.pt`.
  *
  * The server is the one from the link, so the `@` and `:servidor` are stripped. Only when the

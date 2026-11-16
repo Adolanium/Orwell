@@ -1,5 +1,5 @@
 {
-  "//": "A zona de tributo de /embaixadores.html e a linha da página de entrada. Quem a preenche é o dono, à mão: uma lista simples de nomes, como cada um os quer ver escritos, sem dizer se é a comunidade ou o embaixador (decisão do dono a 2 de Novembro de 2026). O distintivo na app entra pelo endereço em packages/ui/src/lib/embaixadores.ts. O site lê isto no build (vite.config.ts).",
+  "//": "A zona de tributo de /embaixadores.html e a linha da página de entrada. Quem a preenche é o dono, à mão: uma lista simples de nomes, como cada um os quer ver escritos, sem dizer se é a comunidade ou o embaixador. O distintivo na app entra pelo endereço em packages/ui/src/lib/embaixadores.ts. O site lê isto no build (vite.config.ts).",
   "nomes": [
     "Lucky 7",
     "BJJ (O Avestruz)",

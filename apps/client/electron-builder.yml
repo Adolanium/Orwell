@@ -1,6 +1,6 @@
 # Orwell's installers.
 #
-# Unsigned, owner's decision Aug 12, 2026, with the cost spelled out on the
+# Unsigned, with the cost spelled out on the
 # downloads page: on macOS the first launch requires approval in System Settings,
 # and on Windows the blue SmartScreen screen appears. It's the price of not
 # paying annual rent to two companies to distribute our own code; the alternative
@@ -16,7 +16,7 @@
 # security fixes without editing anything. The packager needs an exact number-
 # it downloads binaries from a specific version-and refuses to guess. When the
 # range bumps a major, this number rises with it.
-electronVersion: 43.2.0
+electronVersion: 43.8.10
 
 # Names without spaces, with the OS explicit.
 #
@@ -122,8 +122,8 @@ nsis:
   # The installer asks where to install. An installer that doesn't ask looks like
   # one hiding something.
   allowToChangeInstallationDirectory: true
-  # Always "just for me", in %LOCALAPPDATA%\Programs\Orwell (owner's decision
-  # Nov 3, 2026). Per-user install updates without admin. The "for everyone or
+  # Always "just for me", in %LOCALAPPDATA%\Programs\Orwell. Per-user
+  # install updates without admin. The "for everyone or
   # just me" page is removed by `recursos/installer.nsh`: with `oneClick: false`,
   # this option can't be removed without also removing the folder choice. See the
   # header of that file.

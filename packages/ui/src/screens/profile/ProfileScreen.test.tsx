@@ -499,7 +499,7 @@ describe("ProfileScreen — a fotografia é que manda na publicação aberta", (
     const folha = screen.getByRole("dialog")
     expect(within(folha).queryByRole("button", { name: "praia.png" })).toBeNull()
     expect(folha.querySelector(".image-open")).toBeNull()
-    expect(within(folha).getByText(strings.common.mediaEvicted)).toBeTruthy()
+    expect(within(folha).getByText(strings.media.noutroAparelho)).toBeTruthy()
   })
 })
 

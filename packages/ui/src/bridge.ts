@@ -4,10 +4,13 @@ import type {
   DenunciaPreparada,
   DenunciaRecebida,
   DesfechoDoAnexo,
+  DesfechoDoTrazer,
   EscolhaDaDenuncia,
   ContaNaLista,
+  EstadoDoArmazem,
   EstadoDoCofre,
   EstadoDoVideo,
+  EventoDeMedia,
   EventoDoVideo,
   PairEvento,
   RegistoDeSucessao,
@@ -22,7 +25,17 @@ import type {
 import type { AvisoDeSuspensao, FriendTie, InviteTie, PinnedMessage, Power } from "@enclave/protocol"
 import type { MessageExtras } from "./types.js"
 
-export type { DesfechoDoAnexo, EstadoDoVideo, EventoDoVideo, PairEvento, RepairOutcome, SincroniaDoCanal }
+export type {
+  DesfechoDoAnexo,
+  DesfechoDoTrazer,
+  EstadoDoArmazem,
+  EstadoDoVideo,
+  EventoDeMedia,
+  EventoDoVideo,
+  PairEvento,
+  RepairOutcome,
+  SincroniaDoCanal,
+}
 
 /**
  * An account that became another (phase 8.2, "Merge accounts"), as this account
@@ -30,6 +43,30 @@ export type { DesfechoDoAnexo, EstadoDoVideo, EventoDoVideo, PairEvento, RepairO
  * See `sucessao.ts` in the core.
  */
 export type Sucessao = RegistoDeSucessao
+
+/** See `diagnostico` in `EnclaveBridge`. */
+export interface ContadoresDeDiagnostico {
+  gravacoesDoCofre: number
+  temporizadoresAtrasados: number
+  maiorAtrasoMs: number
+  /** Desktop only: the longest the main process event loop was held since the last reading, in ms. */
+  principalPresoMs?: number
+}
+
+/** What `vault.export` returns: the plain file text, the container with the images (web), or already written (desktop). */
+export type FicheiroDeContaExportado = { data: string } | { ficheiro: Blob } | { gravado: boolean }
+
+/** The account file the desktop main process chose and kept (`escolherFicheiroDeConta`). The interface never sees the path. */
+export interface FicheiroDeContaEscolhido {
+  escolhido: true
+}
+
+/** What `vault.import` returns: with the container, how many images got in and how many did not stay on this device. */
+export interface ResultadoDeImportar {
+  ok: boolean
+  imagens?: number
+  emFalta?: number
+}
 
 /**
  * The video to publish, as the bridge receives it from the interface: the file's bytes,
@@ -152,8 +189,7 @@ export interface DonationLink {
 /** The activity a person chose. "invisivel" is local: it is never published
  *, an invisible account simply stops being announced.
  *
- * "ausente" is a manual choice, alongside the others (owner's order on 27
- * October 2026: "online, busy, away"). It's not the grey of someone offline:
+ * "ausente" is a manual choice, alongside the others ("online, busy, away"). It's not the grey of someone offline:
  * the person is online and says they're not at the keyboard. */
 export type Activity = "online" | "ocupado" | "ausente" | "invisivel"
 
@@ -166,6 +202,17 @@ export interface Profile {
   email?: string
   donations: DonationLink[]
   avatarDataUrl?: string
+  /**
+   * The portrait in the media store (Task 10): the `sha` of the reference. The
+   * own profile keeps it this way after the migration, and comes back with it
+   * on `set`, so the portrait is not lost. The lists show it through
+   * `useDirectory`, which resolves it to `avatarDataUrl` through the media
+   * cache. A `blob:` URL is never written into the `avatarDataUrl` of a profile
+   * that is stored.
+   */
+  avatarRef?: string
+  /** The `sha` of the portrait thumbnail, when it is another image. */
+  avatarMini?: string
   updatedAt?: number
 }
 
@@ -294,6 +341,9 @@ export interface HistoricoDosIrmaos {
   canais: string[]
   inicial: boolean
   perfis?: true
+  /** What did not come, and why (12/11/2026). See `EventoDoHistorico` in the core. */
+  perdidas?: number
+  razao?: "sem-irmao" | "irmao-calado" | "ilegiveis"
 }
 
 /** Which key maps to each global command. See `atalhosGlobais`. */
@@ -407,11 +457,33 @@ export interface EnclaveBridge {
      */
     destroy: () => Promise<{ ok: boolean }>
     /** The encrypted vault as a portable file. Never plaintext. OS-protected
-     * vaults must supply a passphrase to re-seal under. */
-    export: (passphrase?: string) => Promise<{ data: string }>
+     * vaults must supply a passphrase to re-seal under.
+     *
+     * With `{ incluirImagens: true }` (Task 11b, design §13 C), the file also
+     * carries the store blobs, in a container that can be hundreds of MB: the
+     * web returns it as a `Blob` (`ficheiro`), and the desktop writes it itself
+     * where the person chooses (`gravado`, false if the person cancelled).
+     * Without the checkbox, the usual file, as text (`data`). */
+    export: (passphrase?: string, opcoes?: { incluirImagens?: boolean }) => Promise<FicheiroDeContaExportado>
     /** Adopt an exported account, replacing the local vault. The passphrase
-     * is proven against the file before anything is written. */
-    import: (data: string, passphrase: string) => Promise<{ ok: boolean }>
+     * is proven against the file before anything is written.
+     *
+     * The chosen file goes whole (`Blob`): the plain one or the container with
+     * the images. The bridge reads it in slices. Text still gets in. On the
+     * desktop `{ escolhido: true }` goes: the file the main process chose
+     * (`escolherFicheiroDeConta`).
+     *
+     * Once the vault is in, it never throws because of the images: it says how
+     * many did not stay (`emFalta`), and the interface warns. */
+    import: (ficheiro: Blob | string | FicheiroDeContaEscolhido, passphrase: string) => Promise<ResultadoDeImportar>
+    /**
+     * Desktop only: the system dialog to choose the account file. The main
+     * process keeps the path and reads the file itself (the renderer never gives
+     * a path to open). Returns the file's name and shape, or `null` if the
+     * person cancelled. Without this (the web), the interface uses the
+     * `<input type="file">`.
+     */
+    escolherFicheiroDeConta?: () => Promise<{ nome: string; forma: "conta" | "beta" | "outro" } | null>
     /**
      * A new vault, open only in memory, for the pairing that will replace the
      * account on this device ("Sign in with another account"). Disk still holds
@@ -597,6 +669,38 @@ export interface EnclaveBridge {
     /** The video bytes (from memory or vault), or `null`. */
     bytes: (sha: string) => Promise<Uint8Array | null>
   }
+  /**
+   * Mechanical counters for the diagnostic log (1.3.15), read on the return to
+   * the foreground: vault writes, core timers that fired late, and on the
+   * desktop how long the main process was held. Cumulative; the interface
+   * compares two readings. Never content. Optional: an old `preload` does not
+   * bring it, and the log says only what the page itself measured.
+   */
+  diagnostico?: {
+    contadores: () => Promise<ContadoresDeDiagnostico>
+  }
+  /**
+   * This device's media store (media out of the vault, design §8): the bytes of
+   * each image, portrait or video live outside the vault, encrypted, and the
+   * interface asks for them by the reference `sha`. Optional: a `preload` from
+   * another version does not bring it, and the interface keeps whatever text
+   * the vault still has.
+   */
+  media?: {
+    /** The decrypted bytes, or `null` (vault closed, no reference, blob off the device or damaged). Never throws. */
+    bytes: (sha: string) => Promise<Uint8Array | null>
+    /** What is on screen does not leave through the ceiling. Each `fixar` needs its `soltar`. */
+    fixar: (sha: string) => Promise<void>
+    soltar: (sha: string) => Promise<void>
+    /** The ceiling, what is in use, and how many originals and thumbnails there are. */
+    estado: () => Promise<EstadoDoArmazem>
+    /** Bytes; one of the `TECTOS_DO_ARMAZEM` options (0 = no ceiling). Lowering it evicts now. */
+    definirTecto: (bytes: number) => Promise<void>
+    /** The "Fetch" gesture: to a sibling device, then to the members. Never throws. */
+    trazer: (id: IdDoAnexo | { a: string } | { sha: string }) => Promise<DesfechoDoTrazer>
+    /** "Free up space": removes from this device every original that is not on screen. Thumbnails stay. */
+    libertar: () => Promise<void>
+  }
   anexo?: {
     pedir: (id: IdDoAnexo) => Promise<DesfechoDoAnexo>
     /** Give up on a request (waiting in queue, or running). Its `request` call ends "cancelled". */
@@ -708,7 +812,7 @@ export interface EnclaveBridge {
      * account and lose against any old republish, see `Session.spaceMeta`,
      * where the full cost is explained.
      */
-    meta: (channel: string) => { name: string; topic?: string; icon?: string; updatedAt: number } | null
+    meta: (channel: string) => { name: string; topic?: string; icon?: string; iconRef?: string; iconMini?: string; updatedAt: number } | null
     /**
      * What each channel is (direct, wall, room, account), with the peer and the
      * owner, read from the vault (1.0 "Arca", slice 2). Synchronous like `meta`:
@@ -717,7 +821,7 @@ export interface EnclaveBridge {
      * without it, the UI reads the old form through the single port of the core.
      */
     fichas?: () => Record<string, FichaDoCanal>
-    setMeta: (channel: string, next: { name: string; topic?: string; icon?: string }) => Promise<{ ok: boolean }>
+    setMeta: (channel: string, next: { name: string; topic?: string; icon?: string; iconRef?: string }) => Promise<{ ok: boolean }>
     /**
      * Whether this account administers the channel.
      *
@@ -1394,6 +1498,11 @@ export interface EnclaveBridge {
     /** A nudge in a chat we belong to. Ephemeral like the one above. */
     buzz: (handler: (event: { channel: string; from: string; at: number }) => void) => () => void
     /**
+     * The channels catching up now (12/11/2026). A message written in one of
+     * them waits for it, and the box says so. Optional: an older host lacks it.
+     */
+    recuperacao?: (handler: (event: { canais: string[] }) => void) => () => void
+    /**
      * Somebody joined or left a call, in any channel we belong to.
      *
      * Separate from the call layer's own signalling, which only concerns the
@@ -1443,6 +1552,8 @@ export interface EnclaveBridge {
     historico?: (handler: (evento: HistoricoDosIrmaos) => void) => () => void
     /** The video of a post: part by part, ready, cancelled or failed. See `video`. */
     video?: (handler: (evento: EventoDoVideo) => void) => () => void
+    /** A media item in the store changed: stored, left through the ceiling, failed (Erro 520 or 521), or arrived. See `media`. */
+    media?: (handler: (evento: EventoDeMedia) => void) => () => void
   }
   /**
    * The call object, which always lives wherever the DOM is.
@@ -1535,8 +1646,7 @@ export interface EnclaveBridge {
   }
   /**
    * Global keyboard shortcuts for the desktop app: mute the mic and toggle audio
-   * with the window minimized, hidden, or behind another app (item 5 of
-   * `docs/planos/depois-da-1-0.md`). See `apps/client/src/main/atalhos.ts`.
+   * with the window minimized, hidden, or behind another app. See `apps/client/src/main/atalhos.ts`.
    *
    * **Absent is normal in the browser**: a page cannot listen to another app's
    * keyboard, and the shortcuts screen says they only work with the page in
@@ -1586,7 +1696,7 @@ export interface EnclaveBridge {
     enviar: (pedido: { texto: string; versao: string }) => Promise<{ ok: true }>
   }
   /**
-   * Reports (`docs/planos/denuncias-design.md`). The bridge picks the server
+   * Reports. The bridge picks the server
    * and version, like with `relato`: the UI only provides the target and choice.
    *
    * - `preparar`: the report assembled from the vault, for preview.

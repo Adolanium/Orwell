@@ -1,21 +1,16 @@
 import { describe, expect, it } from "vitest"
-import {
-  appendHistory,
-  entryMediaBytes,
-  evictEntryMedia,
-  HISTORY_MEDIA_BUDGET_BYTES,
-  type StoredChatMessage,
-  type VaultContents,
-} from "./vault.js"
+import { ArmazemDeMedia } from "./armazem/armazem.js"
+import { ArmazemEmMemoria } from "./armazem/emMemoria.js"
+import { absorverPayload } from "./armazem/referencias.js"
+import { appendHistory, entryMediaBytes, newVaultContents, semBytes, type StoredChatMessage } from "./vault.js"
 
 /**
  * What happens to a DOCUMENT stored in the vault.
  *
- * The vault evicts media by budget, and link thumbnails were already kept out
- * of it, they weighed a lot but did not count, and stayed there forever. A
- * document in a message or post is much heavier than a thumbnail, so the
- * question had to be asked fresh instead of answered by analogy: does it count
- * toward the budget, and does it evict honestly?
+ * Up to version 2 the vault evicted media by budget, and the question was
+ * whether a document counted. Since version 3 the vault keeps the REFERENCE and
+ * the store keeps the bytes. The question becomes: **does the document count
+ * as present, and does it become a reference without losing its name?**
  */
 
 function documento(inline: string, nome = "contrato.pdf"): Record<string, unknown> {
@@ -50,51 +45,43 @@ function entrada(seq: number, anexos: unknown[], chave: "attachments" | "media" 
 
 const BYTES = `data:application/pdf;base64,${"A".repeat(200_000)}`
 
+async function armazemAberto(): Promise<ArmazemDeMedia> {
+  const armazem = new ArmazemDeMedia(new ArmazemEmMemoria(), null)
+  await armazem.abrir()
+  return armazem
+}
+
 describe("um documento no cofre", () => {
-  it("PESA na contabilidade do despejo, numa mensagem e numa publicação", () => {
-    // `carriesBytes` looks for `inline`, and a document has it like an image does.
-    // If someone changes that search to "images only" someday, this breaks, and
-    // should break: a document that weighed zero would stay in the vault forever.
+  it("PESA na contabilidade dos media, numa mensagem e numa publicação", () => {
+    // `carriesBytes` looks for `inline`, and a document has it just as an image
+    // does. A document that weighed zero would never be asked from a sibling.
     expect(entryMediaBytes(entrada(1, [documento(BYTES)]))).toBe(BYTES.length)
     expect(entryMediaBytes(entrada(1, [documento(BYTES)], "media"))).toBe(BYTES.length)
   })
 
-  it("despejado, o nome e o tipo sobrevivem e os bytes não", () => {
-    const entry = entrada(1, [documento(BYTES)])
-    evictEntryMedia(entry)
-    const [anexo] = entry.payload.attachments as Record<string, unknown>[]
-    expect(anexo).toEqual({ evicted: true, name: "contrato.pdf", mediaType: "application/pdf" })
-    // Zero after eviction: otherwise the budget never dropped and the vault evicted
-    // everything on every save.
-    expect(entryMediaBytes(entry)).toBe(0)
+  it("absorvido, fica uma referência com o nome, o tipo e o kind, e pesa o mesmo enquanto está presente", async () => {
+    const armazem = await armazemAberto()
+    const contents = newVaultContents()
+    const absorvida = entrada(1, [documento(BYTES)])
+    absorvida.payload = absorverPayload(contents, absorvida.payload, armazem)
+    appendHistory(contents, "!sala:s", absorvida)
+
+    const [anexo] = contents.history["!sala:s"]![0]!.payload.attachments as Record<string, unknown>[]
+    expect(anexo).toMatchObject({ name: "contrato.pdf", mediaType: "application/pdf", kind: "document" })
+    expect(anexo).not.toHaveProperty("inline")
+    expect(typeof anexo!["ref"]).toBe("string")
+    expect(semBytes(contents)).toEqual([])
+    expect(entryMediaBytes(contents.history["!sala:s"]![0]!, (sha) => armazem.tem(sha), contents.media)).toBe(BYTES.length)
+    // The original left the store: the reference stays, and weighs zero.
+    expect(entryMediaBytes(contents.history["!sala:s"]![0]!, () => false, contents.media)).toBe(0)
   })
 
-  it("o `kind` NÃO sobrevive — é por isso que a interface separa pelo `mediaType`", () => {
-    // This is the fact that decides `separarAnexos` in the interface. A test on
-    // `kind` sent all evicted images to the files list the day they got old.
-    const entry = entrada(1, [documento(BYTES)])
-    evictEntryMedia(entry)
-    const [anexo] = entry.payload.attachments as Record<string, unknown>[]
-    expect(anexo).not.toHaveProperty("kind")
-    expect(anexo).not.toHaveProperty("byteLength")
-    expect(anexo).toHaveProperty("mediaType", "application/pdf")
-  })
-
-  it("passado o orçamento, os documentos mais antigos são os primeiros a cair", () => {
-    const contents = { history: {} } as unknown as VaultContents
-    // Each one gets a quarter of the budget: five do not fit, and the oldest leaves.
-    const pedaco = `data:application/pdf;base64,${"A".repeat(Math.floor(HISTORY_MEDIA_BUDGET_BYTES / 4))}`
-    for (let seq = 1; seq <= 5; seq++) {
-      appendHistory(contents, "!sala:s", entrada(seq, [documento(pedaco, `doc-${seq}.pdf`)]))
-    }
+  it("muitos documentos grandes: o cofre já não despeja o mais antigo", () => {
+    const contents = newVaultContents()
+    const pedaco = `data:application/pdf;base64,${"A".repeat(1_000_000)}`
+    for (let seq = 1; seq <= 5; seq++) appendHistory(contents, "!sala:s", entrada(seq, [documento(pedaco, `doc-${seq}.pdf`)]))
     const guardadas = contents.history["!sala:s"] ?? []
-    const anexoDe = (i: number): Record<string, unknown> =>
-      (guardadas[i]?.payload.attachments as Record<string, unknown>[])[0] as Record<string, unknown>
-
-    expect(anexoDe(0).evicted).toBe(true)
-    // The name stays: the row says what it was, even without the bytes.
-    expect(anexoDe(0).name).toBe("doc-1.pdf")
-    // And the newest survived, which is the other half of the rule.
-    expect(anexoDe(4).evicted).toBeUndefined()
+    expect(guardadas).toHaveLength(5)
+    for (const guardada of guardadas) expect((guardada.payload.attachments as Record<string, unknown>[])[0]).not.toHaveProperty("evicted")
   })
 })

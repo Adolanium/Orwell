@@ -1193,7 +1193,66 @@ describe("estado que não pode sobreviver à chamada", () => {
     await alice.join(CHANNEL)
     await alice.handleSignal(CHANNEL, BRUNO, anuncio)
 
-    expect(erros.filter((detalhe) => detalhe === "no relay server for the call")).toHaveLength(2)
+    expect(erros.filter((detalhe) => detalhe === "no stun or turn server for a direct call")).toHaveLength(2)
+  })
+
+  /**
+   * No third party learns about the call.
+   *
+   * Until 1.3.14 a host with nothing to offer fell back to a public STUN
+   * server, which told that company the IP and the moment of every call. Now
+   * the direct connection gets only the servers the homeserver gives, or none:
+   * it still reaches whoever is on the same network (host candidates), and the
+   * person is told why it may not reach anyone else.
+   */
+  describe("sem STUN nem TURN do servidor", () => {
+    const anuncio = (): Payload => ({ t: "voice.join", at: Date.now(), video: false, sframe: false, alone: true })
+    const urlsDe = (peer: FakePeerConnection): string[] =>
+      ((peer.config as RTCConfiguration).iceServers ?? []).flatMap((servidor) =>
+        Array.isArray(servidor.urls) ? servidor.urls : [servidor.urls],
+      )
+
+    for (const [caso, iceServers] of [
+      ["o anfitrião não sabe pedir", undefined],
+      ["o servidor não oferece nada", async () => []],
+      ["o pedido falha", async () => Promise.reject(new Error("offline"))],
+    ] as const) {
+      it(`${caso}: a ligação nasce sem servidores de terceiros, e a pessoa é avisada uma vez`, async () => {
+        const bridge: CallBridge & { sent: Payload[] } = { ...loopback(ALICE, async () => {}) }
+        if (iceServers) bridge.iceServers = iceServers
+        const alice = new Call(bridge)
+        const erros: string[] = []
+        alice.on("error", (event) => erros.push(event.detail))
+
+        await alice.join(CHANNEL)
+        await alice.handleSignal(CHANNEL, BRUNO, anuncio())
+        await alice.handleSignal(CHANNEL, CARLA, anuncio())
+
+        expect(FakePeerConnection.instances.length).toBeGreaterThan(0)
+        for (const peer of FakePeerConnection.instances) expect(urlsDe(peer)).toEqual([])
+        expect(erros.filter((detalhe) => detalhe === "no stun or turn server for a direct call")).toHaveLength(1)
+        expect(erros).not.toContain("no relay server for the call")
+      })
+    }
+
+    it("só com STUN do servidor: usa-o, e o aviso é o de falta de retransmissão", async () => {
+      const bridge: CallBridge & { sent: Payload[] } = {
+        ...loopback(ALICE, async () => {}),
+        async iceServers() {
+          return [{ urls: "stun:orwell.test:3478" }]
+        },
+      }
+      const alice = new Call(bridge)
+      const erros: string[] = []
+      alice.on("error", (event) => erros.push(event.detail))
+
+      await alice.join(CHANNEL)
+      await alice.handleSignal(CHANNEL, BRUNO, anuncio())
+
+      expect(urlsDe(FakePeerConnection.instances[0]!)).toEqual(["stun:orwell.test:3478"])
+      expect(erros).toContain("no relay server for the call")
+      expect(erros).not.toContain("no stun or turn server for a direct call")
+    })
   })
 
   /**

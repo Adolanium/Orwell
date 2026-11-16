@@ -1,6 +1,5 @@
 /**
- * The mutations of absolute synchrony (§8.4 of the plan
- * `docs/planos/2026-10-20-sincronia-absoluta.md`), recorded in one place.
+ * The mutations of absolute synchrony (§8.4 of the plan), recorded in one place.
  *
  *   node scripts/mutacoes-sincronia.mjs              (all)
  *   node scripts/mutacoes-sincronia.mjs lugar piso   (only these)
@@ -13,8 +12,7 @@
  *
  * The text to swap must appear exactly once in the file: if the code changed
  * and the mutation lost its target, the script says so and fails, instead of
- * measuring nothing (lesson from "Two Phase 1 mutations lost their target",
- * `docs/PENDENTES.md`).
+ * measuring nothing (lesson from "Two Phase 1 mutations lost their target").
  *
  * Mutations touching `packages/` and proved in `apps/server` need `dist`
  * rebuilt: the script runs `npx tsc -b` before and after them.

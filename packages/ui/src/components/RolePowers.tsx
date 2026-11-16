@@ -69,8 +69,7 @@ export function degrausDe(powers: readonly Power[]): Degraus {
  * The groups of the "Permissions" section, arranged like Discord arranges a
  * role.
  *
- * Owner's request on 27 October 2026: "reorganize the menu, just like in
- * Discord". Replaces, in the FORM, the three boxes by kind (cipher, no undo,
+ * Laid out like Discord does it. Replaces, in the FORM, the three boxes by kind (cipher, no undo,
  * convention). The kind is not lost: the cipher group stays at the head with
  * its mark, and each responsibility with no undo gets the mark "Permanent" on
  * the line. The cards in the list and the profile still read `degrausDe`, which

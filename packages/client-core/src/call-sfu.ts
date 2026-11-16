@@ -610,7 +610,7 @@ export interface DependenciasDoMotorSfu {
   /**
    * Do we want to view this person's screen?
    *
-   * Feature request from the owner on October 5, 2026: *when someone shares their screen,
+   * *When someone shares their screen,
    * others should only enter the stream if they choose to.* Until now we consumed any new
    * producer without looking at the source, and whoever received it took 2.5 Mbps forced,    * there's no simulcast or layers (see `media.ts`), so no small version of the screen to
    * request, with nowhere to refuse.
@@ -1368,7 +1368,7 @@ export class MotorSfu {
   /**
    * Put MUSIC in the call: its own producer, source `musica`, encrypted.
    *
-   * Phase 9 of `docs/planos/definicoes-0-9.md`. Independent of everything else:
+   * Independent of everything else:
    * does not ask for image (the server accepts it on its own), does not go
    * through the voice chain (the track comes from the player, `musica.ts`, not
    * the microphone), and does not die when the microphone is muted. Stereo Opus

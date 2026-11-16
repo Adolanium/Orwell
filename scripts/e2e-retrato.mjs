@@ -1,6 +1,6 @@
 /**
- * The channel portrait in Welcome, on three real browsers (phase 1 of
- * `docs/planos/estado-cifrado-plano.md`).
+ * The channel portrait in Welcome, on three real browsers (phase 1 of the
+ * encrypted-state plan).
  *
  *   npm run build && node scripts/e2e-retrato.mjs
  *

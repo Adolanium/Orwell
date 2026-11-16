@@ -175,10 +175,10 @@ const PROIBIDAS = [
 const PROIBIDAS_RE = new RegExp(PROIBIDAS.join("|"))
 
 /**
- * ⚠️ This block was trap number four in `docs/RETOMAR.md`: on a busy machine
+ * ⚠️ This block was a trap: on a busy machine
  * it went red on its own, in a test that had nothing to do with what had
  * changed. It was three scans of 2^20 values with the default budget of 5 s,
- * and the first one took 3.6 s on a free machine. Measured again on August 16,
+ * and the first one took 3.6 s on a free machine. Measured again
  * with the machine full: 23 s. Red, and wrong red.
  *
  * Two things changed, and the second is the one that matters:

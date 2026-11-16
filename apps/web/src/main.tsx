@@ -1,4 +1,5 @@
 import { mostrarFaixa } from "./faixa.js"
+import { marcarArranque } from "@enclave/client-core"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { App, arrancarLingua, OutroSeparador, Splash, strings, tocarSomDeActualizacao } from "@enclave/ui"
@@ -21,6 +22,9 @@ const conviteDeArranque = lerConviteDeArranque({
   storage: armazenamentoDoSeparador(),
   base: import.meta.env.BASE_URL,
 })
+// The bundle has loaded and runs: the first startup mark (see `marcasDeArranque.ts`).
+// After the invite on purpose: the secret in the fragment is cleared before anything else.
+marcarArranque("bundle")
 // And the pairing link, by the same path and for the same reason: a secret
 // in the fragment, read and cleared before anything else.
 const emparelhamentoDeArranque = lerEmparelhamentoDeArranque({
@@ -101,7 +105,7 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
   So the old tab stops writing the moment it notices the new version: it releases
   ownership (disconnects, saves what it had, seals the vault) and goes read-only.
   Reloading is up to the user, and the banner tells them. The text comes from the
-  catalog, short and direct, at the request of the owner (October 19, 2026).
+  catalog, short and direct.
 */
 function bloquearPorVersao(): void {
   if (versaoVelha) return

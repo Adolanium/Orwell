@@ -11,8 +11,7 @@ import { Call, tectoDoEcra, type CallBridge, type MediaKeyMaterial, type Partici
  * that the participant cap refuses instead of letting the call collapse.
  *
  * What they do NOT prove, and no amount of test harnesses would: that two
- * machines for real exchange screen image through a NAT. That is measured live,
- * and is written as pending in `docs/PENDENTES.md`.
+ * machines for real exchange screen image through a NAT. That has to be measured live.
  */
 
 // -------------------------------------------------------------------- stubs

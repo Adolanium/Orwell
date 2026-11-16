@@ -24,8 +24,7 @@ import { Vault, type VaultBackend } from "./vault.js"
  * 2. **Do those who stay honor the request?** That's the part with cryptographic weight, and it's
  *    on the other side: MLS won't let anyone commit their own removal, so the
  *    epoch only advances by those who stay. Proven with two real accounts.
- * 3. **What happens when the leave fails?** The decision is in
- *    `docs/PENDENTES.md`: the account is NOT deleted. Destroying the vault without leaving is the
+ * 3. **What happens when the leave fails?** The decision: the account is NOT deleted. Destroying the vault without leaving is the
  *    worst of both worlds, because the only device that could request the leave
  *    just threw away the keys it would use to request it.
  */

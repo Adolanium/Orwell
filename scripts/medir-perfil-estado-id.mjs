@@ -1,5 +1,5 @@
 /**
- * Live proof of the owner's requests from 27 October 2026 about the profile:
+ * Live proof of the profile features:
  * "Absent" in the card menu, "Channels I created", ids out of view and the
  * "Back" button in view on the person's page.
  *

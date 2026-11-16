@@ -17,8 +17,8 @@ import { NomeDePessoa } from "../../components/NomeDePessoa.js"
  *
  * **Self-contained on purpose.** It does not import `Timeline`, `Composer`, or
  * text formatting: those are other people's files and are being rewritten
- * nearby. What is lost is written in `docs/PENDENTES.md` (images, mentions, and
- * formatting inside a ticket), and what is gained is this screen not breaking
+ * nearby. What is lost is images, mentions, and
+ * formatting inside a ticket, and what is gained is this screen not breaking
  * when those change.
  *
  * **Both truths live here, not on a help page.** A ticket looks like a private

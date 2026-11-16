@@ -6,6 +6,9 @@ import type { EnclaveBridge, PairEvento } from "../../bridge.js"
 import { errosPt } from "../../linguas/pt.js"
 import { strings } from "../../strings.js"
 import { Unlock } from "./Unlock.js"
+// `ImportAccount` reads the chosen file through `Blob.slice` and `arrayBuffer`, which jsdom does not have.
+import "../../testes/blobDoJsdom.js"
+import { ToastProvider } from "../../components/Toast.js"
 
 afterEach(cleanup)
 
@@ -36,7 +39,9 @@ function renderUnlock(
 ): void {
   render(
     <BridgeContext.Provider value={bridge}>
-      <Unlock onDone={onDone} onStartOver={onStartOver} />
+      <ToastProvider>
+        <Unlock onDone={onDone} onStartOver={onStartOver} />
+      </ToastProvider>
     </BridgeContext.Provider>,
   )
 }
@@ -62,15 +67,38 @@ describe("Unlock", () => {
     // device — and, on a keychain vault, asked for a passphrase that does not
     // exist. The banner and the reconnect loop are what a dead server is for.
     const onDone = vi.fn()
-    renderUnlock(
-      bridgeWith({ connect: async () => Promise.reject(new Error("could not reach the homeserver")) }),
-      onDone,
+    const onLigacaoFalhou = vi.fn()
+    render(
+      <BridgeContext.Provider value={bridgeWith({ connect: async () => Promise.reject(new Error("could not reach the homeserver")) })}>
+        <Unlock onDone={onDone} onStartOver={vi.fn()} onLigacaoFalhou={onLigacaoFalhou} />
+      </BridgeContext.Provider>,
     )
 
-    // And the failure comes with it, for the connection banner to say: swallowed,
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith("@abc:orwell.pt"))
+    // And the failure comes after, for the connection banner to say: swallowed,
     // it opened an application with no channels and no sign of why.
-    await waitFor(() => expect(onDone).toHaveBeenCalledWith("@abc:orwell.pt", expect.any(Error)))
-    expect((onDone.mock.calls[0]?.[1] as Error).message).toBe("could not reach the homeserver")
+    await waitFor(() => expect(onLigacaoFalhou).toHaveBeenCalledWith(expect.any(Error)))
+    expect((onLigacaoFalhou.mock.calls[0]?.[0] as Error).message).toBe("could not reach the homeserver")
+  })
+
+  it("entra logo que o cofre abre, sem esperar pela ligação (12/11/2026)", async () => {
+    // The phone start: the connection (handshake, catch-up of every channel)
+    // took seconds on a slow link, and the gate stood in front of history the
+    // device already had. The vault is open: the app opens with it, and the
+    // connection goes on behind.
+    const onDone = vi.fn()
+    let ligou = false
+    renderUnlock(
+      bridgeWith({
+        connect: () =>
+          new Promise(() => {
+            ligou = true
+          }),
+      }),
+      onDone,
+    )
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith("@abc:orwell.pt"))
+    expect(ligou).toBe(true)
   })
 
   it("um cofre que precisa de palavra-passe continua a pedi-la", async () => {

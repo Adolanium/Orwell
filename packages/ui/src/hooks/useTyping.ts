@@ -53,6 +53,16 @@ export const TYPING_INTERVAL_MS = 4_000
  */
 export const TYPING_BURST_MS = 20_000
 
+/** Above this many people typing in the same place, the line says "several people". */
+export const MUITOS_A_ESCREVER = 3
+
+/**
+ * In the common room, the time between our own signals. Longer than
+ * `TYPING_INTERVAL_MS` and still inside the deadline, so the line does not
+ * blink on the other side: every signal there is one copy per member online.
+ */
+export const TYPING_INTERVAL_SALA_GRANDE_MS = 5_500
+
 /** How often to sweep for what has expired. */
 const VARRIMENTO_MS = 1_000
 
@@ -100,6 +110,8 @@ export function useTyping(
   me: string | null,
   /** No connection means no encryption and no typing signal. Connected by default. */
   connection: ConnectionState = "online",
+  /** The common room: our own signal goes out less often. See `TYPING_INTERVAL_SALA_GRANDE_MS`. */
+  salaGrande = false,
 ): Typing {
   const [sinais, setSinais] = useState<ReadonlyMap<string, Sinal>>(() => new Map())
 
@@ -157,6 +169,10 @@ export function useTyping(
 
   // ------------------------------------------------------------- a enviar
 
+  /** How many others are typing here, read when a key is pressed. */
+  const typistsRef = useRef(0)
+  typistsRef.current = typists.length
+
   /** When the last signal left, and when this burst began. */
   const ultimoEnvio = useRef(0)
   const inicioDaRajada = useRef(0)
@@ -176,11 +192,19 @@ export function useTyping(
     const agora = Date.now()
     if (inicioDaRajada.current === 0) inicioDaRajada.current = agora
     if (agora - inicioDaRajada.current > TYPING_BURST_MS) return
-    if (agora - ultimoEnvio.current < TYPING_INTERVAL_MS) return
+    // With more than three people already typing here, the line no longer shows names: space our own signal (owner, 12/11/2026).
+    /*
+      With more than three people already typing here, the line says "several
+      people" and nobody reads our name in it: our own signal does not go out
+      (owner, 12/11/2026). In the common room it goes out less often.
+    */
+    if (typistsRef.current > MUITOS_A_ESCREVER) return
+    const intervalo = salaGrande ? TYPING_INTERVAL_SALA_GRANDE_MS : TYPING_INTERVAL_MS
+    if (agora - ultimoEnvio.current < intervalo) return
     ultimoEnvio.current = agora
     // A lost signal is not an error to show anyone: the phrase that matters goes another way, and the indicator clears itself.
     void bridge.channels.typing(channel, room || undefined).catch(() => undefined)
-  }, [bridge, channel, room, connection])
+  }, [bridge, channel, room, connection, salaGrande])
 
   return { typists, noteTyping, stopTyping }
 }

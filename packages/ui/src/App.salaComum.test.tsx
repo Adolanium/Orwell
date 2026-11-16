@@ -162,7 +162,7 @@ beforeEach(() => {
 
 describe("o canal comum diz que é aberto, e diz-lo sempre", () => {
   /*
-    The lock and the "Open" in the header are gone, at the owner's request (0.8.0).
+    The lock and the "Open" in the header are gone (since 0.8.0).
     The public channel still says it is open in the member list.
   */
   it('o cabeçalho já não tem o cadeado nem o "Aberto"', async () => {

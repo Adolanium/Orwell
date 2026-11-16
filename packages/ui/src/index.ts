@@ -20,12 +20,15 @@ export type {
   EnclaveBridge,
   // The global shortcuts, which only the desktop host fills in.
   EstadoDosAtalhosGlobais,
+  FicheiroDeContaEscolhido,
+  FicheiroDeContaExportado,
   PedidoDeAtalhosGlobais,
   // Screen sharing, which only the desktop host fills in: it has the main process with
   // `desktopCapturer` on the other side of IPC.
   FonteDeEcra,
   PermissaoDeEcra,
   Profile,
+  ResultadoDeImportar,
 } from "./bridge.js"
 // The desktop host shows notifications better than the browser can, and registers here.
 // See `lib/notifications.ts`.

@@ -1,7 +1,7 @@
 /**
  * The meter for the "Support" section: how much the GoFundMe campaign has raised.
  *
- * Request from the owner on 3 November 2026. Visitors never make a request to
+ * Visitors never make a request to
  * GoFundMe: our server reads the campaign at 15 em 15 minutos and serves the amount
  * in `/_enclave/apoiar.json`, from this origin (`apps/server/src/apoio.ts`). This
  * script only fetches that JSON (`connect-src 'self'` in CSP), with no cookies.

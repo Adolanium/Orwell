@@ -123,6 +123,8 @@ vi.mock("@enclave/client-core", () => ({
 }))
 
 vi.mock("@enclave/crypto", () => ({ kindOf: () => "application" }))
+// The media store is born with the bridge; like the vault, without IndexedDB here.
+vi.mock("./armazem-backend.js", () => ({ BrowserArmazemBackend: class {} }))
 vi.mock("./vault-backend.js", () => ({ BrowserVaultBackend: class {} }))
 vi.mock("mediasoup-client", () => ({
   Device: class {

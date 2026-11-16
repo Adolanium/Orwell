@@ -1,19 +1,42 @@
-import { generateDeviceKey, generateIdentity, parseServerName, signWithDevice, toBase64, type Identity } from "@enclave/protocol"
+import { generateDeviceKey, generateIdentity, parseServerName, signWithDevice, toBase64, VIDEO_BYTES_POR_PARTE, type Identity } from "@enclave/protocol"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AntiEntropia, type PortaDaAntiEntropia } from "../sincronia/pedido.js"
-import { dobrarConversa } from "../dobras.js"
+import { chaveDoEvento, dobrarConversa } from "../dobras.js"
+import { ArmazemDeMedia } from "../armazem/armazem.js"
+import { ArmazemEmMemoria } from "../armazem/emMemoria.js"
+import { absorverPayload, absorverVideo, bytesDoMedia, inflarPayload, recolher, shasDoPayload, soInlineOuEvicted } from "../armazem/referencias.js"
 import {
+  bytesParaBase64,
   entradasDoCanal,
   fundirEntradasDoIrmao,
+  guardarVideo,
   HISTORY_MAX_PER_CHANNEL,
   juntarMediaDoIrmao,
   newVaultContents,
-  semMediaPesada,
+  semBytes,
   type StoredChatMessage,
+  type StoredPayload,
   type VaultContents,
 } from "../vault.js"
-import { inventarioDe, paginaDe, resumoDoHistorico, TECTOS_DO_HISTORICO } from "./conteudo.js"
-import { HistoricoEntreAparelhos, TECTOS_DO_FIO_DO_HISTORICO, type EventoDoHistorico, type PortaDoHistorico } from "./historico.js"
+import {
+  faltaAqui,
+  inventarioDe,
+  mediaDe,
+  mediaInteiraDe,
+  paginaDe,
+  resumoDoHistorico,
+  retratoDe,
+  semMediaPesada,
+  TECTOS_DO_HISTORICO,
+  type InflarParaOIrmao,
+} from "./conteudo.js"
+import {
+  HistoricoEntreAparelhos,
+  TECTOS_DO_FIO_DO_HISTORICO,
+  type EventoDoHistorico,
+  type PortaDoArmazemDoHistorico,
+  type PortaDoHistorico,
+} from "./historico.js"
 
 /**
  * The history between devices of the same account, without a server: the vault
@@ -35,6 +58,60 @@ function mensagem(seq: number, sender: string, corpo: string, extra: Record<stri
 
 function imagem(nome: string, caracteres: number): Record<string, unknown> {
   return { name: nome, mediaType: "image/png", byteLength: caracteres, inline: `data:image/png;base64,${"B".repeat(caracteres)}` }
+}
+
+/** An open store, in memory. */
+async function armazemAberto(): Promise<ArmazemDeMedia> {
+  const armazem = new ArmazemDeMedia(new ArmazemEmMemoria(), null)
+  await armazem.abrir()
+  return armazem
+}
+
+/** The output to the sibling, as the session provides it: through the store. */
+function inflarDe(contents: VaultContents, armazem: ArmazemDeMedia): InflarParaOIrmao {
+  return {
+    payload: (payload, opcoes) => inflarPayload(contents, payload, armazem, opcoes ?? {}),
+    bytes: (sha) => bytesDoMedia(contents, sha, armazem),
+  }
+}
+
+/** A new device's door: absorbs on the way in and inflates on the way out. */
+function portaNova(contents: VaultContents, armazem: ArmazemDeMedia): PortaDoArmazemDoHistorico {
+  return {
+    presente: (sha) => armazem.tem(sha),
+    inflar: inflarDe(contents, armazem),
+    absorver: (c, payload) => absorverPayload(c, payload, armazem),
+    guardarVideo: (c, _sha, bytes) => {
+      absorverVideo(c, bytes, "video/mp4", armazem)
+    },
+  }
+}
+
+/** A door of a device from before the store (1.3): the bytes stay in the vault, and go out as they are. */
+const portaAntiga: PortaDoArmazemDoHistorico = {
+  presente: () => false,
+  inflar: { payload: async (payload) => payload, bytes: async () => null },
+  absorver: (_c, payload) => payload,
+  guardarVideo: (c, sha, bytes, at) => {
+    guardarVideo(c, sha, bytesParaBase64(bytes), at)
+  },
+}
+
+/** A page as it leaves the wire: JSON, and back. */
+const peloFio = <T>(valor: T): T => JSON.parse(JSON.stringify(valor)) as T
+
+/** All the attachments and cards a value carries, wherever they are. */
+function anexosEm(valor: unknown): Record<string, unknown>[] {
+  const achados: Record<string, unknown>[] = []
+  const visitar = (v: unknown): void => {
+    if (Array.isArray(v)) return v.forEach(visitar)
+    if (typeof v !== "object" || v === null) return
+    const r = v as Record<string, unknown>
+    for (const chave of ["attachments", "media"]) if (Array.isArray(r[chave])) achados.push(...(r[chave] as Record<string, unknown>[]))
+    Object.values(r).forEach(visitar)
+  }
+  visitar(valor)
+  return achados
 }
 
 describe("fundirEntradasDoIrmao", () => {
@@ -105,7 +182,7 @@ describe("os media pesados", () => {
 })
 
 describe("as páginas", () => {
-  it("as páginas cobrem o canal inteiro, por ordem, mesmo com a lista fora de ordem", () => {
+  it("as páginas cobrem o canal inteiro, por ordem, mesmo com a lista fora de ordem", async () => {
     const tectos = { ...TECTOS_DO_HISTORICO }
     try {
       Object.assign(TECTOS_DO_HISTORICO, { entradasPorPagina: 3 })
@@ -116,7 +193,7 @@ describe("as páginas", () => {
       const vistas: number[] = []
       let desde: number | null = null
       for (let volta = 0; volta < 10; volta++) {
-        const pagina = paginaDe(c, "!c", desde)
+        const pagina = await paginaDe(c, "!c", desde, portaAntiga.inflar)
         vistas.push(...pagina.e.map((e) => e.seq))
         if (pagina.fim) break
         desde = pagina.ate
@@ -156,13 +233,16 @@ const CHAVE = { epoca: 1n, chave: new Uint8Array(32).fill(3) }
  * Two devices of the same account, connected by an in-memory relay. `perder`
  * decides, per signal, whether the relay drops it (a bad connection).
  */
-function doisAparelhos(perder: (n: number) => boolean = () => false): { a: Aparelho; b: Aparelho } {
+function doisAparelhos(
+  perder: (n: number) => boolean = () => false,
+  armazens: { a?: ArmazemDeMedia; b?: ArmazemDeMedia } = {},
+): { a: Aparelho; b: Aparelho } {
   const conta: Identity = generateIdentity(CASA)
   const chaveDoB = generateDeviceKey()
   const contaB = { ...conta, deviceSigningPrivateKey: chaveDoB.privateKey, deviceSigningPublicKey: chaveDoB.publicKey } as Identity
   const aparelhos: Aparelho[] = []
   let n = 0
-  const criar = (identidade: Identity): Aparelho => {
+  const criar = (identidade: Identity, armazem: ArmazemDeMedia | undefined): Aparelho => {
     const contents = newVaultContents()
     const eu: Aparelho = { contents, historico: null as unknown as HistoricoEntreAparelhos, eventos: [], ligado: true, aparelho: toBase64(identidade.deviceSigningPublicKey) }
     const porta: PortaDoHistorico = {
@@ -186,12 +266,14 @@ function doisAparelhos(perder: (n: number) => boolean = () => false): { a: Apare
       lugar: () => undefined,
       emitir: (evento) => eu.eventos.push(evento),
       agora: () => Date.now(),
+      // No store: a device from before it (1.3).
+      armazem: armazem ? portaNova(contents, armazem) : portaAntiga,
     }
     eu.historico = new HistoricoEntreAparelhos(porta)
     aparelhos.push(eu)
     return eu
   }
-  return { a: criar(conta), b: criar(contaB) }
+  return { a: criar(conta, armazens.a), b: criar(contaB, armazens.b) }
 }
 
 async function ate(predicado: () => boolean, rotulo: string, prazoMs = 10_000): Promise<void> {
@@ -312,6 +394,106 @@ describe("o fio entre dois aparelhos", () => {
   })
 })
 
+describe("o aviso nunca fica parado (12/11/2026)", () => {
+  /*
+    The owner's case: "Getting the history: 402 of 420 messages" stood still
+    for a long time. Two paths led there, both reproduced here: an entry the
+    sibling cannot serialize sat in the middle of a channel and the page that
+    carried it never went out (the request was asked again, forever); and the
+    sibling stopped answering with the plan half done, and nothing ever gave
+    up. Rules: the total counts only what can be got, what cannot is given as
+    lost with the reason, and the notice has a deadline.
+  */
+  const fio = { ...TECTOS_DO_FIO_DO_HISTORICO }
+  const conteudo = { ...TECTOS_DO_HISTORICO }
+  beforeEach(() => {
+    Object.assign(TECTOS_DO_FIO_DO_HISTORICO, {
+      sinaisPorMinuto: 100_000,
+      passoMs: 20,
+      esperaDaRespostaMs: 150,
+      esperaDoInventarioMs: 150,
+      primeiraReposicaoMs: 50,
+      intervaloDaReposicaoMs: 50,
+      bytesPorParte: 1_024,
+      desistirAposMs: 1_200,
+      retomarParadoMs: 400,
+    })
+    Object.assign(TECTOS_DO_HISTORICO, { entradasPorPagina: 5, mediaComOTexto: 1_000 })
+  })
+  afterEach(() => {
+    Object.assign(TECTOS_DO_FIO_DO_HISTORICO, fio)
+    Object.assign(TECTOS_DO_HISTORICO, conteudo)
+  })
+
+  it("uma entrada que o irmão não consegue mandar, a meio de um canal: o resto chega, o contador chega ao total e ela conta como perdida", async () => {
+    const { a, b } = doisAparelhos()
+    a.contents.history["!c"] = Array.from({ length: 21 }, (_, i) => mensagem(i + 1, "@b:x", `mensagem ${i + 1}`))
+    // Two entries that do not serialize (a BigInt: JSON.stringify throws), in the second page.
+    a.contents.history["!c"]![7]!.payload["estranho"] = 1n
+    a.contents.history["!c"]![8]!.payload["estranho"] = 2n
+    a.contents.history["!outro"] = [mensagem(1, "@b:x", "outro canal")]
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => b.contents.historico?.plano === undefined && b.contents.historico?.inicial === undefined, "o histórico acaba", 10_000)
+      expect(entradasDoCanal(b.contents, "!c")).toHaveLength(19)
+      expect(entradasDoCanal(b.contents, "!outro")).toHaveLength(1)
+      const comTotal = b.eventos.filter((e) => e.aTrazer && e.total > 0)
+      // The total drops what cannot come, and the counter reaches it.
+      expect(comTotal.at(-1)?.feitas).toBe(comTotal.at(-1)?.total)
+      const fim = b.eventos.at(-1)
+      expect(fim?.aTrazer).toBe(false)
+      expect(fim?.perdidas).toBe(2)
+      expect(fim?.razao).toBe("ilegiveis")
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  })
+
+  it("o irmão cala-se a meio: o aviso desiste com a razão, e volta a tentar devagar até acabar", async () => {
+    const { a, b } = doisAparelhos()
+    a.contents.history["!c"] = Array.from({ length: 30 }, (_, i) => mensagem(i + 1, "@b:x", `mensagem ${i + 1}`))
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => (b.contents.historico?.plano?.canais["!c"]?.feitas ?? 0) > 0, "a meio")
+      // The computer goes away mid-transfer.
+      a.ligado = false
+      a.historico.aoDesligar()
+      await ate(() => b.eventos.at(-1)?.razao === "irmao-calado", "o aviso desiste", 5_000)
+      const parado = b.eventos.at(-1)
+      expect(parado?.aTrazer).toBe(false)
+      expect(parado?.perdidas).toBeGreaterThan(0)
+      // The plan stays in the vault, quiet: when the sibling comes back, it finishes.
+      expect(b.contents.historico?.plano).toBeDefined()
+      a.ligado = true
+      a.historico.aoLigar()
+      await ate(() => b.contents.historico?.plano === undefined, "acaba quando o irmão volta", 10_000)
+      expect(entradasDoCanal(b.contents, "!c")).toHaveLength(30)
+      expect(b.eventos.at(-1)?.perdidas ?? 0).toBe(0)
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  })
+
+  it("nenhum irmão responde: o aviso desiste com essa razão, sem ficar a contar", async () => {
+    const { a, b } = doisAparelhos()
+    a.ligado = false
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    b.historico.aoLigar()
+    try {
+      await ate(() => b.eventos.at(-1)?.razao === "sem-irmao", "o aviso desiste", 5_000)
+      expect(b.historico.estado().aTrazer).toBe(false)
+    } finally {
+      b.historico.aoDesligar()
+    }
+  })
+})
+
 describe("convivência com um irmão de antes disto (1.0.4)", () => {
   it("a anti-entropia de um irmão antigo deita fora os sinais do canal da conta sem contar nada", async () => {
     // The gate for 1.0.4: `elegivel` says no to the account channel (`session.ts`, `#portaDaAntiEntropia`).
@@ -336,5 +518,388 @@ describe("convivência com um irmão de antes disto (1.0.4)", () => {
       a.historico.aoDesligar()
       b.historico.aoDesligar()
     }
+  })
+})
+
+describe("o retrato no armazém conta (Ruling R15)", () => {
+  it("um avatar por referência pesa o inline que reconstitui, se o blob está; sem ele, falta", () => {
+    const contents = newVaultContents()
+    contents.media = { sha1: { v: 1, k: "k", n: "n", b: 300, t: "image/png", f: "bytes", p: "data:image/png;base64,", c: "mini", at: 1 } }
+    const payload = { t: "profile", displayName: "Bruno", donations: [], updatedAt: 5, avatar: { ref: "sha1", name: "avatar", mediaType: "image/*" } }
+    contents.directory["@bruno:x"] = { at: 5, payload }
+    expect(retratoDe(payload, contents)).toBe("data:image/png;base64,".length + 400)
+    expect(retratoDe(payload, contents, () => false)).toBe(0)
+    expect(mediaDe(contents, "@ana:x", () => true)).toContainEqual({ a: "@bruno:x", at: 5, b: "data:image/png;base64,".length + 400 })
+    expect(faltaAqui(contents, { a: "@bruno:x", at: 5, b: 1 }, () => true)).toBe(false)
+    expect(mediaDe(contents, "@ana:x", () => false)).toEqual([])
+    expect(faltaAqui(contents, { a: "@bruno:x", at: 5, b: 1 }, () => false)).toBe(true)
+  })
+
+  it("a forma do perfil próprio (`avatarRef`) conta pela mesma regra", () => {
+    const contents = newVaultContents()
+    contents.media = { sha2: { v: 1, k: "k", n: "n", b: 30, t: "image/png", f: "texto", c: "mini", at: 1 } }
+    const payload = { t: "profile", displayName: "Ana", donations: [], updatedAt: 5, avatarRef: "sha2" }
+    expect(retratoDe(payload, contents)).toBe(30)
+    expect(retratoDe(payload, contents, () => false)).toBe(0)
+  })
+})
+
+// ------------------------------------------- the media store (Task 8)
+
+describe("o fio entre irmãos leva inline ou evicted, nunca ref (Review Focus 3)", () => {
+  const conteudo = { ...TECTOS_DO_HISTORICO }
+  afterEach(() => {
+    Object.assign(TECTOS_DO_HISTORICO, conteudo)
+  })
+
+  const PREFIXO = "data:image/png;base64,"
+  /** The cut: the prefix and 1000 characters of canonical base64. */
+  const LIMITE = PREFIXO.length + 1_000
+  const com = (nome: string, n: number) => ({ name: nome, mediaType: "image/png", byteLength: n, kind: "image", inline: `${PREFIXO}${"B".repeat(n)}` })
+
+  /** The usual payloads (what 1.3.2 had in the vault), with items on both sides of the cut. */
+  function originais(): StoredPayload[] {
+    return [
+      {
+        t: "message",
+        id: "m1",
+        sentAt: 1,
+        body: "quatro anexos e dois cartões",
+        attachments: [
+          com("no-limite.png", 1_000), // canonical, exactly at the cut: goes
+          com("acima.png", 1_004), // canónico, acima: evicted
+          com("texto-abaixo.png", 999), // non-canonical (f: "texto"), below: goes
+          com("texto-acima.png", 1_001), // non-canonical, one above: evicted
+        ],
+        links: [
+          { url: "https://a.pt", kind: "link", thumbnail: `${PREFIXO}${"C".repeat(1_000)}` },
+          { url: "https://b.pt", kind: "link", thumbnail: `${PREFIXO}${"C".repeat(1_004)}` },
+        ],
+        mentions: [],
+      },
+      {
+        t: "post",
+        id: "p1",
+        caption: "um vídeo com uma miniatura grande",
+        // The poster was never cut in 1.3.2.
+        media: [{ name: "v.mp4", mediaType: "video/mp4", byteLength: 9, kind: "video", poster: `data:image/jpeg;base64,${"D".repeat(4_000)}` }],
+        links: [],
+        tags: [],
+      },
+    ]
+  }
+
+  /** A new vault with these payloads absorbed into the store. */
+  async function cofreNovo(payloads: StoredPayload[]) {
+    const armazem = await armazemAberto()
+    const contents = newVaultContents()
+    contents.history["!c"] = payloads.map((payload, i) => ({ seq: i + 1, sender: "@a:x", at: i + 1, payload: absorverPayload(contents, payload, armazem) }))
+    await armazem.drenar()
+    return { contents, armazem }
+  }
+
+  it("paginaDe: inflada e cortada como a 1.3.2 cortava o mesmo item (Ruling R11)", async () => {
+    Object.assign(TECTOS_DO_HISTORICO, { mediaComOTexto: LIMITE })
+    const { contents, armazem } = await cofreNovo(originais())
+    // The vault has only references.
+    expect(semBytes(contents)).toEqual([])
+    const pagina = peloFio(await paginaDe(contents, "!c", null, inflarDe(contents, armazem)))
+    expect(JSON.stringify(pagina)).not.toMatch(/"ref"/)
+    // The 1.3.2 decision, with the same items in the old vault.
+    expect(pagina.e.map((e) => e.payload)).toEqual(originais().map((p) => semMediaPesada(p, LIMITE).payload))
+    const anexos = pagina.e[0]!.payload["attachments"] as Record<string, unknown>[]
+    expect(anexos.map((a) => (a["evicted"] === true ? "evicted" : typeof a["inline"]))).toEqual(["string", "evicted", "string", "evicted"])
+  })
+
+  it("mediaInteiraDe: tudo o que está no armazém, inflado e sem corte; o que saiu não se oferece", async () => {
+    Object.assign(TECTOS_DO_HISTORICO, { mediaComOTexto: LIMITE })
+    const { contents, armazem } = await cofreNovo(originais())
+    const retrato = `${PREFIXO}${"E".repeat(800)}`
+    const perfil = { t: "profile", displayName: "Bruno", donations: [], updatedAt: 5, avatar: { name: "avatar", mediaType: "image/png", byteLength: 600, inline: retrato } }
+    contents.directory["@bruno:x"] = { at: 5, payload: absorverPayload(contents, perfil, armazem) }
+    const video = Uint8Array.from({ length: 3_000 }, (_, i) => i % 251)
+    const v = absorverVideo(contents, video, "video/mp4", armazem)
+    contents.history["!c"]!.push({ seq: 3, sender: "@a:x", at: 3, payload: { t: "post", id: "p2", caption: "", media: [{ name: "v.mp4", mediaType: "video/mp4", byteLength: 3_000, kind: "video", partes: { sha256: v, n: 1, bytes: VIDEO_BYTES_POR_PARTE } }], links: [], tags: [] } })
+    await armazem.drenar()
+    const inflar = inflarDe(contents, armazem)
+    const presente = (sha: string) => armazem.tem(sha)
+
+    // The list offers the entry, the video from the store and the portrait.
+    const lista = mediaDe(contents, "@a:x", presente)
+    const e = chaveDoEvento(contents.history["!c"]![0]!)!
+    expect(lista).toContainEqual(expect.objectContaining({ c: "!c", e }))
+    expect(lista).toContainEqual({ v, b: Math.ceil((3_000 * 4) / 3) })
+    expect(lista).toContainEqual(expect.objectContaining({ a: "@bruno:x" }))
+
+    const { itens } = peloFio(await mediaInteiraDe(contents, "@a:x", [{ c: "!c", e }, { v }, { a: "@bruno:x" }], inflar))
+    expect(JSON.stringify(itens)).not.toMatch(/"ref"/)
+    // No cut: the four attachments with the exact inline.
+    const doIrmao = itens.find((item) => "c" in item) as { p: StoredPayload }
+    expect(doIrmao.p).toEqual(originais()[0])
+    // The video, in base64url, with the right digest.
+    const doVideo = itens.find((item) => "v" in item) as { b64: string }
+    expect(doVideo.b64).toBe(bytesParaBase64(video))
+    // The portrait with the usual inline.
+    const doPerfil = itens.find((item) => "a" in item) as { perfil: { payload: StoredPayload } }
+    expect((doPerfil.perfil.payload["avatar"] as Record<string, unknown>)["inline"]).toBe(retrato)
+
+    // What left the store is no longer offered or served.
+    await armazem.apagar([...shasDoPayload(contents.history["!c"]![0]!.payload), ...shasDoPayload(contents.directory["@bruno:x"]!.payload), v])
+    expect(mediaDe(contents, "@a:x", presente).filter((item) => !("c" in item && item.e !== e))).toEqual([])
+    expect((await mediaInteiraDe(contents, "@a:x", [{ c: "!c", e }, { v }, { a: "@bruno:x" }], inflar)).itens).toEqual([])
+  })
+
+  it("faltaAqui pede só o que não está presente, mesmo com a referência no cofre", async () => {
+    const { contents, armazem } = await cofreNovo(originais())
+    const e = chaveDoEvento(contents.history["!c"]![0]!)!
+    const presente = (sha: string) => armazem.tem(sha)
+    const b = mediaDe(contents, "@a:x", presente).find((item) => "c" in item && item.e === e)!.b
+    expect(faltaAqui(contents, { c: "!c", e, b }, presente)).toBe(false)
+    const v = absorverVideo(contents, new Uint8Array([1, 2, 3]), "video/mp4", armazem)
+    expect(faltaAqui(contents, { v, b: 4 }, presente)).toBe(false)
+    // The blobs leave (the ceiling): the references stay in the vault, and it is missing.
+    await armazem.apagar([...shasDoPayload(contents.history["!c"]![0]!.payload), v])
+    expect(contents.media?.[v]).toBeDefined()
+    expect(faltaAqui(contents, { c: "!c", e, b }, presente)).toBe(true)
+    expect(faltaAqui(contents, { v, b: 4 }, presente)).toBe(true)
+  })
+
+  it("juntarMediaDoIrmao: uma referência presente conta como os bytes; uma cujo blob saiu recebe o inline", async () => {
+    const { contents, armazem } = await cofreNovo(originais())
+    const e = chaveDoEvento(contents.history["!c"]![0]!)!
+    const presente = (sha: string) => armazem.tem(sha)
+    expect(juntarMediaDoIrmao(contents, "!c", e, originais()[0]!, presente)).toBe(false)
+    const [primeiro] = shasDoPayload(contents.history["!c"]![0]!.payload)
+    await armazem.apagar([primeiro!])
+    expect(juntarMediaDoIrmao(contents, "!c", e, originais()[0]!, presente)).toBe(true)
+    expect((contents.history["!c"]![0]!.payload["attachments"] as Record<string, unknown>[])[0]?.["inline"]).toBe(com("x", 1_000).inline)
+  })
+})
+
+describe("irmãos com e sem armazém (Task 8)", () => {
+  const fio = { ...TECTOS_DO_FIO_DO_HISTORICO }
+  const conteudo = { ...TECTOS_DO_HISTORICO }
+  beforeEach(() => {
+    Object.assign(TECTOS_DO_FIO_DO_HISTORICO, {
+      sinaisPorMinuto: 100_000,
+      passoMs: 20,
+      esperaDaRespostaMs: 300,
+      esperaDoInventarioMs: 300,
+      primeiraReposicaoMs: 50,
+      intervaloDaReposicaoMs: 50,
+      bytesPorParte: 1_024,
+    })
+    Object.assign(TECTOS_DO_HISTORICO, { entradasPorPagina: 5, mediaComOTexto: 1_000 })
+  })
+  afterEach(() => {
+    Object.assign(TECTOS_DO_FIO_DO_HISTORICO, fio)
+    Object.assign(TECTOS_DO_HISTORICO, conteudo)
+  })
+
+  const retrato = `data:image/png;base64,${"E".repeat(2_000)}`
+
+  function encher(contents: VaultContents): void {
+    contents.history["!dm"] = Array.from({ length: 7 }, (_, i) => mensagem(i + 1, "@b:x", `mensagem ${i + 1}`))
+    contents.history["!dm"]!.push(mensagem(30, "@a:x", "pequena", { attachments: [imagem("pequena.png", 400)] }))
+    contents.history["!dm"]!.push(mensagem(31, "@a:x", "grande", { attachments: [imagem("grande.png", 20_000)] }))
+    contents.directory["@b:x"] = {
+      at: 5,
+      payload: { t: "profile", displayName: "Bruno", donations: [], updatedAt: 5, avatar: { name: "avatar", mediaType: "image/png", byteLength: 1_500, inline: retrato } },
+    }
+  }
+
+  /** A new device's vault: the same, with the bytes in the store. */
+  function absorverTudo(contents: VaultContents, armazem: ArmazemDeMedia): void {
+    for (const entrada of contents.history["!dm"]!) entrada.payload = absorverPayload(contents, entrada.payload, armazem)
+    for (const perfil of Object.values(contents.directory)) perfil.payload = absorverPayload(contents, perfil.payload, armazem)
+  }
+
+  const anexoDe = (contents: VaultContents, corpo: string) =>
+    (entradasDoCanal(contents, "!dm").find((e) => e.payload["body"] === corpo)!.payload["attachments"] as Record<string, unknown>[])[0]!
+
+  const acabou = (b: Aparelho) => b.contents.historico?.plano === undefined && b.contents.historico?.inicial === undefined
+
+  it("antigo para novo: o novo absorve tudo no armazém, e o cofre fica sem bytes", async () => {
+    const armazem = await armazemAberto()
+    const { a, b } = doisAparelhos(undefined, { b: armazem })
+    encher(a.contents)
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => acabou(b) && b.contents.directory["@b:x"] !== undefined, "o histórico chega")
+      expect(semBytes(b.contents)).toEqual([])
+      for (const corpo of ["pequena", "grande"]) {
+        const sha = anexoDe(b.contents, corpo)["ref"] as string
+        expect(armazem.tem(sha)).toBe(true)
+        const [inflado] = (await inflarPayload(b.contents, { t: "x", attachments: [anexoDe(b.contents, corpo)] }, armazem))["attachments"] as Record<string, unknown>[]
+        expect(inflado?.["inline"]).toBe(anexoDe(a.contents, corpo)["inline"])
+      }
+      expect(retratoDe(b.contents.directory["@b:x"]!.payload, b.contents, (sha) => armazem.tem(sha))).toBe(retrato.length)
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  })
+
+  it("novo para antigo: o antigo recebe inline (e o grande no fim), e nunca um ref", async () => {
+    const armazem = await armazemAberto()
+    const { a, b } = doisAparelhos(undefined, { a: armazem })
+    encher(a.contents)
+    const original = structuredClone(a.contents)
+    absorverTudo(a.contents, armazem)
+    await armazem.drenar()
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => acabou(b) && b.contents.directory["@b:x"] !== undefined, "o histórico chega")
+      expect(JSON.stringify(b.contents)).not.toMatch(/"ref"/)
+      for (const corpo of ["pequena", "grande"]) expect(anexoDe(b.contents, corpo)["inline"]).toBe(anexoDe(original, corpo)["inline"])
+      expect((b.contents.directory["@b:x"]!.payload["avatar"] as Record<string, unknown>)["inline"]).toBe(retrato)
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  })
+
+  it("trazerUm: chega de um irmão; o irmão sem ele diz nao-tem; sem irmão ligado, sem-irmao", async () => {
+    const armazemA = await armazemAberto()
+    const armazemB = await armazemAberto()
+    const { a, b } = doisAparelhos(undefined, { a: armazemA, b: armazemB })
+    encher(a.contents)
+    absorverTudo(a.contents, armazemA)
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => acabou(b) && b.contents.directory["@b:x"] !== undefined, "o histórico chega")
+      const entrada = entradasDoCanal(b.contents, "!dm").find((e) => e.payload["body"] === "grande")!
+      const e = chaveDoEvento(entrada)!
+      const sha = anexoDe(b.contents, "grande")["ref"] as string
+      const doRetrato = (b.contents.directory["@b:x"]!.payload["avatar"] as Record<string, unknown>)["ref"] as string
+      // The ceiling removed them on B.
+      await armazemB.apagar([sha, doRetrato])
+
+      expect(await b.historico.trazerUm({ c: "!dm", e })).toBe("chegou")
+      expect(armazemB.tem(sha)).toBe(true)
+      expect(await b.historico.trazerUm({ a: "@b:x" })).toBe("chegou")
+      expect(armazemB.tem(doRetrato)).toBe(true)
+      expect(b.contents.historico?.plano).toBeUndefined()
+
+      // A no longer has it either.
+      await armazemA.apagar([sha])
+      await armazemB.apagar([sha])
+      expect(await b.historico.trazerUm({ c: "!dm", e })).toBe("nao-tem")
+
+      // A disconnects: nobody answers the `hi`, and the one-item plan leaves.
+      a.ligado = false
+      a.historico.aoDesligar()
+      expect(await b.historico.trazerUm({ c: "!dm", e })).toBe("sem-irmao")
+      expect(b.contents.historico?.plano).toBeUndefined()
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  }, 20_000)
+})
+
+describe("um ref vindo de um irmão nunca se aceita (Ruling R14)", () => {
+  const PREFIXO = "data:image/png;base64,"
+  const inline = (n: number, letra = "B") => `${PREFIXO}${letra.repeat(n)}`
+
+  it("soInlineOuEvicted: ref sem inline dá evicted; ref ao lado do inline sai; um vídeo fica; miniaturas, posters, retratos e ícones por referência saem", () => {
+    const payload: StoredPayload = {
+      t: "post",
+      id: "p1",
+      caption: "",
+      media: [
+        { name: "a.png", mediaType: "image/png", byteLength: 4, kind: "image", ref: "x".repeat(43) },
+        { name: "b.png", mediaType: "image/png", byteLength: 4, kind: "image", inline: inline(8), ref: "y".repeat(43) },
+        { name: "v.mp4", mediaType: "video/mp4", byteLength: 9, kind: "video", partes: { sha256: "z".repeat(43), n: 1, bytes: 1 }, ref: "z".repeat(43), poster: { ref: "w".repeat(43) } },
+        { evicted: true, name: "c.png", mediaType: "image/png" },
+      ],
+      links: [{ url: "https://a.pt", thumbnail: { ref: "t".repeat(43) } }, { url: "https://b.pt", thumbnail: inline(8) }],
+      tags: [],
+    }
+    const limpo = soInlineOuEvicted(payload)
+    expect(JSON.stringify(limpo)).not.toMatch(/"ref"/)
+    expect(limpo["media"]).toEqual([
+      { evicted: true, name: "a.png", mediaType: "image/png" },
+      { name: "b.png", mediaType: "image/png", byteLength: 4, kind: "image", inline: inline(8) },
+      { name: "v.mp4", mediaType: "video/mp4", byteLength: 9, kind: "video", partes: { sha256: "z".repeat(43), n: 1, bytes: 1 } },
+      { evicted: true, name: "c.png", mediaType: "image/png" },
+    ])
+    expect(limpo["links"]).toEqual([{ url: "https://a.pt" }, { url: "https://b.pt", thumbnail: inline(8) }])
+    const perfil = soInlineOuEvicted({ t: "profile", displayName: "B", donations: [], updatedAt: 1, avatar: { name: "avatar", mediaType: "image/*", ref: "x".repeat(43) }, avatarRef: "x".repeat(43) })
+    expect(perfil).toEqual({ t: "profile", displayName: "B", donations: [], updatedAt: 1, avatar: { evicted: true, name: "avatar", mediaType: "image/*" } })
+    // With none of this, the same object.
+    const limpoJa = { t: "message", id: "m", body: "", attachments: [{ name: "b.png", mediaType: "image/png", inline: inline(8) }] }
+    expect(soInlineOuEvicted(limpoJa)).toBe(limpoJa)
+  })
+
+  it("o inflador da sessão com o cofre trancado (não infla): a página leva evicted, nunca ref", async () => {
+    const armazem = await armazemAberto()
+    const contents = newVaultContents()
+    contents.history["!c"] = [mensagem(1, "@a:x", "foto", { attachments: [imagem("f.png", 400)] })].map((e) => ({ ...e, payload: absorverPayload(contents, e.payload, armazem) }))
+    // As the session composes it: `soInlineOuEvicted(await #inflarParaOFio(...))`, and when locked `#inflarParaOFio` returns the payload as it is.
+    const trancado: InflarParaOIrmao = { payload: async (payload) => soInlineOuEvicted(payload), bytes: async () => null }
+    const pagina = await paginaDe(contents, "!c", null, trancado)
+    expect(JSON.stringify(pagina)).not.toMatch(/"ref"/)
+    expect((pagina.e[0]!.payload["attachments"] as unknown[])[0]).toEqual({ evicted: true, name: "f.png", mediaType: "image/png" })
+  })
+
+  it("uma página com um ref de outro media deste cofre: não infla os bytes alheios, e o cofre fica sem bytes", async () => {
+    const fio = { ...TECTOS_DO_FIO_DO_HISTORICO }
+    Object.assign(TECTOS_DO_FIO_DO_HISTORICO, { sinaisPorMinuto: 100_000, passoMs: 20, esperaDaRespostaMs: 300, esperaDoInventarioMs: 300, bytesPorParte: 1_024 })
+    const armazemB = await armazemAberto()
+    // A is a tampered sibling: it sends the vault as it has it, with whatever references it wants.
+    const { a, b } = doisAparelhos(undefined, { b: armazemB })
+    // B already has a media item (Bruno's portrait): A points to it.
+    const retrato = inline(800, "E")
+    b.contents.directory["@b:x"] = { at: 5, payload: absorverPayload(b.contents, { t: "profile", displayName: "Bruno", donations: [], updatedAt: 5, avatar: { name: "avatar", mediaType: "image/png", byteLength: 600, inline: retrato } }, armazemB) }
+    const alheio = shasDoPayload(b.contents.directory["@b:x"]!.payload)[0]!
+    a.contents.history["!dm"] = [
+      mensagem(1, "@a:x", "forjada", { attachments: [{ name: "f.png", mediaType: "image/png", byteLength: 4, kind: "image", ref: alheio }] }),
+      mensagem(2, "@a:x", "dupla", { attachments: [{ name: "d.png", mediaType: "image/png", byteLength: 4, kind: "image", inline: inline(40), ref: alheio }] }),
+      mensagem(3, "@a:x", "marcador", { attachments: [{ evicted: true, name: "m.png", mediaType: "image/png", ref: alheio, poster: { ref: alheio } }] }),
+    ]
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => b.contents.historico?.plano === undefined && b.contents.historico?.inicial === undefined, "o histórico chega")
+      const anexo = (corpo: string) => (entradasDoCanal(b.contents, "!dm").find((e) => e.payload["body"] === corpo)!.payload["attachments"] as Record<string, unknown>[])[0]!
+      expect(anexo("forjada")).toEqual({ evicted: true, name: "f.png", mediaType: "image/png" })
+      expect(anexo("dupla")["ref"]).not.toBe(alheio)
+      expect(armazemB.tem(anexo("dupla")["ref"] as string)).toBe(true)
+      // A marker with a foreign `ref` stays just a marker.
+      expect(anexo("marcador")).toEqual({ evicted: true, name: "m.png", mediaType: "image/png" })
+      expect(semBytes(b.contents)).toEqual([])
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+      Object.assign(TECTOS_DO_FIO_DO_HISTORICO, fio)
+    }
+  })
+})
+
+describe("um marcador evicted com um ref alheio (Ruling R14, ronda 2)", () => {
+  it("não se infla para os bytes do outro media, não conta nas referências, e não segura a recolha", async () => {
+    const armazem = await armazemAberto()
+    const contents = newVaultContents()
+    // A stored media item that nothing else references: only the forged marker points to it.
+    const outro = absorverPayload(contents, { t: "message", id: "m0", body: "", attachments: [imagem("o.png", 400)] }, armazem)
+    const alheio = shasDoPayload(outro)[0]!
+    await armazem.drenar()
+    const forjado: StoredPayload = { t: "message", id: "m1", body: "", attachments: [{ evicted: true, name: "m.png", mediaType: "image/png", ref: alheio, poster: { ref: alheio } }] }
+    expect(soInlineOuEvicted(forjado)["attachments"]).toEqual([{ evicted: true, name: "m.png", mediaType: "image/png" }])
+    // Defence in depth, even without cleaning on the way in:
+    expect(shasDoPayload(forjado)).toEqual([])
+    const inflado = await inflarPayload(contents, forjado, armazem)
+    expect(inflado["attachments"]).toEqual([{ evicted: true, name: "m.png", mediaType: "image/png" }])
+    contents.history["!c"] = [{ seq: 1, sender: "@a:x", at: 1, payload: forjado }]
+    expect(await recolher(contents, armazem)).toContain(alheio)
+    expect(armazem.tem(alheio)).toBe(false)
   })
 })

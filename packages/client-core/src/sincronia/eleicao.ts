@@ -1,6 +1,5 @@
 /**
- * Who speaks, and how much (phase S4 of absolute sync,
- * `docs/planos/2026-10-20-sincronia-absoluta.md`, §4.4).
+ * Who speaks, and how much (phase S4 of absolute sync, §4.4).
  *
  * Three components, all offline and without their own clock (the clock comes as
  * a parameter, for testing):
@@ -80,6 +79,13 @@ export const TECTOS_DA_SINCRONIA = {
    * summing ALL members; half leaves the other half to others.
    */
   bytesDeSinalPorCanalPorMinuto: 2 * 1024 * 1024,
+  /**
+   * Bytes of OUTGOING "is typing" signals per channel and per minute, counted
+   * like the line above, and apart from it (12/11/2026). An eighth of the
+   * server's 4 MiB: in a room with 200 online, about 7 signals a minute from
+   * this device, which is more than one person types.
+   */
+  bytesDeEscritaPorCanalPorMinuto: 512 * 1024,
   /** Bytes of reports per channel and per minute (§4.4: 1 MB). */
   bytesDeRelatoPorCanalPorMinuto: 1024 * 1024,
   /** A report frame has at most this much JSON (§4.4: 256 KB; with room for cipher and padding). */

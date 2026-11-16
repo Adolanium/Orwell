@@ -162,4 +162,37 @@ describe("o histórico entre aparelhos na interface", () => {
     })
     await waitFor(() => expect(screen.queryByText(/A trazer/)).toBeNull())
   })
+
+  it("uma imagem que veio de um irmão como referência mostra-se pelo armazém, com a caixa da referência (Task 10)", async () => {
+    const comFoto = {
+      seq: 5,
+      sender: BRUNO,
+      at: 5,
+      payload: {
+        t: "message",
+        id: "m5",
+        sentAt: 5,
+        body: "a eira",
+        attachments: [{ ref: "sha-eira", name: "eira.png", mediaType: "image/png", w: 640, h: 480, b: 9 }],
+        mentions: [],
+      },
+    } as unknown as StoredChatMessage
+    const historico = { atual: [comFoto] }
+    const aviso: { atual: ((evento: HistoricoDosIrmaos) => void) | null } = { atual: null }
+    const bytes = vi.fn(async (sha: string) => (sha === "sha-eira" ? new Uint8Array([137, 80, 78, 71]) : null))
+    const bridge = {
+      ...ponte(historico, aviso, { aTrazer: false, feitas: 0, total: 0, media: null, canais: [], inicial: false }),
+      media: { bytes, fixar: vi.fn(async () => {}), soltar: vi.fn(async () => {}), estado: vi.fn(), definirTecto: vi.fn(), trazer: vi.fn() },
+    } as unknown as EnclaveBridge
+    const user = userEvent.setup()
+    render(<App bridge={bridge} />)
+    await screen.findByRole("button", { name: strings.rail.chat })
+    await user.click(screen.getByRole("button", { name: strings.rail.chat }))
+    expect(await screen.findByText("a eira")).toBeTruthy()
+    const foto = await screen.findByAltText("eira.png")
+    await waitFor(() => expect(foto.getAttribute("src")).toBeTruthy())
+    expect(foto.getAttribute("width")).toBe("640")
+    expect(foto.getAttribute("height")).toBe("480")
+    expect(bytes).toHaveBeenCalledWith("sha-eira")
+  })
 })

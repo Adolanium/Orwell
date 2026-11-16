@@ -2,12 +2,10 @@ import { Button } from "../../components/Button.js"
 import { strings } from "../../strings.js"
 
 /**
- * The cutoff screen: "Orwell is out of beta." (1.0 "Arca", plan
- * `docs/planos/moradas-opacas-e-corte.md`, section 2, text D3 approved by the
- * owner on October 27, 2026).
+ * The cutoff screen: "Orwell is out of beta." (1.0 "Arca").
  *
  * It appears in the gate, BEFORE `Unlock`, when the vault on this device is
- * from beta (no `orwv2` header). The owner's order is that 1.0 never reads an
+ * from beta (no `orwv2` header). By design 1.0 never reads an
  * old vault. That is why this screen has no password field: asking for the
  * password was inviting key derivation, and the key is not derived. For the
  * same reason there is no export (export forced decryption) and no "How it works"

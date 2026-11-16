@@ -36,7 +36,7 @@ export const CAMINHO_DOS_TOKENS = join(RAIZ, "packages/ui/src/styles/tokens.css"
 export const CAMINHO_DO_HTML = join(RAIZ, "packages/ui/src/novidades/novidades.gen.html")
 export const CAMINHO_DO_MODULO = join(RAIZ, "packages/ui/src/novidades/novidades.gen.ts")
 
-/* Release notes are always in English, written as a dev writes them (owner's order, 3/11/2026). */
+/* Release notes are always in English, written as a dev writes them. */
 const MESES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -65,7 +65,7 @@ export function lerNovidades() {
 }
 
 /**
- * The subtitle: "Orwell version Arca 1.0". Owner's order from October 29, 2026, in English since 3/11/2026.
+ * The subtitle: "Orwell version Arca 1.0". In English.
  *
  * From the root `package.json` (`nomeDaVersao` and `version`), not from the most recent JSON entry: the subtitle says what version the app IS at, and the root knows that, being the single source of truth for version (the others inherit from it). Bumping the version without running the generator leaves the page out of sync, and the test catches it. Only major and minor, like in the site footer: patch does not matter to readers.
  */

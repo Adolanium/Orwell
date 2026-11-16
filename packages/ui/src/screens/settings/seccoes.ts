@@ -8,7 +8,7 @@ import { strings } from "../../strings.js"
  * to import it, and the sidebar importing from the settings screen is a
  * backwards dependency.
  *
- * Six, and were ten (plan in `docs/planos/definicoes-0-9.md`). Each option lives
+ * Six, and were ten. Each option lives
  * in one place only: language and "Sign out" in Account, voice handling in Microphone
  * and camera, blocked users in Privacy, export and the button that destroys the
  * account at the end of Devices. Help is at the end: it is where people with a

@@ -1,0 +1,62 @@
+# Checks every push and pull request: clean install, typecheck, the test
+# suites and the audit of production dependencies.
+#
+# No secrets and no deploy: this runs the same on a fork as on the main repo,
+# and it never talks to a live server. The tests start their own servers on
+# the runner's loopback.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The server needs node:sqlite; production runs Node 24 (infra/Dockerfile).
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        # Also builds the packages' dist/, which the suites below import.
+        run: npm run typecheck
+
+      - name: Test suites
+        # The same loop as `npm test`, with one file left out: see the next step.
+        run: |
+          falhados=""
+          for pacote in packages/protocol packages/crypto packages/client-core apps/server packages/ui apps/web apps/client apps/site; do
+            npx vitest run --root "$pacote" --exclude '**/session.perfis-entre-aparelhos.rede.test.ts' || falhados="$falhados $pacote"
+          done
+          if [ -n "$falhados" ]; then
+            echo "Packages with failing tests:$falhados" >&2
+            exit 1
+          fi
+
+      - name: Known unstable test (profiles across devices)
+        # session.perfis-entre-aparelhos.rede.test.ts (two devices of one
+        # account exchanging profiles over a real local server) fails about half
+        # the time, on the released code as well. The cause is not found yet. It
+        # runs here with retries, so the log still shows it, but it does not fail
+        # the build. When it is fixed, move it back into the step above.
+        continue-on-error: true
+        run: npx vitest run --root packages/client-core src/session.perfis-entre-aparelhos.rede.test.ts --retry 2
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high

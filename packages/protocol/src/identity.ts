@@ -239,7 +239,7 @@ const SIGNATURE_BYTES = 64
 /**
  * How many devices an account can have at the same time.
  *
- * Four, by the owner's decision (docs/planos/MULTIDISPOSITIVO.md, 11 August 2026).
+ * Four, by design.
  * Signal allows five; here each device is a full MLS leaf in each of the person's
  * channels, and a leaf's cost is paid in every Commit and every Welcome in that
  * channel, by everyone there. A desktop, a laptop, a phone and a spare is

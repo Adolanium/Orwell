@@ -12,7 +12,7 @@ import {
 /**
  * The quotes the user sees are straight, never angled.
  *
- * Owner's order on 3 November 2026: in the text the user sees, in pt and
+ * In the text the user sees, in pt and
  * en, quotes are always "", never angled. The change happened once, in
  * all catalogues, error codes and release notes. This test fails the day
  * a new sentence brings them back.

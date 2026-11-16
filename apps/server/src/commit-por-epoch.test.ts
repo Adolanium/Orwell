@@ -361,6 +361,20 @@ describe("o cartão de entrada guarda-se só se descrever a epoch do canal", () 
     expect(store.takeGroupInfo(COMUM)).toEqual(bom)
   }, 30_000)
 
+  it("um segundo cartão da mesma epoch não se grava: fica o primeiro (12/11/2026)", async () => {
+    const { commits, sessoes } = await cadeia(COMUM, 2)
+    for (const commit of commits) guardar(COMUM, commit)
+    const primeiro = await publishableGroupInfo(sessoes[2] as GroupSession)
+    expect(store.putGroupInfo(COMUM, primeiro)).toEqual({ ok: true })
+    // Another member's card for the same epoch: the bytes differ (signature), the epoch does not.
+    // A mark on the stored row: a second write would replace it.
+    db.prepare("UPDATE group_infos SET at_minute = -7 WHERE channel = ?").run(COMUM)
+    const segundo = await publishableGroupInfo(sessoes[2] as GroupSession)
+    expect(store.putGroupInfo(COMUM, segundo)).toEqual({ ok: true })
+    expect((db.prepare("SELECT at_minute FROM group_infos WHERE channel = ?").get(COMUM) as { at_minute: number }).at_minute).toBe(-7)
+    expect(store.takeGroupInfo(COMUM)).toEqual(primeiro)
+  }, 30_000)
+
   it("de uma epoch à frente do canal também é recusado: descreve um ramo que o servidor não aceitou", async () => {
     // Whoever publishes this applied a commit that was refused. Had it been stored, the
     // next arrival would join that branch with a commit for the next epoch, and

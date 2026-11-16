@@ -1419,6 +1419,11 @@ export class Gateway {
     return 60_000
   }
 
+  /** What this bucket spent in the last minute. Spends nothing. */
+  #usadoNoBalde(chave: string, agora: number): number {
+    return (this.#baldesDoSinal.get(chave) ?? []).reduce((soma, gasto) => (agora - gasto.at < 60_000 ? soma + gasto.custo : soma), 0)
+  }
+
   #gastarDoBalde(chave: string, custo: number, agora: number): void {
     const gastos = this.#baldesDoSinal.get(chave) ?? []
     gastos.push({ at: agora, custo })
@@ -1492,15 +1497,38 @@ export class Gateway {
       recusar("sinal-rate-limited", `more than ${tectos.porMinutoPorLigacao} signals per minute`, esperaDaLigacao)
       return
     }
+    /*
+      The channel's bytes, split by SENDER (12/11/2026). Since typing goes by
+      signal, many people typing in the common room filled the channel bucket,
+      and the newcomer's profile request (`pp`) was refused: no names. The server
+      must not learn which signal is typing, so this treats every signal alike:
+      - no sender takes more than half the channel's minute;
+      - a sender that has spent less than an eighth this minute passes even
+        with the channel full. A profile request to 200 members costs ~1.5 MB,
+        so the guarantee is on what was spent before, not on the signal's size.
+    */
+    const chaveDoRemetente = `remetente|${frame.channel}|${connection.id}`
+    const tectoDoRemetente = Math.floor(tectos.bytesPorCanalPorMinuto / 2)
+    // A sender's first signal of the minute is not held to the half: one alone above it would never fit.
+    const usadoPeloRemetente = this.#usadoNoBalde(chaveDoRemetente, agora)
+    const esperaDoRemetente = custo === 0 || usadoPeloRemetente === 0 ? 0 : this.#esperaDoBalde(chaveDoRemetente, custo, tectoDoRemetente, agora)
+    if (esperaDoRemetente > 0) {
+      recusar("sinal-rate-limited", `more than ${tectoDoRemetente} signal bytes out per minute from this connection in this channel`, esperaDoRemetente)
+      return
+    }
+    const leve = usadoPeloRemetente < tectos.bytesPorCanalPorMinuto / 8
     const chaveDoCanal = `canal|${frame.channel}`
-    const esperaDoCanal = custo === 0 ? 0 : this.#esperaDoBalde(chaveDoCanal, custo, tectos.bytesPorCanalPorMinuto, agora)
+    const esperaDoCanal = custo === 0 || leve ? 0 : this.#esperaDoBalde(chaveDoCanal, custo, tectos.bytesPorCanalPorMinuto, agora)
     if (esperaDoCanal > 0) {
       recusar("sinal-channel-busy", `channel over ${tectos.bytesPorCanalPorMinuto} signal bytes out per minute`, esperaDoCanal)
       return
     }
 
     this.#gastarDoBalde(chaveDaLigacao, 1, agora)
-    if (custo > 0) this.#gastarDoBalde(chaveDoCanal, custo, agora)
+    if (custo > 0) {
+      this.#gastarDoBalde(chaveDoCanal, custo, agora)
+      this.#gastarDoBalde(chaveDoRemetente, custo, agora)
+    }
     this.#metricasDoSinal.aceite(agora, tamanho, destinos.length)
 
     // Serialized once: the same text for everyone.
@@ -2180,8 +2208,8 @@ export class Gateway {
    * short enough that a leaked one is worthless, which is the difference
    * between a relay for our users and an open proxy for the internet.
    *
-   * Empty when no TURN is configured. The client then falls back to public STUN
-   * and says so; it does not pretend the call will traverse.
+   * Empty when no TURN is configured. The client then uses no ICE servers and
+   * says so; it does not pretend the call will traverse, and it does not ask a third party.
    */
   #iceServers(forAddress: string | null): { urls: string[]; username?: string; credential?: string }[] {
     if (this.config.turnUrls.length === 0) return []
@@ -2289,10 +2317,18 @@ export class Gateway {
    *
    * Each one reads from the database and returns up to a limit of events; it
    * writes nothing, but reads a lot, and it is the way to download a whole
-   * channel over and over. Sixty is one reconciliation per second, far above
-   * what a client does: it asks on connect and when coming back online.
+   * channel over and over.
+   *
+   * 300, from 60 (12/11/2026). Sixty was "far above what a client does" until
+   * the common room grew: a login after a day away from it is hundreds of
+   * pages, and since 1.3.8 four channels catch up at once. Above the cap the
+   * request is dropped in silence (an older client reads any answer as data),
+   * so the page wait dies after 10 s and the channel is cut until the next
+   * connection. A page is one indexed read of at most 200 rows: 300 a minute
+   * per account is five a second, and the peak day of the common room used
+   * 17 % of the machine.
    */
-  static readonly BACKFILLS_POR_MINUTO = 60
+  static readonly BACKFILLS_POR_MINUTO = 300
 
   /**
    * The three frames that only READ, and so went unnoticed.

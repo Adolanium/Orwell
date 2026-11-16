@@ -156,7 +156,7 @@ export interface SessaoDeCanais {
   closedRoomsOf(channel: string): SalaDoNucleo[]
   categoriesOf(channel: string): { category: string; position: number; roles: string[]; updatedAt?: number }[]
   categoryTombstonesOf(channel: string): { category: string; position: number; roles: string[]; updatedAt: number; removed: true }[]
-  spaceMeta(channel: string): { name: string; topic?: string; icon?: string; updatedAt: number } | null
+  spaceMeta(channel: string): { name: string; topic?: string; icon?: string; iconRef?: string; iconMini?: string; updatedAt: number } | null
   fichasDosCanais(): Record<string, FichaDoCanal>
   mayEditChannel(channel: string): boolean
   founderOf(channel: string): string | null
@@ -223,7 +223,7 @@ export interface SessaoDeCanais {
   /** The role order, top to bottom (the `rank`). Founder and `admin` only. */
   reorderRoles(channel: string, ordem: string[]): Promise<void>
   claimFounder(channel: string): Promise<void>
-  updateSpaceMeta(channel: string, next: { name: string; topic?: string; icon?: string }): Promise<void>
+  updateSpaceMeta(channel: string, next: { name: string; topic?: string; icon?: string; iconRef?: string }): Promise<void>
   editMessage(channel: string, target: string, body: string): Promise<void>
   deleteMessage(channel: string, target: string): Promise<void>
   deleteChannel(channel: string): Promise<void>
@@ -338,7 +338,7 @@ export function ligarCanais({ registarPedido, registarLeitura, sessao }: PortasD
 
   registarPedido(
     CANAIS_DE_CANAL.propriedades,
-    async (channel: string, next: { name: string; topic?: string; icon?: string }) => {
+    async (channel: string, next: { name: string; topic?: string; icon?: string; iconRef?: string }) => {
       await sessao.updateSpaceMeta(channel, next)
       return { ok: true }
     },

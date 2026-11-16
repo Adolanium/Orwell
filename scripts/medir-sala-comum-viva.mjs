@@ -8,22 +8,25 @@
  *   npm run build -w @enclave/web
  *   node scripts/medir-sala-comum-viva.mjs
  *   MEMBROS=30 ATRIBUICOES=80 LASTRO_MB=8 ENTRADAS=2 PERFIL=1 DIST=apps/web/dist node scripts/medir-sala-comum-viva.mjs
+ *   MEDIA_MB=16 MINIATURAS=100 node scripts/medir-sala-comum-viva.mjs   # media in the history
  *
  * LOCAL BY DESIGN, like `medir-login.mjs` from which this comes: own homeserver
  * in a temporary folder at 127.0.0.1.
  *
- * 1. In Node, with the core for real: Ana creates the shared room and sets it
- *    up like `!984` (3 categories, 10 rooms, a role given to ATRIBUICOES
- *    accounts); MEMBROS accounts join and stay connected; MENSAGENS messages.
- *    The Owner joins, receives LASTRO_MB of vault data (the directory of 150
- *    profiles with avatars and history from real usage) and leaves.
- * 2. The Owner's vault goes to IndexedDB of a Chromium and the app opens with
- *    the password.
- * 3. Measurements on the page: long tasks (> 50 ms, `longtask`), duration of
- *    clicks (Event Timing: from click to next render) and JS heap. With
- *    PERFIL=1, a CPU profile via CDP. Phases: (a) 20 s after entry; (b) for
- *    each of ENTRADAS, a new account joins the shared room and a 30 s window
- *    is measured after; (c) screen changes (rooms, channels, settings).
+ * 1. In Node, with the real core: Ana founds the shared room and arranges it like `!984` (3 categories,
+ *    10 rooms, a role given to ATRIBUICOES accounts); MEMBROS accounts join and stay connected; MENSAGENS
+ *    messages. The Owner joins, receives LASTRO_MB of weight in the vault (the directory of 150 profiles
+ *    with portraits and the history of real use) and leaves. With MEDIA_MB/MINIATURAS, the members send
+ *    photos and link cards through the real door (`session.send`): the Owner receives them live and
+ *    their session absorbs the bytes into the media store (an `ArmazemEmMemoria`), not into the vault.
+ * 2. The Owner's vault goes into a Chromium IndexedDB, and their store blobs, encrypted as they are,
+ *    into the `enclave-media` database (the format of `apps/web/src/armazem-backend.ts`). The app
+ *    opens with the password. At the end the browser store is counted against the vault references:
+ *    the images must all be there.
+ * 3. Measurements on the page: long tasks (> 50 ms, `longtask`), click duration (Event Timing: from
+ *    the click to the next paint) and the JS heap. With PERFIL=1, a CPU profile over CDP. Phases:
+ *    (a) 20 s after joining; (b) for each of the ENTRADAS, a new account joins the shared room and
+ *    the 30 s window after it is measured; (c) the screen switches (rooms, channels, settings).
  */
 import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
@@ -31,9 +34,9 @@ import http from "node:http"
 import net from "node:net"
 import { extname, join, normalize, resolve as resolverCaminho } from "node:path"
 import { fileURLToPath } from "node:url"
-import { webcrypto } from "node:crypto"
+import { randomBytes, webcrypto } from "node:crypto"
 import { chromium } from "playwright"
-import { Session, Vault } from "@enclave/client-core"
+import { ArmazemEmMemoria, Session, Vault, shasReferenciados } from "@enclave/client-core"
 import { generateIdentity, parseServerName } from "@enclave/protocol"
 if (!globalThis.crypto) globalThis.crypto = webcrypto
 
@@ -44,6 +47,12 @@ const MEMBROS = Number(process.env.MEMBROS ?? 30)
 const ATRIBUICOES = Number(process.env.ATRIBUICOES ?? 80)
 const MENSAGENS = Number(process.env.MENSAGENS ?? 200)
 const LASTRO_MB = Number(process.env.LASTRO_MB ?? 8)
+// Media in the shared room history, sent by the members: MEDIA_MB of 300 KB photos and
+// MINIATURAS link cards with a 30 KB thumbnail, across the 10 rooms. "300 KB" and "30 KB" are the
+// size of the `inline`/`thumbnail` text (the data URL), as in the small version's measurement, where
+// that was what weighed in the vault. Random bytes: each image is different (the store dedupes by sha).
+const MEDIA_MB = Number(process.env.MEDIA_MB ?? 0)
+const MINIATURAS = Number(process.env.MINIATURAS ?? 0)
 const ENTRADAS = Number(process.env.ENTRADAS ?? 2)
 const PERFIL = process.env.PERFIL === "1"
 const ROTULO = process.env.ROTULO ?? "agora"
@@ -155,9 +164,10 @@ class MemoryBackend {
 }
 async function conta(nome, frase = "frase-de-um-membro") {
   const backend = new MemoryBackend()
+  const armazem = new ArmazemEmMemoria()
   const vault = new Vault(backend)
   await vault.create(frase)
-  const session = new Session(vault)
+  const session = new Session(vault, { armazem })
   await session.createIdentity(NOME)
   // Thirty-two consecutive connections to a local server on a loaded machine:
   // one or two fail to open ("could not reach the homeserver"), and without a
@@ -173,7 +183,7 @@ async function conta(nome, frase = "frase-de-um-membro") {
     }
   }
   await session.updateProfile({ displayName: nome, donations: [] })
-  const c = { nome, vault, session, backend }
+  const c = { nome, vault, session, backend, armazem }
   todas.push(c)
   return c
 }
@@ -224,8 +234,56 @@ if (LASTRO_MB > 0) {
     }
   })
 }
+let mediaMandados = 0
+if (MEDIA_MB > 0 || MINIATURAS > 0) {
+  const FOTO = 300_000
+  const MINI = 30_000
+  const fotos = Math.round((MEDIA_MB * 1e6) / FOTO)
+  // A data URL with `caracteres` characters of text in all, from random bytes in canonical base64.
+  const dataUrl = (tipo, caracteres) => {
+    const prefixo = `data:${tipo};base64,`
+    return prefixo + randomBytes(Math.floor(((caracteres - prefixo.length) * 3) / 4)).toString("base64")
+  }
+  const n = Math.max(fotos, MINIATURAS)
+  for (let i = 0; i < n; i++) {
+    const quem = membros[i % membros.length]
+    const payload = { t: "message", id: `media-${i}-${Math.random().toString(36).slice(2)}`, sentAt: Date.now(), room: `sala${i % 10}`, body: `media ${i}`, attachments: [], mentions: [] }
+    if (i < fotos) {
+      const inline = dataUrl("image/jpeg", FOTO)
+      payload.attachments = [{ url: "", inline, kind: "image", name: `f${i}.jpg`, mediaType: "image/jpeg", byteLength: inline.length }]
+    }
+    if (i < MINIATURAS) payload.links = [{ url: `https://exemplo.pt/${i}`, kind: "link", title: `cartão ${i}`, thumbnail: dataUrl("image/jpeg", MINI) }]
+    for (let tentativa = 1; ; tentativa++) {
+      try {
+        await quem.session.send(SALA, payload)
+        mediaMandados++
+        break
+      } catch (erro) {
+        if (tentativa >= 5) {
+          console.log(`  media ${i} não saiu: ${erro?.message ?? erro}`)
+          break
+        }
+        await pausa(1_000 * tentativa)
+      }
+    }
+  }
+  const recebidos = () => (dono.vault.contents.history[SALA] ?? []).filter((e) => String(e.payload?.id ?? "").startsWith("media-")).length
+  if (!(await ate(() => recebidos() >= mediaMandados, 120_000))) console.log(`  o Dono só recebeu ${recebidos()} de ${mediaMandados} mensagens com media`)
+  console.log(`  media mandados pelos membros: ${fotos} fotografias de ${FOTO / 1000} KB e ${MINIATURAS} miniaturas de ${MINI / 1000} KB em ${mediaMandados} mensagens; o Dono recebeu ${recebidos()}`)
+}
+await dono.session.drenarArmazem()
 await dono.session.flush()
 const bytesDoCofre = Buffer.from(dono.backend.bytes)
+// The written vault's references, and the Owner's store blobs, encrypted as they are on disk.
+const refsDoCofre = [...shasReferenciados(dono.vault.contents)]
+const blobsDoDono = []
+for (const { sha, bytes, ultimoUso, classe } of await dono.armazem.listar()) {
+  blobsDoDono.push({ sha, b: bytes, u: ultimoUso, k: classe, blob: Buffer.from(await dono.armazem.ler(sha)).toString("base64") })
+}
+const bytesNoArmazem = blobsDoDono.reduce((n, x) => n + x.b, 0)
+const semBlob = refsDoCofre.filter((sha) => !blobsDoDono.some((x) => x.sha === sha)).length
+const inlineNoCofre = JSON.stringify(dono.vault.contents).match(/"(inline|thumbnail)":"data:/g)?.length ?? 0
+console.log(`  armazém do Dono: ${blobsDoDono.length} blobs, ${(bytesNoArmazem / 1e6).toFixed(1)} MB em claro; ${refsDoCofre.length} referências no cofre, ${semBlob} sem blob; ${inlineNoCofre} bytes de media ainda no cofre`)
 dono.session.disconnect()
 todas.splice(todas.indexOf(dono), 1)
 console.log(`  semeado em ${((Date.now() - t0) / 1000).toFixed(0)} s; ${membros.filter(naSala).length + 1} contas ligadas na sala comum; cofre do Dono ${(bytesDoCofre.length / 1024 / 1024).toFixed(1)} MB; ${rejeicoesSoltas} rejeições soltas`)
@@ -287,6 +345,45 @@ await page.evaluate(async (b64) => {
     pedido.onerror = () => reject(pedido.error)
   })
 }, bytesDoCofre.toString("base64"))
+// The Owner's store in the web format (`armazem-backend.ts`): database `enclave-media` v1, stores `blobs`, `indice`, `meta`.
+const BASE_DE_MEDIA = "enclave-media"
+if (blobsDoDono.length > 0) {
+  await page.evaluate(async ({ base, blobs }) => {
+    await new Promise((resolve, reject) => {
+      const pedido = indexedDB.open(base, 1)
+      pedido.onupgradeneeded = () => {
+        for (const store of ["blobs", "indice", "meta"]) pedido.result.createObjectStore(store)
+      }
+      pedido.onsuccess = () => {
+        const tx = pedido.result.transaction(["blobs", "indice"], "readwrite")
+        for (const { sha, b, u, k, blob } of blobs) {
+          tx.objectStore("blobs").put(Uint8Array.from(atob(blob), (c) => c.charCodeAt(0)).buffer, sha)
+          tx.objectStore("indice").put({ b, u, k }, sha)
+        }
+        tx.oncomplete = () => (pedido.result.close(), resolve())
+        tx.onerror = () => reject(tx.error)
+      }
+      pedido.onerror = () => reject(pedido.error)
+    })
+  }, { base: BASE_DE_MEDIA, blobs: blobsDoDono })
+}
+/** The browser store at the end, against the references of the seeded vault: how many are present. */
+async function contarArmazem() {
+  const presentes = await page.evaluate(async (base) => {
+    return new Promise((resolve, reject) => {
+      const pedido = indexedDB.open(base, 1)
+      pedido.onsuccess = () => {
+        const tx = pedido.result.transaction(["blobs"], "readonly")
+        const chaves = tx.objectStore("blobs").getAllKeys()
+        tx.oncomplete = () => (pedido.result.close(), resolve(chaves.result))
+        tx.onerror = () => reject(tx.error)
+      }
+      pedido.onerror = () => reject(pedido.error)
+    })
+  }, BASE_DE_MEDIA)
+  const noBrowser = new Set(presentes)
+  return { blobsNoBrowser: noBrowser.size, referencias: refsDoCofre.length, presentes: refsDoCofre.filter((sha) => noBrowser.has(sha)).length }
+}
 await page.addInitScript(instrumentar)
 const cdp = await contexto.newCDPSession(page)
 await cdp.send("Runtime.enable")
@@ -302,9 +399,10 @@ await page.fill('input[type="password"]', FRASE)
 if (PERFIL) await cdp.send("Profiler.start")
 const tEntrar = await page.evaluate(() => performance.now())
 await page.evaluate(() => { const f = document.querySelector('input[type="password"]')?.form; if (f) f.requestSubmit() })
-const abriu = await page.waitForSelector('button[aria-label="Configurações"], button[title="Configurações"]', { timeout: Number(process.env.PRAZO_APP_MS ?? 180_000) }).then(() => true, () => false)
+let porQueNaoAbriu = ""
+const abriu = await page.waitForSelector('button[aria-label="Configurações"], button[title="Configurações"]', { timeout: Number(process.env.PRAZO_APP_MS ?? 180_000) }).then(() => true, (erro) => (porQueNaoAbriu = erro?.message?.split("\n")[0] ?? String(erro), false))
 if (!abriu) {
-  console.log("  a app não abriu no prazo")
+  console.log(`  a app não abriu: ${porQueNaoAbriu} (${Math.round((await page.evaluate(() => performance.now()).catch(() => NaN)) - tEntrar)} ms depois de entrar)`)
   if (PERFIL) {
     const { profile } = await cdp.send("Profiler.stop")
     writeFileSync(join(SAIDA, `perfil-${ROTULO}-sem-abrir.cpuprofile`), JSON.stringify(profile))
@@ -321,6 +419,8 @@ let longas = await page.evaluate(() => window.__longas)
 const resultado = {
   rotulo: ROTULO,
   cofreMB: Number((bytesDoCofre.length / 1024 / 1024).toFixed(1)),
+  cofreBytes: bytesDoCofre.length,
+  armazemDoDono: { blobs: blobsDoDono.length, mbEmClaro: Number((bytesNoArmazem / 1e6).toFixed(1)), referencias: refsDoCofre.length, semBlob, inlineNoCofre, mediaMandados },
   membrosLigados: membros.filter(naSala).length + 1,
   entrar: { entrarAteAppMs: Math.round(tApp - tEntrar), ...janela(longas, tEntrar, fim1), heapMB: await heapMB(cdp) },
   entradas: [],
@@ -350,6 +450,8 @@ if (PERFIL) {
   const { profile } = await cdp.send("Profiler.stop")
   writeFileSync(join(SAIDA, `perfil-${ROTULO}.cpuprofile`), JSON.stringify(profile))
 }
+resultado.armazemNoBrowser = await contarArmazem()
+console.log(`  armazém no browser: ${JSON.stringify(resultado.armazemNoBrowser)}`)
 writeFileSync(join(SAIDA, `resultado-${ROTULO}-${Date.now()}.json`), JSON.stringify(resultado, null, 1))
 /*
   Long watch (MINUTOS=n): app open in the channel, a new join every ENTRADA_CADA

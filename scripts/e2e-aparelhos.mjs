@@ -17,7 +17,7 @@
  *      is rejected with `not-yours`;
  *   7. login without the chain (the account key hitting the address directly)
  *      STILL gets accepted. Not closed in this slice: six scripts and five
- *      server test files use it. See docs/PENDENTES.md.
+ *      server test files use it.
  *
  * And slice 3, the claim in bundle:
  *
@@ -372,7 +372,7 @@ try {
   // ---------------------------------------------------------------------------
   const antigo = await ClienteCru.ligar()
   const semCadeia = await entrarSemCadeia(antigo, generateIdentity(HOME))
-  check("o login sem cadeia continua a ser aceite (porta por fechar, ver PENDENTES.md)", semCadeia.t === "auth.ok", semCadeia.t)
+  check("o login sem cadeia continua a ser aceite (porta por fechar)", semCadeia.t === "auth.ok", semCadeia.t)
   antigo.fechar()
 
   // ---------------------------------------------------------------------------

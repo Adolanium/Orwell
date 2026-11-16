@@ -4,10 +4,14 @@ import { DatabaseSync } from "node:sqlite"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import {
   ate,
+  ateQue,
   canalComTodos,
   contasDeTeste,
   desligarContas,
+  emparelharAparelho,
   levantarServidor,
+  mediaNoAparelho,
+  recarregar,
   type ContaDeTeste,
   type ServidorDeTeste,
 } from "../testes/cliente-de-teste.js"
@@ -20,6 +24,11 @@ import {
  * - Cancelling midway deletes the publication, and followers no longer see it.
  * - Anyone who arrives later (Carla) has the publication with the thumbnail but no bytes,
  *   asks the other members for them (S5), and receives identical bytes.
+ *
+ * Since 1.3.15 the bytes live in each device's media store, not in the vault:
+ * where these tests checked `vault.contents.videos` and the `poster` text in the
+ * vault, they check the store blob, the vault reference (`contents.media`), and
+ * that the bytes read back the same, after a reload and on a sibling device too.
  *
  * With `MEDIR_VIDEO=1`, also measures the time for 5, 15 and 30 MB and the size of each
  * frame on the server (lines `MEDIDA-VIDEO`). It is the measurement that set the cap.
@@ -101,9 +110,42 @@ describe("o vídeo de uma publicação, entre duas sessões", () => {
     const [publicacao] = publicacoes(bruno!, feed)
     expect(publicacao?.["id"]).toBe(id)
     const anexo = (publicacao?.["media"] as Record<string, unknown>[])[0]
-    expect(anexo).toMatchObject({ kind: "video", name: "praia.webm", poster: POSTER, partes: { n: 3, sha256: sha } })
+    expect(anexo).toMatchObject({ kind: "video", name: "praia.webm", partes: { n: 3, sha256: sha } })
     expect(anexo).not.toHaveProperty("inline")
-  }, 60_000)
+
+    // The poster: the vault keeps `{ ref }`, the store has the blob, and it reads back as the same data URL.
+    const posterSha = (anexo?.["poster"] as { ref?: unknown } | undefined)?.ref
+    expect(typeof posterSha).toBe("string")
+    const comoDataUrl = (b: Uint8Array | null): string | null => (b ? `data:image/webp;base64,${Buffer.from(b).toString("base64")}` : null)
+    const poster = await mediaNoAparelho(bruno!, posterSha as string)
+    expect(poster.referencia && poster.blob).toBe(true)
+    expect(comoDataUrl(poster.bytes)).toBe(POSTER)
+
+    // The video: the same, on Bruno's disk and by reference.
+    const video = await mediaNoAparelho(bruno!, sha)
+    expect(video.referencia && video.blob).toBe(true)
+    expect(await resumoDoVideo(video.bytes!)).toBe(sha)
+    expect(bruno!.vault.contents.videos?.[sha]).toBeUndefined()
+
+    // After a reload: only what the disks kept.
+    const depois = await recarregar(bruno!)
+    expect(await resumoDoVideo((await depois.session.bytesDeMedia(sha))!)).toBe(sha)
+    expect(comoDataUrl(await depois.session.bytesDeMedia(posterSha as string))).toBe(POSTER)
+
+    // On Bruno's sibling device: the post comes with the history between devices, and
+    // "Fetch" brings the bytes from the sibling into its own store.
+    const irmao = await emparelharAparelho(bruno!)
+    abertas.push(irmao)
+    await ate(() => publicacoes(irmao, feed).length === 1, "a publicação chega ao aparelho irmão do Bruno", 60_000)
+    for (const alvo of [sha, posterSha as string]) {
+      if ((await irmao.session.bytesDeMedia(alvo)) === null) expect(await irmao.session.trazerMedia({ sha: alvo })).toEqual({ ok: true })
+      await ateQue(async () => (await irmao.session.bytesDeMedia(alvo)) !== null, `o irmão tem ${alvo === sha ? "o vídeo" : "o poster"}`, 30_000)
+      const noIrmao = await mediaNoAparelho(irmao, alvo)
+      expect(noIrmao.referencia && noIrmao.blob).toBe(true)
+    }
+    expect(await resumoDoVideo((await irmao.session.bytesDeMedia(sha))!)).toBe(sha)
+    expect(comoDataUrl(await irmao.session.bytesDeMedia(posterSha as string))).toBe(POSTER)
+  }, 180_000)
 
   it("cancelar a meio apaga a publicação, e o erro diz que foi cancelado", async () => {
     const [ana, bruno] = await contas("Ana", "Bruno")
@@ -230,17 +272,20 @@ describe("revisão do vídeo (26/10/2026)", () => {
     ana!.session.on("video", (evento) => {
       if (evento.fase === "a-enviar" && evento.feitas === 1) ana!.session.cancelarEnvioDeVideo()
     })
-    // Before cancellation, the bytes were in the vault: that proves they were removed.
-    let estavaNoCofre = false
+    // Before cancellation, the bytes were in the store: that proves they were removed.
+    let estavaNoArmazem = false
     ana!.session.on("video", (evento) => {
-      if (evento.sha === sha && evento.fase === "a-enviar") estavaNoCofre ||= ana!.vault.contents.videos?.[sha] !== undefined
+      if (evento.sha === sha && evento.fase === "a-enviar") estavaNoArmazem ||= ana!.session.armazem.tem(sha)
     })
     await expect(
       ana!.session.publicarVideo("vai ser cancelado", [], {}, { bytes, name: "x.mp4", mediaType: "video/mp4", duration: 3 }),
     ).rejects.toThrow("the video upload was cancelled")
-    expect(estavaNoCofre).toBe(true)
+    expect(estavaNoArmazem).toBe(true)
+    await ateQue(async () => !(await mediaNoAparelho(ana!, sha)).blob, "o blob sai do armazém da Ana", 30_000)
+    expect(await mediaNoAparelho(ana!, sha)).toEqual({ referencia: false, blob: false, bytes: null })
     expect(ana!.vault.contents.videos?.[sha]).toBeUndefined()
     expect(ana!.session.bytesDoVideo(sha)).toBeNull()
+    expect(await (await recarregar(ana!)).session.bytesDeMedia(sha)).toBeNull()
   }, 60_000)
 
   it("achado 6: apagar a publicação tira o vídeo do cofre de quem o recebeu", async () => {
@@ -249,13 +294,18 @@ describe("revisão do vídeo (26/10/2026)", () => {
     const bytes = bytesSinteticos(VIDEO_BYTES_POR_PARTE)
     const sha = await resumoDoVideo(bytes)
     const id = await ana!.session.publicarVideo("vai ser apagado", [], {}, { bytes, name: "x.mp4", mediaType: "video/mp4", duration: 3 })
-    await ate(() => bruno!.vault.contents.videos?.[sha] !== undefined, "o vídeo fica no cofre do Bruno", 30_000)
-    expect(ana!.vault.contents.videos?.[sha]).toBeDefined()
+    await ateQue(async () => (await mediaNoAparelho(bruno!, sha)).blob, "o vídeo fica no armazém do Bruno", 30_000)
+    expect((await mediaNoAparelho(bruno!, sha)).referencia).toBe(true)
+    expect(await mediaNoAparelho(ana!, sha)).toMatchObject({ referencia: true, blob: true })
     await ana!.session.deletePost(id)
-    await ate(() => bruno!.vault.contents.videos?.[sha] === undefined, "o vídeo sai do cofre do Bruno", 30_000)
-    await ate(() => ana!.vault.contents.videos?.[sha] === undefined, "e do da Ana", 30_000)
+    const fora = { referencia: false, blob: false, bytes: null }
+    await ateQue(async () => !(await mediaNoAparelho(bruno!, sha)).blob, "o vídeo sai do armazém do Bruno", 30_000)
+    await ateQue(async () => !(await mediaNoAparelho(ana!, sha)).blob, "e do da Ana", 30_000)
+    expect(await mediaNoAparelho(bruno!, sha)).toEqual(fora)
+    expect(await mediaNoAparelho(ana!, sha)).toEqual(fora)
     expect(bruno!.session.bytesDoVideo(sha)).toBeNull()
-  }, 60_000)
+    expect(await (await recarregar(bruno!)).session.bytesDeMedia(sha)).toBeNull()
+  }, 90_000)
 
   it("achado 7: uma falha a meio apaga a publicação, e publicar outra vez não a duplica", async () => {
     const [ana, bruno] = await contas("Ana", "Bruno")
@@ -315,17 +365,20 @@ describe("revisão do vídeo (26/10/2026)", () => {
     const bytes = bytesSinteticos(VIDEO_BYTES_POR_PARTE + VIDEO_BYTES_POR_PARTE / 2)
     const sha = await resumoDoVideo(bytes)
     // The `post` is refused (no connection, or server rate limit), after `preparar` has saved the bytes.
-    let estavaNoCofre = false
+    let estavaNoArmazem = false
     ana!.session.post = async () => {
-      estavaNoCofre = ana!.vault.contents.videos?.[sha] !== undefined
+      estavaNoArmazem = ana!.session.armazem.tem(sha)
       throw new Error("not connected")
     }
     await expect(
       ana!.session.publicarVideo("não sai", [], {}, { bytes, name: "x.mp4", mediaType: "video/mp4", duration: 3 }),
     ).rejects.toThrow("not connected")
-    expect(estavaNoCofre).toBe(true)
+    expect(estavaNoArmazem).toBe(true)
+    await ateQue(async () => !(await mediaNoAparelho(ana!, sha)).blob, "o blob sai do armazém da Ana", 30_000)
+    expect(await mediaNoAparelho(ana!, sha)).toEqual({ referencia: false, blob: false, bytes: null })
     expect(ana!.vault.contents.videos?.[sha]).toBeUndefined()
     expect(ana!.session.bytesDoVideo(sha)).toBeNull()
+    expect(await (await recarregar(ana!)).session.bytesDeMedia(sha)).toBeNull()
   }, 60_000)
 
   it("achado 5: com um envio em curso, outro publicar recusa antes de publicar", async () => {

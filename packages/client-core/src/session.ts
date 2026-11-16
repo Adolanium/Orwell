@@ -1,3 +1,4 @@
+import { marcarArranque } from "./marcasDeArranque.js"
 import {
   addMembers,
   addressAtLeaf,
@@ -71,7 +72,7 @@ import {
 } from "./denuncia.js"
 import { origemDoServidorDe } from "./relato.js"
 import { escolherFundador, montarRetrato, ordemDeAplicacao, perfisParaRelatar, type RetratoMontado } from "./retrato.js"
-import { HistoricoEntreAparelhos, type EventoDoHistorico, type PortaDoHistorico } from "./historico/historico.js"
+import { HistoricoEntreAparelhos, type DesfechoDoIrmao, type EventoDoHistorico, type PortaDoHistorico } from "./historico/historico.js"
 import {
   itemApagado,
   itemDoPayload,
@@ -88,6 +89,7 @@ import {
   generateIdentity,
   identityFromPrivateKey,
   makeUserAddress,
+  TYPING_TTL_MS,
   newRoomId,
   parseAddress,
   parseServerName,
@@ -261,6 +263,7 @@ import {
   noteTransmitter,
   upsertDirectory,
   upsertSpaceMeta,
+  semBytes,
   type DenunciaRecebida,
   type StoredChatMessage,
   type StoredPayload,
@@ -269,10 +272,33 @@ import {
   type StoredProfile,
   type VaultContents,
   type Vault,
+  type ItemDeMediaDoIrmao,
+  bytesParaBase64,
   guardarVideo,
   apagarVideo,
   videoNoCofre,
+  cederAVez,
 } from "./vault.js"
+import { ArmazemDeMedia, TECTOS_DO_ARMAZEM, type ArmazemBackend, type EstadoDoArmazem, type Miniaturista } from "./armazem/armazem.js"
+import { ArmazemEmMemoria } from "./armazem/emMemoria.js"
+import { migrarTudo } from "./armazem/migracao.js"
+import {
+  absorverPayload,
+  absorverRetrato,
+  absorverVideo,
+  bytesDoMedia,
+  inflarPayload,
+  pedirMiniatura,
+  promoverARetrato,
+  recolher,
+  semReferencias,
+  paraOEcra,
+  shasDoPayload,
+  shasDosRetratos,
+  soInlineOuEvicted,
+  shasReferenciados,
+} from "./armazem/referencias.js"
+import { caracteresDaRef } from "./medidaDeMedia.js"
 import {
   ERROS_DO_VIDEO,
   resumosDosVideos,
@@ -310,6 +336,13 @@ export interface ReceivedMessage {
 }
 
 export type ConnectionState = "offline" | "connecting" | "online" | "reconnecting"
+
+/** See `Session.diagnostico`. */
+export interface DiagnosticoDaSessao {
+  gravacoesDoCofre: number
+  temporizadoresAtrasados: number
+  maiorAtrasoMs: number
+}
 
 /**
  * Why an event did not arrive, which decides whether to ask again.
@@ -381,6 +414,24 @@ class BuracoDeEpoca extends Error {
  * It stays this way until the server confirms, the echo with our `ref`. See
  * `#publicarCommit`, which explains why applying it early broke the room.
  */
+/** How the channel-state cascade goes out. See `#enviarCascata`. */
+export interface OpcoesDaCascata {
+  /** In pieces, with a turn for the page between them (hotfix 1.3.14). */
+  emPedacos?: boolean
+}
+
+/**
+ * Runs `fn` when the page is idle, and at the latest after `tectoMs`
+ * (hotfix 1.3.14). Where there is no `requestIdleCallback` (Node, which is
+ * also the desktop main process, and WebKit), it runs at once: the caller
+ * already waited with a timer.
+ */
+function quandoOcioso(fn: () => void, tectoMs: number): void {
+  const pedir = (globalThis as { requestIdleCallback?: (cb: () => void, opcoes?: { timeout: number }) => number }).requestIdleCallback
+  if (typeof pedir === "function") pedir(() => fn(), { timeout: tectoMs })
+  else fn()
+}
+
 interface CommitNosso {
   /** The exact bytes that went on the wire: the server stores them unchanged. */
   commit: Uint8Array
@@ -848,6 +899,11 @@ const LUGAR_POR_PEDIR_MS = 30 * 24 * 60 * 60_000
  * A timer that does not keep the process alive (Node). In the browser, a
  * number, and nothing to do.
  */
+/** Yield to the page (or the process) between two steps of background work. */
+function ceder(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
 function soltar<T>(relogio: T): T {
   ;(relogio as { unref?: () => void }).unref?.()
   return relogio
@@ -1536,6 +1592,8 @@ export type SessionEvents = {
   buzz: { channel: string; from: UserAddress; at: number }
   /** Someone sharing a channel with us connected or disconnected. */
   presence: { address: UserAddress; online: boolean }
+  /** The channels catching up now (12/11/2026). The box says so. See `Session.aRecuperar`. */
+  recuperacao: { canais: string[] }
   /**
    * The pairing of a device, step by step. See `emparelhar.ts`.
    *
@@ -1570,7 +1628,13 @@ export type SessionEvents = {
    */
   video: EventoDoVideo
   /**
-   * What the SFU says without anyone asking.
+   * A media item in this device's store changed (design §4 and §8): the blob
+   * was stored, left through the ceiling, the write failed (`erro`: Erro 520 or
+   * 521), or it arrived from another device or a member after a `trazerMedia`.
+   */
+  media: EventoDeMedia
+  /**
+   * O que o SFU diz sem ninguém lhe ter perguntado nada.
    *
    * Warnings only, never responses: a response belongs to whoever made the request
    * and arrives there, matched by tag. This is the other half, the streams that appear
@@ -1690,6 +1754,28 @@ export interface SalaListada {
   updatedAt?: number
 }
 
+/** A media item in the store changed. See the `media` event. */
+export interface EventoDeMedia {
+  sha: string
+  estado: "guardado" | "saiu" | "falhou" | "chegou"
+  /** Only on "falhou". */
+  erro?: "media store is full" | "media store failed"
+}
+
+/** The outcome of `trazerMedia`. */
+/** The `partes.sha256` of a post video attachment, or null for anything else. */
+function shaDoVideoDoAnexo(anexo: unknown): string | null {
+  if (typeof anexo !== "object" || anexo === null) return null
+  const partes = (anexo as { partes?: unknown }).partes
+  const sha = typeof partes === "object" && partes !== null ? (partes as { sha256?: unknown }).sha256 : undefined
+  return typeof sha === "string" ? sha : null
+}
+
+export type DesfechoDoTrazer = { ok: true } | { ok: false; motivo: "sem-irmao" | "ninguem" | "sem-ligacao" }
+
+/** What `trazerMedia` can fetch: an attachment of a message or post, an account's portrait, or a `sha`. */
+export type MediaATrazer = { channel: string; alvo: string; indice: number } | { a: string } | { sha: string }
+
 export class Session extends Emitter<SessionEvents> {
   #identity: Identity | null = null
   #socket: WebSocket | null = null
@@ -1765,12 +1851,32 @@ export class Session extends Emitter<SessionEvents> {
    */
   readonly #versaoDaApp: string | undefined
 
+  /**
+   * This device's media store (design §1): the bytes of images and files,
+   * outside the vault. It is tied to the vault: it opens with it, locks with
+   * it, and is destroyed with the account.
+   */
+  readonly #armazem: ArmazemDeMedia
+
+  /**
+   * `armazem` is the platform backend (IndexedDB on the web, a folder on the
+   * desktop); absent, an in-memory one (tests). `miniaturista` makes the
+   * permanent thumbnails (design §3); null, only images that are already small
+   * get a thumbnail.
+   */
   constructor(
     private readonly vault: Vault,
-    opcoes: { versaoDaApp?: string } = {},
+    opcoes: { versaoDaApp?: string; armazem?: ArmazemBackend; miniaturista?: Miniaturista | null } = {},
   ) {
     super()
     this.#versaoDaApp = opcoes.versaoDaApp
+    vault.aoSerializar = (contents) => this.#escreverGruposAdiados(contents)
+    this.#armazem = new ArmazemDeMedia(opcoes.armazem ?? new ArmazemEmMemoria(), opcoes.miniaturista ?? null)
+    this.#armazem.aoMudar((evento) => {
+      if (evento.estado === "falhou") this.#retratoProprioFalhou(evento.sha)
+      this.emit("media", evento)
+    })
+    vault.ligarArmazem(this.#armazem)
   }
 
   get identity(): Identity {
@@ -2139,11 +2245,22 @@ export class Session extends Emitter<SessionEvents> {
    * it without a cap would be waiting for itself. Only `message`, `edit` and
    * `reaction`, the ones a person writes; everything else goes out as before.
    */
-  async #esperarPelaRecuperacao(channel: string, payload: Payload): Promise<void> {
-    if (payload.t !== "message" && payload.t !== "edit" && payload.t !== "reaction") return
-    const aRecuperar = (): boolean => this.#recuperacoesPorFazer.has(channel) || this.#recuperacoes.has(channel)
+  async #esperarPelaRecuperacao(channel: string, payload: Payload, daPessoa = false): Promise<void> {
+    // A reaction from the interface (`post.reaction`, `reactToPost`) waits too (re-review of 1.3.8, R2).
+    const daConversa = payload.t === "message" || payload.t === "edit" || payload.t === "reaction" || (daPessoa && payload.t === "post.reaction")
+    if (!daConversa) return
+    const aRecuperar = (): boolean => this.aRecuperar(channel)
     if (this.#connection !== "online" || !aRecuperar()) return
-    const ate = Date.now() + Session.ESPERA_PELA_RECUPERACAO_MS
+    /*
+      What the person writes waits with NO cap (12/11/2026). After 10 s it went
+      out in whatever epoch the recovery had reached, and with the room 3 or
+      more commits ahead nobody could read it, while the sender saw it as sent.
+      Since 1.3.8 the app is on screen during the first recovery, which is the
+      common case. The cap stays for internal sends: some leave from inside the
+      channel's own recovery, and waiting for it would be waiting for themselves.
+      The box says the channel is catching up (`recuperacao` event).
+    */
+    const ate = daPessoa ? Number.POSITIVE_INFINITY : Date.now() + Session.ESPERA_PELA_RECUPERACAO_MS
     while (aRecuperar() && this.#connection === "online" && Date.now() < ate) {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
@@ -2282,6 +2399,31 @@ export class Session extends Emitter<SessionEvents> {
 
   // ------------------------------------------------------------ connection
 
+  /**
+   * The server answered `auth.ok` on this socket (12/11/2026). Before it, only
+   * the handshake may go out: any other frame gets a FATAL `unauthenticated`
+   * from the server, and since 1.3.8 the app is on screen during the handshake.
+   * See `#send` and `#esperarPelaAutenticacao`.
+   */
+  #autenticado = false
+
+  /** The frames allowed before `auth.ok`. */
+  static readonly TRAMAS_DO_HANDSHAKE: ReadonlySet<string> = new Set(["hello", "auth.begin", "auth.finish", "ping"])
+
+  /**
+   * A send from the person, made while the connection is still being set up,
+   * waits for it (at most `ESPERA_PELA_AUTENTICACAO_MS`). Offline it does not
+   * wait: `#send` refuses, as always, and the caller keeps it to retry.
+   */
+  async #esperarPelaAutenticacao(): Promise<void> {
+    const ate = Date.now() + Session.ESPERA_PELA_AUTENTICACAO_MS
+    while (this.#connection === "connecting" && !this.#deliberateClose && Date.now() < ate) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+  }
+
+  static ESPERA_PELA_AUTENTICACAO_MS = 30_000
+
   async connect(): Promise<void> {
     const identity = this.identity
     // A stopped channel doesn't reconnect (see `pararDeEscrever`): connecting means
@@ -2338,6 +2480,9 @@ export class Session extends Emitter<SessionEvents> {
     if (this.vault.unlocked) this.#lastSeqAntesDaLigacao = { ...this.vault.contents.lastSeq }
     this.#setConnection("connecting")
 
+    marcarArranque("ligar")
+    // A new socket is not authenticated, whatever the last one was (`disconnect()` drops a socket before its `close` arrives).
+    this.#autenticado = false
     const socket = new WebSocket(gatewayUrl(identity))
     this.#socket = socket
 
@@ -2418,7 +2563,9 @@ export class Session extends Emitter<SessionEvents> {
     // "not connected" with no explanation. Closing the socket on the way out
     // turns a silent hang into an ordinary reconnect.
     try {
+      marcarArranque("socket-aberto")
       await this.#handshake(identity)
+      marcarArranque("ligado")
     } catch (error) {
       // A suspension: the `status`, with the warning, goes out before `connect()` rejects.
       await this.#leituraDaSuspensao
@@ -2474,6 +2621,8 @@ export class Session extends Emitter<SessionEvents> {
       this.#serverRetentionDays = hello.retentionDays
       this.#commonRoom = this.#acceptCommonRoom(hello.commonRoom)
       this.#salaComumTemCartao = hello.commonRoomGroupInfo === true
+      // A new connection reads here whether the room has a card: what an earlier one published may have been taken.
+      this.#cartaoPublicadoNaEpoca = null
       // Before proving who we are: no point authenticating an account the server no
       // longer recognizes.
       if (await this.#reconcileAccountsReset(hello.accountsResetAtMinute)) {
@@ -2514,6 +2663,7 @@ export class Session extends Emitter<SessionEvents> {
     })
     const ok = await this.#await("auth.ok")
     if (ok.t !== "auth.ok") throw new Error("the server refused the login")
+    this.#autenticado = true
     // A server that doesn't know the possession doesn't answer `possession`: the
     // request stays pending for a server that does know it.
     if (ok.posse !== undefined && (ok.posse !== posseDoAparelho || assumirPosse)) {
@@ -2531,6 +2681,7 @@ export class Session extends Emitter<SessionEvents> {
     // presence announcement — so invisibility never flickers on reconnect.
     if (!this.#visible) this.#send({ t: "presence.set", visible: false })
     this.#setConnection("online", identity.address)
+    marcarArranque("auth-ok")
 
     const { restored, failed } = await this.restore()
     // A new connection restarts the account: what was left to recover in the last
@@ -2603,6 +2754,7 @@ export class Session extends Emitter<SessionEvents> {
         See `#ancoraPresa`.
       */
       for (const canal of restored) this.#recuperacoesPorFazer.add(canal)
+      this.#avisarRecuperacao()
       try {
         this.#send({ t: "channel.subscribe", channels: restored })
       } catch (erro) {
@@ -2645,6 +2797,7 @@ export class Session extends Emitter<SessionEvents> {
        */
       try {
         await this.#comRecuperacaoPorFazer(restored, () => this.#catchUp(restored))
+        marcarArranque("recuperado")
       } catch (error) {
         const message = (error as Error).message
       this.emit("status", {
@@ -2701,38 +2854,25 @@ export class Session extends Emitter<SessionEvents> {
        */
       // (Invites go in the same pass, above.)
 
-      /**
-       * And the rooms of channels we administer, by the same logic.
-       *
-       * `republishRooms` runs when the group grows, which handles whoever joins
-       * from now on, but doesn't fix who's already there. Whoever joined before
-       * this existed got a channel with no rooms, and there's nothing on their
-       * side that fixes it: the statements were encrypted in an epoch they'll
-       * never see, and only whoever administrates can publish them again.
-       *
-       * Cheap and idempotent: one `channel.meta` per room, only in channels we
-       * administer, and whoever already had them just rewrites what they knew.
-       * Without this, the only fix was an admin remembering to tweak a room
-       * somewhere to force it to republish.
-       */
-      /**
-       * And who runs them, by the same logic taken to the gravest case.
-       *
-       * Missing rooms gave an empty channel; missing authority gave a channel
-       * with no owner, and a channel with no owner was, until this version,
-       * a channel owned by whoever joined it. Whoever joined before this
-       * republish existed still doesn't know today who founded the channel they're
-       * in, and nothing on their side can discover it. This is the fix for those.
-       *
-       * Before rooms, not after: the guards on receiving roles depend on the
-       * founder already being known. See `republishAuthority`.
-       */
-      for (const canal of restored) {
-        void this.republishAuthority(canal)
-          .catch(() => {})
-          .then(() => this.republishRooms(canal))
-          .catch(() => {})
-      }
+      /*
+        No republish of authority and rooms here (hotfix 1.3.12, 12/11/2026).
+
+        Up to 1.3.10 every connection ran `republishAuthority` and `republishRooms`
+        for every restored channel (added 7/8/2026, before 1.0, to repair members who
+        joined before any republish existed). On every admin device, on every
+        connection: in the common room ~176 frames each time (one `role.assign` per
+        person with a role, every room and category, the banner), ~120 000 of the
+        153 000 events of `!984` in production. Each send wrote the whole vault, and
+        every member decrypted and applied the lot. On a phone with a large vault
+        that burst is what made the browser kill the tab ("the app restarts").
+
+        Whoever lacks the state now gets it by a path that is directed and runs once:
+        the Welcome portrait and the inviter's cascade on its own commit
+        (`#announceLocalEpoch`), a reseat (`#answerRejoin`), and anti-entropy, where
+        a summary that differs in `fundador`, `cargo`, `atribuicao`, `categoria` or
+        `sala` makes ONE leaf report the items (and the author signs its own).
+        Proved by `apps/server/src/republicar-so-com-sinal.test.ts`.
+      */
     }
     if (failed.length > 0) {
       this.emit("status", {
@@ -2757,6 +2897,7 @@ export class Session extends Emitter<SessionEvents> {
       if (this.#keyPackages.size === 0) await this.topUpKeyPackages(20, true)
       else if (this.#keyPackages.size < 10) await this.topUpKeyPackages(20)
       this.#chavesProntas = true
+      marcarArranque("chaves")
     } catch (error) {
       // Guarded for the same reason as catch-up: a vault that will not accept
       // a write must not be able to stop the resync below, which is what
@@ -2817,11 +2958,27 @@ export class Session extends Emitter<SessionEvents> {
       // down here. The round is best-effort and can't block the rest of `connect`,
       // which delivers invites and friendships to whoever waits for them.
       try {
-        const falhados = await this.publishProfile(undefined, true)
+        /*
+          Channel by channel (hotfix 1.3.14). A channel already repaired in an
+          earlier attempt of this round is not forced again: only an unforced
+          publish, which goes out only if the profile changed since. Before, one
+          channel that kept failing made every connection force the profile into
+          ALL channels: 72 on the owner's account, on every login.
+        */
+        const canais = this.channels
+        const jaFeitos = new Set(this.vault.contents.profileRepairChannels ?? [])
+        const porReparar = canais.filter((canal) => !jaFeitos.has(canal))
+        const reparados = canais.filter((canal) => jaFeitos.has(canal))
+        const falhados = await this.publishProfile(porReparar, true)
+        if (reparados.length > 0) await this.publishProfile(reparados)
         if (falhados.length === 0 && this.profile.displayName) {
           this.vault.contents.profileRepairRound = RONDA_DE_REPARACAO
+          delete this.vault.contents.profileRepairChannels
           await this.flush()
         } else if (this.profile.displayName) {
+          const falhou = new Set(falhados)
+          this.vault.contents.profileRepairChannels = canais.filter((canal) => jaFeitos.has(canal) || !falhou.has(canal))
+          await this.flush()
           /*
             Said, and not just unrecorded: a repair that didn't happen is
             something someone will want to see in the log the day someone's name
@@ -2848,6 +3005,7 @@ export class Session extends Emitter<SessionEvents> {
     } else {
       await this.publishProfile()
     }
+    marcarArranque("perfil")
 
     /**
      * The manifest of devices for this account, published once in its lifetime.
@@ -2901,6 +3059,7 @@ export class Session extends Emitter<SessionEvents> {
   }
 
   #onClose(): void {
+    this.#autenticado = false
     // Waiters belong to the socket, not to the session. Left in place they
     // outlive it: the reconnect's backoff is shorter than the ten-second
     // timeout, so a page requested by the dead connection's catch-up was
@@ -3006,6 +3165,8 @@ export class Session extends Emitter<SessionEvents> {
    */
   pararDeEscrever(): void {
     this.#escreve = false
+    // The store too (Ruling R17): a tab without ownership neither writes nor deletes blobs.
+    this.#armazem.selar()
     if (this.#reconnectTimer) {
       clearTimeout(this.#reconnectTimer)
       this.#reconnectTimer = undefined
@@ -3061,6 +3222,7 @@ export class Session extends Emitter<SessionEvents> {
     void this.flush().catch(() => {})
     this.#socket?.close()
     this.#socket = null
+    this.#autenticado = false
     this.#setConnection("offline")
   }
 
@@ -3074,6 +3236,15 @@ export class Session extends Emitter<SessionEvents> {
    * from the vault via `restore()`.
    */
   reset(): void {
+    // The media store: this opening's background work does not carry over to the next.
+    if (this.#recolhaTimer !== undefined) clearTimeout(this.#recolhaTimer)
+    this.#recolhaTimer = undefined
+    this.#recolhaEm = Number.POSITIVE_INFINITY
+    this.#porMiniaturar.clear()
+    this.#porPromover.clear()
+    this.#emVoo.clear()
+    this.#aberturaCuidada = null
+    this.#retratoProprio = null
     this.#desarmarSincronia()
     this.#desarmarCaixa()
     this.#pararRevezamentos()
@@ -3126,6 +3297,8 @@ export class Session extends Emitter<SessionEvents> {
     this.#libertarVezes()
     this.#ritmo = Session.#ritmoNovo()
     this.#dirty.clear()
+    // The groups kept for a deferred write go with the groups (review finding 4).
+    this.#gruposAdiados.clear()
     this.#backfilled.clear()
     // These were missing here and survived account switches: the admission gate
     // held a window opened by an old attempt, and the member count described a
@@ -3176,8 +3349,11 @@ export class Session extends Emitter<SessionEvents> {
     this.#aLargar.clear()
     this.#epocaFuturaVista.clear()
     this.#cartaoAdiado = false
+    // A new connection reads in `hello.ok` whether the room has a card: what this one published may have been taken.
+    this.#cartaoPublicadoNaEpoca = null
     this.#recuperacoesPorFazer.clear()
     this.#recuperacoes.clear()
+    this.#avisarRecuperacao()
     this.#crescidosNaRecuperacao.clear()
     this.#entradaExternaPorConfirmar.clear()
     this.#pendingAuthority = []
@@ -3426,6 +3602,8 @@ export class Session extends Emitter<SessionEvents> {
    */
   async forgetChannel(channel: string): Promise<void> {
     await this.#largarGrupo(channel, true)
+    // The media only this channel referenced leave the store (design §5, collection).
+    await this.#recolherAgora().catch(() => {})
   }
 
   /**
@@ -3522,6 +3700,8 @@ What was left behind:
     }
 
     if (this.vault.unlocked) {
+      // A group kept for a deferred write would come back at the next one.
+      this.#gruposAdiados.delete(channel)
       await this.vault.update((contents) => {
         delete contents.groups[channel]
         if (apagarHistorico) {
@@ -3659,8 +3839,8 @@ What was left behind:
    * except by hand by a member with the power to expel. Refusal costs far less:
    * the account still exists and the person hits it again when they have network.
    *
-   * That is why refusal is the default behavior. It is written in
-   * `docs/PENDENTES.md` for the owner to change knowing what they trade.
+   * That is why refusal is the default behavior. It is a deliberate trade-off,
+   * to be changed only knowing what is traded.
    *
    * @throws if any channel is left unsaid, with the reason in Portuguese to read.
    */
@@ -3782,6 +3962,7 @@ What was left behind:
     }
 
     if (this.vault.unlocked) {
+      this.#gruposAdiados.clear()
       await this.vault.update((contents) => {
         contents.groups = {}
         contents.history = {}
@@ -4691,7 +4872,7 @@ What was left behind:
 
   /**
    * Add people to the group, with the channel snapshot in the Welcome when the joiner
-   * can read it (phase 1 of 1.1, `docs/planos/estado-cifrado-plano.md`).
+   * can read it (phase 1 of 1.1).
    *
    * One hook for all Welcome entries: the invite by address, the link entry
    * admitted by any member (`#admit`), the reseat, the re-admission, and the seating
@@ -4711,7 +4892,7 @@ What was left behind:
     let retrato: RetratoMontado | null = null
     if (leem > 0 && channel !== this.canalDaConta) {
       try {
-        retrato = this.#montarRetrato(channel, atual)
+        retrato = await this.#montarRetrato(channel, atual)
       } catch {
         // A snapshot that fails to build does not block the entry: it goes without it, and the cascade does the old one.
         retrato = null
@@ -4734,16 +4915,37 @@ What was left behind:
    * Our profile goes whenever it would come out in a `publishProfile` (with name, or in
    * our profile wall, where it goes even without a name with the profile secret).
    */
-  #montarRetrato(channel: string, grupo: GroupSession): RetratoMontado {
+  async #montarRetrato(channel: string, grupo: GroupSession): Promise<RetratoMontado> {
     const eu = this.identity.address
     const profile = this.profile
-    const perfil = profile.displayName || channel === this.feedChannel ? (this.#payloadDoPerfil(profile, channel) as StoredPayload) : null
+    // Our profile and the sign with the store bytes: the sign's authorship signs the whole icon.
+    const perfil =
+      profile.displayName || channel === this.feedChannel
+        ? ((await this.#paraOFio(this.#payloadDoPerfil(profile, channel)).catch(() => null)) as unknown as StoredPayload | null)
+        : null
+    /*
+      And the members' profiles, with the portraits: the Welcome portrait
+      carries them whole, as in 1.3 (the wire does not change), and the light
+      shape is left for the ceiling cut. A portrait not on this device goes as
+      a marker, and the profile goes in the light shape, which verifies all the
+      same.
+    */
+    const contents = this.vault.contents
+    const membros = [...new Set([...memberAddresses(grupo.state.ratchetTree).values()].map(String))]
+    const directory = { ...contents.directory }
+    for (const membro of membros) {
+      const guardado = directory[membro]
+      if (membro !== eu && guardado) directory[membro] = { ...guardado, payload: await this.#inflarParaOFio(guardado.payload) }
+    }
+    const letreiro = contents.spaceMeta[channel]
+    const spaceMeta = letreiro ? { ...contents.spaceMeta, [channel]: { ...letreiro, payload: await this.#inflarParaOFio(letreiro.payload) } } : contents.spaceMeta
+    const conteudo: VaultContents = { ...contents, directory, spaceMeta }
     return montarRetrato(
       {
         canal: channel,
         eu: this.#quemRelata(),
-        conteudo: this.vault.contents,
-        membros: [...new Set([...memberAddresses(grupo.state.ratchetTree).values()].map(String))],
+        conteudo,
+        membros,
         perfilProprio: perfil,
         fundador: this.founderOf(channel) === eu,
         gerePapeis: this.mayManageRoles(channel),
@@ -4755,9 +4957,28 @@ What was left behind:
     )
   }
 
-  async send(channel: string, payload: Payload): Promise<void> {
-    await this.#sendPayload(channel, this.#comMencoesConferidas(channel, this.identity.address, payload))
+  /**
+   * `daPessoa`: written by the person, from the interface. It then waits for
+   * the channel's recovery with no cap. See `#esperarPelaRecuperacao`.
+   */
+  async send(channel: string, payload: Payload, opcoes: { daPessoa?: boolean } = {}): Promise<void> {
+    await this.#sendPayload(channel, this.#comMencoesConferidas(channel, this.identity.address, payload), opcoes.daPessoa === true)
   }
+
+  /** This channel is catching up (to recover, or recovering) on this connection. */
+  aRecuperar(channel: string): boolean {
+    return this.#recuperacoesPorFazer.has(channel) || this.#recuperacoes.has(channel)
+  }
+
+  /** The channels catching up now, said to the interface when the set changes. */
+  #avisarRecuperacao(): void {
+    const canais = [...new Set([...this.#recuperacoesPorFazer, ...this.#recuperacoes.keys()])].sort()
+    const chave = canais.join("\u0000")
+    if (chave === this.#recuperacaoAvisada) return
+    this.#recuperacaoAvisada = chave
+    this.emit("recuperacao", { canais })
+  }
+  #recuperacaoAvisada = ""
 
   /**
    * Multiple sends in a row on the same channel, with ONE vault save (slow-after-entry, 4/11/2026).
@@ -4781,8 +5002,11 @@ What was left behind:
    * send waits for the echo of the previous one, and the batch goes to `send` one by one, as before.
    * The book (friends, invites) too, because it has its own receipt.
    */
-  async #enviarEmLote(channel: string, payloads: readonly Payload[]): Promise<void> {
+  async #enviarEmLote(channel: string, guardados: readonly Payload[]): Promise<void> {
     if (!this.#groups.has(channel)) throw new Error("not a member of this channel", { cause: { channel } })
+    await this.#esperarPelaAutenticacao()
+    // The store's bytes first: the authorship signs the `inline` (design §5).
+    const payloads = await Promise.all(guardados.map((payload) => this.#paraOFio(payload)))
     this.#talvezVerificar(payloads[0])
     if (payloads[0]) await this.#esperarPelaRecuperacao(channel, payloads[0])
     const vida = this.#vida
@@ -4901,13 +5125,20 @@ What was left behind:
    * has 512 slots and dumps the oldest, so a reference marked before a long wait
    * is the first to be dumped, when it is the last to need to be recognized. **This is
    * reasoning, not measurement**, no test tells the two positions apart, and it is
-   * stated this way in `docs/PENDENTES.md`.
+   * stated as such.
    */
-  async #sendPayload(channel: string, payload: Payload): Promise<string> {
+  async #sendPayload(channel: string, guardado: Payload, daPessoa = false): Promise<string> {
     if (!this.#groups.has(channel)) throw new Error("not a member of this channel", { cause: { channel } })
+    await this.#esperarPelaAutenticacao()
+    /*
+      The way out to the network (design §5): a payload that comes from the vault (the
+      profile, a republish, a resend) carries `{ ref }`, and the wire carries the exact
+      `inline`. Before the authorship, which signs the bytes (`resumosDosAnexos`).
+    */
+    let payload = await this.#paraOFio(guardado)
     // Goes out now: the check, if there is one, runs alongside. See `#talvezVerificar`.
     this.#talvezVerificar(payload)
-    await this.#esperarPelaRecuperacao(channel, payload)
+    await this.#esperarPelaRecuperacao(channel, payload, daPessoa)
     // The life of this account in the session (S6): whatever waits for the rate
     // limit and wakes up after an account switch does not go out. See `#vida`.
     const vida = this.#vida
@@ -5118,7 +5349,7 @@ What was left behind:
       if (barreira) {
         barreira.chegou()
         await barreira.passar
-      } else await this.flush()
+      } else await this.#flushDosEnvios()
 
       // Marked here, on the way out, and returned to whoever wants the receipt.
       // See the header: the queue decides when this frame goes out, so the queue
@@ -5730,7 +5961,7 @@ What was left behind:
    * **That fourth path, the connection drops mid-wait, has no test**, and
    * that's on record: the offline test disconnects BEFORE asking to send, so a
    * receipt never gets pending. If it breaks, the ten-second timeout solves it
-   * anyway, slower. In `docs/PENDENTES.md`.
+   * anyway, slower.
    */
   #confirmado(ref: string, channel: string): Promise<number> {
     return new Promise((resolve, reject) => {
@@ -5806,10 +6037,9 @@ What was left behind:
    *
    * Managing roles is NOT one of the four powers, and that's on purpose. If it
    * were, having any power would let you name yourself all the others, and the
-   * separation the owner asked for wouldn't last a day.
+   * separation wouldn't last a day.
    *
-   * In a one-on-one chat nobody has power, and that's the owner's order word for
-   * word: "It must not be possible to make admin in the private chat between two
+   * In a one-on-one chat nobody has power, and the rule is: "It must not be possible to make admin in the private chat between two
    * users." The refusal must be here, not the screen, because a hidden button
    * won't stop anyone calling the bridge, and here everything falls at once:
    * `mayManageRoles` stops offering it and the two guards on `role.assign` and
@@ -6583,19 +6813,24 @@ What was left behind:
    * most recent. The icon died for everyone, and who killed it was whoever was
    * changing something else.
    */
-  spaceMeta(channel: string): { name: string; topic?: string; icon?: string; updatedAt: number } | null {
+  spaceMeta(channel: string): { name: string; topic?: string; icon?: string; iconRef?: string; iconMini?: string; updatedAt: number } | null {
     const guardado = this.vault.contents.spaceMeta[channel]
     if (!guardado) return null
-    // The vault stores payloads as `{ t: string } & Record<string, unknown>` on
-    // purpose: a vault written by a newer version must open here. Narrowing by hand
-    // is the price, and it is better than a cast that would accept garbage.
-    const bruto = guardado.payload as { t: string; name?: unknown; topic?: unknown; icon?: { inline?: unknown } }
+    // The vault stores payloads as `{ t: string } & Record<string, unknown>`, on
+    // purpose: a vault written by a newer version must open here. Narrowing by
+    // hand is the price, and it is better than a cast that would accept garbage.
+    const bruto = guardado.payload as { t: string; name?: unknown; topic?: unknown; icon?: { inline?: unknown; ref?: unknown } }
     if (bruto.t !== "space.meta" || typeof bruto.name !== "string") return null
+    // The icon in the store (Task 10): the interface asks for the bytes by `iconRef`, and the thumbnail by `iconMini`.
+    const iconRef = typeof bruto.icon?.ref === "string" ? bruto.icon.ref : undefined
+    const iconMini = iconRef ? this.vault.contents.media?.[iconRef]?.mini : undefined
     return {
       name: bruto.name,
       ...(typeof bruto.topic === "string" ? { topic: bruto.topic } : {}),
       ...(typeof bruto.icon?.inline === "string" ? { icon: bruto.icon.inline } : {}),
-      // The timestamp it was recorded with, not the payload's: this is what the guard
+      ...(iconRef ? { iconRef } : {}),
+      ...(iconMini ? { iconMini } : {}),
+      // The stamp it was written with, not the payload's: this is the one the guard
       // in `upsertSpaceMeta` uses to decide, and the two must agree.
       updatedAt: guardado.at,
     }
@@ -6614,18 +6849,39 @@ What was left behind:
    * by the receiver and counts as an ignored event. A series of ignored events
    * marks the channel deaf, which triggers the repair that clears history.
    */
-  async updateSpaceMeta(channel: string, next: { name: string; topic?: string; icon?: string }): Promise<void> {
+  async updateSpaceMeta(channel: string, next: { name: string; topic?: string; icon?: string; iconRef?: string }): Promise<void> {
     if (!this.#groups.has(channel)) throw new Error("not a member of this channel", { cause: { channel } })
     // The guard lives here, not just in the interface: hiding a button does not
     // stop anyone from calling the bridge. What protects is to refuse to publish.
     if (!this.mayEditChannel(channel)) throw new Error("only an administrator may edit this channel", { cause: { channel } })
     const nome = next.name.trim()
     if (!nome) throw new Error("the channel needs a name")
+    /*
+      The icon already there, by reference (Task 10): the interface does not
+      have the `inline`, only the `iconRef` from `spaceMeta`. The stored
+      attachment goes, with the `{ ref }`, and the output to the network
+      inflates it (`#paraOFio`). A reference that is no longer the stored
+      icon's does not go.
+    */
+    const guardado = (this.vault.contents.spaceMeta[channel]?.payload as { icon?: { ref?: unknown } } | undefined)?.icon
+    const mantido = !next.icon && next.iconRef && guardado?.ref === next.iconRef ? (guardado as unknown as Attachment) : null
+    /*
+      Without the icon bytes on this device, the output to the network would
+      send it `evicted`, and the icon would die for everyone. First try to fetch
+      it; if it does not come, refuse, and the icon stays as it is for
+      everyone.
+    */
+    if (mantido && next.iconRef) {
+      await this.vault.armazemPronto()
+      if (!this.#armazem.tem(next.iconRef)) await this.trazerMedia({ sha: next.iconRef })
+      if (!this.#armazem.tem(next.iconRef)) throw new Error("media store failed", { cause: { passo: "icone-em-falta" } })
+    }
 
     await this.send(channel, {
       t: "space.meta",
       name: nome,
       ...(next.topic?.trim() ? { topic: next.topic.trim() } : {}),
+      ...(mantido ? { icon: mantido } : {}),
       ...(next.icon
         ? {
             icon: {
@@ -7479,11 +7735,32 @@ What was left behind:
     return podeSobrepor(this.#estadoDePermissoes(channel), this.identity.address, lugar, guardadas, guardadas) ? guardadas : undefined
   }
 
-  async republishRooms(channel: string): Promise<void> {
+  async republishRooms(channel: string, opcoes: OpcoesDaCascata = {}): Promise<void> {
     if (!this.#groups.has(channel)) return
     if (!this.mayEditChannel(channel)) return
-    await this.#enviarSalas(channel)
+    await this.#enviarSalas(channel, opcoes)
   }
+
+  /**
+   * A batch of the cascade, whole or in pieces (hotfix 1.3.14).
+   *
+   * In pieces only for the cascade an admin says after its own login
+   * (`#arrumarParaQuemEntrou` at the end of a recovery): ~175 frames in the
+   * common room, encrypted and handed to the interface in one run, froze the
+   * app for seconds on a large account. Between pieces the page (or the desktop
+   * main process, which answers the window's clicks) takes a turn. Each piece is
+   * one vault write, so the pieces are not tiny: see `PEDACO_DA_CASCATA`.
+   */
+  async #enviarCascata(channel: string, payloads: readonly Payload[], opcoes: OpcoesDaCascata): Promise<void> {
+    if (!opcoes.emPedacos) return this.sendBatch(channel, payloads)
+    for (let i = 0; i < payloads.length; i += Session.PEDACO_DA_CASCATA) {
+      if (i > 0) await cederAVez()
+      await this.sendBatch(channel, payloads.slice(i, i + Session.PEDACO_DA_CASCATA))
+    }
+  }
+
+  /** Frames per piece in `#enviarCascata`: ~175 frames go in about five vault writes, not one, not 175. */
+  static PEDACO_DA_CASCATA = 40
 
   /**
    * The live categories of this channel, with the original stamp, for whoever joined.
@@ -7492,7 +7769,7 @@ What was left behind:
    * (`#revezarSalas`) to use as well. With the original date for the usual reason:
    * a new date would beat a published tombstone still on the way.
    */
-  async #enviarCategorias(channel: string): Promise<void> {
+  async #enviarCategorias(channel: string, opcoes: OpcoesDaCascata = {}): Promise<void> {
     const categorias: Payload[] = []
     for (const categoria of this.categoriesOf(channel)) {
       // Overlays go to whoever joins, but only from who could write them: the
@@ -7508,11 +7785,11 @@ What was left behind:
         updatedAt: this.vault.contents.channelCategories?.[channel]?.[categoria.category]?.at ?? 1,
       })
     }
-    await this.sendBatch(channel, categorias)
+    await this.#enviarCascata(channel, categorias, opcoes)
   }
 
   /** The body of `republishRooms`, without the guard of who organizes. See `#revezarSalas`. */
-  async #enviarSalas(channel: string): Promise<void> {
+  async #enviarSalas(channel: string, opcoes: OpcoesDaCascata = {}): Promise<void> {
     const guardadas = this.vault.contents.channelRooms[channel] ?? {}
     // All in one vault save (`#enviarEmLote`).
     const salas: Payload[] = []
@@ -7598,7 +7875,7 @@ What was left behind:
         updatedAt: entrada.at,
       })
     }
-    await this.sendBatch(channel, salas)
+    await this.#enviarCascata(channel, salas, opcoes)
   }
 
   /**
@@ -7752,7 +8029,7 @@ What was left behind:
      * would be signed by us on the wall, meaning we'd vote on behalf of another person. It's
      * the same wall that `republishPosts` already had for posts and that
      * `republishAuthority` has for the foundation. The result is honestly
-     * partial and is stated in `docs/PENDENTES.md`: whoever arrives sees the voting, sees the
+     * partial: whoever arrives sees the voting, sees the
      * vote of whoever posted, and doesn't see others' until each of them speaks up
      * again.
      *
@@ -7914,16 +8191,28 @@ What was left behind:
    * their rooms come after, and turn-taking waits for them. Only from whoever can
    * say them (`renomear`, like `republishRooms`); from anyone else it doesn't count.
    */
-  #ouviuQuemArruma(channel: string, sender: string): void {
+  #ouviuQuemArruma(channel: string, sender: string, seq = -1): void {
     if (sender === this.identity.address || this.#eDirecta(channel)) return
     if (!this.powersOf(channel, sender).includes("renomear")) return
     this.#arrumacaoOuvida.set(channel, (this.#arrumacaoOuvida.get(channel) ?? 0) + 1)
+    if (seq > (this.#ultimaArrumacaoSeq.get(channel) ?? -1)) this.#ultimaArrumacaoSeq.set(channel, seq)
   }
+
+  /**
+   * The highest `seq` of a cascade frame heard (or said, see `#arrumarParaQuemEntrou`),
+   * and of the last growth, per channel (hotfix 1.3.12, review finding 1). A growth
+   * newer than the last cascade is a join nobody covered: the common room by the card
+   * with no admin online. Memory only: a recovery reads both again from the pages.
+   */
+  #ultimaArrumacaoSeq = new Map<string, number>()
+  #ultimoCrescimentoSeq = new Map<string, number>()
 
   /** Stop turn-takings waiting: the connection ended, and the next join asks for them again. */
   #pararRevezamentos(): void {
     for (const relogio of this.#revezamentos.values()) clearTimeout(relogio)
     this.#revezamentos.clear()
+    for (const relogio of this.#arrumacoesPorVez.values()) clearTimeout(relogio)
+    this.#arrumacoesPorVez.clear()
   }
 
   /**
@@ -7961,8 +8250,12 @@ What was left behind:
    * Idempotent for everyone who already knows: the foundation record is not
    * replaced, and the rest saves by timestamp and rewrites the same as before.
    */
-  async republishAuthority(channel: string): Promise<void> {
+  async republishAuthority(channel: string, opcoes: OpcoesDaCascata = {}): Promise<void> {
     if (!this.#groups.has(channel)) return
+    // In pieces, a turn for the page between each part of the cascade. See `#enviarCascata`.
+    const vez = async (): Promise<void> => {
+      if (opcoes.emPedacos) await cederAVez()
+    }
 
     /**
      * The foundation, and only from whoever founded it.
@@ -7999,6 +8292,7 @@ What was left behind:
        * just deleted.
        */
       for (const papel of this.rolesOf(channel)) {
+        await vez()
         // The `rank` only if the role had it: a role from before 1.2 comes out equal to what it was.
         const comRank = typeof (this.vault.contents.channelRoles[channel]?.[papel.role]?.payload as { rank?: unknown } | undefined)?.rank === "number"
         await this.send(channel, {
@@ -8072,18 +8366,30 @@ What was left behind:
           assignedAt: this.vault.contents.channelMemberRolesAt?.[channel]?.[address]?.at ?? 1,
         })
       }
-      // All in one vault save, not one each (`#enviarEmLote`).
-      await this.sendBatch(channel, atribuicoes)
+      // All in one vault save, not one each (`#enviarEmLote`), or in a few pieces.
+      await vez()
+      await this.#enviarCascata(channel, atribuicoes, opcoes)
     }
 
     if (this.mayEditChannel(channel)) {
       // Categories before the banner, and the banner last: it carries
       // the icon, it's the only one that can exceed the max size of a send, and a
       // failure here can't pull along what still had to be published.
-      await this.#enviarCategorias(channel)
+      await vez()
+      await this.#enviarCategorias(channel, opcoes)
 
       const meta = this.spaceMeta(channel)
+      /*
+        An icon in the store (1.3.15): `spaceMeta` gives `iconRef`, not `icon`. The
+        stored attachment goes with its `{ ref }`, and the output to the network
+        inflates it (`#paraOFio`), as in `updateSpaceMeta`. Without this the banner
+        went out with no icon and the same `updatedAt`, and every receiver,
+        this device included, replaced its copy: the icon died for everyone.
+      */
+      const guardado = (this.vault.contents.spaceMeta[channel]?.payload as { icon?: { ref?: unknown } } | undefined)?.icon
+      const iconeGuardado = meta?.iconRef && guardado?.ref === meta.iconRef ? (guardado as unknown as Attachment) : null
       if (meta) {
+        await vez()
         await this.send(channel, {
           t: "space.meta",
           name: meta.name,
@@ -8105,7 +8411,9 @@ What was left behind:
                   byteLength: meta.icon.length,
                 },
               }
-            : {}),
+            : iconeGuardado
+              ? { icon: iconeGuardado }
+              : {}),
           updatedAt: this.vault.contents.spaceMeta[channel]?.at ?? 1,
         })
       }
@@ -8335,7 +8643,9 @@ What was left behind:
     const canais = [...this.#groups.keys()].sort()
     const depois = canais.findIndex((canal) => canal > this.#ultimoReenvioDaFila)
     const fila = depois < 0 ? canais : [...canais.slice(depois), ...canais.slice(0, depois)]
-    for (const channel of fila) {
+    for (const [i, channel] of fila.entries()) {
+      // The catch-up yields between channels (1.3.15): 72 channels with large trees were one long task.
+      if (i > 0) await cederAVez()
       if (this.#connection !== "online") return
       if (channel === this.canalDaConta || channel === this.#commonRoom || this.#eDirecta(channel)) continue
       const grupo = this.#groups.get(channel)
@@ -8443,7 +8753,8 @@ What was left behind:
 
   /** On connection: announce resend in channels where this device has not yet done so. */
   async #anunciarReenvioEmFalta(): Promise<void> {
-    for (const channel of [...this.#groups.keys()]) {
+    for (const [i, channel] of [...this.#groups.keys()].entries()) {
+      if (i > 0) await cederAVez()
       if (this.#connection !== "online") return
       // A device that announced before 1.2 announces again, once, for the permissions model.
       const jaDisse =
@@ -8501,7 +8812,8 @@ What was left behind:
    * respond; there is no worse than today.
    */
   async #pedirPerfisEmFalta(): Promise<void> {
-    for (const channel of [...this.#groups.keys()]) {
+    for (const [i, channel] of [...this.#groups.keys()].entries()) {
+      if (i > 0) await cederAVez()
       if (this.#connection !== "online") return
       if (channel === this.canalDaConta || channel === this.#commonRoom) continue
       const grupo = this.#groups.get(channel)
@@ -8588,8 +8900,11 @@ What was left behind:
       ...(activity === "ocupado" || activity === "ausente" ? { activity } : {}),
       updatedAt: Date.now(),
     }
+    await this.vault.armazemPronto()
     await this.vault.update((contents) => {
       contents.profile = profile
+      // The new portrait goes to the store; one already there stays by the `avatarRef` that came.
+      this.#absorverPerfilProprio(contents)
     })
     await this.publishProfile()
     // And to other devices on the account, so they show the same (phase 1e). Without
@@ -8629,27 +8944,42 @@ What was left behind:
       ...(profile.statusText ? { statusText: profile.statusText } : {}),
       ...(profile.bio ? { bio: profile.bio } : {}),
       ...(profile.email ? { email: profile.email } : {}),
-      ...(profile.avatarDataUrl
-        ? {
-            avatar: {
-              // The data URL goes in `inline`, never in `url`. `url` is capped at 2048
-              // characters in the schema and any real avatar exceeds it, which made the
-              // receiver reject the entire payload (name included) and count the event as
-              // ignored, three ignored events mark the channel deaf and trigger the cascade
-              // of resets that erase history for forward secrecy. `inline` accepts 4 MB and is
-              // the field the reader looks for (useDirectory).
-              url: "",
-              inline: profile.avatarDataUrl,
-              key: "",
-              nonce: "",
-              digest: "",
-              kind: "image" as const,
-              name: "avatar",
-              mediaType: "image/*",
-              byteLength: profile.avatarDataUrl.length,
-            },
-          }
-        : {}),
+      ...(this.#retratoParaOPerfil(profile) ?? {}),
+    }
+  }
+
+  /**
+   * The profile portrait, as the `profile` payload carries it: the `inline` (a
+   * vault still to migrate) or the store reference (`{ ref }`), which the
+   * output to the network inflates (`#paraOFio`). The `byteLength` is always
+   * the length of the `inline`, as it always was: the payload comes out the
+   * same before and after absorbing.
+   */
+  #retratoParaOPerfil(profile: StoredProfile): { avatar: Attachment } | null {
+    const ref = profile.avatarDataUrl ? undefined : profile.avatarRef
+    if (!profile.avatarDataUrl && !ref) return null
+    const caracteres = profile.avatarDataUrl?.length ?? caracteresDaRef(ref ? this.vault.contents.media?.[ref] : undefined)
+    // The reference travels only as far as `#paraOFio`, which swaps it for the `inline`: hence the `as`.
+    const bytes = (ref ? { ref } : { inline: profile.avatarDataUrl }) as { inline: string }
+    return {
+      avatar: {
+        // The data URL goes in `inline`, never in `url`. `url` is limited to
+        // 2048 characters in the schema and any real avatar exceeds it, which
+        // made the receiver reject the WHOLE payload (name included) and count
+        // the event as ignored -- three ignored declare the channel deaf and
+        // trigger the reseat cascade that deletes history through forward
+        // secrecy. `inline` accepts 4 MB and is the field the reader looks for
+        // (useDirectory).
+        url: "",
+        ...bytes,
+        key: "",
+        nonce: "",
+        digest: "",
+        kind: "image" as const,
+        name: "avatar",
+        mediaType: "image/*",
+        byteLength: caracteres,
+      },
     }
   }
 
@@ -8698,18 +9028,28 @@ What was left behind:
     const meuMural = this.#identity !== null ? this.feedChannel : ""
     if (semNome && (!meuMural || !channels.includes(meuMural))) return [...channels]
 
-    const falhados: string[] = []
-    for (const channel of channels) {
+    /*
+      Several channels at once, not one after the other (hotfix 1.3.13). Each
+      publish is two whole-vault writes: the send's own (the ratchet before the
+      frame leaves) and `publishedProfileAt`. One after the other, that was 16
+      writes in 0.9 s at connection on a loaded account. Side by side, the
+      writes that arrive while one is in flight share the next one
+      (`Vault.#gravarPartilhada`), and each caller still waits for the write
+      that holds its change. Different channels have different groups, so the
+      ratchet order of each one does not change.
+    */
+    const falhou = new Array<boolean>(channels.length).fill(false)
+    const publicar = async (channel: string, i: number): Promise<void> => {
       if (semNome && channel !== meuMural) {
-        falhados.push(channel)
-        continue
+        falhou[i] = true
+        return
       }
       // Republishing an unchanged profile is pure cost: at ~124 KB with an
       // avatar, on every connection and every epoch change, to every channel,
       // it was almost the entire content of a live server's database and it
       // pushed real messages out of the capped local timeline. `updatedAt` only
       // moves when the user actually edits their profile.
-      if (!force && this.vault.contents.publishedProfileAt[channel] === profile.updatedAt) continue
+      if (!force && this.vault.contents.publishedProfileAt[channel] === profile.updatedAt) return
 
       try {
         await this.send(channel, this.#payloadDoPerfil(profile, channel))
@@ -8717,17 +9057,24 @@ What was left behind:
         // remembered as done.
         const grupo = this.#groups.get(channel)
         const contas = grupo ? [...new Set([...memberAddresses(grupo.state.ratchetTree).values()].map(String))].sort() : []
-        await this.vault.update((contents) => {
-          contents.publishedProfileAt[channel] = profile.updatedAt
-          // F10: the accounts that received it, so a profile request only answers when
-          // there is someone new. See `#responderAPedidoDePerfis`.
-          contents.perfilPublicadoPara = { ...contents.perfilPublicadoPara, [channel]: contas }
-        })
+        /*
+          Deferred (hotfix 1.3.13): it rides the next write. Lost in a crash, it
+          costs one more publish of the same profile at the next connection,
+          which the receivers already take as a repeat.
+        */
+        void this.vault
+          .updateEmBreve((contents) => {
+            contents.publishedProfileAt[channel] = profile.updatedAt
+            // F10: the accounts that received it, so a profile request only answers when
+            // there is someone new. See `#responderAPedidoDePerfis`.
+            contents.perfilPublicadoPara = { ...contents.perfilPublicadoPara, [channel]: contas }
+          })
+          .catch(() => {})
       } catch {
         // A channel we cannot currently send to. It will pick up the profile on the
         // next update, and whoever called knows, which is the difference between a
         // repair that repeats and one that burns out for nothing.
-        falhados.push(channel)
+        falhou[i] = true
         /*
           F10: a forced send that fails is a profile someone new does not have.
           Forget the version published in this channel makes the next connection
@@ -8742,8 +9089,19 @@ What was left behind:
         }
       }
     }
-    return falhados
+    let proximo = 0
+    const trabalhador = async (): Promise<void> => {
+      while (proximo < channels.length) {
+        const i = proximo++
+        await publicar(channels[i] as string, i)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(Session.PERFIS_EM_PARALELO, channels.length) }, trabalhador))
+    return channels.filter((_, i) => falhou[i])
   }
+
+  /** How many channels get the profile at the same time. See `publishProfile`. */
+  static PERFIS_EM_PARALELO = 8
 
   // ---------------------------------------------------------------- invites
 
@@ -8933,9 +9291,9 @@ What was left behind:
   /**
    * STUN and TURN servers for a call, from our own homeserver.
    *
-   * Empty when the operator runs none, and the caller falls back to a public
-   * STUN — which works on forgiving networks, fails behind symmetric NAT and
-   * CGNAT, and tells a third party the time and IP of every call.
+   * Empty when the operator runs none. The call then uses no ICE servers at all
+   * (no third party learns of the call): the direct connection reaches only the
+   * same network, and the person is told so.
    */
   async iceServers(): Promise<{ urls: string[]; username?: string | undefined; credential?: string | undefined }[]> {
     /**
@@ -9413,7 +9771,7 @@ What was left behind:
         The link gate checks the manifest, as claim already did. Without this, a
         revoked device that still has the account key would generate a package
         with valid chain and enter by link, over the manifest that removed it
-        (docs/PENDENTES.md, slice 3). Without manifest (old server, account that
+        (slice 3). Without manifest (old server, account that
         never published), the chain arrives as in claim.
       */
       const foraDe = (lido: DeviceManifest | null): boolean =>
@@ -9618,9 +9976,8 @@ What was left behind:
    * out, the same rule as the server table.
    *
    * What this is NOT: pairing. When revocation exists (block G), a device
-   * removed from the manifest by another cannot be put back this way; it is
-   * noted in docs/PENDENTES.md, so whoever does block G can close it at the
-   * same time.
+   * removed from the manifest by another cannot be put back this way; whoever does block G
+   * must close it at the same time.
    */
   async #garantirManifesto(): Promise<void> {
     if (!this.suportaAparelhos) return
@@ -9657,7 +10014,7 @@ What was left behind:
     /*
       Account full: do not add. Adding would force cutting by the cap to remove
       another device, and the cut device would add itself again on the next
-      connection: that was the cap ping-pong (docs/PENDENTES.md). The server
+      connection: that was the cap ping-pong. The server
       no longer revokes it (it only revokes what comes in the `revoke` list, see
       `aparelhosRevogados`), but the cycle kept going. To make room you revoke
       one, on purpose (`revokeDevice`).
@@ -9852,6 +10209,8 @@ What was left behind:
     if (!temChaveDeConta(identity)) throw new Error("this device has no account key")
     if (!this.suportaEmparelhamento) throw new Error("this server cannot pair devices")
     if (this.#connection !== "online") throw new Error("no connection to the server")
+    // The own portrait, already read from the store: the snapshot goes out without waiting (`#estadoParaEmparelhar`).
+    await this.#aquecerRetratoProprio().catch(() => {})
     this.#anfitriao?.cancelar()
 
     const anfitriao = new AnfitriaoDeEmparelhamento(
@@ -9950,9 +10309,12 @@ What was left behind:
               contents.deviceSigningPrivateKey = toBase64(resultado.deviceSigningPrivateKey)
               contents.homeserver = resultado.homeserver
               contents.identityCreatedAtMinute = Math.floor(Date.now() / 60_000)
-              // The account state, if it came (phase 5): in the same `update`, so the
-              // first `connect()` already finds it in the vault.
-              if (resultado.estado) aplicarEstadoDeConta(contents, resultado.address, resultado.estado)
+              // The account state, if it came (phase 5): in the same `update`, so
+              // the first `connect()` already finds it in the vault.
+              if (resultado.estado) {
+                aplicarEstadoDeConta(contents, resultado.address, resultado.estado)
+                this.#absorverPerfilProprio(contents)
+              }
             }),
           )
           .then(() => this.emit("pair", evento))
@@ -10004,7 +10366,7 @@ What was left behind:
 
   /**
    * "Join another account", step 1: pair THIS device with the main account,
-   * without dropping the secondary (phase 8.2, `docs/planos/definicoes-0-9.md`).
+   * without dropping the secondary (phase 8.2).
    *
    * The usual pairing, from the guest side, with one difference: the
    * certificate is NOT written to the vault. It stays in memory (`#juntar`), and
@@ -10167,7 +10529,10 @@ What was left behind:
         contents.deviceSigningPrivateKey = toBase64(cofre.deviceSigningPrivateKey)
         contents.homeserver = cofre.homeserver
         contents.identityCreatedAtMinute = Math.floor(Date.now() / 60_000)
-        if (cofre.estado) aplicarEstadoDeConta(contents, cofre.address, cofre.estado)
+        if (cofre.estado) {
+          aplicarEstadoDeConta(contents, cofre.address, cofre.estado)
+          this.#absorverPerfilProprio(contents)
+        }
       })
       this.loadIdentity()
       await this.connect()
@@ -11081,6 +11446,7 @@ What was left behind:
             updatedAt: payload.updatedAt,
           })
         ) {
+          this.#absorverPerfilProprio(c)
           mudou = true
           this.emit("perfil", { profile: c.profile })
           void this.publishProfile().catch(() => {})
@@ -11126,7 +11492,10 @@ What was left behind:
       malformed profile from an old vault (a name over the limit) is left out and
       doesn't take the entire snapshot with it. No name, no profile to send.
     */
-    const lido = c.profile.displayName ? PerfilDaConta.safeParse(c.profile) : null
+    // The own portrait is in the store: what `#aquecerRetratoProprio` read goes; without it, it arrives later with the whole state.
+    const { avatarRef, ...perfilDoCofre } = c.profile
+    const retrato = avatarRef && this.#retratoProprio?.sha === avatarRef ? { avatarDataUrl: this.#retratoProprio.inline } : {}
+    const lido = c.profile.displayName ? PerfilDaConta.safeParse({ ...perfilDoCofre, ...retrato }) : null
     const perfil = lido?.success ? lido.data : undefined
     const perfis = this.#perfisParaOsIrmaos()
     return {
@@ -11194,6 +11563,30 @@ What was left behind:
    * this device can enter the account channel, and prove this leaf is alive when a
    * sibling asks for space (F16, `#folhasMortas`).
    */
+  /**
+   * Say "I am typing" in this channel, until `ate` (12/11/2026).
+   *
+   * By the encrypted ephemeral signal when the server routes it: nothing is
+   * stored, nothing comes back in a recovery, and no generation of the ratchet
+   * is spent. It was an MLS `typing`, and in the common room those were most of
+   * the 30 days of stored events that everyone decrypted. Only a server without
+   * `CAPACIDADE_SINAL_EFEMERO` still gets the old message.
+   *
+   * A client up to 1.3.7 does not see the new signal: it drops it as illegible,
+   * and only loses the "is typing" line of an updated client.
+   */
+  async sinalizarEscrita(channel: string, room?: string, ate: number = Date.now() + TYPING_TTL_MS): Promise<void> {
+    if (!this.#groups.has(channel)) throw new Error("not a member of this channel", { cause: { channel } })
+    // Ephemeral: one that would wait for the connection is already stale. Before `auth.ok` it is dropped.
+    if (this.#connection !== "online") return
+    if (this.#serverCapabilities.includes(CAPACIDADE_SINAL_EFEMERO)) {
+      // A refused or capped signal is a lost "is typing" line, never a reason to store one.
+      await this.#anti.escrever(channel, room ?? "", ate)
+      return
+    }
+    await this.send(channel, { t: "typing", ...(room ? { room } : {}), until: ate })
+  }
+
   async #sinalDeAparelho(channel: string, pedirPerfis = false): Promise<void> {
     const capacidades = [
       CAPACIDADE_ESTADO_DA_CONTA,
@@ -11498,14 +11891,19 @@ What was left behind:
    * One message per action, and the most recent from each person is what counts. Switching thumbs means sending the other; removing the vote is `remove`. There is no counter here being incremented, because there is no one to trust with the sum, see `post.reaction` in the protocol.
    */
   async reactToPost(channel: string, target: string, emoji: string, remove = false): Promise<void> {
-    await this.send(channel, {
-      t: "post.reaction",
-      id: crypto.randomUUID(),
-      target,
-      emoji,
-      at: Date.now(),
-      remove,
-    })
+    // From the interface: waits for the channel's recovery like a message. See `#esperarPelaRecuperacao`.
+    await this.send(
+      channel,
+      {
+        t: "post.reaction",
+        id: crypto.randomUUID(),
+        target,
+        emoji,
+        at: Date.now(),
+        remove,
+      },
+      { daPessoa: true },
+    )
   }
 
   /**
@@ -11564,7 +11962,7 @@ What was left behind:
     if (this.#bloqueadoAqui(channel, address)) throw new Error("that person is blocked")
     const group = this.#groups.get(channel)
     if (group && [...memberAddresses(group.state.ratchetTree).values()].includes(address as UserAddress)) {
-      // `live` is having broadcast AND no device missing: an account with one device speaking and another without a leaf yet has a seat to give, and `#invite` gives only that one. Proof of life is still per PERSON (`transmitters` by address); dropping it to the device, so a dead device does not live in another's shadow, is block F of the plan and stays in docs/PENDENTES.md.
+      // `live` is having broadcast AND no device missing: an account with one device speaking and another without a leaf yet has a seat to give, and `#invite` gives only that one. Proof of life is still per PERSON (`transmitters` by address); dropping it to the device, so a dead device does not live in another's shadow, is block F of the plan and is still open.
       if (hasTransmitted(this.vault.contents, channel, address)) {
         if (!(await this.#haLugarPorDar(group, address))) return "live"
         await this.#seatInvite(channel, address)
@@ -11588,7 +11986,7 @@ What was left behind:
   /**
    * Take the dead leaf back and hand out a fresh seat.
    *
-   * **This does NOT walk the group queue, and it is on purpose.** The two halves already walk it internally, each in its turn; putting it here too was the trap written in `docs/PENDENTES.md` before this was fixed: `#unseat` would wait for a queue that the very `#reseat` that called it would be holding, and the channel would freeze forever, with no error and no warning, because a promise that never resolves is indistinguishable from slow work. The rule that stands: the queue embraces the LEAVES of the call tree, never what composes them.
+   * **This does NOT walk the group queue, and it is on purpose.** The two halves already walk it internally, each in its turn; putting it here too was a trap: `#unseat` would wait for a queue that the very `#reseat` that called it would be holding, and the channel would freeze forever, with no error and no warning, because a promise that never resolves is indistinguishable from slow work. The rule that stands: the queue embraces the LEAVES of the call tree, never what composes them.
    *
    * The cost of two times instead of one is that a send can slip between removal and admission. It is the certain cost: the two are independent commits, and a message encrypted in the in-between epoch opens perfectly for whoever is there.
    *
@@ -12133,6 +12531,28 @@ What was left behind:
       lugar: (canal) => this.#lugarDaConta(canal),
       emitir: (evento) => this.emit("historico", evento),
       agora: () => Date.now(),
+      armazem: {
+        presente: this.#presente,
+        inflar: {
+          // Never a `{ ref }` to a sibling: whatever could not be inflated (the vault locked, the blob missing) goes `evicted`.
+          payload: async (payload, opcoes) => soInlineOuEvicted(await this.#inflarParaOFio(payload, opcoes)),
+          bytes: (sha) => this.bytesDeMedia(sha),
+        },
+        absorver: (contents, payload) => {
+          const absorvido = this.#absorver(contents, payload)
+          // A post a sibling brought: its videos are no longer in flight.
+          this.#largarEmVoo(absorvido)
+          return absorvido
+        },
+        guardarVideo: (contents, sha, bytes, at) => {
+          if (!this.#armazem.aberto || this.#armazem.selado) {
+            // The store is closed: into the legacy field, and the migration moves it.
+            if (guardarVideo(contents, sha, bytesParaBase64(bytes), at)) contents.armazem = { ...contents.armazem, porMigrar: true }
+            return
+          }
+          absorverVideo(contents, bytes, this.#tipoDoVideo(contents, sha), this.#armazem)
+        },
+      },
     }
   }
 
@@ -12179,7 +12599,7 @@ What was left behind:
 
   /**
    * The report, assembled from the vault and ready to show before leaving
-   * (`docs/planos/denuncias-design.md`, §4.4 and §5).
+   * 
    *
    * Reads vault entries as they are, not `history()`: `history()` removes the
    * mention of everyone who lacks the permission, and a changed payload no
@@ -12485,8 +12905,15 @@ What was left behind:
         })
       })
     }
+    let esperadoEm = Date.now() + Session.CAIXA_MS
     this.#caixaPrimeira = soltar(setTimeout(ler, Session.CAIXA_PRIMEIRA_MS))
-    this.#caixaRelogio = soltar(setInterval(ler, Session.CAIXA_MS))
+    this.#caixaRelogio = soltar(
+      setInterval(() => {
+        this.#notarAtraso(esperadoEm)
+        esperadoEm = Date.now() + Session.CAIXA_MS
+        ler()
+      }, Session.CAIXA_MS),
+    )
   }
 
   #desarmarCaixa(): void {
@@ -12537,6 +12964,11 @@ What was left behind:
       enviarRelatos: async (canal, relatos) => {
         await this.send(canal, { t: "typing", until: 0, relatos })
       },
+      // Live only by construction: an ephemeral signal never comes back in a recovery.
+      aoEscrever: (canal, de, sala, ate) => {
+        if (de === this.identity.address || ate <= Date.now()) return
+        this.emit("typing", { channel: canal, from: de as UserAddress, room: sala, until: ate })
+      },
       gravarRelatado: (canal, seq, autor, payload) => this.#gravarRelatado(canal, seq, autor, payload),
       escoar: () => this.flush(),
       marcarParaGravar: () => {
@@ -12551,6 +12983,8 @@ What was left behind:
       gravarAnexo: (canal, autor, alvo, indice, anexo) => this.#gravarAnexo(canal, autor, alvo, indice, anexo),
       bytesDoVideo: (sha) => this.#videos.bytes(sha),
       aoFalharAnexo: (canal, detalhe) => this.#anexoFalhou(canal, detalhe),
+      temVideo: (sha) => this.#videos.tem(sha),
+      inflar: (payload) => this.#inflarParaOFio(payload),
       servirVideo: (canal, sha, q, vez) => this.#videos.servir(canal, sha, q, vez),
       esperarVideo: (canal, anexo) => this.#videos.esperar(canal, [anexo]),
       aoMudar: (canal) => {
@@ -12560,8 +12994,9 @@ What was left behind:
       // Profiles to third parties, only in the common room (3/11/2026). See `#pedirPerfisNaSalaComum`.
       perfisATerceiros: (canal) => canal === this.#commonRoom,
       perfisParaRelatar: (canal, contas) => perfisParaRelatar(this.vault.contents, canal, contas, this.identity.address),
-      republicarPerfil: (canal) => {
-        if (!this.#podeAgora(this.#perfisRepublicadosAPedido, canal, Session.PEDIDO_DE_PERFIS_MS)) return
+      // Once per requester and channel every ten minutes: one per channel blocked the next newcomer of a wave of joins.
+      republicarPerfil: (canal, quem) => {
+        if (!this.#podeAgora(this.#perfisRepublicadosAPedido, `${canal}|${quem}`, Session.PEDIDO_DE_PERFIS_MS)) return
         void this.publishProfile([canal], true).catch(() => {})
       },
       aoPerfisRelatados: (_canal, perfis) => {
@@ -12598,10 +13033,10 @@ What was left behind:
    * the others, who read it before their turn. That heals the accounts that are ALREADY
    * without a name: each updated client requests it on login.
    */
-  #pedirPerfisNaSalaComum(): void {
+  #pedirPerfisNaSalaComum(esperaMs?: number): void {
     const sala = this.#commonRoom
     if (!sala || this.#pedidoDePerfisNaSalaComum !== null) return
-    const espera = Session.ESPERA_DO_PEDIDO_DE_PERFIS_MS + Math.random() * Session.ACASO_DO_PEDIDO_DE_PERFIS_MS
+    const espera = esperaMs ?? Session.ESPERA_DO_PEDIDO_DE_PERFIS_MS + Math.random() * Session.ACASO_DO_PEDIDO_DE_PERFIS_MS
     this.#pedidoDePerfisNaSalaComum = setTimeout(() => {
       this.#pedidoDePerfisNaSalaComum = null
       if (this.#connection !== "online" || !this.vault.unlocked || !this.#groups.has(sala)) return
@@ -12610,7 +13045,20 @@ What was left behind:
       const semNome = [...new Set(this.membersOf(sala).map(String))].filter(
         (conta) => conta !== eu && !diretorio[conta]?.payload["displayName"],
       )
-      if (semNome.length > 0) void this.#anti.pedirPerfis(sala, semNome).catch(() => {})
+      /*
+        One request carries at most `PERFIS_POR_PEDIDO` accounts, and the next
+        waits a minute (12/11/2026). It used to wait for the ten-minute pass: in
+        a room of 409, a newcomer saw 300 people "Sem nome". So it re-arms here,
+        a minute later, while there are accounts not yet asked for.
+      */
+      const porPedir = this.#anti.contasPorPedir(sala, semNome)
+      if (porPedir.length === 0) return
+      void this.#anti
+        .pedirPerfis(sala, porPedir)
+        .catch(() => false)
+        .then(() => {
+          if (this.#anti.contasPorPedir(sala, semNome).length > 0) this.#pedirPerfisNaSalaComum(AntiEntropia.INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS + 1_000)
+        })
     }, espera)
   }
 
@@ -12630,12 +13078,522 @@ What was left behind:
       for (const entrada of entradasDoCanal(contents, canal)) {
         if (entrada.sender !== autor || entrada.payload["id"] !== alvo) continue
         const novo = comAnexo(entrada.payload, indice, anexo)
-        if (novo) entrada.payload = novo as typeof entrada.payload
+        // The checked bytes go to the store, in the same mutation that puts them in place of the marker.
+        if (novo) entrada.payload = this.#absorver(contents, novo as typeof entrada.payload)
       }
     })
   }
 
-  // ------------------------------------------------- video from publications
+  // ------------------------------------------------- the media store
+  //
+  // The vault keeps
+  // references; the bytes live in the store. Nine input doors absorb
+  // (synchronous, inside the mutation that stores the payload) and the outputs
+  // to the network inflate: the wire carries the same exact `inline` as always.
+
+  /** The blob for this `sha` is on this device. The `presente` of the media accounting (Ruling R15). */
+  readonly #presente = (sha: string): boolean => this.#armazem.tem(sha)
+
+  /**
+   * The input door: a payload's bytes move to the store, and the payload that
+   * is stored keeps `{ ref }`. Runs INSIDE the mutation that stores it (Ruling
+   * R12: absorbed and not stored is an orphan for the collection). Only for
+   * payloads that already went through the protocol schema (Ruling R14: the
+   * schema strips a `ref` coming from outside, and a foreign `{ ref }` is never
+   * accepted).
+   *
+   * With the store still closed, or sealed, the payload keeps the bytes, and
+   * the vault is left to migrate: the migration moves them afterwards.
+   */
+  #absorver(contents: VaultContents, payload: StoredPayload): StoredPayload {
+    if (!this.#armazem.aberto || this.#armazem.selado) {
+      if (semBytes({ payload } as unknown as VaultContents).length > 0) contents.armazem = { ...contents.armazem, porMigrar: true }
+      return payload
+    }
+    const absorvido = absorverPayload(contents, payload, this.#armazem)
+    if (absorvido !== payload) this.#notarAbsorvidos(contents, absorvido)
+    return absorvido
+  }
+
+  /** A vault entry with its payload absorbed. The same if it had no bytes. */
+  #absorverEntrada<E extends { payload: StoredPayload }>(contents: VaultContents, entrada: E): E {
+    const payload = this.#absorver(contents, entrada.payload)
+    return payload === entrada.payload ? entrada : { ...entrada, payload }
+  }
+
+  /** The own portrait (`avatarDataUrl`) moves to the store: it becomes `avatarRef`. */
+  #absorverPerfilProprio(contents: VaultContents): void {
+    const { avatarDataUrl, ...resto } = contents.profile
+    if (!avatarDataUrl) return
+    if (!this.#armazem.aberto || this.#armazem.selado) {
+      contents.armazem = { ...contents.armazem, porMigrar: true }
+      return
+    }
+    const sha = absorverRetrato(contents, avatarDataUrl, this.#armazem)
+    contents.profile = { ...resto, avatarRef: sha }
+    this.#retratoProprio = { sha, inline: avatarDataUrl }
+    this.#notarAbsorvidos(contents, { t: "profile", avatar: { ref: sha } })
+  }
+
+  /** New images ask for a thumbnail; portraits stored as originals become "mini" (Ruling R13). */
+  #notarAbsorvidos(contents: VaultContents, payload: StoredPayload): void {
+    for (const sha of shasDoPayload(payload)) {
+      const ref = contents.media?.[sha]
+      if (ref && ref.mini === undefined && ref.t.startsWith("image/")) this.#porMiniaturar.add(sha)
+    }
+    for (const sha of shasDosRetratos(payload)) if (contents.media?.[sha]?.c === "original") this.#porPromover.add(sha)
+    if (this.#porMiniaturar.size > 0 || this.#porPromover.size > 0) queueMicrotask(() => void this.#trabalharMedia())
+  }
+
+  /** The thumbnails to make and the portraits to promote, in the background. */
+  #porMiniaturar = new Set<string>()
+  #porPromover = new Set<string>()
+  #aTrabalharMedia = false
+
+  /**
+   * The thumbnails and the promotions, one at a time, yielding between them
+   * (design §6, step 6). Never before the migration ends. A reclassified
+   * reference is written at once (Ruling R12): the blob has already been
+   * re-encrypted, and only the new reference opens it.
+   */
+  async #trabalharMedia(): Promise<void> {
+    if (this.#aTrabalharMedia) return
+    this.#aTrabalharMedia = true
+    try {
+      for (;;) {
+        if (!this.vault.unlocked || !this.#escreve || this.#armazem.selado || !this.#armazem.aberto) return
+        const contents = this.vault.contents
+        if (contents.armazem?.porMigrar) return
+        const [promover] = this.#porPromover
+        const [miniaturar] = promover === undefined ? this.#porMiniaturar : []
+        const sha = promover ?? miniaturar
+        if (sha === undefined) return
+        if (promover !== undefined) this.#porPromover.delete(sha)
+        else this.#porMiniaturar.delete(sha)
+        const classe = contents.media?.[sha]?.c
+        try {
+          if (promover !== undefined) await promoverARetrato(contents, sha, this.#armazem)
+          else await pedirMiniatura(contents, sha, this.#armazem)
+        } catch {
+          // A platform failure: it stays without a thumbnail, and the next opening tries again.
+        }
+        if (this.vault.contents !== contents) return
+        if (contents.media?.[sha]?.c !== classe) await this.vault.update(() => {}).catch(() => {})
+        else void this.vault.updateEmBreve(() => {}).catch(() => {})
+        await ceder()
+      }
+    } finally {
+      this.#aTrabalharMedia = false
+    }
+  }
+
+  /** The store opening this session has already handled (migration, thumbnails, collection). */
+  #aberturaCuidada: Promise<void> | null = null
+
+  /**
+   * Once per vault opening: waits for the store, migrates what is still in the
+   * vault (design §6), and only then asks for the missing thumbnails and arms
+   * the deferred collection of crash orphans. Only in the tab that writes
+   * (Ruling R17): a tab without ownership never migrates nor deletes.
+   */
+  #cuidarDoArmazem(): void {
+    if (!this.vault.unlocked) return
+    const abertura = this.vault.armazemPronto()
+    if (abertura === this.#aberturaCuidada) return
+    this.#aberturaCuidada = abertura
+    const contents = this.vault.contents
+    void (async () => {
+      await abertura
+      const minha = () => this.vault.unlocked && this.vault.contents === contents && this.#escreve && this.#armazem.aberto && !this.#armazem.selado
+      if (!minha()) return
+      try {
+        await migrarTudo(this.vault, this.#armazem, { passo: ceder })
+      } catch {
+        // Interrupted (vault closed, disk full): the next opening resumes where it stopped.
+      }
+      if (!minha()) return
+      // The own portrait from before the migration, which `migrarTudo` already moved, or one left to move.
+      if (contents.profile.avatarDataUrl && !contents.armazem?.porMigrar) {
+        await this.vault.update((c) => this.#absorverPerfilProprio(c)).catch(() => {})
+      }
+      for (const [sha, ref] of Object.entries(contents.media ?? {})) {
+        if (ref.mini === undefined && ref.t.startsWith("image/")) this.#porMiniaturar.add(sha)
+      }
+      void this.#aquecerRetratoProprio()
+      void this.#trabalharMedia()
+      this.#agendarRecolha(Session.RECOLHA_ADIADA_MS)
+    })()
+  }
+
+  /**
+   * The videos `guardarNoArmazem` absorbed before the post that references them
+   * (through the parts) entered the vault: the collection does not touch them.
+   * Only `guardarNoArmazem` adds. They leave: in the mutation that stores the
+   * post (`#largarEmVoo`), right after the absorption if the post was already
+   * there, when the upload ends or fails, when they are forgotten, on lock
+   * (`reset`), and at the end of `EM_VOO_MS`, so nothing is held for the whole
+   * session.
+   */
+  #emVoo = new Map<string, number>()
+
+  /** How long a video can stay in flight, at most. Static for tests. */
+  static EM_VOO_MS = 30 * 60_000
+
+  /** This payload's post entered the vault: its videos are no longer in flight. */
+  #largarEmVoo(payload: StoredPayload): void {
+    if (this.#emVoo.size === 0 || payload.t !== "post") return
+    for (const sha of resumosDosVideos(payload["media"])) this.#emVoo.delete(sha)
+  }
+
+  /** The deferred collection of orphans after opening (design §5). Static for tests. */
+  static RECOLHA_ADIADA_MS = 30_000
+
+  #recolhaTimer: ReturnType<typeof setTimeout> | undefined
+  #recolhaEm = Number.POSITIVE_INFINITY
+
+  /** Collect `ms` from now (or earlier, if it was already set for earlier). */
+  #agendarRecolha(ms: number): void {
+    const em = Date.now() + ms
+    if (this.#recolhaTimer !== undefined && this.#recolhaEm <= em) return
+    if (this.#recolhaTimer !== undefined) clearTimeout(this.#recolhaTimer)
+    this.#recolhaEm = em
+    this.#recolhaTimer = setTimeout(() => {
+      this.#recolhaTimer = undefined
+      this.#recolhaEm = Number.POSITIVE_INFINITY
+      void this.#recolherAgora().catch(() => {})
+    }, ms)
+  }
+
+  /**
+   * Delete from the store what the vault no longer references (design §5,
+   * collection): after forgetting a channel, after a tombstone, and once per
+   * opening. Never with the migration unfinished (T5 ruling), nor in a tab
+   * without ownership.
+   */
+  async #recolherAgora(): Promise<void> {
+    if (!this.vault.unlocked || !this.#escreve || this.#armazem.selado || !this.#armazem.aberto) return
+    const contents = this.vault.contents
+    if (contents.armazem?.porMigrar) return
+    // The in-flight ones the vault already references no longer need the guard.
+    if (this.#emVoo.size > 0) {
+      const referenciados = shasReferenciados(contents)
+      const agora = Date.now()
+      for (const [sha, desde] of this.#emVoo) {
+        if (referenciados.has(sha) || agora - desde > Session.EM_VOO_MS) this.#emVoo.delete(sha)
+      }
+    }
+    // The synchronous part of `recolher` removes the dead references from the vault now; the write carries them.
+    const apagados = await recolher(contents, this.#armazem, new Set(this.#emVoo.keys()))
+    if (apagados.length > 0 && this.vault.contents === contents) void this.vault.updateEmBreve(() => {}).catch(() => {})
+  }
+
+  /**
+   * A tombstone arrived (`redact`): the target stays in the vault, hidden by
+   * the folds, but without media references (design §5), and the collection
+   * deletes the bytes. Only the author's own tombstone (Ruling R22): a
+   * moderator's one is undone (the folds stop honouring it when the role
+   * leaves), and the bytes must be there when it shows again.
+   */
+  #tirarMediaDoAlvo(contents: VaultContents, channel: string, lapide: StoredChatMessage): void {
+    const alvo = (lapide.payload as { target?: unknown }).target
+    if (typeof alvo !== "string") return
+    let tirou = false
+    for (const lista of [contents.history[channel], contents.estadoDoCanal?.[channel]]) {
+      for (const entrada of lista ?? []) {
+        if ((entrada.payload as { id?: unknown }).id !== alvo) continue
+        if (entrada.sender !== lapide.sender) continue
+        const sem = semReferencias(entrada.payload)
+        if (sem === entrada.payload) continue
+        entrada.payload = sem
+        tirou = true
+      }
+    }
+    if (tirou) this.#agendarRecolha(0)
+  }
+
+  /**
+   * The write of the own portrait blob failed (disk full, Erro 520 or 521).
+   * The portrait goes back to the vault (`avatarDataUrl`, and the vault is left
+   * to migrate): without this, every profile that went out gave "the profile
+   * picture is not on this device", and the new name never reached anyone.
+   */
+  #retratoProprioFalhou(sha: string): void {
+    if (!this.vault.unlocked || this.vault.contents.profile.avatarRef !== sha) return
+    const inline = this.#retratoProprio?.sha === sha ? this.#retratoProprio.inline : null
+    if (inline === null) return
+    void this.vault
+      .update((contents) => {
+        if (contents.profile.avatarRef !== sha) return
+        const { avatarRef: _ref, ...resto } = contents.profile
+        contents.profile = { ...resto, avatarDataUrl: inline }
+        contents.armazem = { ...contents.armazem, porMigrar: true }
+      })
+      .catch(() => {})
+  }
+
+  /** The own portrait, inflated, for what goes out without waiting (the pairing snapshot). */
+  #retratoProprio: { sha: string; inline: string } | null = null
+
+  /** Reads the own portrait from the store into `#retratoProprio`. */
+  async #aquecerRetratoProprio(): Promise<void> {
+    if (!this.vault.unlocked) return
+    const sha = this.vault.contents.profile.avatarRef
+    if (!sha || this.#retratoProprio?.sha === sha) return
+    await this.vault.armazemPronto()
+    const inflado = await this.#inflarParaOFio({ t: "profile", avatar: { ref: sha, name: "avatar", mediaType: "image/*" } })
+    const inline = (inflado["avatar"] as { inline?: unknown } | undefined)?.inline
+    if (typeof inline === "string" && this.vault.unlocked && this.vault.contents.profile.avatarRef === sha) this.#retratoProprio = { sha, inline }
+  }
+
+  /**
+   * The output door to the network (design §5): each `{ ref }` becomes again
+   * the exact `inline`, `thumbnail` or `poster` the authorship signed, and the
+   * wire carries what it always carried. Without the blob, the attachment goes
+   * as `evicted` (which a 1.1.x to 1.3.x client already reads). The same
+   * payload if it has no references.
+   */
+  async #inflarParaOFio<P extends { t: string }>(payload: P, opcoes: { maxBytes?: number; maxCaracteres?: number } = {}): Promise<P> {
+    const stored = payload as unknown as StoredPayload
+    if (shasDoPayload(stored).length === 0 || !this.vault.unlocked) return payload
+    await this.vault.armazemPronto()
+    return (await inflarPayload(this.vault.contents, stored, this.#armazem, opcoes)) as unknown as P
+  }
+
+  /**
+   * The payload as it goes out to the network: inflated (`#inflarParaOFio`). A
+   * profile whose portrait is not on this device does not go out: without the
+   * `inline`, the others would get the marker over the portrait they already
+   * have.
+   */
+  async #paraOFio(payload: Payload): Promise<Payload> {
+    const inflado = await this.#inflarParaOFio(payload)
+    if (inflado !== payload && payload.t === "profile" && (inflado as { avatar?: { evicted?: unknown } }).avatar?.evicted === true) {
+      // Our portrait that did not reach the disk: the `inline` is still in memory.
+      const ref = (payload as { avatar?: { ref?: unknown } }).avatar?.ref
+      const proprio = this.#retratoProprio
+      if (proprio && ref === proprio.sha) {
+        // The `inline` in place of the `ref`, in the same position: the payload goes out the same as always.
+        const avatar: Record<string, unknown> = {}
+        for (const [chave, valor] of Object.entries((payload as unknown as { avatar: Record<string, unknown> }).avatar)) {
+          avatar[chave === "ref" ? "inline" : chave] = chave === "ref" ? proprio.inline : valor
+        }
+        return { ...inflado, avatar } as Payload
+      }
+      throw new Error("the profile picture is not on this device")
+    }
+    return inflado
+  }
+
+  /**
+   * The bytes of a media item on this device, decrypted: the file's. Null if
+   * the vault is closed, if the reference does not exist, if the blob left
+   * (through the ceiling, or never arrived), or if it is damaged (Erro 522).
+   */
+  async bytesDeMedia(sha: string): Promise<Uint8Array | null> {
+    if (!this.vault.unlocked) return null
+    await this.vault.armazemPronto()
+    if (!this.vault.unlocked) return null
+    try {
+      return await bytesDoMedia(this.vault.contents, sha, this.#armazem)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Resolves when the store writes that were in the queue reached the disk.
+   * The hosts wait for this before sealing (ownership passes to another tab)
+   * and before locking (sign out, switch account, close): after locking, the
+   * queue no longer touches the disk.
+   */
+  drenarArmazem(): Promise<void> {
+    return this.#armazem.drenar()
+  }
+
+  /** This session's store, for the account file with the images (`Vault.exportarComImagens`, `Vault.importVault`). */
+  get armazem(): ArmazemDeMedia {
+    return this.#armazem
+  }
+
+  /** What is on screen does not leave through the ceiling. Each `fixarMedia` needs its `soltarMedia`. */
+  fixarMedia(sha: string): void {
+    this.#armazem.fixar(sha)
+  }
+
+  soltarMedia(sha: string): void {
+    this.#armazem.soltar(sha)
+  }
+
+  /** The ceiling, what is used, and how many originals and thumbnails there are. */
+  estadoDoArmazem(): EstadoDoArmazem {
+    return this.#armazem.estado()
+  }
+
+  /** This device's ceiling, in bytes (0 = no ceiling). One of `TECTOS_DO_ARMAZEM.opcoes`. Lowering it evicts now. */
+  async definirTectoDoArmazem(bytes: number): Promise<void> {
+    if (!(TECTOS_DO_ARMAZEM.opcoes as readonly number[]).includes(bytes)) throw new RangeError("invalid media store ceiling", { cause: { bytes } })
+    await this.vault.armazemPronto()
+    await this.#armazem.definirTecto(bytes)
+  }
+
+  /** "Free up space": removes from this device every original that is not on screen. Thumbnails stay. */
+  async libertarArmazem(): Promise<void> {
+    await this.vault.armazemPronto()
+    await this.#armazem.libertar()
+  }
+
+  /**
+   * Fetch a media item this device only has by reference (the "Fetch" gesture,
+   * design §8): first from a connected sibling device (the history between
+   * devices, `trazerUm`); then an attachment is asked from the members who have
+   * it (S5), and an account's portrait from the members (F10). A `sha` is
+   * resolved through the vault to one of the two. Emits `media` with "chegou"
+   * when the blob is here. "sem-irmao": no sibling to ask and no member gave
+   * it; "ninguem": a sibling answered without it, and no member gave it. Never
+   * throws.
+   */
+  async trazerMedia(id: MediaATrazer): Promise<DesfechoDoTrazer> {
+    if (!this.vault.unlocked) return { ok: false, motivo: "ninguem" }
+    if (this.#connection !== "online") return { ok: false, motivo: "sem-ligacao" }
+    const alvo = "sha" in id ? this.#ondeEstaOMedia(id.sha) : id
+    if (!alvo) return { ok: false, motivo: "ninguem" }
+    // A sibling device first (the history between devices): it is the same account, and it has the whole store.
+    const irmao = await this.#trazerDoIrmao(alvo)
+    if (irmao === "chegou") return { ok: true }
+    if (this.#connection !== "online") return { ok: false, motivo: "sem-ligacao" }
+    // Then the members. With none that gives it, the reason says whether there was a sibling to ask.
+    const ninguem: DesfechoDoTrazer = { ok: false, motivo: irmao === "sem-irmao" ? "sem-irmao" : "ninguem" }
+    if ("a" in alvo) {
+      const retrato = await this.#trazerRetrato(alvo.a)
+      return retrato.ok || retrato.motivo === "sem-ligacao" ? retrato : ninguem
+    }
+    const desfecho = await this.pedirAnexo(alvo.channel, alvo.alvo, alvo.indice)
+    if (!desfecho.ok) return desfecho.motivo === "sem-ligacao" ? { ok: false, motivo: "sem-ligacao" } : ninguem
+    const sha = this.#shaDoAnexo(alvo)
+    if (sha) this.emit("media", { sha, estado: "chegou" })
+    return { ok: true }
+  }
+
+  /**
+   * Ask a sibling device for the media item (`trazerUm`). "chegou" only if the
+   * blob really is here now: the sibling may have the entry with the attachment
+   * missing. Emits `media`.
+   */
+  async #trazerDoIrmao(alvo: { channel: string; alvo: string; indice: number } | { a: string }): Promise<DesfechoDoIrmao> {
+    const shaAgora = (): string | null => {
+      if (!this.vault.unlocked) return null
+      if ("a" in alvo) {
+        const perfil = this.vault.contents.directory[alvo.a]
+        return (perfil ? shasDosRetratos(perfil.payload)[0] : undefined) ?? null
+      }
+      return this.#shaDoAnexo(alvo)
+    }
+    let item: ItemDeMediaDoIrmao
+    if ("a" in alvo) item = { a: alvo.a }
+    else {
+      const entrada = entradasDoCanal(this.vault.contents, alvo.channel).find((e) => (e.payload as { id?: unknown }).id === alvo.alvo)
+      const e = entrada ? chaveDoEvento(entrada) : null
+      if (e === null) return "nao-tem"
+      item = { c: alvo.channel, e }
+    }
+    const desfecho = await this.#historico.trazerUm(item).catch((): DesfechoDoIrmao => "sem-irmao")
+    if (desfecho !== "chegou") return desfecho
+    const sha = shaAgora()
+    if (!sha || !this.#armazem.tem(sha)) return "nao-tem"
+    this.emit("media", { sha, estado: "chegou" })
+    return "chegou"
+  }
+
+  /** Where the vault references this `sha`: an attachment of an entry, or an account's portrait. */
+  #ondeEstaOMedia(sha: string): { channel: string; alvo: string; indice: number } | { a: string } | null {
+    const c = this.vault.contents
+    for (const [a, perfil] of Object.entries(c.directory)) if (shasDoPayload(perfil.payload).includes(sha)) return { a }
+    for (const channel of canaisComEntradas(c)) {
+      for (const entrada of entradasDoCanal(c, channel)) {
+        const id = (entrada.payload as { id?: unknown }).id
+        if (typeof id !== "string") continue
+        const anexos = ["attachments", "media"].flatMap((chave) => {
+          const lista = entrada.payload[chave]
+          return Array.isArray(lista) ? lista : []
+        })
+        // A post video is referenced by its parts (`partes.sha256`), not by `{ ref }` (1.3.15).
+        const indice = anexos.findIndex(
+          (anexo) => shaDoVideoDoAnexo(anexo) === sha || shasDoPayload({ t: "x", attachments: [anexo] }).includes(sha),
+        )
+        if (indice >= 0) return { channel, alvo: id, indice }
+      }
+    }
+    return null
+  }
+
+  /** The `sha` of attachment `indice` of entry `alvo`, if it is a reference. */
+  #shaDoAnexo(id: { channel: string; alvo: string; indice: number }): string | null {
+    const entrada = entradasDoCanal(this.vault.contents, id.channel).find((e) => (e.payload as { id?: unknown }).id === id.alvo)
+    if (!entrada) return null
+    const anexos = ["attachments", "media"].flatMap((chave) => {
+      const lista = entrada.payload[chave]
+      return Array.isArray(lista) ? lista : []
+    })
+    // A video's bytes are the parts' `sha`; its first `{ ref }` is only the poster.
+    return shaDoVideoDoAnexo(anexos[id.indice]) ?? shasDoPayload({ t: "x", attachments: [anexos[id.indice]] })[0] ?? null
+  }
+
+  /**
+   * An account's portrait, asked from the members through the profile request
+   * (F10): whoever is on the list and connected publishes theirs, with the
+   * portrait. Waits up to `TRAZER_RETRATO_MS`. The caller has already asked a
+   * sibling device (`#trazerDoIrmao`).
+   */
+  async #trazerRetrato(conta: string): Promise<DesfechoDoTrazer> {
+    const temRetrato = (): string | null => {
+      const perfil = this.vault.unlocked ? this.vault.contents.directory[conta] : undefined
+      const sha = perfil ? shasDosRetratos(perfil.payload)[0] : undefined
+      return sha && this.#armazem.tem(sha) ? sha : null
+    }
+    const ja = temRetrato()
+    if (ja) return { ok: true }
+    // The channels where the account is with us: the common room asks via `pp`; the others via the device signal (F10).
+    const canais = this.channels.filter((canal) => canal !== this.canalDaConta && this.membersOf(canal).map(String).includes(conta))
+    let pediu = false
+    for (const canal of canais) {
+      if (canal === this.#commonRoom) {
+        if (await this.#anti.pedirPerfis(canal, [conta]).catch(() => false)) pediu = true
+      } else if (this.#podeAgora(this.#perfisPedidos, canal, Session.PEDIDO_DE_PERFIS_MS)) {
+        await this.#anunciarReenvio(canal, true).catch(() => {})
+        pediu = true
+      }
+    }
+    if (!pediu) return { ok: false, motivo: "ninguem" }
+    const limite = Date.now() + Session.TRAZER_RETRATO_MS
+    while (Date.now() < limite) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      const sha = temRetrato()
+      if (sha) {
+        this.emit("media", { sha, estado: "chegou" })
+        return { ok: true }
+      }
+    }
+    return { ok: false, motivo: "ninguem" }
+  }
+
+  /** How long to wait for the portrait asked from the members. Static for tests. */
+  static TRAZER_RETRATO_MS = 15_000
+
+  // ------------------------------------------------- the post video
+
+  /** The MIME type of a video, from the post that has it in its parts. Without it, `video/mp4`. */
+  #tipoDoVideo(contents: VaultContents, sha: string): string {
+    for (const canal of canaisComEntradas(contents)) {
+      for (const entrada of entradasDoCanal(contents, canal)) {
+        const media = entrada.payload["media"]
+        if (!Array.isArray(media)) continue
+        for (const anexo of media as { partes?: { sha256?: unknown }; mediaType?: unknown }[]) {
+          if (anexo?.partes?.sha256 === sha && typeof anexo.mediaType === "string") return anexo.mediaType
+        }
+      }
+    }
+    return "video/mp4"
+  }
   //
   // Bridge only. Rules are in `videos.ts`, and the format in `video.ts`
   // of the protocol.
@@ -12652,11 +13610,31 @@ What was left behind:
         })
         return ficou
       },
+      // `guardarVideo` now absorbs into the store (design §5): the raw bytes, without the vault ceiling.
+      guardarNoArmazem: async (sha, bytes, tipo) => {
+        await this.vault.armazemPronto()
+        if (!this.vault.unlocked || !this.#armazem.aberto || this.#armazem.selado) return false
+        let ficou = false
+        // In flight until the post enters the vault: otherwise a collection in that window would delete it.
+        this.#emVoo.set(sha, Date.now())
+        await this.vault.update((contents) => {
+          ficou = absorverVideo(contents, bytes, tipo ?? this.#tipoDoVideo(contents, sha), this.#armazem) === sha
+        })
+        // A received video: the post is already in the vault, and it does not stay in flight.
+        if (videoEmUso(this.vault.contents, sha)) this.#emVoo.delete(sha)
+        return ficou
+      },
+      noArmazem: (sha) => this.#armazem.tem(sha),
+      lerDoArmazem: (sha) => bytesDoMedia(this.vault.contents, sha, this.#armazem),
       apagarDoCofre: async (sha) => {
-        if (videoNoCofre(this.vault.contents, sha) === null) return
+        this.#emVoo.delete(sha)
+        const legado = videoNoCofre(this.vault.contents, sha) !== null
+        const noArmazem = this.vault.contents.media?.[sha] !== undefined
+        if (!legado && !noArmazem) return
         await this.vault.update((contents) => {
           apagarVideo(contents, sha)
         })
+        if (noArmazem) await this.#recolherAgora()
       },
       enviarParte: (canal, video) => this.send(canal, { t: "typing", until: 0, video }),
       emitir: (evento) => this.emit("video", evento),
@@ -12695,6 +13673,15 @@ What was left behind:
 
   async #publicarVideo(caption: string, tags: string[], extras: PostExtras, video: VideoAPublicar): Promise<string> {
     const { anexo, sha } = await this.#videos.preparar(video)
+    try {
+      return await this.#publicarVideoPreparado(caption, tags, extras, anexo, sha)
+    } finally {
+      // Finished or failed: the post is in the vault, or the video was already forgotten.
+      this.#emVoo.delete(sha)
+    }
+  }
+
+  async #publicarVideoPreparado(caption: string, tags: string[], extras: PostExtras, anexo: Attachment, sha: string): Promise<string> {
     let feed: string
     let id: string
     try {
@@ -12932,10 +13919,55 @@ What was left behind:
   /** Arm the reconciliation clock. Disarms the previous one, if any. */
   #armarSincronia(): void {
     this.#desarmarSincronia()
+    const periodo = Session.SINCRONIA_MS
+    let esperadoEm = Date.now() + periodo
     this.#relogioDeSincronia = setInterval(() => {
+      this.#notarAtraso(esperadoEm)
+      esperadoEm = Date.now() + periodo
       if (this.#connection !== "online") return
+      /*
+        A tick is periodic work, not a new reason (1.3.15). A hidden page throttles
+        this interval, and on the return it fires late, next to the pass that
+        `retomar` already started: it rode `#sincronizarDeNovo` and ran a second
+        whole pass right after. Now a tick with a pass running, or one that ran in
+        the last half period, joins it and does nothing.
+      */
+      if (this.#sincroniaEmCurso || Date.now() - this.#ultimaSincronia < periodo / 2) return
       void this.#sincronizar().catch(() => {})
-    }, Session.SINCRONIA_MS)
+    }, periodo)
+  }
+
+  /**
+   * Notes a timer that fired late: more than a second after it was due. A hidden
+   * page throttles timers (to one minute after five minutes hidden), and a busy
+   * thread delays them all. Only the count and the largest delay, for the
+   * diagnostic log (`diagnostico`).
+   */
+  #notarAtraso(esperadoEm: number): void {
+    const atraso = Date.now() - esperadoEm
+    if (atraso <= Session.ATRASO_QUE_CONTA_MS) return
+    this.#atrasos.n++
+    this.#atrasos.maiorMs = Math.max(this.#atrasos.maiorMs, atraso)
+  }
+
+  /** A timer later than this counts as late (the vault's deferred write uses the same second). */
+  static ATRASO_QUE_CONTA_MS = 1_000
+
+  #atrasos = { n: 0, maiorMs: 0 }
+
+  /**
+   * Mechanical counters for the diagnostic log that the person copies (1.3.15):
+   * vault writes, and the core timers that fired late (count and largest delay).
+   * Cumulative since this session started; whoever reads compares two readings.
+   * Never content.
+   */
+  diagnostico(): DiagnosticoDaSessao {
+    const doCofre = this.vault.atrasosDaAdiada
+    return {
+      gravacoesDoCofre: this.vault.gravacoes,
+      temporizadoresAtrasados: this.#atrasos.n + doCofre.n,
+      maiorAtrasoMs: Math.max(this.#atrasos.maiorMs, doCofre.maiorMs),
+    }
   }
 
   #desarmarSincronia(): void {
@@ -13325,7 +14357,7 @@ What was left behind:
    * apply it on read (`comEmendas`, in the interface). Until now, typing wrong in
    * a channel meant typing it forever.
    *
-   * No time window, by the owner's decision on August 12, 2026, and with the edited
+   * No time window, and with the edited
    * mark always in sight: what you gain by fixing a typo can't be paid for with a
    * channel that changes under whoever read it without noticing.
    *
@@ -13334,7 +14366,7 @@ What was left behind:
    * enforced by whoever reads, against the sender authenticated by MLS.
    */
   async editMessage(channel: string, target: string, body: string): Promise<void> {
-    await this.send(channel, { t: "edit", id: crypto.randomUUID(), target, editedAt: Date.now(), body })
+    await this.send(channel, { t: "edit", id: crypto.randomUUID(), target, editedAt: Date.now(), body }, { daPessoa: true })
   }
 
   /**
@@ -14441,7 +15473,7 @@ What was left behind:
    * Only live friends: whoever ended the friendship, or was blocked, stopped showing us
    * anything, and the copy that stayed in the vault is not shown. Our own is the
    * choice we made, so the interface can edit it. No overlap with my list: "mutual
-   * friends" does not exist, by the owner's decision.
+   * friends" does not exist, by design.
    */
   shownFriendsOf(address: string): { shown: string[]; updatedAt: number } | null {
     if (!this.vault.unlocked) return null
@@ -14489,7 +15521,7 @@ What was left behind:
    * test has two accounts, and with two the turn is always zero: what is measured
    * is that the leaf goes out, not that the queue prevents concurrent commits with
    * three or more members. And the recovery path - honoring a departure replayed from
-   * history - also has no test. Both in `docs/PENDENTES.md`.
+   * history - also has no test. Both are known gaps.
    */
   async #honrarSaida(channel: string, address: string): Promise<void> {
     return this.#umaDeCadaVez(`saida|${channel}|${address}`, () => this.#honrarSaidaAgora(channel, address))
@@ -14620,7 +15652,7 @@ What was left behind:
    * which is what stops the friendship from remaking itself behind whoever broke it.
    *
    * **What is NOT here, and why not:** there is no automatic unseating. It is said
-   * entirely in the body, and the pending item is in `docs/PENDENTES.md`.
+   * entirely in the body, and it is still open.
    */
   async syncFriendships(): Promise<void> {
     return this.#reconciliarAmizades(null)
@@ -14666,7 +15698,7 @@ What was left behind:
       a destructive automatic action does not hang on top of a fix from the same round:
       it needs its own proof. What prompted the request - a `friend.remove` recovered
       by backfill staying forever without effect on this side - goes back to open, and
-      is recorded in `docs/PENDENTES.md` with the exact condition.
+      stays open, with the exact condition.
       
       What CONTINUES to cut it is the live path (`#onFriendPayload`), which does not
       depend on any fold: it is an event authenticated by MLS, handled once, when it arrives.
@@ -14833,8 +15865,8 @@ What was left behind:
       if (this.friendTies().get(sender)?.link !== "amigos") {
         /*
           An accept to a request we withdrew: it's a 0.5.x client, which read the
-          cancellation as no refusal and kept seeing the request (see
-          `docs/PENDENTES.md`). On their side the friendship was made and our
+          cancellation as no refusal and kept seeing the request.
+          On their side the friendship was made and our
           slot in their feed given. We respond with the break, directly, and
           leave their feed: the old one stays "undone" and takes our slot.
         */
@@ -15496,24 +16528,63 @@ What was left behind:
    * Events are applied strictly in `seq` order, because that is the order the
    * server assigned and the order commits must be applied in.
    */
+  /**
+   * How many channels catch up at once.
+   *
+   * It was one (12/11/2026): a page per round trip, per channel, in series,
+   * and the first screen waited for all of it. On a phone on slow 4G that was
+   * 1.8 s for five channels and a round trip more for every channel more.
+   * Channels are independent here: each has its own group, its own anchor and
+   * its own gate (`#recuperacoesPorFazer`), and page waits pair by channel tag,
+   * so two in flight never take each other's page. Four, not all: the server's
+   * backfill cap counts pages per minute whatever the order, and four keeps a
+   * weak device from decrypting forty channels' pages in the same tick.
+   */
+  static readonly RECUPERACOES_EM_PARALELO = 4
+
   async #catchUp(channels: string[]): Promise<void> {
-    for (const channel of channels) {
-      // One channel per try: a vault that refuses a write must cost that
-      // channel its replay and nothing more. Nineteen healthy channels used
-      // to be abandoned because the twentieth was broken — and the twentieth
-      // was replayed first again on the next attempt.
-      try {
-        await this.#catchUpChannel(channel)
-      } catch (error) {
-        this.emit("status", {
-          detail: `${channel}: recuperação interrompida (${(error as Error).message})`,
-          level: "error",
-          code: "catchup-failed",
-          route: "log",
-          channel,
-        })
+    /*
+      The channels the person used last go first (12/11/2026): the open
+      channel works first, and the rest catches up below it. "Used" is the
+      read mark (`lidas`), which the interface moves when a conversation is on
+      screen. Channels without a mark keep their order, after.
+    */
+    const lidas = this.vault.unlocked ? (this.vault.contents.lidas ?? {}) : {}
+    const fila = channels
+      .map((canal, indice) => ({ canal, indice, uso: lidas[canal] ?? -1 }))
+      .sort((a, b) => b.uso - a.uso || a.indice - b.indice)
+      .map((item) => item.canal)
+    // One channel (a Welcome, a gap): it writes at its own end, as before.
+    const umSo = fila.length === 1
+    const trabalhador = async (): Promise<void> => {
+      for (let channel = fila.shift(); channel !== undefined; channel = fila.shift()) {
+        // One channel per try: a vault that refuses a write must cost that
+        // channel its replay and nothing more. Nineteen healthy channels used
+        // to be abandoned because the twentieth was broken — and the twentieth
+        // was replayed first again on the next attempt.
+        try {
+          await this.#catchUpChannel(channel, umSo)
+        } catch (error) {
+          this.emit("status", {
+            detail: `${channel}: recuperação interrompida (${(error as Error).message})`,
+            level: "error",
+            code: "catchup-failed",
+            route: "log",
+            channel,
+          })
+        }
       }
     }
+    const quantos = Math.min(Session.RECUPERACOES_EM_PARALELO, fila.length)
+    await Promise.all(Array.from({ length: quantos }, trabalhador))
+    if (umSo) return
+    /*
+      What all the recoveries left in the deferred window reaches the disk now, in
+      ONE write (hotfix 1.3.12). It was one per channel, in each channel's `finally`:
+      12 channels, 12 writes of the whole vault in a row (`escritas-por-canal-recuperado.test.ts`).
+      Only what the server gives again waits here, so a crash before it costs a replay.
+    */
+    await this.vault.gravarAdiada().catch(() => {})
   }
 
   /**
@@ -15529,7 +16600,8 @@ What was left behind:
    * the same pages and apply the same events twice; the second would fail
    * each one and count them as deaf.
    */
-  async #catchUpChannel(channel: string): Promise<void> {
+  /** `gravarNoFim`: write the deferred window when this channel ends. `#catchUp` writes once for all. */
+  async #catchUpChannel(channel: string, gravarNoFim = true): Promise<void> {
     const emCurso = this.#recuperacoes.get(channel)
     if (emCurso) {
       emCurso.repetir = true
@@ -15556,6 +16628,7 @@ What was left behind:
     const geracao = this.#geracaoDaLigacao
     const estado = { repetir: false, promessa: Promise.resolve() }
     this.#recuperacoes.set(channel, estado)
+    this.#avisarRecuperacao()
     estado.promessa = (async () => {
       try {
         // Three passes maximum: whoever asks for another one is whoever changed something
@@ -15576,6 +16649,14 @@ What was left behind:
           this is ours, the new connection set its marks, and erasing them is opening the
           gate of a channel it has not yet read. See the stamp above.
         */
+        /*
+          What the recovery left in the deferred window reaches the disk now, once
+          per channel. BEFORE the generation check, and that order is the guard: a
+          write that blocks here can outlive this connection, and the check below
+          must be read after it, or this `finally` would open the new connection's
+          gate (defect M1, see `session.portao.test.ts`).
+        */
+        if (gravarNoFim && geracao === this.#geracaoDaLigacao) await this.vault.gravarAdiada().catch(() => {})
         if (geracao === this.#geracaoDaLigacao) {
           this.#recuperacoesPorFazer.delete(channel)
           // A recovery that ends with no gap read everything the server has: what
@@ -15613,8 +16694,9 @@ What was left behind:
           if (this.#cartaoAdiado && channel === this.#commonRoom) this.#agendarCartao(channel)
           // Whoever entered while we were away: once, now, in the epoch of now.
           // See the growth in `#applyEvent`. Off the path that `connect()` waits for.
-          if (this.#connection === "online" && this.#crescidosNaRecuperacao.delete(channel)) this.#dizerAQuemEntrou(channel)
+          if (this.#connection === "online" && this.#crescidosNaRecuperacao.delete(channel)) this.#dizerAQuemEntrou(channel, false)
         }
+        this.#avisarRecuperacao()
       }
     })()
     return estado.promessa
@@ -15653,11 +16735,13 @@ What was left behind:
     */
     const geracao = this.#geracaoDaLigacao
     for (const canal of canais) this.#recuperacoesPorFazer.add(canal)
+    this.#avisarRecuperacao()
     try {
       await fn()
     } finally {
       if (geracao === this.#geracaoDaLigacao) {
         for (const canal of canais) this.#recuperacoesPorFazer.delete(canal)
+        this.#avisarRecuperacao()
         /*
           And the gate opens here for whoever never got recovered.
           
@@ -16175,8 +17259,8 @@ What was left behind:
    * `#undecryptable` is what declares a channel silent, and behind silence comes
    * `repairChannel` → reentry request → reseat, which is a remove followed by an add:
    * the channel history vanishing for persistent secrecy. Counting these messages
-   * declared channels silent where someone had just joined, it is the decision
-   * of August 16, 2026, `docs/PENDENTES.md`, and stands in full. What reaches here
+   * declared channels silent where someone had just joined, it is a standing
+   * decision, and stands in full. What reaches here
    * already left the silence path with a `return`.
    *
    * What this does is what was missing: name the thing. Silent discard is what
@@ -16401,6 +17485,7 @@ What was left behind:
   }
 
   async #recuperarUmaVez(channel: string): Promise<void> {
+    let fatia = performance.now()
     /*
       Two positions, not one: `cursor` is how far we read, `anchor` is how far we
       can write. They move together, except after an epoch hole not yet proven
@@ -16439,7 +17524,7 @@ What was left behind:
       // Counted per channel and per connection: this count is what `#pedirLacunas`
       // reads to know if backfills budget remains. See `PAGINAS_ANTES_DE_LACUNAS`.
       this.#paginasGastas.set(channel, (this.#paginasGastas.get(channel) ?? 0) + 1)
-      this.#send({ t: "channel.backfill", channel, afterSeq: cursor, limit: 100 })
+      this.#send({ t: "channel.backfill", channel, afterSeq: cursor, limit: Session.EVENTOS_POR_PAGINA })
 
       let page
       try {
@@ -16466,8 +17551,7 @@ What was left behind:
         
         Now the distinction is made: what won't read is skipped (no second read
         possible), what won't enter pauses reading here and waits for the next
-        connection, three times before giving up. See `docs/PENDENTES.md`, 15
-        August 2026.
+        connection, three times before giving up.
         
         **An EPOCH hole is the exception, and we can discard it because it's junk.**
         Any account with a place in the common room leaves there a thread of one of
@@ -16479,6 +17563,16 @@ What was left behind:
         always was.
         */
       for (const event of page.events) {
+        /*
+          A page is up to a hundred events, each an MLS decrypt and its state, with
+          no real wait between them: one task of seconds on a big tree. Give the
+          page a turn every `FATIA_DA_RECUPERACAO_MS` (hotfix 1.3.12), so a click
+          during startup is answered. Live frames stay behind the gate meanwhile.
+        */
+        if (performance.now() - fatia > Session.FATIA_DA_RECUPERACAO_MS) {
+          await cederAVez()
+          fatia = performance.now()
+        }
         cursor = event.seq
         // Already entered live, with the anchor locked. See `#consumidasAoVivo`.
         const consumida = this.#consumidasAoVivo.get(channel)?.get(event.seq)
@@ -16521,7 +17615,16 @@ What was left behind:
         avancar(event.seq)
       }
 
-      if (suspeito === undefined) await this.#rememberSeq(channel, ancora)
+      /*
+        Into memory now, and to disk in the deferred window (12/11/2026). It was
+        one write of the WHOLE vault per page: JSON, cipher and IndexedDB, 0.5 to
+        1 s each on a big vault (a recording of the owner's Safari), so a long
+        recovery was minutes of writing. The anchor and the groups still go
+        together in every write, so a crash in the window restarts from an older
+        anchor with the matching groups, and the server sends those events again.
+        The end of the channel's recovery writes what is left (`#catchUpChannel`).
+      */
+      if (suspeito === undefined) await this.#rememberSeq(channel, ancora, true, Session.JANELA_DA_RECUPERACAO_MS)
       if (esperar || !page.more) break
     }
 
@@ -16532,6 +17635,15 @@ What was left behind:
       await this.#rememberSeq(channel, ancora)
     }
   }
+
+  /** The longest stretch a recovery page works without giving the page a turn. See `#recuperarUmaVez`. */
+  static FATIA_DA_RECUPERACAO_MS = 40
+
+  /** During a recovery, the vault reaches the disk at most this often. See `#recuperarUmaVez`. */
+  static JANELA_DA_RECUPERACAO_MS = 10_000
+
+  /** Events per recovery page (the wire maximum is 200). Static for tests. */
+  static EVENTOS_POR_PAGINA = 100
 
   /**
    * Apply one event and never throw.
@@ -16646,7 +17758,7 @@ What was left behind:
    * (slow-after-enter, 4/11/2026). Recovery keeps writing page by page and
    * waiting, because it decides where the next one starts.
    */
-  async #rememberSeq(channel: string, seq: number, adiar = false): Promise<void> {
+  async #rememberSeq(channel: string, seq: number, adiar = false, janelaMs?: number): Promise<void> {
     const advanced = (this.vault.contents.lastSeq[channel] ?? -1) < seq
     if (
       !advanced &&
@@ -16698,7 +17810,8 @@ What was left behind:
       // every update, so an extra write per message would double the cost for
       // nothing — the payload just gets a little bigger.
       this.#drainRecords(contents)
-      this.#escreverGrupos(contents, grupos)
+      if (adiar) this.#adiarGrupos(contents, grupos)
+      else this.#escreverGrupos(contents, grupos)
     }
     if (adiar) {
       /*
@@ -16707,7 +17820,7 @@ What was left behind:
         next one carries it; the dirty marks reset as in the waiting path, and
         the failure is said in the log, as `#onFrame` would say it.
       */
-      void this.vault.updateEmBreve(escrever).catch((erro: unknown) => {
+      void this.vault.updateEmBreve(escrever, janelaMs).catch((erro: unknown) => {
         for (const canal of grupos) this.#dirty.add(canal)
         this.emit("status", {
           detail: `gravação do cofre adiada: ${(erro as Error)?.message ?? String(erro)}`,
@@ -16728,20 +17841,67 @@ What was left behind:
     }
   }
 
+  /**
+   * The groups of a deferred write, kept as they are NOW and serialized only when
+   * the vault is written (hotfix 1.3.12).
+   *
+   * `exportSession` of a group of 100 leaves costs a few ms, and the live path ran
+   * it on every event: a burst of ~500 frames from old admins was 1.3 s of page
+   * thread in a 100-member room (`scripts/medir-sala-carregada.mjs`), and grows
+   * with the tree. A `GroupSession` is never changed in place (each event gives a
+   * new one), so the reference taken here, next to the anchor written into the
+   * contents in the same mutation, serializes later to the same bytes it would
+   * have had now: the anchor and the group on disk still match.
+   */
+  #gruposAdiados = new Map<string, GroupSession>()
+
+  /**
+   * Only the BYTES wait for the write. The channel card goes in now, in the same
+   * mutation as before (review finding 3): it is state the session reads at once
+   * (`fichaDoCanal`), and its notice to siblings must not run inside the vault's
+   * serialization.
+   */
+  #adiarGrupos(contents: VaultContents, canais: readonly string[]): void {
+    for (const canal of canais) {
+      const session = this.#groups.get(canal)
+      if (!session) continue
+      this.#gruposAdiados.set(canal, session)
+      this.#escreverFicha(contents, canal, session)
+    }
+  }
+
+  /** Called by the vault right before it serializes: the bytes, and nothing else. See `#gruposAdiados`. */
+  #escreverGruposAdiados(contents: VaultContents): void {
+    if (this.#gruposAdiados.size === 0) return
+    const adiados = [...this.#gruposAdiados]
+    this.#gruposAdiados.clear()
+    for (const [canal, session] of adiados) contents.groups[canal] = toBase64(exportSession(session))
+  }
+
   /** The in-memory state of these channels, for inside a vault write. */
   #escreverGrupos(contents: VaultContents, canais: string[]): void {
     for (const canal of canais) {
       const session = this.#groups.get(canal)
       if (!session) continue
-      contents.groups[canal] = toBase64(exportSession(session))
-      // The channel card enters with the first group written: the one who created
-      // it here, or the one inferred from the group (slice 3). With none, it doesn't
-      // write: the channel is a room until the card arrives (account's channel,
-      // owner's profile).
-      const ficha = this.#fichaAoNascer.get(canal) ?? this.#fichaDeduzida(canal, session)
-      this.#fichaAoNascer.delete(canal)
-      if (ficha && registarFicha(contents, canal, ficha)) this.#anunciarFicha(canal, ficha)
+      // Newer than anything deferred for this channel: the deferred copy must not overwrite it.
+      this.#gruposAdiados.delete(canal)
+      this.#escreverGrupo(contents, canal, session)
     }
+  }
+
+  #escreverGrupo(contents: VaultContents, canal: string, session: GroupSession): void {
+    contents.groups[canal] = toBase64(exportSession(session))
+    this.#escreverFicha(contents, canal, session)
+  }
+
+  #escreverFicha(contents: VaultContents, canal: string, session: GroupSession): void {
+    // The channel card enters with the first group written: the one who created
+    // it here, or the one inferred from the group (slice 3). With none, it doesn't
+    // write: the channel is a room until the card arrives (account's channel,
+    // owner's profile).
+    const ficha = this.#fichaAoNascer.get(canal) ?? this.#fichaDeduzida(canal, session)
+    this.#fichaAoNascer.delete(canal)
+    if (ficha && registarFicha(contents, canal, ficha)) this.#anunciarFicha(canal, ficha)
   }
 
   /** The commits to confirm, for inside a vault write. See `pendingCommits`. */
@@ -16848,11 +18008,22 @@ What was left behind:
   /** Shown friend lists waiting for the next write. See `friends.shown`. */
   #pendingShownFriends: { author: string; shown: string[]; updatedAt: number }[] = []
 
-  #recordPayload(channel: string, seq: number, sender: string, payload: Payload, apos?: number): void {
+  /**
+   * Returns false when the payload is a repeat of channel state we already hold, and
+   * nothing was queued (hotfix 1.3.12). The caller then does not tell the interface.
+   */
+  #recordPayload(channel: string, seq: number, sender: string, payload: Payload, apos?: number): boolean {
     // Anything that came out of the group at all proves this member's seat is
     // live — the profile they republish on every epoch counts exactly as much
     // as a post, and for a feed reader it is the only thing there is.
     this.#pendingTransmitters.push({ channel, address: sender })
+    if (seq >= 0 && this.#estadoRepetido(channel, sender, payload)) {
+      // Heard all the same: the turn-takings (`#revezarSalas`, `#arrumarParaQuemEntrou`) count a cascade by these.
+      if (payload.t === "channel.meta" || payload.t === "channel.category") this.#ouviuSalas(channel, sender)
+      else this.#ouviuQuemArruma(channel, sender, seq)
+      this.estatisticasDoEstado.repetidos += 1
+      return false
+    }
     // A send of ours without echo gets marked with the order: the highest `seq`
     // we saw when it left (see `apos` in vault and `dobras.ts`).
     const marcaDeOrdem = seq < 0 && apos !== undefined && apos >= 0 ? { apos } : {}
@@ -16929,14 +18100,14 @@ What was left behind:
       // trying to take the channel, and that's how we refuse it. It goes to vault
       // in the same write as the rest, see `channelFounder`.
       this.#pendingAuthority.push({ channel, kind: "founder", address: sender, seq, payload })
-      this.#ouviuQuemArruma(channel, sender)
+      this.#ouviuQuemArruma(channel, sender, seq)
     } else if (payload.t === "role.assign") {
       // Only the sender can name. Without this, any member would declare themselves
       // admin with a phrase in the thread.
       //
       // With the stamp of who granted it and the `seq` (F11): the higher stamp wins,
       // and `seq` breaks ties. See `channelMemberRolesAt`.
-      this.#ouviuQuemArruma(channel, sender)
+      this.#ouviuQuemArruma(channel, sender, seq)
       if (this.#autoridadeAceita(channel, sender, payload)) {
         this.#pendingAuthority.push({
           channel,
@@ -16958,7 +18129,7 @@ What was left behind:
       // color: `powersOf` doesn't read the stored powers of `admin`, and `rolesOf`
       // doesn't list it, so emptying or deleting it here changes nothing. See
       // `defineRole` and `adminRole`.
-      this.#ouviuQuemArruma(channel, sender)
+      this.#ouviuQuemArruma(channel, sender, seq)
       if (this.#autoridadeAceita(channel, sender, payload)) {
         this.#pendingRoleDefs.push({ channel, role: payload.role, at: payload.definedAt || Date.now(), seq, por: sender, payload })
       }
@@ -17017,7 +18188,58 @@ What was left behind:
       // For the same reason as the profile: we want the most recent one, not the series, and
       // a repeated icon in the history would consume the media budget that belongs to messages.
       this.#pendingSpaceMeta.push({ channel, at: payload.updatedAt || Date.now(), seq, por: sender, payload })
-      this.#ouviuQuemArruma(channel, sender)
+      this.#ouviuQuemArruma(channel, sender, seq)
+    }
+    return true
+  }
+
+  /** For tests and the report: state payloads dropped as repeats. See `#estadoRepetido`. */
+  readonly estatisticasDoEstado = { repetidos: 0 }
+
+  /**
+   * A state payload equal to what this vault already holds, or to what is already
+   * queued for the next write (hotfix 1.3.12).
+   *
+   * Clients up to 1.3.10 say the whole state of every channel they run on every
+   * connection and every join: ~176 frames in the common room, all equal to what
+   * everyone has. Each one went through the queues, the write and the interface
+   * (one `message` per frame, one render each). Dropped here, they cost a decrypt.
+   *
+   * Equal means: the same stamp AND the same content, field by field (`autoria`
+   * aside, but a copy without it never replaces one with it). A tie with different
+   * content, or anything this cannot read, is not a repeat: it goes the old way,
+   * where `venceCarimbo` decides. So the rule can only drop a no-op, never a change.
+   */
+  #estadoRepetido(channel: string, sender: string, payload: Payload): boolean {
+    const contents = this.vault.contents
+    const igual = (guardado: { at: number; payload: unknown } | undefined, at: number): boolean =>
+      guardado !== undefined &&
+      guardado.at === at &&
+      // A signed copy is never a repeat of an unsigned one: it is what the Welcome portrait needs.
+      ((payload as { autoria?: unknown }).autoria === undefined || (guardado.payload as { autoria?: unknown }).autoria !== undefined) &&
+      mesmoEstado(guardado.payload, payload)
+    switch (payload.t) {
+      case "room.created":
+        // The first one wins forever: with a founder known, any later one changes nothing.
+        return contents.channelFounder[channel] !== undefined || this.#pendingAuthority.some((p) => p.channel === channel && p.kind === "founder")
+      case "role.assign": {
+        const carimbo = contents.channelMemberRolesAt?.[channel]?.[payload.subject]
+        if (!carimbo || carimbo.at !== payload.assignedAt) return false
+        if (payload.autoria !== undefined && carimbo.autoria === undefined) return false
+        const guardados = contents.channelMemberRoles[channel]?.[payload.subject] ?? []
+        const novos = [...new Set(payload.roles)]
+        return guardados.length === novos.length && novos.every((papel) => guardados.includes(papel))
+      }
+      case "role.define":
+        return !!payload.definedAt && igual(contents.channelRoles[channel]?.[payload.role], payload.definedAt)
+      case "channel.meta":
+        return !!payload.updatedAt && igual(contents.channelRooms[channel]?.[payload.room], payload.updatedAt)
+      case "channel.category":
+        return !!payload.updatedAt && igual(contents.channelCategories?.[channel]?.[payload.category], payload.updatedAt)
+      case "space.meta":
+        return !!payload.updatedAt && igual(contents.spaceMeta[channel], payload.updatedAt)
+      default:
+        return false
     }
   }
 
@@ -17124,7 +18346,12 @@ What was left behind:
 
   #drenarRegistos(contents: VaultContents): void {
     if (this.#pendingHistory.some(({ entry }) => isFriendPayload(entry.payload))) this.#avisarAmizades()
-    for (const { channel, entry } of this.#pendingHistory) appendHistory(contents, channel, entry)
+    // The main input door (design §5): what arrives live, our sends and the reports.
+    for (const { channel, entry } of this.#pendingHistory) {
+      appendHistory(contents, channel, this.#absorverEntrada(contents, entry), this.#presente)
+      this.#largarEmVoo(entry.payload)
+      if (entry.payload.t === "redact") this.#tirarMediaDoAlvo(contents, channel, entry)
+    }
     this.#pendingHistory = []
     for (const { channel, subject, ...proposta } of this.#pendingApelidos) registarApelido(contents, channel, subject, proposta)
     this.#pendingApelidos = []
@@ -17134,7 +18361,7 @@ What was left behind:
     if (sucessoesMudaram) queueMicrotask(() => this.#avisarSucessoes())
     for (const { address, at, payload } of this.#pendingDirectory) {
       const antes = contents.directory[address]?.at
-      upsertDirectory(contents, address, payload, at)
+      upsertDirectory(contents, address, this.#absorver(contents, payload), at)
       this.#fichaDoMuralQueChegou(contents, address)
       this.#perfilQueMudou(contents, address, antes)
     }
@@ -17153,7 +18380,7 @@ What was left behind:
       // The rule for all timestamped records: the timestamp wins, and `seq`
       // breaks ties (`venceCarimbo`, in `dobras.ts`).
       if (venceCarimbo(contents.spaceMeta[channel], { at, seq })) {
-        contents.spaceMeta[channel] = { at, payload: structuredClone(payload), ...comSeq(seq), por }
+        contents.spaceMeta[channel] = { at, payload: structuredClone(this.#absorver(contents, payload)), ...comSeq(seq), por }
       }
     }
     this.#pendingSpaceMeta = []
@@ -17180,7 +18407,7 @@ What was left behind:
         const anteriores = fixadasDe(actual?.payload)
         const propostas = podeFixar ? fixadasDe(payload) : undefined
         const fixadas = propostas ?? anteriores
-        const proximo = structuredClone(payload) as Record<string, unknown>
+        const proximo = structuredClone(this.#absorver(contents, payload)) as Record<string, unknown>
         if (fixadas) proximo["pinned"] = fixadas
         else delete proximo["pinned"]
         // The overlays (1.2), by the same rule: absent keeps what is there, from someone who cannot drops it.
@@ -17282,9 +18509,20 @@ What was left behind:
     // inherited from pairing: this device never decrypted them, and the interface never had them (phase S2).
     const list = entradasDoCanal(this.vault.contents, channel).filter((entrada) => !entrada.herdado)
     const copia = structuredClone(limit === undefined ? list : list.slice(-limit))
-    // Mentions of everyone only from whoever has the permission (`#comMencoesConferidas`).
-    for (const entrada of copia) entrada.payload = this.#comMencoesConferidas(channel, entrada.sender, entrada.payload)
+    // The everyone mention only from those with the permission (`#comMencoesConferidas`).
+    // And the measurements of each media item by reference, for the screen (`paraOEcra`).
+    for (const entrada of copia) entrada.payload = this.#paraOEcra(this.#comMencoesConferidas(channel, entrada.sender, entrada.payload))
     return copia
+  }
+
+  /**
+   * A payload as the interface reads it (Task 10): each `{ ref }` with `w`,
+   * `h`, `mini`, `b`, and `falta` if the original is not on this device. With
+   * the store not yet open, nothing is missing: it is not known.
+   */
+  #paraOEcra(payload: StoredPayload): StoredPayload {
+    const armazem = this.#armazem
+    return paraOEcra(payload, this.vault.contents.media ?? {}, (sha) => !armazem.aberto || armazem.tem(sha))
   }
 
   /** The stored notification log, a copy. */
@@ -17300,7 +18538,10 @@ What was left behind:
 
   /** Every profile the vault remembers, keyed by address. */
   directorySnapshot(): Record<string, StoredPeerProfile> {
-    return structuredClone(this.vault.contents.directory)
+    const copia = structuredClone(this.vault.contents.directory)
+    // The portrait with the measurements and the thumbnail, so the lists ask the store for it (Task 10).
+    for (const perfil of Object.values(copia)) perfil.payload = this.#paraOEcra(perfil.payload)
+    return copia
   }
 
   /**
@@ -17472,12 +18713,17 @@ What was left behind:
       // One vault write for the whole page.
       let sucessoesMudaram = false
       await this.vault.update((contents) => {
-        mergeOlderHistory(contents, channel, recovered)
+        const absorvidas = recovered.map((entrada) => this.#absorverEntrada(contents, entrada))
+        mergeOlderHistory(contents, channel, absorvidas, this.#presente)
+        for (const entrada of recovered) {
+          this.#largarEmVoo(entrada.payload)
+          if (entrada.payload.t === "redact") this.#tirarMediaDoAlvo(contents, channel, entrada)
+        }
         for (const { subject, ...proposta } of apelidosRecuperados) registarApelido(contents, channel, subject, proposta)
         for (const recebida of sucessoesRecuperadas) if (registarSucessao(contents, recebida)) sucessoesMudaram = true
         for (const { address, at, payload } of profiles) {
           const antes = contents.directory[address]?.at
-          upsertDirectory(contents, address, payload, at)
+          upsertDirectory(contents, address, this.#absorver(contents, payload), at)
           this.#fichaDoMuralQueChegou(contents, address)
           this.#perfilQueMudou(contents, address, antes)
         }
@@ -17496,8 +18742,8 @@ What was left behind:
       the reason this exists, was a silent no-op in all full channels.
 
       The fix for RECOVERY itself is another conversation (a channel at the cap has
-      nowhere to store what is older than the cap), and is in
-      `docs/PENDENTES.md`. What fixes here is the lie.
+      nowhere to store what is older than the cap), and is a
+      known limit. What fixes here is the lie.
     */
     const guardados = new Set(entradasDoCanal(this.vault.contents, channel).map((entrada) => entrada.seq))
     return recovered.filter((entrada) => guardados.has(entrada.seq)).length
@@ -17849,11 +19095,17 @@ What was left behind:
       return
     }
     this.#cartaoAdiado = false
+    // Once per epoch: the newcomer publishes right after its commit, and the epoch announcement would publish the same card again.
+    const epoca = epochOf(grupo)
+    if (this.#cartaoPublicadoNaEpoca === epoca) return
+    this.#cartaoPublicadoNaEpoca = epoca
     this.#send({ t: "channel.groupinfo.put", channel: canal, info: toBase64(await publishableGroupInfo(grupo)) })
   }
 
   /** A blank was not posted because we are behind. See `#publicarCartao`. */
   #cartaoAdiado = false
+  /** The epoch of the last card this device published for the common room. Memory only. */
+  #cartaoPublicadoNaEpoca: bigint | null = null
   /** The highest epoch seen in a frame ahead of the group, per channel. See `BuracoDeEpoca`. */
   #epocaFuturaVista = new Map<string, bigint>()
 
@@ -18085,8 +19337,7 @@ What was left behind:
 
         "Do not count toward deafness" and "mark as read" are not the same
         decision, and until October 5, 2026 they were the same line. The first
-        is right and stays intact, it is the August 16 decision, written in
-        `docs/PENDENTES.md`: counting this declared channels deaf where someone
+        is right and stays intact, it is a standing decision: counting this declared channels deaf where someone
         had just joined, and deafness brings a repair that drags the history.
         The second was wrong: an event said AFTER we had our place, which does
         not decrypt because our epoch moved ahead of it, is a lost message, and
@@ -18142,7 +19393,16 @@ None of this touches the deafness counter: whoever reads it is the next
       return
     }
 
-    if (result.kind === "ignored") {
+    /*
+      A generation already spent ("Desired gen in the past") is proof that this
+      seat holds the epoch's keys: it opened that frame before, by another path.
+      It is never deafness (12/11/2026). With catch-up on four channels at once,
+      a live frame and the recovery page that carries it run at the same time,
+      and the second one to open it got here and was counted: enough of them in
+      30 s and the channel asked for a new seat, in a room of 409 leaves.
+    */
+    const geracaoGasta = result.kind === "ignored" && result.reason.includes("Desired gen in the past")
+    if (result.kind === "ignored" && !geracaoGasta) {
       // Our own echoes and replayed handshakes land here too, so one failure
       // means nothing; a run of them means the seat is dead.
       const estado = this.#undecryptable.get(channel) ?? { falhas: 0, desde: Date.now() }
@@ -18183,7 +19443,7 @@ None of this touches the deafness counter: whoever reads it is the next
         if (vista === undefined || vista < result.epochDoFrame) this.#epocaFuturaVista.set(channel, result.epochDoFrame)
         throw new BuracoDeEpoca(result.epochDoFrame, epochOf(result.session))
       }
-    } else {
+    } else if (!geracaoGasta) {
       this.#undecryptable.delete(channel)
       this.#rejoinAsked.delete(channel)
       // A frame that decrypts is proof our place is the same as everyone else's. It
@@ -18191,9 +19451,17 @@ None of this touches the deafness counter: whoever reads it is the next
       this.#entradaExternaPorConfirmar.delete(channel)
     }
 
-    // The epoch changed under us: the card on the server no longer describes this
-    // room, and whoever arrives with it is out. Reset it.
-    if (result.kind === "epoch") this.#agendarCartao(channel)
+    /*
+      The epoch changed under us, and the card on the server no longer describes
+      this room. It is NOT ours to reset (12/11/2026): whoever made the commit
+      publishes it (`#announceLocalEpoch`, and the newcomer by card in
+      `#entrarComCartao`). Every member used to publish it here, 1.1 MB each at
+      409 leaves, after every commit: ~20 copies per join reached the server on
+      10/11, and each device serialised and signed the whole tree for nothing.
+      If the committer drops before publishing, the next account asks for a
+      seat instead, and whoever admits it publishes; a member connecting to a
+      room without a card publishes one too (`hello.ok`).
+    */
     // Any event that decrypts in my feed also decrypts on an old client, and
     // resets their failed count. See `#listasSeguidas`.
     if (channel === this.feedChannel && (result.kind === "epoch" || result.kind === "payload")) {
@@ -18452,7 +19720,8 @@ None of this touches the deafness counter: whoever reads it is the next
       // Queue the chat-visible payloads for the vault write that `#rememberSeq`
       // is about to do anyway. Ephemeral kinds (typing, signalling) never land
       // on disk, and voice.* already returned above.
-      this.#recordPayload(channel, seq, result.sender, result.payload)
+      // A repeat of state we already hold stops here: no queue, no `message`, no render (hotfix 1.3.12).
+      if (!this.#recordPayload(channel, seq, result.sender, result.payload)) return
       // A friendship that arrives live closes live. See `#onFriendPayload` for why
       // it is live only, and `syncFriendships` for what came before.
       if (aoVivo && seq >= 0 && result.sender !== this.identity.address && isFriendPayload(result.payload)) {
@@ -18501,6 +19770,7 @@ None of this touches the deafness counter: whoever reads it is the next
       const grew = this.#noteMembership(channel)
       // The newcomer does not read telemetry from conversation before this commit (S4). See `piso`.
       if (grew && seq >= 0) this.#anti.aoCrescer(channel, seq)
+      if (grew && seq > (this.#ultimoCrescimentoSeq.get(channel) ?? -1)) this.#ultimoCrescimentoSeq.set(channel, seq)
       // A direct message that ended up with just us because another device committed (F9).
       if (aoVivo) this.#directaSozinha(channel)
       // In the account channel, the newcomer gets the entire state, nothing else.
@@ -18517,7 +19787,7 @@ None of this touches the deafness counter: whoever reads it is the next
           Once is enough: it leaves on the current epoch, which everyone who joined deciphers, and it says the current state, which is what matters.
           */
         if (!aoVivo && this.#recuperacoes.has(channel)) this.#crescidosNaRecuperacao.add(channel)
-        else this.#dizerAQuemEntrou(channel)
+        else this.#dizerAQuemEntrou(channel, aoVivo)
         // And the rooms, if we do not fix the channel and nobody who would fix it tells them.
         this.#revezarSalas(channel)
       }
@@ -18527,20 +19797,143 @@ None of this touches the deafness counter: whoever reads it is the next
   /**
    * What we tell a newcomer to a channel: the profile, the authority, the rooms and the roles, forwarding and what is ours. Send and forget.
    */
-  #dizerAQuemEntrou(channel: string): void {
-    void this.publishProfile([channel], true).catch(() => {})
-    // And who runs the channel, for the exact same reason and with more weight: without this, a newcomer does not know who founded the channel, and what would have been done with that ignorance is written in `republishAuthority`. Authority first, then rooms: order is the guard.
-    void this.republishAuthority(channel)
-      .catch(() => {})
-      .then(() => this.republishRooms(channel))
-      .catch(() => {})
-      // The newcomer learns that we deduplicate forwarding (§4.6).
-      .then(() => this.#anunciarReenvio(channel))
+  #dizerAQuemEntrou(channel: string, aoVivo: boolean): void {
+    /*
+      Not in the common room (12/11/2026). There every online member republished
+      its profile on every join: one join cost one send per online member, and
+      the wave of 11/11 (248 joins into 409 members) put ~220 events in the room
+      per join, 54 486 in one day. Every member decrypts, applies and renders all
+      of them, and every send writes the whole vault in the per-channel queue
+      that the person's own message waits in. The newcomer by card asks for the
+      names it lacks instead (`#pedirPerfisNaSalaComum`): one leaf relays the
+      signed profiles, and only the accounts named in the request publish theirs.
+    */
+    // Only the LIVE growth skips it. Coming back after joins (the end of a recovery) says it once
+    // per connection, not once per join: whoever joined while we were away has no other way to hear it.
+    if (channel !== this.#commonRoom || !aoVivo) void this.publishProfile([channel], true).catch(() => {})
+    /*
+      The authority and the rooms: once per join, never once per admin (hotfix 1.3.12).
+      Every admin device that saw the channel grow said them again, so one join cost
+      one full cascade per admin online (~176 frames each in the common room).
+      Outside the common room the newcomer came by a Welcome, and the inviter covers
+      it (the portrait, or its own cascade in `#announceLocalEpoch`). In the common
+      room the newcomer came by the card, with no inviter: ONE admin says it, by turn.
+      See `#arrumarParaQuemEntrou` and `republicar-so-com-sinal.test.ts`.
+    */
+    /*
+      Live, or at the end of a recovery when nobody covered the join: someone came in
+      by the card while no admin was online (review finding 1). If the pages of the
+      recovery brought another admin's cascade after the growth, we stay quiet.
+    */
+    if (
+      channel === this.#commonRoom &&
+      (aoVivo || (this.#ultimoCrescimentoSeq.get(channel) ?? -1) > (this.#ultimaArrumacaoSeq.get(channel) ?? -1))
+    ) {
+      this.#arrumarParaQuemEntrou(channel, aoVivo)
+    }
+    // The newcomer learns that we deduplicate forwarding (§4.6).
+    void this.#anunciarReenvio(channel)
       .catch(() => {})
       // And what is ours, for the same reason as the other three: someone who just joined cannot decipher anything in there. The wall, comments, likes and votes, and tickets (S1).
       .then(() => this.#reenviarDoProprio(channel))
       .catch(() => {})
   }
+
+  /**
+   * The cascade of who runs the channel (`republishAuthority`, then `republishRooms`)
+   * for someone who joined the common room by the card, said by ONE admin (hotfix 1.3.12).
+   *
+   * The admins that may say it are ordered, the ones the server shows online first,
+   * then by address: every device computes the same order. Each waits its turn
+   * (`ARRUMACAO_POR_VEZ_MS` per place) and stays quiet if, meanwhile, it heard the
+   * cascade start from someone else (`#ouviuQuemArruma`). The first online admin
+   * speaks at once; the others only if it did not. Only the first
+   * `ARRUMACAO_VEZES` places take a turn: past them, members without a role still
+   * say the rooms (`#revezarSalas`), and anti-entropy brings the rest.
+   *
+   * An admin on 1.3.10 or older still says its cascade on every join and every
+   * connection. Hearing it counts the same: this one stays quiet.
+   */
+  #arrumarParaQuemEntrou(channel: string, aoVivo = true): void {
+    if (!this.#groups.has(channel) || !this.mayEditChannel(channel)) return
+    if (this.#arrumacoesPorVez.has(channel)) return
+    const eu = this.identity.address
+    const fundador = this.#fundadorConhecido(channel)
+    const membros = new Set(this.membersOf(channel).map(String))
+    const candidatos = [
+      ...new Set([
+        ...(fundador ? [fundador] : []),
+        ...Object.entries(this.vault.contents.channelMemberRoles[channel] ?? {})
+          .filter(([, papeis]) => papeis.includes(ADMIN_ROLE))
+          .map(([address]) => address),
+      ]),
+    ].filter((address) => membros.has(address))
+    const ligado = (address: string): boolean => address === eu || this.#presentes.has(address)
+    // The founder first among equals: its `room.created` is what makes the newcomer accept the rest.
+    candidatos.sort(
+      (a, b) =>
+        Number(ligado(b)) - Number(ligado(a)) || Number(b === fundador) - Number(a === fundador) || (a < b ? -1 : a > b ? 1 : 0),
+    )
+    const vez = candidatos.indexOf(eu)
+    // Not in the list: an editor by delegated power (`renomear`), not by `admin`. Last turn.
+    const lugar = vez === -1 ? Session.ARRUMACAO_VEZES - 1 : vez
+    if (lugar >= Session.ARRUMACAO_VEZES) return
+    const ouvidaAntes = this.#arrumacaoOuvida.get(channel) ?? 0
+    const dizer = (): void => {
+      // A disconnect cleared the turn (and a new connection may hold its own): stay quiet.
+      if (this.#arrumacoesPorVez.get(channel) !== relogio) return
+      this.#arrumacoesPorVez.delete(channel)
+      if (this.#connection !== "online" || !this.#groups.has(channel)) return
+      if ((this.#arrumacaoOuvida.get(channel) ?? 0) !== ouvidaAntes) return
+      this.estatisticasDaArrumacao.cascatas += 1
+      // Ours covers every growth seen so far, but only once it has fully gone out.
+      // In pieces the cascade takes seconds: marking it before the end would leave a
+      // newcomer with half the state if the connection dropped midway, and this
+      // admin would never say it again (review of hotfix 1.3.14).
+      const crescimento = this.#ultimoCrescimentoSeq.get(channel) ?? -1
+      const opcoes: OpcoesDaCascata = aoVivo ? {} : { emPedacos: true }
+      let completa = true
+      void this.republishAuthority(channel, opcoes)
+        .catch(() => {
+          completa = false
+        })
+        .then(() => (aoVivo ? undefined : cederAVez()))
+        .then(() => this.republishRooms(channel, opcoes))
+        .then(() => {
+          if (completa && crescimento > (this.#ultimaArrumacaoSeq.get(channel) ?? -1)) {
+            this.#ultimaArrumacaoSeq.set(channel, crescimento)
+          }
+        })
+        .catch(() => {})
+    }
+    /*
+      At the end of a recovery, off the login path (hotfix 1.3.14). Measured in
+      production on 13/11/2026: the owner, founder and admin, logs in and the
+      cascade for joins nobody covered (~175 frames in the common room) went out
+      as soon as the room's recovery ended, in the same seconds as the rest of
+      the login, and the app froze 3 to 4 s. Now it waits
+      `ARRUMACAO_DEPOIS_DO_ARRANQUE_MS`, then for the page to be idle (at most
+      `ARRUMACAO_OCIOSA_TECTO_MS`), and goes in pieces. The wait is also time
+      for another admin's cascade to arrive: heard, this one stays quiet.
+      Live joins keep the old turn: the newcomer is waiting for it.
+    */
+    const espera = lugar * Session.ARRUMACAO_POR_VEZ_MS + (aoVivo ? 0 : Session.ARRUMACAO_DEPOIS_DO_ARRANQUE_MS)
+    const relogio = setTimeout(() => (aoVivo ? dizer() : quandoOcioso(dizer, Session.ARRUMACAO_OCIOSA_TECTO_MS)), espera)
+    this.#arrumacoesPorVez.set(channel, relogio)
+  }
+
+  /** The wait per place in `#arrumarParaQuemEntrou`. Static for tests. */
+  static ARRUMACAO_POR_VEZ_MS = 1_200
+  /** How many admins take a turn in `#arrumarParaQuemEntrou`. */
+  static ARRUMACAO_VEZES = 3
+  /** How long after a recovery an admin waits before saying the cascade nobody said. Static for tests. */
+  static ARRUMACAO_DEPOIS_DO_ARRANQUE_MS = 6_000
+  /** The cap on the idle wait after `ARRUMACAO_DEPOIS_DO_ARRANQUE_MS`. */
+  static ARRUMACAO_OCIOSA_TECTO_MS = 4_000
+  /** The turns waiting, one per channel. Cleared with the connection. */
+  #arrumacoesPorVez = new Map<string, ReturnType<typeof setTimeout>>()
+  /** For tests and the report: how many full cascades this session said for a join. */
+  readonly estatisticasDaArrumacao = { cascatas: 0 }
 
   /**
    * Channels that grew during recovery and have not yet told the newcomer. They leave at the end of the channel recovery, once. A channel whose recovery ended without a connection stays here until the next recovery.
@@ -19000,8 +20393,7 @@ None of this touches the deafness counter: whoever reads it is the next
   }
 
   /**
-   * Apply the channel snapshot from the Welcome (phase 1 of 1.1,
-   * `docs/planos/estado-cifrado-plano.md`). Returns whether it saved anything.
+   * Apply the channel snapshot from the Welcome (phase 1 of 1.1). Returns whether it saved anything.
    *
    * **Does not trust the inviter.** Each item goes through `receberItem`, with
    * the rules of telemetry: a type with authorship, the schema, the device
@@ -19372,7 +20764,25 @@ None of this touches the deafness counter: whoever reads it is the next
     // a *newer* welcome for the same channel still gets its chance — and say
     // it once, quietly. The other side's repair is what actually fixes this,
     // by re-inviting against a fresh key package.
-    await this.vault.update((contents) => {
+    /*
+      The deferred, shared write (hotfix 1.3.10), never `update`.
+
+      Nothing here is lost if the write never lands: no key package burned, no
+      MLS state moved, and the server delivers this Welcome again at the next
+      resync, where it dies again. That is exactly what `updateEmBreve` is for.
+      With `update`, each death wrote the whole vault at once, and frames are
+      handled in parallel: "Sync the account" empties `deadWelcomes`, the next
+      start gets every pending Welcome in one burst (175 on a real account), and
+      175 full writes in flight ran a phone browser out of memory before any of
+      them landed. The marks never reached the disk, and the crash came back at
+      every start. Now the whole burst goes out in one write.
+
+      Not awaited: the change is in memory at once (the next copy of this
+      Welcome is skipped by the check above), and catch-up replays old Welcomes
+      one after another. Waiting for the write window on each one held every
+      channel's recovery for a second per Welcome.
+    */
+    void this.vault.updateEmBreve((contents) => {
       contents.deadWelcomes = [...contents.deadWelcomes, mark].slice(-200)
       /**
        * The channel stays pending in the vault (F3, 20/10/2026).
@@ -19387,7 +20797,7 @@ None of this touches the deafness counter: whoever reads it is the next
       if (!this.#groups.has(channel)) {
         contents.lugaresPorPedir = { ...contents.lugaresPorPedir, [channel]: { desde: Date.now(), tentativas: 0, proxima: 0 } }
       }
-    })
+    }).catch(() => {})
     // With keys published, request right away; before that, the requester is the
     // end of `#handshake`, so the responder has something to give us.
     if (this.#chavesProntas && !this.#groups.has(channel)) this.#pedirLugar(channel)
@@ -19530,15 +20940,51 @@ None of this touches the deafness counter: whoever reads it is the next
   }
   #gravacaoJaAgendada = false
 
+  /**
+   * The write a send waits for before its frame leaves, shared by the sends that
+   * reach this point in the same turn of the event loop (hotfix 1.3.13).
+   *
+   * Sends to different channels at once (the profile at connection, see
+   * `publishProfile`) each wrote the whole vault, one after the other: the
+   * shared write in the vault only joins callers that arrive while a write is in
+   * flight, and the encryption is synchronous, so they never overlapped. Here
+   * they wait for one `flush` at the end of the turn. Each send has its ratchet
+   * and group in memory before it asks, so the one write holds all of them, and
+   * no frame leaves before it is on disk. `flush` called directly (the page
+   * leaving, closing the app) does not pass here and still writes at once.
+   */
+  #flushDosEnvios(): Promise<void> {
+    if (this.#flushDosEnviosArmado) return this.#flushDosEnviosArmado
+    // `cederAVez`, not `setTimeout(0)`: a hidden tab throttles timers to 1 s, and
+    // to 1 per minute after 5 minutes in Chromium, which would stretch a series
+    // of sends (a state cascade for someone joining) to many minutes.
+    const armado = cederAVez().then(() => {
+      // Cleared BEFORE the flush: a send that arrives from here on is not in its snapshot.
+      this.#flushDosEnviosArmado = null
+      return this.flush()
+    })
+    this.#flushDosEnviosArmado = armado
+    return armado
+  }
+  #flushDosEnviosArmado: Promise<void> | null = null
+
   /** Batch flush `FLUSH_MS` later, if none is already scheduled. */
   #agendarGravacao(): void {
     if (this.#flushTimer) return
+    /*
+      During a recovery, the recovery window and not `FLUSH_MS` (12/11/2026).
+      Every event a recovery opens marks its group dirty, and this timer wrote
+      the whole vault every 1.5 s through a long recovery: on a phone, tens of
+      writes of 0.5 to 1 s. What must be on disk at once (our sends, commits,
+      key packages) does not come through here: it writes itself.
+    */
+    const aRecuperar = this.#recuperacoes.size > 0 || this.#recuperacoesPorFazer.size > 0
     this.#flushTimer = setTimeout(() => {
       this.#flushTimer = null
       // The failure must be handled HERE, and there is nowhere else to handle it:
       // no one is waiting for this promise. See `#falhaAoGravar`.
       void this.flush().catch((erro: unknown) => this.#falhaAoGravar(erro))
-    }, Session.FLUSH_MS)
+    }, aRecuperar ? Session.JANELA_DA_RECUPERACAO_MS : Session.FLUSH_MS)
   }
 
   /**
@@ -19686,6 +21132,9 @@ None of this touches the deafness counter: whoever reads it is the next
    * channel must not stop the app from opening the other twenty.
    */
   async restore(): Promise<{ restored: string[]; failed: string[] }> {
+    // The media store opens with the vault: what arrives next is absorbed into it (design §5).
+    await this.vault.armazemPronto()
+    this.#cuidarDoArmazem()
     const contents = this.vault.contents
     const restored: string[] = []
     const failed: string[] = []
@@ -19707,6 +21156,8 @@ None of this touches the deafness counter: whoever reads it is the next
       }
       try {
         this.#groups.set(channel, await importSession(channel, fromBase64(blob)))
+        // Read from the vault, so anything kept for a deferred write is older than this.
+        this.#gruposAdiados.delete(channel)
         restored.push(channel)
       } catch {
         failed.push(channel)
@@ -19864,6 +21315,8 @@ None of this touches the deafness counter: whoever reads it is the next
    * creator could join, with no error anywhere.
    */
   #send(frame: ClientFrame): void {
+    // Before `auth.ok`, only the handshake. See `#autenticado`.
+    if (!this.#autenticado && !Session.TRAMAS_DO_HANDSHAKE.has(frame.t)) throw new Error("no connection to the server")
     if (this.#socket?.readyState === 1) {
       this.#socket.send(JSON.stringify(frame))
       return
@@ -19946,4 +21399,32 @@ function gatewayUrl(identity: Identity): string {
 function gatewayUrlDe(host: string): string {
   const scheme = isLoopbackHost(host) ? "ws" : "wss"
   return `${scheme}://${host}/_enclave/gateway`
+}
+
+/**
+ * Two state payloads say the same thing: equal field by field, key order aside,
+ * with `autoria` left out (a signature over the same content, by the same author,
+ * may differ in bytes). See `#estadoRepetido`.
+ */
+function mesmoEstado(guardado: unknown, recebido: unknown): boolean {
+  if (guardado === null || typeof guardado !== "object" || recebido === null || typeof recebido !== "object") return false
+  const { autoria: _a, ...semA } = guardado as Record<string, unknown>
+  const { autoria: _b, ...semB } = recebido as Record<string, unknown>
+  return igualProfundo(semA, semB)
+}
+
+function igualProfundo(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== typeof b || a === null || b === null || typeof a !== "object") return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a)) {
+    const lista = b as unknown[]
+    return a.length === lista.length && a.every((valor, i) => igualProfundo(valor, lista[i]))
+  }
+  const x = a as Record<string, unknown>
+  const y = b as Record<string, unknown>
+  // An absent key and an `undefined` one are the same: that is how JSON reads both.
+  const chaves = new Set([...Object.keys(x), ...Object.keys(y)].filter((k) => x[k] !== undefined || y[k] !== undefined))
+  for (const chave of chaves) if (!igualProfundo(x[chave], y[chave])) return false
+  return true
 }

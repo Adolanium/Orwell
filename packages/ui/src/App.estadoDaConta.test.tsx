@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event"
 import type { AvisoDeSuspensao } from "@enclave/protocol"
 import type { EnclaveBridge } from "./bridge.js"
 import { App } from "./App.js"
+import { cacheDeMedia } from "./lib/cacheDeMedia.js"
 import { LAST_READ_KEY, desligarEstadoDaConta, lerEstadoDaConta } from "./lib/estadoDaConta.js"
 import { DM_CLOSED_KEY } from "./lib/directs.js"
 import { strings } from "./strings.js"
@@ -178,6 +179,21 @@ describe("um aparelho revogado volta ao portão", () => {
     // Stopped: no silent attempt, which would enter again and be rejected.
     expect(vi.mocked(bridge.vault.unlock).mock.calls.length).toBe(desbloqueiosAntes)
     expect(screen.queryByRole("button", { name: strings.rail.chat })).toBeNull()
+  })
+
+  it("ao trancar, as imagens decifradas da cache de media são revogadas (Task 10)", async () => {
+    const statusRef: { current: ((status: unknown) => void) | null } = { current: null }
+    const lock = vi.fn(async () => ({ ok: true }))
+    const bridge = ponte({ statusRef, lock })
+    render(<App bridge={bridge} />)
+    await screen.findByRole("button", { name: strings.rail.chat })
+    const url = await cacheDeMedia.obter("sha-teste-trancar", "image/png", async () => new Uint8Array([1]))
+    expect(cacheDeMedia.ainda("sha-teste-trancar", url!)).toBe(true)
+    act(() => {
+      statusRef.current?.({ detail: "este aparelho foi tirado da conta noutro aparelho", level: "error", code: "device-revoked", route: "toast" })
+    })
+    await waitFor(() => expect(lock).toHaveBeenCalled())
+    await waitFor(() => expect(cacheDeMedia.ainda("sha-teste-trancar", url!)).toBe(false))
   })
 })
 

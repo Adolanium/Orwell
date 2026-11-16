@@ -151,7 +151,7 @@ describe("readPrefs / writePrefs", () => {
 })
 
 describe("sons", () => {
-  it("por omissão os sons estão ligados, a 100 % (era 50 até 2/11/2026, ordem do dono)", () => {
+  it("por omissão os sons estão ligados, a 100 % (o valor anterior era 50)", () => {
     expect(DEFAULT_PREFS.sounds).toBe(true)
     expect(DEFAULT_PREFS.soundVolume).toBe(100)
   })

@@ -11,13 +11,17 @@ import {
   type ParDoHistorico,
 } from "@enclave/crypto"
 import { canonicoTolerante, fromBase64, toBase64, verify } from "@enclave/protocol"
+import { soInlineOuEvicted } from "../armazem/referencias.js"
+import { chaveDoEvento } from "../dobras.js"
 import {
   base64ParaBytes,
   fundirEntradasDoIrmao,
-  guardarVideo,
   juntarMediaDoIrmao,
   type EstadoDoHistorico,
   type ItemDeMediaDoIrmao,
+  type RazaoDoHistorico,
+  type StoredChatMessage,
+  type StoredPayload,
   type VaultContents,
 } from "../vault.js"
 import {
@@ -31,9 +35,11 @@ import {
   mediaInteiraDe,
   paginaDe,
   pedidoDe,
+  registosSemRefs,
   resumoDoHistorico,
   TECTOS_DO_HISTORICO,
   type ContextoDoIrmao,
+  type InflarParaOIrmao,
   type Inventario,
   type MediaInteira,
   type MediaNoIrmao,
@@ -41,10 +47,10 @@ import {
 } from "./conteudo.js"
 
 /**
- * The history between devices of the same account (1.0 "Arca", 29/10/2026).
+ * The history between devices of the same account (1.0 "Arca").
  *
- * The owner's request: "all history and all media" move to the new device
- * during pairing, without prompts or questions ("I want it out"). And what one
+ * All history and all media move to the new device
+ * during pairing, without prompts or questions. And what one
  * device has and another device in the account lost (by being offline) passes
  * between them through the account channel.
  *
@@ -126,6 +132,15 @@ export const TECTOS_DO_FIO_DO_HISTORICO = {
   passoMs: 2_000,
   /** The responder forgets a silent session during this time. */
   sessaoCaladaMs: 30 * 60_000,
+  /**
+   * The notice's deadline (12/11/2026). With a plan (or a fresh device) and no
+   * progress for this long, the transfer gives up FOR NOW: the notice closes
+   * with the reason (`RazaoDoHistorico`), and what is missing counts as lost on
+   * screen. Before this, "402 of 420" could stand still forever.
+   */
+  desistirAposMs: 3 * 60_000,
+  /** After giving up, a new try this often, quiet (the first progress brings the notice back). */
+  retomarParadoMs: 5 * 60_000,
   /** Stored responses to request missing parts: up to this many bytes, for this long. */
   guardadasBytes: 16 * 1024 * 1024,
   guardadasMs: 5 * 60_000,
@@ -133,6 +148,8 @@ export const TECTOS_DO_FIO_DO_HISTORICO = {
   partesMax: 4_096,
   /** The text of a response, after decompression, at most. */
   descomprimidoMax: 64 * 1024 * 1024,
+  /** `trazerUm` gives up after this, if no sibling has just answered. */
+  trazerUmMs: 60_000,
 }
 
 /** What the module needs from the session. */
@@ -156,10 +173,38 @@ export interface PortaDoHistorico {
   lugar(canal: string): { seq: number; em: number } | null | undefined
   emitir(evento: EventoDoHistorico): void
   agora(): number
+  /** The media store, through the session: the wire between siblings carries `inline` or `evicted`, and the vault keeps references. */
+  armazem: PortaDoArmazemDoHistorico
 }
+
+/** What the history between siblings needs from the media store. */
+export interface PortaDoArmazemDoHistorico {
+  /** The blob for this `sha` is on this device. */
+  presente(sha: string): boolean
+  /** The output: references turn back into text. */
+  inflar: InflarParaOIrmao
+  /**
+   * The input, synchronous, inside `gravar`: a payload's bytes move to the
+   * store, and the payload comes back with `{ ref }` (the same, if it had no
+   * bytes).
+   */
+  absorver(contents: VaultContents, payload: StoredPayload): StoredPayload
+  /** The bytes of a video a sibling sent (already checked against the `sha`), inside `gravar`. */
+  guardarVideo(contents: VaultContents, sha: string, bytes: Uint8Array, at: number): void
+}
+
+/** The outcome of `trazerUm`. */
+export type DesfechoDoIrmao = "chegou" | "sem-irmao" | "nao-tem"
 
 /** What the interface listens to: the progress, and the channels whose history changed. */
 export interface EventoDoHistorico {
+  /**
+   * What did not come, and why (12/11/2026). Present when the transfer gave up
+   * (`aTrazer` false, plan stopped), or ended with entries the sibling could not
+   * send. The interface says it in one line, and the progress notice closes.
+   */
+  perdidas?: number
+  razao?: RazaoDoHistorico
   /** History is arriving from a sibling. */
   aTrazer: boolean
   /** Fetched entries and count of remaining entries. */
@@ -343,7 +388,18 @@ export class HistoricoEntreAparelhos {
   #cadeia: Promise<void> = Promise.resolve()
   /** The last message sent to the interface, to avoid repeating it. */
   #ultimoEvento = ""
+  /** When the transfer last moved (inventory, page, media). The deadline counts from here. */
+  #progressoEm = 0
+  /** A sibling answered on this connection: tells `irmao-calado` from `sem-irmao`. */
+  #irmaoRespondeu = false
+  /** Entries lost on the way in the plan that just finished, for the last event. */
+  #perdidasNoFim = 0
   /** For tests: signal count sent and received. */
+  /** Who is waiting for a `trazerUm` item, by item key. */
+  readonly #aEspera = new Map<string, ((desfecho: DesfechoDoIrmao) => void)[]>()
+  /** The `trazerUm` items that arrived while a plan had no media list yet: they join it when it comes. */
+  readonly #avulsos: ItemDeMediaDoIrmao[] = []
+  /** For tests: how many signals went out and came in. */
   readonly estatisticas = { enviados: 0, recebidos: 0, recusados: 0, ilegiveis: 0, pedidos: 0, respostas: 0 }
 
   constructor(porta: PortaDoHistorico) {
@@ -355,6 +411,8 @@ export class HistoricoEntreAparelhos {
   aoLigar(): void {
     this.aoDesligar()
     this.#ligadoEm = this.#porta.agora()
+    this.#progressoEm = this.#ligadoEm
+    this.#irmaoRespondeu = false
     this.#reposicaoNestaLigacao = false
     this.#relogio = setInterval(() => void this.#passo(), TECTOS_DO_FIO_DO_HISTORICO.passoMs)
     ;(this.#relogio as { unref?: () => void }).unref?.()
@@ -381,6 +439,89 @@ export class HistoricoEntreAparelhos {
 
   // ------------------------------------------------------------- clock
 
+  /**
+   * A single media item, requested from a connected sibling (the "Fetch"
+   * gesture, design §8): opens a one-item plan, or puts the item at the front
+   * of the current plan.
+   *
+   * - "chegou": a sibling sent it, and it entered the vault and the store;
+   * - "nao-tem": a sibling answered without it;
+   * - "sem-irmao": there is no sibling on this account, or none answered in time.
+   *
+   * Never throws.
+   */
+  async trazerUm(item: ItemDeMediaDoIrmao): Promise<DesfechoDoIrmao> {
+    if (!this.#porta.conteudo() || !this.#porta.canalDaConta() || !this.#porta.podeSinalizar()) return "sem-irmao"
+    const eu = this.#meuAparelho()
+    if (!this.#porta.folhasDaConta().some((aparelho) => aparelho !== eu)) return "sem-irmao"
+    const chave = chaveDoItem(item)
+    const desfecho = new Promise<DesfechoDoIrmao>((resolve) => {
+      const lista = this.#aEspera.get(chave) ?? []
+      lista.push(resolve)
+      this.#aEspera.set(chave, lista)
+    })
+    const agora = this.#porta.agora()
+    this.#porta.gravar((contents) => {
+      const h = (contents.historico ??= {})
+      if (!h.plano) {
+        h.plano = { comecou: agora, canais: {}, media: { total: 1, feitas: 0, porTrazer: [item] } }
+      } else if (h.plano.media) {
+        const media = h.plano.media
+        const ja = media.porTrazer.findIndex((x) => chaveDoItem(x) === chave)
+        if (ja >= 0) media.porTrazer.splice(ja, 1)
+        else media.total += 1
+        media.porTrazer.unshift(item)
+      } else if (!this.#avulsos.some((x) => chaveDoItem(x) === chave)) {
+        // The plan does not have the media list yet: the item joins it when it comes.
+        this.#avulsos.push(item)
+      }
+    })
+    if (!this.#porta.conteudo()?.historico?.plano) {
+      // The vault did not write (it locked meanwhile).
+      this.#resolver(chave, "sem-irmao")
+      return desfecho
+    }
+    if (!this.#pedinte) this.#ultimoHi = 0
+    void this.#passo()
+    const prazo = setTimeout(() => this.#largarAvulsos("sem-irmao", [chave]), TECTOS_DO_FIO_DO_HISTORICO.trazerUmMs)
+    ;(prazo as { unref?: () => void }).unref?.()
+    try {
+      return await desfecho
+    } finally {
+      clearTimeout(prazo)
+    }
+  }
+
+  #resolver(chave: string, desfecho: DesfechoDoIrmao): void {
+    const lista = this.#aEspera.get(chave)
+    if (!lista) return
+    this.#aEspera.delete(chave)
+    for (const resolve of lista) resolve(desfecho)
+  }
+
+  /**
+   * The waiting `trazerUm` requests end with `desfecho`. On "sem-irmao", the
+   * items leave the plan, and a plan left empty leaves: it does not stay asking
+   * nobody.
+   */
+  #largarAvulsos(desfecho: DesfechoDoIrmao, chaves: string[] = [...this.#aEspera.keys()]): void {
+    if (chaves.length === 0) return
+    const largar = new Set(chaves)
+    for (let i = this.#avulsos.length - 1; i >= 0; i--) if (largar.has(chaveDoItem(this.#avulsos[i] as ItemDeMediaDoIrmao))) this.#avulsos.splice(i, 1)
+    if (desfecho === "sem-irmao") {
+      this.#porta.gravar((contents) => {
+        const plano = contents.historico?.plano
+        const media = plano?.media
+        if (!plano || !media) return
+        const antes = media.porTrazer.length
+        media.porTrazer = media.porTrazer.filter((x) => !largar.has(chaveDoItem(x)))
+        media.total = Math.max(media.feitas, media.total - (antes - media.porTrazer.length))
+        if (Object.keys(plano.canais).length === 0 && media.porTrazer.length === 0) delete contents.historico!.plano
+      })
+    }
+    for (const chave of chaves) this.#resolver(chave, desfecho)
+  }
+
   #emSerie(trabalho: () => Promise<void>): Promise<void> {
     const proximo = this.#cadeia.then(trabalho).catch(() => {
       // A failed step does not halt the following ones.
@@ -400,23 +541,66 @@ export class HistoricoEntreAparelhos {
     if (!(await this.#porta.contaPronta())) return
     const agora = this.#porta.agora()
     this.#esquecerVelhas(agora)
+    this.#talvezDesistir(contents, agora)
     const pedinte = this.#pedinte
     if (!pedinte) {
       if (this.#querPedir(contents.historico, agora)) await this.#abrirSessao(agora)
       return
     }
     if (!pedinte.chave) {
-      // No one answered the `hi` (old sibling or none connected): another can go out.
-      if (agora - pedinte.aberta > TECTOS_DO_FIO_DO_HISTORICO.esperaDoInventarioMs) this.#pedinte = null
+      // Nobody answered the `hi` (an old sibling, or none connected): another can go out.
+      if (agora - pedinte.aberta > TECTOS_DO_FIO_DO_HISTORICO.esperaDoInventarioMs) {
+        this.#pedinte = null
+        this.#largarAvulsos("sem-irmao")
+      }
       return
     }
     if (pedinte.pedido) await this.#talvezRepetir(pedinte, agora)
     else await this.#proximoPedido(pedinte)
   }
 
+  /**
+   * The deadline: with something to bring and no progress for `desistirAposMs`,
+   * give up for now, with the reason. Written to the vault, so a reload does
+   * not bring back a notice that already gave up.
+   */
+  #talvezDesistir(contents: VaultContents, agora: number): void {
+    const h = contents.historico
+    if (!h) return
+    if (agora - this.#progressoEm < TECTOS_DO_FIO_DO_HISTORICO.desistirAposMs) return
+    if (h.plano && !h.plano.parado) {
+      const razao: RazaoDoHistorico = this.#irmaoRespondeu ? "irmao-calado" : "sem-irmao"
+      this.#porta.gravar((c) => {
+        if (c.historico?.plano) c.historico.plano.parado = { em: agora, razao }
+      })
+      this.#pedinte = null
+      this.#dizer([])
+    } else if (!h.plano && h.inicial && h.semIrmaoDesde === undefined) {
+      this.#porta.gravar((c) => {
+        if (c.historico?.inicial && !c.historico.plano) c.historico.semIrmaoDesde = agora
+      })
+      this.#dizer([])
+    }
+  }
+
+  /** The transfer moved: the deadline starts again, and a stopped plan is no longer stopped. */
+  #progrediu(): void {
+    this.#progressoEm = this.#porta.agora()
+    this.#irmaoRespondeu = true
+    const h = this.#porta.conteudo()?.historico
+    if (h?.plano?.parado || h?.semIrmaoDesde !== undefined) {
+      this.#porta.gravar((c) => {
+        if (c.historico?.plano) delete c.historico.plano.parado
+        if (c.historico) delete c.historico.semIrmaoDesde
+      })
+    }
+  }
+
   #querPedir(estado: EstadoDoHistorico | undefined, agora: number): boolean {
     const t = TECTOS_DO_FIO_DO_HISTORICO
     const desdeOUltimo = agora - this.#ultimoHi
+    // Stopped: quiet retries, slower. A sibling that connects brings it forward (`#irmaoLigado`).
+    if (estado?.plano?.parado || (!estado?.plano && estado?.semIrmaoDesde !== undefined)) return desdeOUltimo >= t.retomarParadoMs
     if (estado?.plano) return desdeOUltimo >= t.esperaDoInventarioMs
     const inicial = estado?.inicial
     if (inicial && agora - inicial.desde < t.inicialDuraMs) {
@@ -443,6 +627,8 @@ export class HistoricoEntreAparelhos {
   /** A sibling said it is connected (requested history): this one also asks it, once per interval. */
   #irmaoLigado(): void {
     const agora = this.#porta.agora()
+    // A stopped transfer asks at once: the sibling it was waiting for is here.
+    this.#ultimoHi = 0
     if (this.#ultimaReposicao > 0 && agora - this.#ultimaReposicao < TECTOS_DO_FIO_DO_HISTORICO.intervaloDaReposicaoMs) return
     this.#reposicaoNestaLigacao = false
     this.#ligadoEm = Math.min(this.#ligadoEm, agora - TECTOS_DO_FIO_DO_HISTORICO.primeiraReposicaoMs + 2_000)
@@ -550,6 +736,7 @@ export class HistoricoEntreAparelhos {
         this.#pedinte = null
         return
       }
+      this.#progrediu()
       this.#aoInventario(inventario)
       await this.#proximoPedido(pedinte)
       return
@@ -559,6 +746,8 @@ export class HistoricoEntreAparelhos {
     const pedido = pedinte.pedido
     if (!pedido || cabecalho.id !== pedido.id || cabecalho.ap !== pedinte.com) return
     pedido.ultimaParte = this.#porta.agora()
+    // Each part is progress: a 2 MiB media response takes minutes at 40 signals a minute, and must not hit the deadline.
+    this.#progrediu()
     pedinte.chegada ??= { id: pedido.id, n, partes: new Array<Uint8Array | undefined>(n), recebidas: 0 }
     if (!this.#guardarParte(pedinte.chegada, i, n, corpo)) return
     const resposta = await this.#abrirResposta<unknown>(pedinte, pedinte.chegada)
@@ -665,18 +854,24 @@ export class HistoricoEntreAparelhos {
       const canal = contents.historico?.plano?.canais[c]
       if (!canal) return
       const entradas = pagina.e.filter(entradaValida).filter((entrada) => !this.#porta.bloqueado(c, entrada.sender))
-      if (fundirEntradasDoIrmao(contents, c, entradas) > 0) mudou = true
+      // What comes in with bytes (a sibling always sends `inline`) moves to the store, in the same mutation.
+      if (fundirEntradasDoIrmao(contents, c, this.#absorverNovas(contents, c, entradas)) > 0) mudou = true
       if (pagina.r && typeof pagina.r === "object") {
-        fundirRegistosDoIrmao(contents, c, pagina.r)
+        fundirRegistosDoIrmao(contents, c, registosSemRefs(pagina.r))
+        this.#absorverRegistos(contents, c)
         mudou = true
       }
-      canal.feitas = Math.min(canal.total, canal.feitas + pagina.e.length)
+      const perdidas = typeof pagina.p === "number" && Number.isSafeInteger(pagina.p) && pagina.p > 0 ? pagina.p : 0
+      if (perdidas > 0) canal.perdidas = Math.min(canal.total, (canal.perdidas ?? 0) + perdidas)
+      const possivel = canal.total - (canal.perdidas ?? 0)
+      canal.feitas = Math.min(possivel, canal.feitas + pagina.e.length)
       if (typeof pagina.ate === "number") canal.cursor = pagina.ate
-      if (pagina.fim || pagina.e.length === 0) {
+      if (pagina.fim || (pagina.e.length === 0 && perdidas === 0)) {
         canal.fim = true
-        canal.feitas = canal.total
+        canal.feitas = possivel
       }
     })
+    this.#progrediu()
     this.#dizer(mudou ? [c] : [])
   }
 
@@ -694,7 +889,7 @@ export class HistoricoEntreAparelhos {
         if ("a" in item && (typeof item.a !== "string" || typeof item.at !== "number")) continue
         if (!("c" in item) && !("v" in item) && !("a" in item)) continue
         if ("c" in item && this.#porta.bloqueado(item.c, item.e.split("|")[1] ?? "")) continue
-        if (!faltaAqui(contents, item)) continue
+        if (!faltaAqui(contents, item, (sha) => this.#porta.armazem.presente(sha))) continue
         const pedido = pedidoDe(item)
         const chave = chaveDoItem(pedido)
         if (vistos.has(chave)) continue
@@ -703,8 +898,14 @@ export class HistoricoEntreAparelhos {
       }
       // Conversation thumbnails before videos and avatars: these show up first.
       porTrazer.sort((a, b) => ordemDoItem(a) - ordemDoItem(b))
+      // The `trazerUm` requests ahead of everything: someone is looking at them.
+      for (const item of this.#avulsos.splice(0).reverse()) {
+        if (vistos.has(chaveDoItem(item))) porTrazer.splice(porTrazer.findIndex((x) => chaveDoItem(x) === chaveDoItem(item)), 1)
+        porTrazer.unshift(item)
+      }
       plano.media = { total: porTrazer.length, feitas: 0, porTrazer }
     })
+    this.#progrediu()
     this.#dizer([])
   }
 
@@ -713,6 +914,7 @@ export class HistoricoEntreAparelhos {
     const resto = typeof resposta?.resto === "number" && resposta.resto >= 0 ? Math.min(resposta.resto, pedidos.length) : 0
     const tratados = new Set(pedidos.slice(0, pedidos.length - resto).map(chaveDoItem))
     const canais = new Set<string>()
+    const chegaram = new Set<string>()
     let perfis = false
     this.#porta.gravar((contents) => {
       const media = contents.historico?.plano?.media
@@ -721,12 +923,19 @@ export class HistoricoEntreAparelhos {
         if (typeof item !== "object" || item === null) continue
         if ("c" in item && typeof item.c === "string" && typeof item.e === "string" && typeof item.p === "object" && item.p !== null) {
           if (this.#porta.bloqueado(item.c, item.e.split("|")[1] ?? "")) continue
-          if (juntarMediaDoIrmao(contents, item.c, item.e, item.p)) canais.add(item.c)
+          if (juntarMediaDoIrmao(contents, item.c, item.e, soInlineOuEvicted(item.p), (sha) => this.#porta.armazem.presente(sha))) {
+            this.#absorverEntrada(contents, item.c, item.e)
+            canais.add(item.c)
+          }
+          chegaram.add(chaveDoItem({ c: item.c, e: item.e }))
         } else if ("v" in item && typeof item.v === "string" && typeof item.b64 === "string") {
           // Video verified by its hash, which is its key: a mismatched video is rejected.
           try {
             const resumo = toBase64(sha256(base64ParaBytes(item.b64)))
-            if (resumo === item.v) guardarVideo(contents, item.v, item.b64, typeof item.at === "number" ? item.at : this.#porta.agora())
+            if (resumo === item.v) {
+              this.#porta.armazem.guardarVideo(contents, item.v, base64ParaBytes(item.b64), typeof item.at === "number" ? item.at : this.#porta.agora())
+              chegaram.add(chaveDoItem({ v: item.v }))
+            }
           } catch {
             // Corrupted bytes: rejected, not requested again.
           }
@@ -736,29 +945,86 @@ export class HistoricoEntreAparelhos {
           const aqui = contents.directory[item.a]
           if (aqui && !aqui.parcial && aqui.at > perfil.at) continue
           const { parcial: _parcial, ...inteiro } = structuredClone(perfil)
-          contents.directory[item.a] = inteiro
+          contents.directory[item.a] = { ...inteiro, payload: this.#porta.armazem.absorver(contents, soInlineOuEvicted(inteiro.payload)) }
           perfis = true
+          chegaram.add(chaveDoItem({ a: item.a }))
         }
       }
       const antes = media.porTrazer.length
       media.porTrazer = media.porTrazer.filter((item) => !tratados.has(chaveDoItem(item)))
       media.feitas = Math.min(media.total, media.feitas + (antes - media.porTrazer.length))
     })
+    this.#progrediu()
+    for (const chave of tratados) this.#resolver(chave, chegaram.has(chave) ? "chegou" : "nao-tem")
     this.#dizer([...canais], perfis)
+  }
+
+  /**
+   * A sibling page's entries ready to merge: without foreign references
+   * (Ruling R14: a `{ ref }` from the wire would point to a `sha` in this
+   * vault), and those not here yet with their bytes in the store. Repeated ones
+   * are not absorbed: `fundirEntradasDoIrmao` throws them away, and the blob
+   * would be orphaned. Runs inside `gravar`.
+   */
+  #absorverNovas(contents: VaultContents, canal: string, entradas: StoredChatMessage[]): StoredChatMessage[] {
+    const aqui = [...(contents.history[canal] ?? []), ...(contents.estadoDoCanal?.[canal] ?? [])]
+    // An act inherited from pairing gives way to the full event: it counts as new.
+    const seqs = new Set(aqui.filter((e) => e.seq >= 0 && !e.herdado).map((e) => e.seq))
+    const chaves = new Set(aqui.map(chaveDoEvento).filter((chave): chave is string => chave !== null))
+    return entradas.map((entrada) => {
+      const limpo = soInlineOuEvicted(entrada.payload)
+      const chave = chaveDoEvento(entrada)
+      // The `fundirEntradasDoIrmao` rules: without identity, or already here (in the vault or earlier in this page), it does not enter.
+      const fora = (chave === null && entrada.seq < 0) || (entrada.seq >= 0 && seqs.has(entrada.seq)) || (chave !== null && chaves.has(chave))
+      if (entrada.seq >= 0) seqs.add(entrada.seq)
+      if (chave !== null) chaves.add(chave)
+      const payload = fora ? limpo : this.#porta.armazem.absorver(contents, limpo)
+      return payload === entrada.payload ? entrada : { ...entrada, payload }
+    })
+  }
+
+  /** The entry with this key, with its bytes moved to the store. Inside `gravar`. */
+  #absorverEntrada(contents: VaultContents, canal: string, chave: string): void {
+    for (const lista of [contents.history[canal], contents.estadoDoCanal?.[canal]]) {
+      const entrada = lista?.find((e) => chaveDoEvento(e) === chave)
+      if (!entrada) continue
+      const payload = this.#porta.armazem.absorver(contents, entrada.payload)
+      if (payload !== entrada.payload) entrada.payload = payload
+      return
+    }
+  }
+
+  /** The channel records that can have media (the presentation and the rooms), with the bytes in the store. Inside `gravar`. */
+  #absorverRegistos(contents: VaultContents, canal: string): void {
+    const meta = contents.spaceMeta[canal]
+    if (meta) {
+      const payload = this.#porta.armazem.absorver(contents, meta.payload)
+      if (payload !== meta.payload) contents.spaceMeta[canal] = { ...meta, payload }
+    }
+    const salas = contents.channelRooms[canal]
+    for (const [id, sala] of Object.entries(salas ?? {})) {
+      const payload = this.#porta.armazem.absorver(contents, sala.payload)
+      if (payload !== sala.payload) salas![id] = { ...sala, payload }
+    }
   }
 
   #acabar(): void {
     const agora = this.#porta.agora()
+    this.#perdidasNoFim = 0
     this.#porta.gravar((contents) => {
       const h = contents.historico
       if (!h?.plano) return
+      for (const canal of Object.values(h.plano.canais)) this.#perdidasNoFim += canal.perdidas ?? 0
       for (const [c, canal] of Object.entries(h.plano.canais)) (h.trazidos ??= {})[c] = canal.resumo
       delete h.plano
       delete h.inicial
     })
+    // An item left out of the plan (the sibling did not list it): it does not have it.
+    this.#largarAvulsos("nao-tem")
     this.#pedinte = null
     this.#ultimaReposicao = agora
     this.#dizer([])
+    this.#perdidasNoFim = 0
   }
 
   // -------------------------------------------------------- responder
@@ -824,13 +1090,18 @@ export class HistoricoEntreAparelhos {
     if (pedido.t === "pagina" && typeof pedido.c === "string") {
       if (pedido.c === this.#porta.canalDaConta()) return
       const desde = typeof pedido.desde === "number" ? pedido.desde : null
-      resposta = paginaDe(contents, pedido.c, desde)
+      try {
+        resposta = await paginaDe(contents, pedido.c, desde, this.#porta.armazem.inflar)
+      } catch {
+        // A channel that cannot be paged at all: say it ended, never stay silent (the requester would ask forever).
+        resposta = { c: pedido.c, e: [], ate: desde, fim: true } satisfies PaginaDoHistorico
+      }
     } else if (pedido.t === "media?") {
       const canais = Array.isArray(pedido.canais) ? pedido.canais.filter((c) => typeof c === "string") : undefined
-      resposta = { itens: mediaDe(contents, eu, canais) }
+      resposta = { itens: mediaDe(contents, eu, (sha) => this.#porta.armazem.presente(sha), canais) }
     } else if (pedido.t === "media" && Array.isArray(pedido.itens)) {
       const pedidos = pedido.itens.slice(0, TECTOS_DO_HISTORICO.itensPorPedidoDeMedia)
-      resposta = mediaInteiraDe(contents, eu, pedidos)
+      resposta = await mediaInteiraDe(contents, eu, pedidos, this.#porta.armazem.inflar)
     } else {
       return
     }
@@ -1017,14 +1288,23 @@ export class HistoricoEntreAparelhos {
   // ------------------------------------------------------------ a interface
 
   #evento(canais: string[]): EventoDoHistorico {
-    const plano = this.#porta.conteudo()?.historico?.plano
-    const inicial = this.#porta.conteudo()?.historico?.inicial !== undefined
-    if (!plano) return { aTrazer: false, feitas: 0, total: 0, media: null, canais, inicial }
+    const h = this.#porta.conteudo()?.historico
+    const plano = h?.plano
+    const inicial = h?.inicial !== undefined
+    if (!plano) {
+      if (h?.inicial && h.semIrmaoDesde !== undefined) return { aTrazer: false, feitas: 0, total: 0, media: null, canais, inicial, razao: "sem-irmao" }
+      if (this.#perdidasNoFim > 0) return { aTrazer: false, feitas: 0, total: 0, media: null, canais, inicial, perdidas: this.#perdidasNoFim, razao: "ilegiveis" }
+      return { aTrazer: false, feitas: 0, total: 0, media: null, canais, inicial }
+    }
     let feitas = 0
     let total = 0
     for (const canal of Object.values(plano.canais)) {
       feitas += canal.feitas
-      total += canal.total
+      // The total counts only what can be got: what the sibling could not send leaves it.
+      total += canal.total - (canal.perdidas ?? 0)
+    }
+    if (plano.parado) {
+      return { aTrazer: false, feitas, total, media: null, canais, inicial, perdidas: Math.max(0, total - feitas), razao: plano.parado.razao }
     }
     return {
       aTrazer: true,

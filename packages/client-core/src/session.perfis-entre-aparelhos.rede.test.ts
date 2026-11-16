@@ -98,7 +98,8 @@ describe("os perfis das outras pessoas no emparelhamento", () => {
     // channel where Ana gained a device (the channel grew).
     await bruno!.session.connect()
     await ate(
-      () => typeof (telemovel.vault.contents.directory[bruno!.address]?.payload["avatar"] as { inline?: unknown } | undefined)?.inline === "string",
+      // The portrait goes to the media store: the vault keeps the reference (design "media fora do cofre" §5).
+      () => typeof (telemovel.vault.contents.directory[bruno!.address]?.payload["avatar"] as { ref?: unknown } | undefined)?.ref === "string",
       "o retrato do Bruno chega ao telemóvel quando ele volta",
       60_000,
     )

@@ -16,7 +16,7 @@ import { loadSuite } from "./suite.js"
 import { encodeDeviceCredential } from "@enclave/protocol"
 
 /**
- * The channel snapshot in the Welcome (phase 1 of `docs/planos/estado-cifrado-plano.md`).
+ * The channel snapshot in the Welcome (phase 1 of the encrypted-state plan).
  * The extension goes in the Welcome's `GroupInfo` and round-trips; and a Welcome with it
  * opens in the usual `joinGroup`, which is what a 1.0.x client does.
  */

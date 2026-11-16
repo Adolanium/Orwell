@@ -1,4 +1,5 @@
 import type { LinkCard } from "../../bridge.js"
+import { useImagemPequena } from "../../hooks/useMedia.js"
 import { domainOf } from "../../lib/format.js"
 import { strings } from "../../strings.js"
 import { youtubeIdOf, youtubeWatchUrl } from "@enclave/protocol"
@@ -35,7 +36,7 @@ function PlayIcon({ size = 30 }: { size?: number }): React.JSX.Element {
  * published it: nothing is requested from Google to draw it. See `@enclave/protocol`,
  * `youtube.ts`.
  */
-function YouTubeMiniatura({ link, videoId }: { link: LinkCard; videoId: string }): React.JSX.Element {
+function YouTubeMiniatura({ link, videoId, miniatura }: { link: LinkCard; videoId: string; miniatura: string | null }): React.JSX.Element {
   return (
     <a
       className="link-card video-facade"
@@ -48,8 +49,8 @@ function YouTubeMiniatura({ link, videoId }: { link: LinkCard; videoId: string }
       title={strings.linkCard.openVideo}
     >
       <span className="facade-frame">
-        {link.thumbnail ? (
-          <img className="facade-thumb" src={link.thumbnail} alt="" />
+        {miniatura ? (
+          <img className="facade-thumb" src={miniatura} alt="" />
         ) : (
           <span className="facade-blank" />
         )}
@@ -70,12 +71,14 @@ export function LinkPreview({ link }: { link: LinkCard }): React.JSX.Element {
   // Recognized by the address, never by `kind`, which is a field the publisher picks
   // from a list and can say anything.
   const videoId = youtubeIdOf(link.url)
-  if (videoId) return <YouTubeMiniatura link={link} videoId={videoId} />
+  // The thumbnail the vault stored in the media store arrives as `{ ref }` (Task 10, design §3).
+  const miniatura = useImagemPequena(link.thumbnail)
+  if (videoId) return <YouTubeMiniatura link={link} videoId={videoId} miniatura={miniatura} />
 
   const domain = domainOf(link.url)
   return (
     <div className={`link-card ${link.kind ?? "link"}`}>
-      {link.thumbnail && <img className="link-thumb" src={link.thumbnail} alt="" />}
+      {miniatura && <img className="link-thumb" src={miniatura} alt="" />}
       <div className="link-body">
         <span className="link-site">
           {link.kind === "video" ? strings.linkCard.videoPrefix : ""}

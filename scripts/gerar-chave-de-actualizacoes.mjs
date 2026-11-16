@@ -3,7 +3,7 @@
  *
  * ## Why we have our own key
  *
- * Installers are not signed with a commercial certificate (owner's decision on August 12, 2026). Without a signature, an updater can only trust what the server says, and a compromised `orwell.pt` would start sending code to run on everyone's machine (see the header of `apps/client/src/main/actualizacao.ts`).
+ * Installers are not signed with a commercial certificate. Without a signature, an updater can only trust what the server says, and a compromised `orwell.pt` would start sending code to run on everyone's machine (see the header of `apps/client/src/main/actualizacao.ts`).
  *
  * An Ed25519 key that's ours alone solves this without paying rent: the private key stays on the owner's Mac and never reaches the server; the public key goes inside the application. Anyone who gains write access to the server can swap the installer, but cannot write a signature that the public key will accept. The anchor stops being the server and becomes this file.
  *

@@ -2,7 +2,7 @@ import { z } from "zod"
 import { AssinaturaEd25519, ChaveEd25519, canonicoTolerante, ItemRelatado } from "./autoria.js"
 
 /**
- * Reports (`docs/planos/denuncias-design.md`): the HTTP routes and the
+ * Reports: the HTTP routes and the
  * signed request that authenticates them.
  *
  * The routes are HTTP and bypass the gateway, so no session says who is calling.
@@ -22,6 +22,32 @@ export const ROTAS_DA_DENUNCIA = {
 } as const
 
 export type RotaDaDenuncia = (typeof ROTAS_DA_DENUNCIA)[keyof typeof ROTAS_DA_DENUNCIA]
+
+/**
+ * "Send log" (Help and diagnostics). Since 1.3.15 it takes the same signed
+ * request as the report routes: the address on the stored log is proven, not
+ * claimed. The `corpo` is `CorpoDoRelato`.
+ */
+export const ROTA_DO_RELATO = "/_enclave/relato" as const
+
+/** Every route that takes a signed request. */
+export type RotaAssinada = RotaDaDenuncia | typeof ROTA_DO_RELATO
+
+/** The largest diagnostic log accepted, in bytes of UTF-8 text. */
+export const RELATO_MAX_BYTES = 64 * 1024
+
+/** The `corpo` of the signed request to `ROTA_DO_RELATO`. The address comes from the signature. */
+export const CorpoDoRelato = z.object({
+  /** The app version as it writes it (`0.9.2`, `0.9.2-beta.1`). */
+  versao: z.string().regex(/^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-+][0-9A-Za-z.-]{1,24})?$/),
+  /**
+   * The session's diagnostic log: no messages, no text the person wrote. The
+   * exact cap is `RELATO_MAX_BYTES` in UTF-8 bytes, checked by the server; here
+   * only the bound no log under that cap can pass (4 bytes per character at most).
+   */
+  texto: z.string().min(1).max(RELATO_MAX_BYTES * 4),
+})
+export type CorpoDoRelato = z.infer<typeof CorpoDoRelato>
 
 export const PedidoAssinado = z.object({
   v: z.literal(1),

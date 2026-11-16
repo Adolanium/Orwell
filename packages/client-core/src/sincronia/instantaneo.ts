@@ -4,7 +4,7 @@ import type { ResumoNivel0, TipoDoResumo } from "./resumo.js"
 
 /**
  * The snapshot for late arrivals, and attachments on request (phase S5 of
- * absolute sync, `docs/planos/2026-10-20-sincronia-absoluta.md`, §5).
+ * absolute sync, §5).
  *
  * **Not a new path (§5.1).** The arriving member states their summary, which is
  * empty. On the first summary from another member, instead of descending to levels 1 and 2,

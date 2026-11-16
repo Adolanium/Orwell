@@ -88,8 +88,8 @@ describe("o som de quem sai da sala", () => {
   })
 
   it("toca uma vez pela nossa entrada e uma vez pela nossa saída, e não pelos anúncios repetidos", () => {
-    // Request from the owner (October 27, 2026): "I want sound when the user
-    // themselves joins the channel". The user's own announcement repeats every
+    // There is a sound when the user
+    // themselves joins the channel. The user's own announcement repeats every
     // five seconds while alone; only the first one plays.
     const vigia = numaSala()
 

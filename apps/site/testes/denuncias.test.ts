@@ -99,7 +99,7 @@ describe.each(PRIVACIDADE)("$ficheiro", (pagina) => {
     expect(html).toContain(pagina.artigo)
   })
   it("diz quem é o responsável, sem campos por preencher nem notas para o dono", () => {
-    // Owner's decision (4/11/2026): the responsible person is "Duarte Bivar", with no tax ID and no address.
+    // The responsible person is "Duarte Bivar", with no tax ID and no address.
     expect(html).toContain("Duarte Bivar")
     expect(html).not.toMatch(/por preencher|to be filled in|legal-por-preencher|\[dono\]/i)
     expect(texto(html)).not.toMatch(/\bNIF\b|tax number/i)
@@ -113,7 +113,7 @@ describe.each([...TERMOS, ...PRIVACIDADE].map((p) => p.ficheiro))("%s", (ficheir
     expect(html).not.toMatch(/[—–]/)
   })
   it("não fala da licença do código nem de revisão por advogado", () => {
-    // Owner's orders (4/11/2026): no mention of AGPL, and published without legal review.
+    // No mention of AGPL, and published without legal review.
     expect(html).not.toMatch(/AGPL/i)
     expect(html).not.toMatch(/advogado|jurídico antes de publicar|lawyer/i)
   })

@@ -17,6 +17,7 @@ import { PostDetail } from "../social/PostDetail.js"
 import { MemberRoles } from "./MemberRoles.js"
 import { PublicacoesDoPerfil } from "./ProfileBody.js"
 import { NomeDePessoa } from "../../components/NomeDePessoa.js"
+import { useMedia } from "../../hooks/useMedia.js"
 
 type Separador = "publicacoes" | "amigos" | "comum"
 
@@ -271,6 +272,10 @@ export function PersonProfile({
     document.getElementById(`${prefixo}-sep-${seguinte.id}`)?.focus()
   }
 
+  // The sheet shows the portrait ORIGINAL (design §3 and §8); the directory gives the thumbnail, which stays while the original arrives.
+  const retrato = useMedia({ ...(profile?.avatarRef ? { ref: profile.avatarRef } : {}) }, { visivel: true, tamanho: "original" })
+  const cara = retrato.src ?? profile?.avatarDataUrl
+
   return (
     <main className="main pagina-da-pessoa person-profile" aria-label={strings.personProfile.title(name)}>
       {connection && <ConnectionBanner state={connection} detail={connectionDetail} />}
@@ -285,8 +290,8 @@ export function PersonProfile({
           onClick={onBack}
         >
           <SetaParaTrasIcon size={18} />
-          {/* The word in view, not just the arrow (owner's request on 27 October
-              2026: "I want to go back", and could not find the button). The
+          {/* The word in view, not just the arrow (people looking for a way
+              back could not find the button). The
               accessible name is the `aria-label`, which starts with this word. */}
           <span aria-hidden="true">{strings.personProfile.backFromPage}</span>
         </button>
@@ -314,8 +319,8 @@ export function PersonProfile({
           <>
             <section className="pessoa-cabeca">
               <span className="profile-avatar pessoa-avatar">
-                {profile?.avatarDataUrl ? (
-                  <img src={profile.avatarDataUrl} alt="" />
+                {cara ? (
+                  <img src={cara} alt="" />
                 ) : (
                   (profile?.displayName.trim()[0] ?? address[1] ?? "?").toUpperCase()
                 )}

@@ -25,12 +25,11 @@ import {
 import { NomeDePessoa } from "../../components/NomeDePessoa.js"
 
 /**
- * The report sheet for a message or a person (`docs/planos/denuncias-design.md`,
- * §4 and §9b). Opens from the message menu (`ChatScreen`) and the person
+ * The report sheet for a message or a person (§4 and §9b of the reports design).
+ * Opens from the message menu (`ChatScreen`) and the person
  * menu (`menuDaPessoa`, linked in `App`). Both use this flow.
  *
- * The design is what the owner chose on 4/11/2026 (`docs/planos/denunciar-layout/`):
- * on desktop, a step-by-step window (Reason, Review, Send); on mobile,
+ * The design: on desktop, a step-by-step window (Reason, Review, Send); on mobile,
  * a bottom sheet with a handle and the button fixed at the bottom. Styles in
  * `styles/folhaDeDenunciar.css`.
  *

@@ -9,7 +9,7 @@ import {
 
 /**
  * The summary of a channel, calculated locally and without networking (phase S0
- * of the plan `docs/planos/2026-10-20-sincronia-absoluta.md`, §4.2).
+ * of the absolute-sync plan, §4.2).
  *
  * It says, in few bytes, what this device has in a channel. It has three levels
  * and only descends when there is a difference:
@@ -20,9 +20,8 @@ import {
  *
  * **Measures only.** Nothing here travels or changes the vault. Reads
  * `VaultContents` and nothing else, because phase S0 does not touch `session.ts`
- * or `vault.ts`. What the summary needed and the vault does not store is
- * written in `docs/planos/2026-10-20-sincronia-S0-medidas.md`, in the list for
- * S1 and S4.
+ * or `vault.ts`. What the summary needed and the vault does not store was
+ * carried to S1 and S4.
  *
  * **Deterministic.** The history order does not enter the result: keys are a
  * set, ordered before the hash, and folds (reactions, tie) order the input by

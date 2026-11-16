@@ -8,7 +8,7 @@ import {
   type ParteDeVideo,
   type PartesDoVideo,
 } from "@enclave/protocol"
-import { base64ParaBytes, bytesParaBase64, entradasDoCanal, videoCabeNoCofre, videoNoCofre, type VaultContents } from "./vault.js"
+import { base64ParaBytes, bytesParaBase64, entradasDoCanal, VIDEO_NO_COFRE_MAX_CARACTERES, videoNoCofre, type VaultContents } from "./vault.js"
 
 /**
  * Video in posts, in the core (26/10/2026). The wire format is in
@@ -20,13 +20,14 @@ import { base64ParaBytes, bytesParaBase64, entradasDoCanal, videoCabeNoCofre, vi
  *
  * **Where the bytes live.** In three places, in this order:
  *
- * 1. Session memory (`MEMORIA_BYTES`). Both the publisher and receiver see the
- *    video from here while the app is open.
- * 2. The vault, within the media budget (`guardarVideo`). Today the budget
- *    is 4 million characters for everything: only one small video fits, and it leaves
- *    first when space runs out.
- * 3. Other members (S5): those who no longer have it ask for it, and those who have it send
- *    the parts again. The SHA-256 hash of the attachment verifies them.
+ * 1. The session memory (`MEMORIA_BYTES`). Whoever posted and whoever received
+ *    see the video from here while the app is open.
+ * 2. The device media store (`guardarNoArmazem`), encrypted and outside the
+ *    vault, up to the store ceiling. Without a store (the tests from before
+ *    it), the legacy: the vault (`guardarVideo`), up to
+ *    `VIDEO_NO_COFRE_MAX_CARACTERES`.
+ * 3. The other members (S5): whoever no longer has them asks, and whoever has
+ *    them sends the parts again. The attachment's SHA-256 digest checks them.
  */
 
 /** Error messages, stable: the UI gives them the code (`codigosDeErro.ts`). */
@@ -239,6 +240,16 @@ export interface PortaDosVideos {
   guardarNoCofre(sha: string, b64: string): Promise<boolean>
   /** Delete video bytes from the vault (cancelled, or no live post). */
   apagarDoCofre?(sha: string): Promise<void>
+  /**
+   * The media store (design §5, `guardarVideo` now absorbs): store the raw
+   * bytes, without base64 and without the vault ceiling. Says whether it
+   * stayed. With this, `guardarNoCofre` is no longer used.
+   */
+  guardarNoArmazem?(sha: string, bytes: Uint8Array, tipo?: string): Promise<boolean>
+  /** The store has the bytes of this video (synchronous, through the inventory). */
+  noArmazem?(sha: string): boolean
+  /** The bytes of this video, from the store; null if they are not there. */
+  lerDoArmazem?(sha: string): Promise<Uint8Array | null>
   enviarParte(canal: string, parte: ParteDeVideo): Promise<void>
   emitir(evento: EventoDoVideo): void
   /** A part of `sha` arrived from `aparelho` (`completo`: the video is complete and verified). For S5 requests. */
@@ -287,7 +298,7 @@ export class VideosDaSessao {
     const sha = await resumoDoVideo(video.bytes)
     const n = partesDoVideo(video.bytes.length)
     this.#memoria.guardar(sha, video.bytes)
-    await this.#guardarNoCofre(sha, video.bytes)
+    await this.#guardarNoCofre(sha, video.bytes, video.mediaType)
     const anexo: Attachment = {
       url: "",
       key: "",
@@ -311,12 +322,14 @@ export class VideosDaSessao {
   async enviarPartes(canal: string, sha: string): Promise<void> {
     // One send at a time: a second one would overwrite the first one's state, and "Cancel" would stop the wrong one.
     if (this.#envio) throw new Error("a video upload is already in progress")
-    const bytes = this.bytes(sha)
-    if (!bytes) throw new Error("the video upload was cancelled")
-    const partes = partir(bytes)
-    const envio = { sha, feitas: 0, de: partes.length, cancelado: false }
+    // The turn is taken now, before reading the store (asynchronous): a second send in between is refused.
+    const envio = { sha, feitas: 0, de: 0, cancelado: false }
     this.#envio = envio
     try {
+      const bytes = this.bytes(sha) ?? (await this.bytesInteiros(sha))
+      if (!bytes) throw new Error("the video upload was cancelled")
+      const partes = partir(bytes)
+      envio.de = partes.length
       for (const [indice, parte] of partes.entries()) {
         if (envio.cancelado) throw new Error("the video upload was cancelled")
         await this.#porta.enviarParte(canal, { sha, parte: indice, de: partes.length, dados: bytesParaBase64(parte) })
@@ -361,9 +374,13 @@ export class VideosDaSessao {
     }
   }
 
-  /** Store in the vault only if it fits: a video that doesn't fit won't be encoded to base64. */
-  async #guardarNoCofre(sha: string, bytes: Uint8Array): Promise<void> {
-    if (!videoCabeNoCofre(this.#porta.conteudo(), caracteresDeBase64(bytes.length))) return
+  /** Store in the store; without it, in the vault, only if it fits: a video that does not fit is not even turned into base64. */
+  async #guardarNoCofre(sha: string, bytes: Uint8Array, tipo?: string): Promise<void> {
+    if (this.#porta.guardarNoArmazem) {
+      await this.#porta.guardarNoArmazem(sha, bytes, tipo).catch(() => false)
+      return
+    }
+    if (caracteresDeBase64(bytes.length) > VIDEO_NO_COFRE_MAX_CARACTERES) return
     await this.#porta.guardarNoCofre(sha, bytesParaBase64(bytes)).catch(() => false)
   }
 
@@ -391,7 +408,7 @@ export class VideosDaSessao {
    */
   async aoParte(canal: string, parte: ParteDeVideo, aparelho: string): Promise<void> {
     const { sha } = parte
-    if (this.#memoria.obter(sha) || this.#envio?.sha === sha) return
+    if (this.#memoria.obter(sha) || this.#envio?.sha === sha || this.#porta.noArmazem?.(sha)) return
     const chave = `${sha}|${aparelho}`
     const existente = this.#montagens.get(chave)
     // An assembly belongs to one channel: the same chunk in another channel doesn't complete it.
@@ -483,9 +500,28 @@ export class VideosDaSessao {
     }
   }
 
+  /** This device has the bytes: in memory, in the store or in the legacy vault. */
+  tem(sha: string): boolean {
+    return this.bytes(sha) !== null || (this.#porta.noArmazem?.(sha) ?? false)
+  }
+
+  /** The bytes of a video, wherever they are (the store is asynchronous). `null` if this device does not have them. */
+  async bytesInteiros(sha: string): Promise<Uint8Array | null> {
+    const aqui = this.bytes(sha)
+    if (aqui) return aqui
+    let doArmazem: Uint8Array | null = null
+    try {
+      doArmazem = (await this.#porta.lerDoArmazem?.(sha)) ?? null
+    } catch {
+      // A damaged blob (Erro 522) is a video this device does not have.
+    }
+    if (doArmazem) this.#memoria.guardar(sha, doArmazem)
+    return doArmazem
+  }
+
   estado(sha: string): EstadoDoVideo {
     if (this.#envio?.sha === sha) return { fase: "a-enviar", feitas: this.#envio.feitas, de: this.#envio.de }
-    if (this.#memoria.obter(sha) || this.bytes(sha)) return { fase: "pronto" }
+    if (this.#memoria.obter(sha) || this.tem(sha)) return { fase: "pronto" }
     for (const montagem of this.#montagens.values()) {
       if (montagem.sha === sha) return { fase: "a-receber", feitas: this.#feitasDe(sha), de: montagem.esperado.n }
     }
@@ -499,7 +535,7 @@ export class VideosDaSessao {
    * The first refusal stops. Returns whether all were sent.
    */
   async servir(canal: string, sha: string, q: string, vez: (bytes: number) => Promise<boolean>): Promise<boolean> {
-    const bytes = this.bytes(sha)
+    const bytes = await this.bytesInteiros(sha)
     if (!bytes) return false
     const partes = partir(bytes)
     for (const [indice, parte] of partes.entries()) {

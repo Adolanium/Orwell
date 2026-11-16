@@ -12,7 +12,7 @@ import {
 /**
  * The quotes that site visitors see are straight, never angled.
  *
- * Owner's order on November 3, 2026, same as the app (`packages/ui/src/aspas.test.ts`).
+ * Same rule as the app (`packages/ui/src/aspas.test.ts`).
  * HTML comments are left out: they reach no one.
  */
 const pasta = fileURLToPath(new URL("..", import.meta.url))

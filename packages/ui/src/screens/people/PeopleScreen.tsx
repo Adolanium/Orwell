@@ -246,7 +246,7 @@ export function PeopleScreen({
         {/*
           The bottom line is ALWAYS the status, and empty when there is no status.
           
-          The address left here on August 19 2026, by the owner's decision. It said
+          The address no longer shows here. It said
           nothing to anyone, `@garbicis-xapsensis-giprete-birmyris:orwell.pt`
           is long, ugly, and never what you search for in a contact list. It took
           the line that should say how the person is.
@@ -268,7 +268,7 @@ export function PeopleScreen({
         )}
       </div>
       {/* The id does not show; it is copied here, next to the name, like in the member
-          panel (owner's order on October 27 2026). */}
+          panel. */}
       <BotaoCopiarId id={address} rotulo={strings.copiarId.de(nome)} />
       {/* A row is the name and the "⋯", same as in the member panel: Message and Copy
           address were two buttons only in this list, and they are in the menu,
@@ -315,7 +315,7 @@ export function PeopleScreen({
                         aceitar={strings.people.accept}
                         aceitando={strings.people.accepting}
                         recusar={strings.people.decline}
-                        /* The address left the text (owner's order on October 27 2026): copy it by
+                        /* The address left the text: copy it by
                            this button. */
                         detalhe={<BotaoCopiarId id={request.peer} rotulo={strings.copiarId.de(nome)} />}
                         ocupado={busy === request.peer}

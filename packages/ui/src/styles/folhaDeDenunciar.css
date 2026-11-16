@@ -1,5 +1,4 @@
-/* The report sheet (`DenunciarSheet.tsx`, 4/11/2026), for the two layouts
-   the owner chose (`docs/planos/denunciar-layout/`):
+/* The report sheet (`DenunciarSheet.tsx`), for the two layouts:
    
    - on desktop, a stepped dialog: Reason, Review, Send. On Review, the
    reported message in a card with the danger bar and pill, context in

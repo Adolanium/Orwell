@@ -128,6 +128,6 @@ describe("ImagemAPedido", () => {
   it("sem saber de que mensagem é, fica o marcador de sempre, sem botão", () => {
     montar({ ok: true, anexo: {} }, false)
     expect(screen.queryByRole("button")).toBeNull()
-    expect(screen.getByRole("img", { name: strings.common.mediaEvicted })).toBeTruthy()
+    expect(screen.getByRole("img", { name: strings.media.noutroAparelho })).toBeTruthy()
   })
 })

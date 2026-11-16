@@ -12,8 +12,8 @@ export type FraseId = "conta" | "canal"
  *
  * The "How it works" section explains everything to those who open it, and almost nobody
  * opens it. This is the other half: the right phrase where the doubt starts (creating the
- * account, entering the first channel), and nothing more. The one for the first call went
- * out on October 27, 2026 by order of the owner. A tap on "Got it" closes it forever on
+ * account, entering the first channel), and nothing more. The one for the first call has
+ * been added since. A tap on "Got it" closes it forever on
  * this device. A phrase that returns every time stops being read the second time.
  *
  * The text comes from `strings.frasesDoMomento`, by the same name.

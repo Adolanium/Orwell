@@ -1,8 +1,7 @@
 /**
  * The app's global shortcuts, in the main process.
  *
- * Owner request on 2 November 2026 (points 5 e 8 de
- * `docs/planos/depois-da-1-0.md`): "the mute shortcut doesn't work when the app is minimized". The UI listens to `document`, and a document only hears keyboard input when the window is in focus. What works with the window hidden is the `globalShortcut` from Electron, which asks the system for the key.
+ * The reason: "the mute shortcut doesn't work when the app is minimized". The UI listens to `document`, and a document only hears keyboard input when the window is in focus. What works with the window hidden is the `globalShortcut` from Electron, which asks the system for the key.
  *
  * Nothing here matters `electron`, for the reason of `ecra.ts`: the decision measures against a double of `globalShortcut`, and `index.ts` connects the port to the real one.
  *
@@ -10,7 +9,7 @@
  *
  *  - Global: "mute microphone", "unmute" and "show or hide the game overlay". These are the ones used when another app is in front (a game, a document). The overlay one came with it (see `overlay-janela.ts`).
  *  - Never global, by choice: a common key (letter, digit, space, arrows) without Ctrl/Cmd or Alt. A global shortcut steals the key from the entire system; an "M" that stops typing in email during a call is worse than a shortcut that only works with the app in focus.
- *  - Never global, by Electron's limit: "speak while holding down" and mouse buttons. `globalShortcut` only signals when the key goes DOWN (no signal on release), and it doesn't know about the mouse. For both you'd need a native keyboard and mouse hook (for example `uiohook-napi`), which is a new native dependency, compiled per platform, and on macOS it asks for Accessibility permission for everything. This is for the owner to decide, and the report (`docs/planos/atalhos-relatorio.md`) explains why.
+ *  - Never global, by Electron's limit: "speak while holding down" and mouse buttons. `globalShortcut` only signals when the key goes DOWN (no signal on release), and it doesn't know about the mouse. For both you'd need a native keyboard and mouse hook (for example `uiohook-napi`), which is a new native dependency, compiled per platform, and on macOS it asks for Accessibility permission for everything. It is a product decision, not a technical default.
  *
  * **When they're registered: only during a call.** It's the rule of least surprise. Outside a call the two commands do nothing (see `alternarMicrofone` in the UI), and a global shortcut that does nothing just steals the key from other apps. Someone who chooses `` ` `` para silenciar não quer
  * perder o `` ` `` in the code editor all day, only while speaking. The UI calls `definir` when entering the call and `definir(null)` when leaving; `index.ts` frees everything too if the renderer crashes or reloads, and on exit.

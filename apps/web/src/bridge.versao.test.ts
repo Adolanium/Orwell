@@ -34,6 +34,8 @@ vi.mock("@enclave/client-core", async (original) => ({
   },
 }))
 vi.mock("@enclave/crypto", () => ({ kindOf: () => "application" }))
+// The media store is born with the bridge; like the vault, without IndexedDB here.
+vi.mock("./armazem-backend.js", () => ({ BrowserArmazemBackend: class {} }))
 vi.mock("./vault-backend.js", () => ({ BrowserVaultBackend: class {} }))
 
 const { CABECALHO_DO_COFRE } = await import("@enclave/client-core")
@@ -87,6 +89,7 @@ describe("a ponte do browser diz a versão do cofre", () => {
 describe("a ponte do browser dá à sessão a versão da app", () => {
   it("a do package.json da app, para os dois hello", () => {
     createBrowserBridge({ backend: disco(null), derivar: vi.fn() })
-    expect(criacao.opcoes).toEqual({ versaoDaApp: pacote.version })
+    // Next to the version go the media store and the thumbnails (see `bridge.armazem.test.ts`).
+    expect(criacao.opcoes).toMatchObject({ versaoDaApp: pacote.version })
   })
 })

@@ -183,8 +183,8 @@ export function ConfiguracoesDeVoz({
         </div>
 
         {children}
-        {/* The engine status line (model running, loading, native) was removed on
-            October 27, 2026 by order of the owner: it is information about who
+        {/* The engine status line (model running, loading, native) was removed:
+            it is information about who
             makes the app, not who uses it. The status remains in diagnostics. */}
       </section>
 

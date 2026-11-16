@@ -68,7 +68,7 @@ describe("youtubeWatchUrl", () => {
 
 describe("sem leitor embebido", () => {
   it("o protocolo já não monta endereços de leitor embebido", async () => {
-    // The video opens outside (owner's request on November 2, 2026). An embed address left here
+    // The video opens outside. An embed address left here
     // is an invitation to put the iframe back.
     const modulo: Record<string, unknown> = await import("./youtube.js")
     expect(modulo.youtubeEmbedUrl).toBeUndefined()

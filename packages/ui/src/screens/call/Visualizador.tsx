@@ -5,9 +5,8 @@ import { lerBandas, useAnalisador } from "../../hooks/useAnalisador.js"
  * The background of the card from whoever streams music: light that dances
  * with the sound.
  *
- * Request from the owner on October 27, 2026: "a modern Windows Media Player
- * style animation in the background of the user card that streams", then
- * "think Winamp and Windows Media Player. Nostalgia.". It's the "Alchemy" and
+ * A modern Windows Media Player
+ * style animation in the background of the user card that streams. It's the "Alchemy" and
  * "Battery" family from Media Player, in midnight skin: four color blobs (cyan,
  * indigo, pink and green from the skin) that move in Lissajous curves and swell
  * with the bands (bass, mids, treble), two wave ribbons that twist with the

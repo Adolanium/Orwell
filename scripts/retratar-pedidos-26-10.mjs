@@ -1,5 +1,5 @@
 /**
- * Two requests from the owner on October 26, 2026, captured in a real layout engine: the common channel header without the "Open" lock (request 2), and the people panel with "Invite..." in primary and no note below (request 3).
+ * Two layout changes captured in a real layout engine: the common channel header without the "Open" lock, and the people panel with "Invite..." in primary and no note below.
  *
  * Builds the TRUE shell (`App`) with the true stylesheet, on a mock bridge that announces the common channel and lets you invite, like `retratar-novidades-na-sala.mjs`. Opens the common channel by clicks, opens the people panel, measures and saves:
  *

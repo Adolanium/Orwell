@@ -28,8 +28,7 @@ import { strings } from "../../strings.js"
  * `combinacaoValida`), and if it already belonged to another command, it leaves
  * there: a key with two owners did two things, and no one wants that.
  *
- * From 1.0.6 on, any single key enters and mouse buttons 4 and 5 (point 8 of
- * `docs/planos/depois-da-1-0.md`). A key that types enters with a warning,
+ * From 1.0.6 on, any single key enters and mouse buttons 4 and 5. A key that types enters with a warning,
  * because its cost only shows later: either it does not work in a text box, or
  * (in the desktop app, during a call) it stops typing in other apps. `atalhosGlobais`
  * only exists in the desktop app.

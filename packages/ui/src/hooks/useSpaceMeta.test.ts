@@ -1,4 +1,4 @@
-import { cleanup, renderHook } from "@testing-library/react"
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { EnclaveBridge } from "../bridge.js"
 import type { ChatMessage } from "../types.js"
@@ -94,6 +94,47 @@ describe("useSpaceMeta", () => {
   })
 })
 
-// The `vi` is imported for the day this file needs to inspect the bridge;
-// unused, the linter would complain.
+describe("useSpaceMeta e o armazém de media (Task 10)", () => {
+  it("o ícone por referência mostra-se pela miniatura do armazém, e o iconRef fica para guardar sem o perder", async () => {
+    const sufixo = Math.random().toString(36).slice(2)
+    const bytes = vi.fn(async (sha: string) => (sha === `mini-${sufixo}` ? new Uint8Array([1]) : null))
+    const ponte = {
+      channels: { meta: () => ({ name: "Lagar", iconRef: `ref-${sufixo}`, iconMini: `mini-${sufixo}`, updatedAt: 1 }) },
+      media: { bytes, fixar: vi.fn(), soltar: vi.fn() },
+      on: {},
+    } as unknown as EnclaveBridge
+    const { result } = renderHook(() => useSpaceMeta(ponte, [CANAL], []))
+    expect(result.current.spaceMeta.get(CANAL)?.iconRef).toBe(`ref-${sufixo}`)
+    await waitFor(() => expect(result.current.spaceMeta.get(CANAL)?.icon).toBeTruthy())
+    expect(bytes).toHaveBeenCalledWith(`mini-${sufixo}`)
+  })
+})
+
+describe("useSpaceMeta: o ícone que ainda não está no armazém", () => {
+  it("volta a pedir quando o núcleo diz que chegou", async () => {
+    const sufixo = Math.random().toString(36).slice(2)
+    let tem = false
+    const bytes = vi.fn(async () => (tem ? new Uint8Array([1]) : null))
+    const ouvintes = new Set<(evento: { sha: string; estado: string }) => void>()
+    const ponte = {
+      channels: { meta: () => ({ name: "Lagar", iconRef: `ref-${sufixo}`, updatedAt: 1 }) },
+      media: { bytes, fixar: vi.fn(), soltar: vi.fn() },
+      on: {
+        media: (ouvinte: (evento: { sha: string; estado: string }) => void) => {
+          ouvintes.add(ouvinte)
+          return () => ouvintes.delete(ouvinte)
+        },
+      },
+    } as unknown as EnclaveBridge
+    const { result } = renderHook(() => useSpaceMeta(ponte, [CANAL], []))
+    await waitFor(() => expect(bytes).toHaveBeenCalledTimes(1))
+    expect(result.current.spaceMeta.get(CANAL)?.icon).toBeUndefined()
+    tem = true
+    act(() => ouvintes.forEach((ouvinte) => ouvinte({ sha: `ref-${sufixo}`, estado: "chegou" })))
+    await waitFor(() => expect(result.current.spaceMeta.get(CANAL)?.icon).toBeTruthy())
+  })
+})
+
+// `vi` stays imported for the day this file needs to spy on the
+// bridge; unused, the lint would complain.
 void vi

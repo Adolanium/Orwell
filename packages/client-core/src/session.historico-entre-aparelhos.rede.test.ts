@@ -1,9 +1,9 @@
 import { friendsOfTies, type Payload } from "@enclave/protocol"
+import { randomBytes } from "node:crypto"
 import { DatabaseSync } from "node:sqlite"
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
-// The server of the server harness, for real, on an ephemeral port, and its
-// accounts and pairing. The sessions are those of this package: it is the core
-// being tested.
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+// The server harness's server, for real, on an ephemeral port, with its accounts
+// and its pairing. The sessions are this package's: the core is what is measured.
 import {
   ate,
   canalComTodos,
@@ -19,6 +19,8 @@ import {
   chaveDoEvento,
   dobrarConversa,
   entradasDoCanal,
+  semBytes,
+  shasDoPayload,
   TECTOS_DO_FIO_DO_HISTORICO,
   TECTOS_DO_HISTORICO,
   type StoredChatMessage,
@@ -26,15 +28,46 @@ import {
 } from "@enclave/client-core"
 
 /**
- * History across devices on the same account (1.0 "Arca", 29/10/2026).
+ * History across devices on the same account (1.0 "Arca").
  *
- * The owner's request: "and that can also apply to messages and everything
- * else", and when asked about timeframe and large files, "everything". The new
+ * Everything applies, with no timeframe and no size limit. The new
  * device receives, during pairing and without prompting, all history from the
  * primary: conversations, bulletin boards, tickets, pins, votes and media. And
  * what one account device lost while offline arrives from another via the
  * account channel.
  */
+
+/**
+ * A tampered sibling (Ruling R14): the page the computer sends to the phone
+ * carries, in the "forjada" message, a `{ ref }` to the media of the "alvo"
+ * message, and in "dupla" the `inline` with a foreign `ref` next to it. Only
+ * with `forjar.ativo`.
+ */
+const forjar = { ativo: false }
+vi.mock("../dist/historico/conteudo.js", async (original) => {
+  const real = await original<typeof import("./historico/conteudo.js")>()
+  return {
+    ...real,
+    paginaDe: async (...args: Parameters<typeof real.paginaDe>) => {
+      const pagina = await real.paginaDe(...args)
+      if (!forjar.ativo) return pagina
+      const [contents, canal] = args
+      const alvo = entradasDoCanal(contents, canal).find((e) => e.payload["body"] === "alvo")
+      const alheio = alvo ? shasDoPayload(alvo.payload)[0] : undefined
+      if (!alheio) return pagina
+      for (const entrada of pagina.e) {
+        const anexos = entrada.payload["attachments"] as Record<string, unknown>[] | undefined
+        const anexo = anexos?.[0]
+        if (!anexo) continue
+        if (entrada.payload["body"] === "forjada") {
+          const { inline: _inline, ...resto } = anexo
+          anexos[0] = { ...resto, ref: alheio }
+        } else if (entrada.payload["body"] === "dupla") anexos[0] = { ...anexo, ref: alheio }
+      }
+      return pagina
+    },
+  }
+})
 
 let servidor: ServidorDeTeste
 const abertas: ContaDeTeste[] = []
@@ -62,6 +95,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   desligarContas(abertas.splice(0))
+  forjar.ativo = false
 })
 
 afterAll(async () => {
@@ -120,11 +154,25 @@ const corpos = (conta: ContaDeTeste, canal: string): string[] =>
     .filter((e) => e.payload.t === "message")
     .map((e) => String(e.payload["body"]))
 
-/** The inline attachment of a message with this body, if present with the bytes. */
-function inlineDe(contents: VaultContents, canal: string, corpo: string): string | undefined {
-  const entrada = entradasDoCanal(contents, canal).find((e) => e.payload["body"] === corpo)
-  const anexo = (entrada?.payload["attachments"] as { inline?: string }[] | undefined)?.[0]
-  return anexo?.inline
+/**
+ * The attachment bytes of a message with this body, in base64, if they are on
+ * this device. The vault keeps the reference, and the bytes are in the store.
+ */
+async function bytesDoAnexo(conta: ContaDeTeste, canal: string, corpo: string): Promise<string | null> {
+  const entrada = entradasDoCanal(conta.vault.contents, canal).find((e) => e.payload["body"] === corpo)
+  const sha = entrada ? shasDoPayload(entrada.payload)[0] : undefined
+  const bytes = sha ? await conta.session.bytesDeMedia(sha) : null
+  return bytes ? Buffer.from(bytes).toString("base64") : null
+}
+
+const be32 = (n: number): number[] => [(n >>> 24) & 0xff, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff]
+
+/** A PNG portrait with a real header, as `FileReader` writes it. */
+function retratoPng(tamanho: number): string {
+  const cabecalho = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...be32(13), 0x49, 0x48, 0x44, 0x52, ...be32(90), ...be32(90), 8, 6, 0, 0, 0]
+  const bytes = Uint8Array.from(randomBytes(tamanho))
+  bytes.set(cabecalho, 0)
+  return `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`
 }
 
 /**
@@ -236,9 +284,13 @@ describe("o histórico no emparelhamento", () => {
     expect(corpos(telemovel, dm).filter((c) => c.startsWith("da Ana")).length).toBe(12)
     expect(corpos(telemovel, dm).filter((c) => c.startsWith("do Bruno")).length).toBe(8)
     expect(corpos(telemovel, dm)).not.toContain("isto vai ser apagado")
-    // The media: the large photo arrives at the end, the small one with the text.
-    expect(inlineDe(telemovel.vault.contents, dm, "a fotografia grande")).toBe(inlineDe(ana!.vault.contents, dm, "a fotografia grande"))
-    expect(inlineDe(telemovel.vault.contents, dm, "a fotografia pequena")).toBe(inlineDe(ana!.vault.contents, dm, "a fotografia pequena"))
+    // The media: the large photo arrives at the end, the small one with the text. On the phone, in the store, and the vault without bytes.
+    for (const corpo of ["a fotografia grande", "a fotografia pequena"]) {
+      const daAna = await bytesDoAnexo(ana!, dm, corpo)
+      expect(daAna).not.toBeNull()
+      expect(await bytesDoAnexo(telemovel, dm, corpo)).toBe(daAna)
+    }
+    expect(semBytes(telemovel.vault.contents)).toEqual([])
     // The tickets: the open one with the reply, and the deleted one stays deleted.
     const tickets = telemovel.session.ticketsOf(canal, "")
     expect(tickets.map((t) => t.id)).toEqual([aberto])
@@ -304,5 +356,79 @@ describe("o histórico entre aparelhos já emparelhados", () => {
     // The forgotten channel stays forgotten.
     await new Promise((resolve) => setTimeout(resolve, 2_000))
     expect(entradasDoCanal(telemovel.vault.contents, canal)).toHaveLength(0)
+  }, 300_000)
+})
+
+describe("o armazém de media entre irmãos (Task 8)", () => {
+  it("trazer um retrato que saiu do telemóvel: vem do computador, o irmão, e emite media chegou", async () => {
+    const [ana, bruno] = await contas("Ana", "Bruno")
+    await canalComTodos(servidor, ana!, [bruno!])
+    const telemovel = await emparelharAparelho(ana!)
+    abertas.push(telemovel)
+    await ate(
+      () => telemovel.vault.contents.historico?.plano === undefined && telemovel.vault.contents.historico?.inicial === undefined,
+      "o primeiro histórico chega",
+      120_000,
+    )
+    // The phone disk fills up when Bruno's portrait arrives: the reference stays, the blob does not.
+    telemovel.armazem.falharProxima()
+    await bruno!.session.updateProfile({ displayName: "Bruno", donations: [], avatarDataUrl: retratoPng(3_000) })
+    const ref = bruno!.vault.contents.profile.avatarRef!
+    const refDe = (conta: ContaDeTeste) => (conta.vault.contents.directory[bruno!.address]?.payload["avatar"] as { ref?: string } | undefined)?.ref
+    await ate(() => refDe(telemovel) === ref && refDe(ana!) === ref, "a referência chega aos dois aparelhos da Ana", 30_000)
+    await ate(() => telemovel.session.estadoDoArmazem().emFalta > 0, "o telemóvel ficou sem o blob")
+    let noComputador = false
+    await ate(() => {
+      void ana!.session.bytesDeMedia(ref).then((bytes) => (noComputador = bytes !== null))
+      return noComputador
+    }, "o computador tem o blob")
+    // Bruno leaves: no member can give it. Only the sibling.
+    bruno!.session.disconnect()
+    const chegou = new Promise<void>((resolve) => {
+      const largar = telemovel.session.on("media", (evento) => {
+        if (evento.sha === ref && evento.estado === "chegou") {
+          largar()
+          resolve()
+        }
+      })
+    })
+    expect(await telemovel.session.trazerMedia({ a: bruno!.address })).toEqual({ ok: true })
+    await chegou
+    expect(Buffer.from((await telemovel.session.bytesDeMedia(ref))!).toString("base64")).toBe(
+      Buffer.from((await ana!.session.bytesDeMedia(ref))!).toString("base64"),
+    )
+    expect(semBytes(telemovel.vault.contents)).toEqual([])
+  }, 300_000)
+})
+
+describe("um ref vindo de um irmão (Ruling R14)", () => {
+  it("o computador alterado manda refs para outro media: o telemóvel não infla bytes alheios, e o cofre fica sem bytes", async () => {
+    const [ana, bruno] = await contas("Ana", "Bruno")
+    const dm = await amigos(ana!, bruno!)
+    await ana!.session.send(dm, mensagem("alvo", { nome: "alvo.png", bytes: 2_000 }))
+    await ana!.session.send(dm, mensagem("forjada", { nome: "forjada.png", bytes: 1_200 }))
+    await ana!.session.send(dm, mensagem("dupla", { nome: "dupla.png", bytes: 800 }))
+    await ate(() => corpos(ana!, dm).includes("dupla"), "a Ana tem as três")
+    await ana!.session.flush()
+    bruno!.session.disconnect()
+    forjar.ativo = true
+    const telemovel = await emparelharAparelho(ana!)
+    abertas.push(telemovel)
+    await ate(
+      () => telemovel.vault.contents.historico?.plano === undefined && telemovel.vault.contents.historico?.inicial === undefined,
+      "o histórico chega",
+      120_000,
+    )
+    const alheio = shasDoPayload(entradasDoCanal(ana!.vault.contents, dm).find((e) => e.payload["body"] === "alvo")!.payload)[0]
+    for (const corpo of ["forjada", "dupla"]) {
+      const entrada = entradasDoCanal(telemovel.vault.contents, dm).find((e) => e.payload["body"] === corpo)!
+      // Never the foreign reference; the bytes are the message's own.
+      expect(shasDoPayload(entrada.payload)).not.toContain(alheio)
+      const daAna = await bytesDoAnexo(ana!, dm, corpo)
+      const doTelemovel = await bytesDoAnexo(telemovel, dm, corpo)
+      if (doTelemovel !== null) expect(doTelemovel).toBe(daAna)
+      else expect((entrada.payload["attachments"] as Record<string, unknown>[])[0]?.["evicted"]).toBe(true)
+    }
+    expect(semBytes(telemovel.vault.contents)).toEqual([])
   }, 300_000)
 })

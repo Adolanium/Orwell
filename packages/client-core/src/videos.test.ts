@@ -4,8 +4,8 @@ import {
   bytesParaBase64,
   apagarVideo,
   guardarVideo,
-  HISTORY_MEDIA_BUDGET_BYTES,
   newVaultContents,
+  VIDEO_NO_COFRE_MAX_CARACTERES,
   videoNoCofre,
   type StoredChatMessage,
   type VaultContents,
@@ -70,7 +70,7 @@ describe("as partes", () => {
   })
 })
 
-describe("o cofre: o vídeo conta no orçamento e sai primeiro", () => {
+describe("o cofre da versão 3: o vídeo já não conta num orçamento nem sai primeiro", () => {
   function comFotografia(contents: VaultContents, caracteres: number, at: number): void {
     const entrada: StoredChatMessage = {
       seq: at,
@@ -81,22 +81,22 @@ describe("o cofre: o vídeo conta no orçamento e sai primeiro", () => {
     contents.estadoDoCanal["!c:x"] = [...(contents.estadoDoCanal["!c:x"] ?? []), entrada]
   }
 
-  it("guarda o vídeo que cabe, e despeja-o antes das fotografias quando o orçamento passa", () => {
+  it("guarda os vídeos que cabem, e nenhum despeja outro nem as fotografias", () => {
     const contents = newVaultContents()
     comFotografia(contents, 1_000_000, 1)
     expect(guardarVideo(contents, "V".repeat(43), "a".repeat(2_000_000), 10)).toBe(true)
     expect(videoNoCofre(contents, "V".repeat(43))).toHaveLength(2_000_000)
-    // Another video blows the budget: the oldest video leaves, and the still stays.
+    // Before version 3, this one exceeded the budget and evicted the first.
     expect(guardarVideo(contents, "W".repeat(43), "b".repeat(1_500_000), 20)).toBe(true)
-    expect(videoNoCofre(contents, "V".repeat(43))).toBeNull()
+    expect(videoNoCofre(contents, "V".repeat(43))).toHaveLength(2_000_000)
     expect(videoNoCofre(contents, "W".repeat(43))).not.toBeNull()
     const foto = (contents.estadoDoCanal["!c:x"]![0]!.payload["media"] as Record<string, unknown>[])[0]!
     expect(foto["inline"]).toBeDefined()
   })
 
-  it("um vídeo maior do que o orçamento inteiro não entra", () => {
+  it("um vídeo maior do que o tecto provisório não entra", () => {
     const contents = newVaultContents()
-    expect(guardarVideo(contents, "V".repeat(43), "a".repeat(HISTORY_MEDIA_BUDGET_BYTES + 1), 1)).toBe(false)
+    expect(guardarVideo(contents, "V".repeat(43), "a".repeat(VIDEO_NO_COFRE_MAX_CARACTERES + 1), 1)).toBe(false)
     expect(contents.videos ?? {}).toEqual({})
   })
 
@@ -369,20 +369,20 @@ describe("revisão do vídeo: os bytes saem do cofre (achado 6)", () => {
   })
 })
 
-describe("revisão do vídeo: o cofre não despeja à toa (recomendação 10)", () => {
-  it("um vídeo que não cabe ao lado das fotografias é recusado, e os vídeos antigos ficam", () => {
+describe("revisão do vídeo: o cofre não despeja (recomendação 10, versão 3)", () => {
+  it("as fotografias já não contam contra o vídeo, e os vídeos antigos ficam", () => {
     const contents = newVaultContents()
     publicacaoNoCofre(contents, "!c:x", "p-f", [{ name: "f.png", mediaType: "image/png", inline: "x".repeat(2_500_000) }])
     expect(guardarVideo(contents, "V".repeat(43), "a".repeat(1_000_000), 1)).toBe(true)
-    // 2.5 M photos plus 2 M new video exceed 4 M: reject immediately, without discarding the old one.
-    expect(guardarVideo(contents, "W".repeat(43), "b".repeat(2_000_000), 2)).toBe(false)
+    // Before version 3: 2.5 M of photos + 2 M of video exceeded the 4 M, and it was refused.
+    expect(guardarVideo(contents, "W".repeat(43), "b".repeat(2_000_000), 2)).toBe(true)
     expect(videoNoCofre(contents, "V".repeat(43))).not.toBeNull()
-    expect(videoNoCofre(contents, "W".repeat(43))).toBeNull()
+    expect(videoNoCofre(contents, "W".repeat(43))).not.toBeNull()
   })
 
   it("um vídeo que não cabe nem chega a ser passado a base64 para o cofre", async () => {
     const autor = montarComCofre()
-    // 3 MB translates to 4.2 million characters: over the entire budget.
+    // 3 MB gives 4.2 million characters: above the provisional ceiling for video in the vault.
     await autor.videos.preparar({ bytes: bytes(3 * VIDEO_BYTES_POR_PARTE), name: "v.mp4", mediaType: "video/mp4", duration: 1 })
     expect(autor.gravados).toEqual([])
   })

@@ -10,7 +10,7 @@
       `default-src 'none'` locks everything down and then opens only the minimum: the style from this
       origin, the fonts from this origin and images from this origin. `script-src
       'self'` is only for `src/sistema.ts`, the script that picks the button based on the
-      visitor's system (request from the owner on 2 November 2026). Nothing inline,
+      visitor's system. Nothing inline,
       nothing external: the other three pages still have no JavaScript. `font-src 'self'` is the one for the
       midnight theme: Space Grotesk and Noto Sans JP kana come from this origin, in the same
       files as the app. `connect-src 'self'` is only for the meter in the "Support" section (3 de
@@ -100,18 +100,15 @@
     </header>
 
     <!--
-      The support banner (owner's request on 9 November 2026: "põe no início e
-      no fim, preciso mesmo de doações"). Thin and discreet, right below the
-      header. Ko-fi only, no GoFundMe and no measure (owner's decision the same
-      day; see `MEDIDOR_LIGADO` in src/apoio.ts).
+      The support banner. Thin and discreet, right below the
+      header. Ko-fi only, no GoFundMe and no measure (see `MEDIDOR_LIGADO` in
+      src/apoio.ts).
     -->
 
     <!--
-      Direction "02 Editorial", chosen by the owner on November 2, 2026
-      (`docs/planos/site-editorial-direccao-02.png`, and the report alongside).
+      Direction "02 Editorial".
       Less is more: a headline with a real screenshot of the app, the phone, and
-      everything else wrapped in two questions. The four bullet points came out on
-      November 3, 2026, by owner's request. No animated background, no grid of
+      everything else wrapped in two questions. The four bullet points were removed. No animated background, no grid of
       cards. The screenshot is the only visual.
 
       The main button changes with the system (`src/sistema.ts`). Without the
@@ -152,8 +149,7 @@
       </section>
 
       <!--
-        We are recruiting ambassadors. Owner's request of October 27, 2026, and
-        again on November 2: the ambassador figure shows up on the landing page,
+        We are recruiting ambassadors: the ambassador figure shows up on the landing page,
         in its own block, not just a link.
         
         For people who have a community elsewhere and can bring it here. The
@@ -204,7 +200,7 @@
         <!--
           The phone: the browser app on the main screen, and the limits before steps run out.
           
-          A drawer, like the other two, since November 3, 2026 (owner's request).
+          A drawer, like the other two.
           The `id="telemovel"` is in the `<details>`, and the hero link goes there
           and opens it (`src/gaveta.ts`; without the script, it goes there and the
           visitor opens it).
@@ -489,7 +485,7 @@
       </section>
 
       <!--
-        Support Orwell: as of November 9, 2026, only through Ko-fi (owner's decision).
+        Support Orwell: only through Ko-fi.
         A link to an external site. GoFundMe stays only in the footer.
 
         The meter (src/apoio.ts) shows the amount raised on GoFundMe. It is

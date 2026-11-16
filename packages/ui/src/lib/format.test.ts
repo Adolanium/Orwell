@@ -135,6 +135,22 @@ function raw(sender: string, payload: ChatMessage["payload"], channel = MURAL_AN
   return { channel, seq: 1, sender, payload }
 }
 
+describe("feedOf: a mesma publicação duas vezes, com media no armazém (R16)", () => {
+  it("escolhe a cópia cuja foto está neste aparelho, pela presença e pelo peso que a ponte manda", () => {
+    const semFoto = raw("@ana:s", { t: "post", id: "p9", postedAt: 100, media: [{ ref: "sha-a", b: 50_000, falta: true, mediaType: "image/png" }] })
+    const comFoto = raw("@ana:s", { t: "post", id: "p9", postedAt: 100, media: [{ ref: "sha-b", b: 50_000, mediaType: "image/png" }] })
+    const dobrado = feedOf([{ ...semFoto, seq: 1 }, { ...comFoto, seq: 2 }])
+    expect(dobrado).toHaveLength(1)
+    expect(dobrado[0]?.payload.media?.[0]?.ref).toBe("sha-b")
+  })
+
+  it("a miniatura conta sem o original: entre duas cópias sem original, ganha a que tem miniatura", () => {
+    const nada = raw("@ana:s", { t: "post", id: "p8", postedAt: 100, media: [{ ref: "sha-c", b: 50_000, falta: true }] })
+    const comMini = raw("@ana:s", { t: "post", id: "p8", postedAt: 100, media: [{ ref: "sha-d", b: 50_000, mini: "sha-m", falta: true }] })
+    expect(feedOf([nada, comMini])[0]?.payload.media?.[0]?.ref).toBe("sha-d")
+  })
+})
+
 describe("feedOf — edições e apagados", () => {
   const original = raw("@ana:s", { t: "post", id: "p1", postedAt: 100, caption: "primeira #velha" })
 

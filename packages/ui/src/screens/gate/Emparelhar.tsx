@@ -92,7 +92,7 @@ export function Emparelhar({
   const useOs = false
   /** The platform has a place to memorize the session (F1). See `MemorizarSessao.tsx`. */
   const [memoriaDisponivel, setMemoriaDisponivel] = useState(false)
-  /** "Memorize the session", on by default (owner's decision 1). */
+  /** "Memorize the session", on by default. */
   const [memorizar, setMemorizar] = useState(true)
   const memorizarDepoisDeAbrir = useMemorizarDepoisDeAbrir(bridge)
   // Read when the certificate arrives, inside an effect with other dependencies.

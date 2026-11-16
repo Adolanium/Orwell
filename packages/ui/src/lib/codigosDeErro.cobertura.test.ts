@@ -56,6 +56,13 @@ function foraDoProduto(caminho: string): boolean {
  * No line number on purpose: the file changes, the reason does not.
  */
 const TOLERADAS: Readonly<Record<string, string>> = {
+  // Vault file in one buffer (1.3.13): internal checks of the write. They never fire on a sound build; if one did, the write fails and `Session.#falhaAoGravar` sends it to the log.
+  "packages/client-core/src/seloDoCofre.ts::base64 in place: the writer would pass the reader": "invariante interna da gravação, vai ao log",
+  "packages/client-core/src/seloDoCofre.ts::vault envelope without one empty ciphertext": "invariante interna da gravação, vai ao log",
+  "packages/client-core/src/seloDoCofre.ts::vault envelope is not ASCII": "invariante interna da gravação, vai ao log",
+  "packages/client-core/src/seloDoCofre.ts::vault plaintext length does not match its encoding": "invariante interna da gravação, vai ao log",
+  "packages/client-core/src/seloDoCofre.ts::vault base64 length mismatch": "invariante interna da gravação, vai ao log",
+  "packages/client-core/src/seloDoCofre.ts::vault envelope changed between the two stages": "invariante interna da gravação, vai ao log",
   // Windows update: startup catches both and logs "instalador-falhou"; the app runs the version it has.
   "apps/client/src/main/actualizacao-windows.ts::argumento recusado": "apanhado no arranque, vira diagnóstico",
   "apps/client/src/main/actualizacao-windows.ts::powershell saiu sem sucesso": "apanhado no arranque, vira diagnóstico",
@@ -66,7 +73,9 @@ const TOLERADAS: Readonly<Record<string, string>> = {
   "packages/client-core/src/audio/processador-de-voz.ts::noise-suppressor-assert": "apanhado na cadeia, vira diagnóstico",
   "packages/client-core/src/audio/processador-de-voz.ts::noise-suppressor-exports-changed": "apanhado na cadeia, vira diagnóstico",
   "packages/client-core/src/audio/processador-de-voz.ts::noise-suppressor-delay-mismatch": "apanhado na cadeia, vira diagnóstico",
-  // Server.
+  // Núcleo.
+  "packages/client-core/src/armazem/contentor.ts::a media sha must be 32 bytes":
+    "guarda do contrato: `exportarComImagens` só passa shas que `shaEmBruto` aceitou",
   "packages/client-core/src/session.ts::uma operação com mais de um commit não sabe ainda esperar pelos veredictos":
     "erro de programação: nenhuma operação faz dois commits",
   "packages/client-core/src/session.ts::archive time is invalid":
@@ -100,6 +109,18 @@ const TOLERADAS: Readonly<Record<string, string>> = {
     "uma razão `PairFalha`, que a interface traduz por `translatePairingError` (`CHAVES_DO_EMPARELHAMENTO`)",
   "packages/client-core/src/erros-do-browser.ts::chave": "é a chave da tabela dos erros do browser, que este teste verifica à parte",
   "packages/client-core/src/call.ts::erro.message": "re-atira a chave de uma `RecusaDoSfu`, que este teste verifica à parte",
+  // The media store (Task 10).
+  "packages/client-core/src/armazem/armazem.ts::a new media class needs a new nonce":
+    "erro de programação: `reclassificar` recebe sempre uma referência com chave e nonce novos",
+  "packages/client-core/src/armazem/armazem.ts::invalid media store ceiling":
+    "guarda do contrato: a interface só passa uma das opções de `TECTOS_DO_ARMAZEM`",
+  "packages/client-core/src/session.ts::invalid media store ceiling":
+    "guarda do contrato: a interface só passa uma das opções de `TECTOS_DO_ARMAZEM`",
+  "packages/client-core/src/session.ts::the profile picture is not on this device":
+    "apanhado em `publishProfile` e no envio aos irmãos: o perfil fica por publicar e sai na vez seguinte",
+  "apps/web/src/miniaturista.ts::no 2d context": "apanhado em `fazerMiniatura`: a imagem fica sem miniatura",
+  "apps/web/src/armazem-backend.ts::RECUSA_DE_ESCRITA":
+    "a recusa de escrita de um separador sem posse (R17): o armazém apanha-a, e o ecrã desse separador já diz que não guarda (117)",
   // Pontes.
   "apps/web/src/kdf.ts::kdf worker failed": "apanhado em `derivarNoWorker`, que cai na derivação local",
   "apps/web/src/kdf.ts::kdf worker timed out": "apanhado em `derivarNoWorker`, que cai na derivação local",

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { copiarTexto } from "./lib/copiar.js"
-import { parseInviteLink, parseShortInviteLink, sameHomeserver, type Participant, type StoredChatMessage } from "@enclave/client-core"
+import { marcarArranque, parseInviteLink, parseShortInviteLink, sameHomeserver, type Participant, type StoredChatMessage } from "@enclave/client-core"
 import {
   canalAEsperaParaMostrar,
   canalParaMostrar,
@@ -22,6 +22,9 @@ import { useLacosDeAmizade } from "./hooks/useLacosDeAmizade.js"
 import { useSucessoes } from "./hooks/useSucessoes.js"
 import { chaveDaOferta, escondidasPorSucessao, ofertasDeSucessao, type OfertaDeSucessao } from "./lib/sucessoes.js"
 import { useBloqueioAutomatico } from "./hooks/useBloqueioAutomatico.js"
+import { useMarcaDaVolta } from "./hooks/useMarcaDaVolta.js"
+import { useEstavel } from "./hooks/useEstavel.js"
+import { useMesmoValor } from "./hooks/useMesmoValor.js"
 import { useConhecidos } from "./hooks/useConhecidos.js"
 import { pedidoCabe } from "./lib/privacidade.js"
 import { useAtalhos } from "./hooks/useAtalhos.js"
@@ -74,6 +77,7 @@ import {
 } from "./lib/format.js"
 import { citacaoDe as citacaoNoIndice, indiceDasCitacoes, type Citacao, type RespostaPendente } from "./lib/respostas.js"
 import { prefersReducedMotion } from "./lib/scroll.js"
+import { cacheDeMedia } from "./lib/cacheDeMedia.js"
 import { closeDirect, listDirects } from "./lib/directs.js"
 import { arquivar, desarquivar, esquecerEstadoDoBrowser, ligarEstadoDaConta, marcarLido, useEstadoDaConta } from "./lib/estadoDaConta.js"
 import { aceitesAEspera, conviteDaMensagem, convitesDe } from "./lib/convites.js"
@@ -105,7 +109,7 @@ import { ContaSuspensa } from "./screens/gate/ContaSuspensa.js"
 import { SaiuDeBeta } from "./screens/gate/SaiuDeBeta.js"
 import { CallDock } from "./screens/call/CallDock.js"
 import { useEcraLargo } from "./hooks/useEcraLargo.js"
-import { ChannelSidebar } from "./screens/chat/ChannelSidebar.js"
+import { ChannelSidebar, type PresenteNaVoz } from "./screens/chat/ChannelSidebar.js"
 import { ChatScreen } from "./screens/chat/ChatScreen.js"
 import { PrimeirosPassos } from "./screens/chat/PrimeirosPassos.js"
 import { marcarPrimeirosPassos, usePrimeirosPassos } from "./hooks/usePrimeirosPassos.js"
@@ -268,12 +272,25 @@ export function appendBounded(current: ChatMessage[], message: ChatMessage): Cha
   return next.filter((item) => !largar.has(item))
 }
 
+/**
+ * A batch of live messages into the list, in order, in ONE state update (hotfix 1.3.12).
+ * `onMessage` queues what arrives in the same task and this runs once at its end.
+ */
+export function juntarLote(current: ChatMessage[], lote: readonly ChatMessage[]): ChatMessage[] {
+  let lista = current
+  for (const message of lote) lista = juntarCopiaAoVivo(lista, message) ?? appendBounded(lista, message)
+  return lista
+}
+
 export function useBridge(): EnclaveBridge {
   const bridge = useContext(BridgeContext)
   if (!bridge) throw new Error("App must be rendered inside a bridge provider")
   return bridge
 }
 
+
+/** No last activity: what `presenceFor` reads when the server relays live presence. */
+const SEM_ACTIVIDADE: ReturnType<typeof lastActivityOf> = new Map()
 
 export function App({
   bridge,
@@ -476,6 +493,15 @@ function Shell({
   stageRef.current = stage
   const [bootError, setBootError] = useState<string | null>(null)
   const [address, setAddress] = useState<string | null>(null)
+  /*
+    The images decrypted from the store (the `blob:` cache, up to 64 MB) do
+    not survive locking, signing out or switching account: outside the
+    "ready" screen and on each new account, everything is revoked (Task 10).
+  */
+  useEffect(() => {
+    if (stage !== "ready") cacheDeMedia.esvaziar()
+  }, [stage])
+  useEffect(() => () => cacheDeMedia.esvaziar(), [address])
   const [channels, setChannels] = useState<string[]>([])
   /**
    * The channel open at the conversation destination. Never a direct message.
@@ -2230,6 +2256,9 @@ function Shell({
     empty until someone moved.
   */
   const refrescarCanais = useRef<() => void>(() => {})
+  /** Live messages waiting for the next batch. See `juntarLote`. */
+  const porJuntar = useRef<ChatMessage[]>([])
+  const loteAgendado = useRef(false)
   useSessionEvents(bridge, {
     onMessage: (message) => {
       // Kind and channel only. What was said never enters this log.
@@ -2254,10 +2283,26 @@ function Shell({
         return
       }
       // The same message again (telemetry and then server): one line. See `juntarCopiaAoVivo`.
-      setMessages((current) => juntarCopiaAoVivo(current, message) ?? appendBounded(current, message))
-      // Our own sends come back through here (seq -1); the matching outbox
-      // entry has served its purpose the moment the real message exists.
-      outbox.noteOwnMessage(message)
+      /*
+        Queued, and everything that arrives in the same task enters in ONE update at
+        its end (a microtask): a page of a recovery, a portrait, a batch of reports.
+        Not across tasks: a time window there changed what the screen shows right
+        after a message, and twenty tests of the screen rely on that. See `juntarLote`.
+      */
+      porJuntar.current.push(message)
+      if (!loteAgendado.current) {
+        loteAgendado.current = true
+        queueMicrotask(() => {
+          loteAgendado.current = false
+          const lote = porJuntar.current
+          porJuntar.current = []
+          setMessages((current) => juntarLote(current, lote))
+          // Our own sends come back through here (seq -1); the matching outbox
+          // entry has served its purpose the moment the real message exists.
+          // In the same tick as the list, or the message would blink out for one frame.
+          for (const item of lote) outbox.noteOwnMessage(item)
+        })
+      }
       /**
        * The return slot is not given here.
        *
@@ -2447,6 +2492,13 @@ function Shell({
       // The tags before the list: whoever draws the list asks the type of each channel.
       lembrarFichasDosCanais(bridge.channels.fichas?.())
       setChannels(list)
+      /*
+        The first channel, as `refreshChannels` picks it. The gate no longer
+        waits for the connection (12/11/2026): the app can open before the
+        vault groups are restored, with an empty list, and this event is the
+        first to bring them.
+      */
+      if (stageRef.current === "ready") setCanal((current) => current ?? list.find((channel) => !isFeed(channel) && !isDirect(channel)) ?? null)
       // A channel we are waiting on (join-by-link) auto-opens the moment a
       // member admits us; any other new channel must not steal the focus.
       const awaited = pendingJoin.current
@@ -2471,7 +2523,7 @@ function Shell({
         
         It is an indication, not proof, and the phrase speaks as such: from here
         we cannot know which request a new channel answers to (only the core
-        knows that, by the key package the request carried; see `docs/PENDENTES.md`).
+        knows that, by the key package the request carried).
         A channel where someone sat us down at the same moment lights this up
         for no reason. That is why we do not steal focus or give up waiting for
         the named channel.
@@ -3182,6 +3234,20 @@ function Shell({
     }
   }, [])
 
+  /**
+   * The first connection failed: the banner says why. Called by `enter` and,
+   * since the gate stopped waiting for the connection (12/11/2026), by the
+   * `Unlock` after the app is already open. A revocation or a suspension is not
+   * a connection failure: `handleStatus` already moved the stage.
+   */
+  const anotarLigacaoFalhada = useCallback((ligacaoFalhou: Error) => {
+    if (aparelhoRevogadoRef.current || contaSuspensaRef.current) return
+    recordDiagnostic({ kind: "connection", code: "offline", detail: ligacaoFalhou.message })
+    setConnection((actual) => (actual === "online" ? actual : "offline"))
+    setConnectionDetail(traduzirErro(ligacaoFalhou))
+    setCaiuEm((antes) => antes ?? Date.now())
+  }, [])
+
   const enter = useCallback(
     (addr: string, ligacaoFalhou?: Error) => {
       /*
@@ -3202,22 +3268,18 @@ function Shell({
       }
       setAddress(addr)
       setStage("ready")
+      marcarArranque("app")
       /*
         The first connection failed: the app opens with what the vault has, and the
         connection banner says why. Core reconnect handles the rest, and
         when the channel list comes back it is read again (see `refrescarCanais`).
       */
-      if (ligacaoFalhou) {
-        recordDiagnostic({ kind: "connection", code: "offline", detail: ligacaoFalhou.message })
-        setConnection((actual) => (actual === "online" ? actual : "offline"))
-        setConnectionDetail(traduzirErro(ligacaoFalhou))
-        setCaiuEm((antes) => antes ?? Date.now())
-      }
+      if (ligacaoFalhou) anotarLigacaoFalhada(ligacaoFalhou)
       void refreshChannels()
         .then(seedStored)
         .catch((error: Error) => pushToast(traduzirErro(error), "error"))
     },
-    [refreshChannels, seedStored, pushToast],
+    [refreshChannels, seedStored, pushToast, anotarLigacaoFalhada],
   )
 
   /**
@@ -3463,10 +3525,9 @@ function Shell({
    * category) is not a channel without rooms: it is a channel whose rooms are still
    * on the way. Every channel is born with rooms (`Session.SALAS_INICIAIS`), and whoever
    * just joined only gets them when someone passes them along. Report from owner on
-   * 2/11/2026: "rooms appear on phone but are not visually visible.. the
-   * column disappears". Someone entered and tapped the common room, the drawer closed, and the
-   * rooms arrived an instant later, already off screen. See
-   * `docs/planos/coluna-telemovel-relatorio.md`.
+   * Symptom: rooms appeared on the phone but were not visible, and the
+   * column disappeared. Someone entered and tapped the common room, the drawer closed, and the
+   * rooms arrived an instant later, already off screen.
    *
    * Direct conversations and bulletin boards have no rooms: always close.
    */
@@ -3486,13 +3547,13 @@ function Shell({
    * `visible` right below needs to know what rooms exist to decide
    * where a message is read.
    */
-  const {
-    rooms: salasDoCanal,
-    groups: roomGroups,
-    closed: roomsFechadas,
-    categories: categoriasDeclaradas,
-    refresh: refreshRooms,
-  } = useRooms(bridge, active, messages, quemVe)
+  const salasEmBruto = useRooms(bridge, active, messages, quemVe)
+  // The same lists while nothing changed in them (1.3.15): each message rebuilt them, and the memoized sidebar rendered.
+  const salasDoCanal = useMesmoValor(salasEmBruto.rooms)
+  const roomGroups = useMesmoValor(salasEmBruto.groups)
+  const roomsFechadas = useMesmoValor(salasEmBruto.closed)
+  const categoriasDeclaradas = useMesmoValor(salasEmBruto.categories)
+  const refreshRooms = salasEmBruto.refresh
 
   /**
    * The open room, or the default one, if the chosen one stopped being visible.
@@ -4468,8 +4529,11 @@ function Shell({
         .catch((error: Error) => pushToast(traduzirErro(error), "error"))
     },
   })
+  // The mark in the diagnostic log at each return to the foreground (1.3.15): see the hook.
+  useMarcaDaVolta(bridge, stage === "ready", connection)
   const lidasPorSala = useLidasPorSala()
-  const porLerPorSala = useMemo(
+  // The same map while the counts do not change: a message that changes no count leaves the sidebar alone.
+  const porLerPorSala = useMesmoValor(useMemo(
     () =>
       contarPorSala(
         messages,
@@ -4481,7 +4545,7 @@ function Shell({
         silenciados,
       ),
     [messages, lidasDosCanais, lidasPorSala, active, activeRoom, address, salaDeLeitura, silenciados],
-  )
+  ))
   /**
    * Having a room open means reading it, just as having the channel open reads
    * it. Each message that arrives while it is in front advances its marker.
@@ -4857,8 +4921,7 @@ function Shell({
    * With no open channel they do nothing: there is no "next" from anywhere.
    */
   /*
-    The desktop app's global shortcuts (items 5 and 8 of
-    `docs/planos/depois-da-1-0.md`): microphone and sound work with the window
+    The desktop app's global shortcuts: microphone and sound work with the window
     hidden, but only during a call. The reason is in
     `apps/client/src/main/atalhos.ts`. What the system refuses is said once per
     change, not on every call.
@@ -5070,7 +5133,9 @@ function Shell({
 
   // Here, and not next to `labelFor`: the "awaiting entry" lines already need the
   // published names.
-  const { spaceMeta, refresh: refreshSpaceMeta } = useSpaceMeta(bridge, channels, messages)
+  const { spaceMeta: spaceMetaEmBruto, refresh: refreshSpaceMeta } = useSpaceMeta(bridge, channels, messages)
+  // The same map while no channel's banner changed (1.3.15): `labelFor` and `iconFor` depend on it.
+  const spaceMeta = useMesmoValor(spaceMetaEmBruto)
   nomePublicado.current = (canal) => spaceMeta.get(canal)?.name
 
   /**
@@ -5079,7 +5144,7 @@ function Shell({
    * channel enters the list and the line leaves on its own, because it stops passing the
    * filter. One channel only once, even if there is both a link and invite for it.
    */
-  const aEsperaDeEntrada = useMemo(() => {
+  const aEsperaDeEntrada = useMesmoValor(useMemo(() => {
     const linhas: { canal: string; nome: string; deLink: boolean; nota?: string }[] = []
     if (entradaAEspera && !channels.includes(entradaAEspera)) {
       linhas.push({
@@ -5100,7 +5165,7 @@ function Shell({
       linhas.push({ canal: tie.target, nome, deLink: false })
     }
     return linhas
-  }, [entradaAEspera, nomeDaEntradaAEspera, entradaComOutroNome, channels, convites, conhecidosOuFeitos, spaceMeta])
+  }, [entradaAEspera, nomeDaEntradaAEspera, entradaComOutroNome, channels, convites, conhecidosOuFeitos, spaceMeta]))
 
   /**
    * The first friend or the first channel, which removes the first steps card. A direct conversation
@@ -5225,6 +5290,12 @@ function Shell({
    */
   const porAtenderEmContactos = porDestino.contactos + openRequests.length
   const lastActivity = useMemo(() => lastActivityOf(messages), [messages])
+  /*
+    With live presence the last activity is not read, and it changes on every
+    message: kept out of `presenceFor`'s identity (1.3.15), or every message made
+    every presence function new, and the memoized sidebar rendered again.
+  */
+  const atividadeDaPresenca = livePresence ? SEM_ACTIVIDADE : lastActivity
 
   /** Live presence when the server relays it (the operator's explicit
    * choice); otherwise the derived, local fallback for older servers. */
@@ -5234,10 +5305,10 @@ function Shell({
       // you, so the answer is always "absent" and you would watch everyone
       // else go green while your own dot stayed grey.
       if (who === address) return selfPresenceOf(connection, activity)
-      const connected = livePresence ? online.has(who) : presenceOf(lastActivity, who) === "active"
+      const connected = livePresence ? online.has(who) : presenceOf(atividadeDaPresenca, who) === "active"
       return presenceKindOf(connected, directory.get(who)?.activity)
     },
-    [address, connection, activity, livePresence, online, lastActivity, directory],
+    [address, connection, activity, livePresence, online, atividadeDaPresenca, directory],
   )
 
   /**
@@ -6100,8 +6171,7 @@ function Shell({
   }, [callChannel, callRoom, active, salasDoCanal, bridge])
 
   /*
-    The game overlay on the desktop app (owner's request on 2 November
-    2026). The minimal summary of the voice room goes to the main process, which shows
+    The game overlay on the desktop app. The minimal summary of the voice room goes to the main process, which shows
     the pill on top of the game. The rules for when it appears and what it overlays are
     in `hooks/useOverlayDeJogo.ts` and `apps/client/src/main/overlay.ts`.
   */
@@ -6115,7 +6185,8 @@ function Shell({
     eu: {
       id: address ?? "",
       nome: profile.displayName || strings.call.selfFallback,
-      cara: profile.avatarDataUrl,
+      // The own portrait in the store (Task 10) comes resolved by the directory.
+      cara: profile.avatarDataUrl ?? (address ? directory.get(address)?.avatarDataUrl : undefined),
     },
     // `naSalaDaChamada` and not just `participants`: anyone who announced themselves and is still
     // connected is also in the room, like in the "calling" cards.
@@ -6349,6 +6420,184 @@ function Shell({
     return true
   }
 
+  /*
+    The sidebar's props, stable between renders (1.3.15), so its `memo` can skip
+    it when nothing it shows changed. Event handlers go through `useEstavel`: a
+    stable identity that runs the latest code. What the sidebar calls while it
+    renders (`voicePresence`, `categoriaRestrita`, `salaDaChamadaEm`) uses
+    `useCallback` with what it reads, so it changes when that changes.
+  */
+  const editaOCanal = active !== null && (bridge.channels.mayEdit?.(active) ?? false)
+  const esperaDaBarra = useMemo(
+    () =>
+      aEsperaDeEntrada.map((linha) => ({
+        canal: linha.canal,
+        nome: linha.nome,
+        ...(linha.nota ? { nota: linha.nota } : {}),
+        onCancelar: () => cancelarEspera(linha.canal, linha.deLink),
+      })),
+    [aEsperaDeEntrada, cancelarEspera],
+  )
+  const canalOficialDaBarra = useMemo(
+    () =>
+      commonRoom && !channels.includes(commonRoom) && bridge.session.escolherSalaComum
+        ? { aEntrar: aEntrarNoCanalOficial, onEntrar: entrarNoCanalOficial }
+        : undefined,
+    [commonRoom, channels, bridge, aEntrarNoCanalOficial, entrarNoCanalOficial],
+  )
+  /* A non-empty role list is a restriction, empty means "everyone", not
+     a restriction on nobody. Same reading as `categoriaVisivel`, and
+     the decision lives here, with the model in front. */
+  const categoriaRestritaDaBarra = useCallback(
+    (nome: string) => (categoriasDeclaradas.find((entrada) => entrada.category === nome)?.roles.length ?? 0) > 0,
+    [categoriasDeclaradas],
+  )
+  const salaDaChamadaDaBarra = useCallback(
+    (channel: string) => salaUnicaDaChamadaDe(channel, vozPorSala, Date.now()),
+    [vozPorSala],
+  )
+  const presencaNaVozDaBarra = useCallback(
+    (room: string): PresenteNaVoz[] => {
+      if (!active) return []
+      /**
+       * In the room we are in, the call peers: they come from the connections
+       * this device has open, and that is the most reliable source.
+       *
+       * In other rooms, whoever announced and did not say goodbye. Less
+       * reliable, and on purpose, a presence indicator that only worked
+       * in the room we are already in would indicate nothing, because it
+       * is exactly in other rooms that it serves a purpose.
+       */
+      if (callChannel === active && callRoom === room) {
+        /**
+         * Us first, then the peers.
+         *
+         * `participants` are the connections this device has open, so they
+         * never include us, and without this line someone entering an
+         * empty room saw nobody, not even themselves. They would not know
+         * if they got in. It is also what lets an admin drag us to another
+         * room: you can only drag someone on the list.
+         */
+        /* `presence`: the ring color. Without it the room painted everyone green,
+           including those who chose "busy". */
+        /* `transmite`: the broadcast signal next to the face. Known here, from
+           participants and our screen and audio; in other rooms it comes
+           from the announcement (`transmitePorSala`, phase 1i). */
+        const euTransmito: Transmissao | undefined =
+          screenStream !== null && minhaMusica
+            ? "ecra+musica"
+            : screenStream !== null
+              ? "ecra"
+              : minhaMusica
+                ? "musica"
+                : undefined
+        const eu = address
+          ? [
+              {
+                address,
+                name: nameFor(address),
+                profile: directory.get(address),
+                presence: presenceFor(address),
+                ...(euTransmito ? { transmite: euTransmito } : {}),
+              },
+            ]
+          : []
+        /* `naSalaDaChamada` and not just `participants`: whoever announced and
+           still has no media up is also in the room, and that is the
+           window where the list stayed empty on entry (owner, October 27,
+           2026). The broadcast signal is only known for those with media
+           already. */
+        return [
+          ...eu,
+          ...naSalaDaChamada
+            .filter((quem) => quem !== address)
+            .map((quem) => {
+              const participante = participants.find((p) => p.address === quem)
+              const transmite = participante ? transmissaoDe(participante) : undefined
+              return {
+                address: quem,
+                name: nameFor(quem),
+                profile: directory.get(quem),
+                presence: presenceFor(quem),
+                ...(transmite ? { transmite } : {}),
+              }
+            }),
+        ]
+      }
+      const laDentro = vozPorSala.get(chaveDaSala(active, room))
+      if (!laDentro) return []
+      // The broadcast signal from other rooms comes from the announcement (phase 1i).
+      const transmitem = transmitePorSala.get(chaveDaSala(active, room))
+      // Discarded on read, not just on write: with no more events coming in,
+      // a stale presence would never be cleaned up, and that is exactly the
+      // case for someone who left without saying goodbye.
+      return [...presencasVivas(laDentro, Date.now()).keys()]
+        .filter((quem) => quem !== address)
+        .map((quem) => {
+          const transmite = transmitem?.get(quem)
+          return {
+            address: quem,
+            name: nameFor(quem),
+            profile: directory.get(quem),
+            presence: presenceFor(quem),
+            ...(transmite ? { transmite } : {}),
+          }
+        })
+    },
+    [active, callChannel, callRoom, screenStream, minhaMusica, address, nameFor, directory, presenceFor, naSalaDaChamada, participants, vozPorSala, transmitePorSala],
+  )
+  const barra = {
+    abrirSala: useEstavel((room: string) => {
+      // A room is a different place: the person's page moves out of the way.
+      fecharPessoa()
+      abrirSala(room)
+    }),
+    menuDaVoz: useEstavel((room: string, who: string, at: { x: number; y: number }) => setVozMenu({ room, address: who, at })),
+    moverPessoa: useEstavel((who: string, room: string, de?: string) => moverPessoa(who, room, de)),
+    arrumarSala: useEstavel((arrastado: string, destino: { antesDe: string } | { categoria: string }) => arrumarSala(arrastado, destino)),
+    arrumarCategoria: useEstavel((arrastada: string, alvo: string) => arrumarCategoria(arrastada, alvo)),
+    reabrirSala: useEstavel((room: string) => reabrirSala(room)),
+    eliminarSala: useEstavel((room: string) => eliminarSala(room)),
+    menuDaSala: useEstavel((room: string, at: { x: number; y: number }) => setRoomMenu({ room, at })),
+    menuDaCategoria: useEstavel((category: string, at: { x: number; y: number }) => setCategoriaMenu({ category, at })),
+    novaSala: useEstavel(() => {
+      if (active) setNovaSalaEm(active)
+    }),
+    fechar: useEstavel(() => setSidebarOpen(false)),
+    escolherCanal: useEstavel((channel: string) => {
+      // The sidebar lists channels and only channels, and picking one goes to
+      // their destination: without the `setView`, picking from Friends would
+      // light the channel and keep showing the direct message next to it.
+      setCanal(channel)
+      setView("chat")
+      /*
+        The drawer only leaves when the channel has nothing more to say.
+        
+        This is where the phone got lost. Rooms in a channel draw below
+        the OPEN channel, and this tap is what opens it, but it closed
+        the drawer in the same gesture, so the tree appeared behind the
+        panel sliding out. You read "this channel has no rooms", and a
+        channel with rooms became a channel with one conversation only.
+        
+        A channel with a tree stays with the drawer open, which is where
+        rooms are now. A channel without a tree already gave up everything
+        it had (the conversation), and the drawer leaves it alone. Who
+        closes the drawer in the first case is `abrirSala`, at the end of
+        the path. A channel whose rooms have not arrived yet also stays: see
+        `gavetaSaiAoTocar`.
+        */
+      if (gavetaSaiAoTocar(channel)) setSidebarOpen(false)
+    }),
+    menuDoCanal: useEstavel((channel: string, at: { x: number; y: number }) => setMenu({ channel, at })),
+    editarPerfil: useEstavel(() => setEditingProfile(true)),
+    menuDoMicrofone: useEstavel((at: { x: number; y: number }) => setAudioMenu({ qual: "mic", at })),
+    menuDoSom: useEstavel((at: { x: number; y: number }) => setAudioMenu({ qual: "som", at })),
+    abrirDefinicoes: useEstavel(() => setView("config")),
+    latencia: useEstavel((dentro: boolean) => (dentro ? comecarLatencia() : pararLatencia())),
+    // Defined further down, after the gate's early return; called only on events.
+    guardarEstado: useEstavel((statusText: string) => guardarEstado(statusText)),
+  }
+
   if (stage !== "ready") {
     // One line, and discreet: the gate remains the gate. It only says that the
     // link was read and that it was not lost because there was still no open account.
@@ -6420,6 +6669,7 @@ function Shell({
           <Unlock
             key={vezDoPortao}
             onDone={enter}
+            onLigacaoFalhou={anotarLigacaoFalhada}
             onStartOver={checkVault}
             semTentativaSilenciosa={aparelhoRevogado}
           />
@@ -6606,7 +6856,7 @@ function Shell({
       onRetryEntry={outbox.retry}
       onDiscardEntry={outbox.discard}
       draft={draftFor(active)}
-      onDraftChange={(text) => active && setDraft(active, text)}
+      onDraftChange={setDraft}
       activeRoom={activeRoom}
       onPrompt={setPrompt}
       /* The single sheet for inviting, with this conversation's channel filled in. The
@@ -6942,142 +7192,32 @@ function Shell({
         <ChannelSidebar
           view={view}
           rooms={rooms}
-          aEsperaDeEntrada={aEsperaDeEntrada.map((linha) => ({
-            canal: linha.canal,
-            nome: linha.nome,
-            ...(linha.nota ? { nota: linha.nota } : {}),
-            onCancelar: () => cancelarEspera(linha.canal, linha.deLink),
-          }))}
-          canalOficialPorEntrar={
-            commonRoom && !channels.includes(commonRoom) && bridge.session.escolherSalaComum
-              ? { aEntrar: aEntrarNoCanalOficial, onEntrar: entrarNoCanalOficial }
-              : undefined
-          }
+          aEsperaDeEntrada={esperaDaBarra}
+          canalOficialPorEntrar={canalOficialDaBarra}
           labelFor={labelFor}
           iconFor={iconFor}
           oficialFor={oficialFor}
           roomGroups={roomGroups}
           activeRoom={activeRoom}
-          onSelectRoom={(room) => {
-            // A room is a different place: the person's page moves out of the way.
-            fecharPessoa()
-            abrirSala(room)
-          }}
-          /* A non-empty role list is a restriction, empty means "everyone", not
-             a restriction on nobody. Same reading as `categoriaVisivel`, and
-             the decision lives here, with the model in front. */
-          categoriaRestrita={(nome) =>
-            (categoriasDeclaradas.find((entrada) => entrada.category === nome)?.roles.length ?? 0) > 0
-          }
-          onVoiceMemberMenu={(room, who, at) => setVozMenu({ room, address: who, at })}
+          onSelectRoom={barra.abrirSala}
+          categoriaRestrita={categoriaRestritaDaBarra}
+          onVoiceMemberMenu={barra.menuDaVoz}
           mayMove={active ? (bridge.channels.mayMove?.(active) ?? false) : false}
-          onMovePerson={moverPessoa}
-          onReorderRoom={active && (bridge.channels.mayEdit?.(active) ?? false) ? arrumarSala : undefined}
+          onMovePerson={barra.moverPessoa}
+          onReorderRoom={editaOCanal ? barra.arrumarSala : undefined}
           onReorderCategory={
             // Also needs the bridge to declare categories: an older host does not bring
             // `setCategory`, and a handle that goes nowhere is worse than having no
             // handle at all.
-            active && (bridge.channels.mayEdit?.(active) ?? false) && bridge.channels.setCategory
-              ? arrumarCategoria
-              : undefined
+            editaOCanal && bridge.channels.setCategory ? barra.arrumarCategoria : undefined
           }
           closedRooms={roomsFechadas}
-          onReopenRoom={active && (bridge.channels.mayEdit?.(active) ?? false) ? reabrirSala : undefined}
-          onRemoveRoom={active && (bridge.channels.mayEdit?.(active) ?? false) ? eliminarSala : undefined}
-          voicePresence={(room) => {
-            if (!active) return []
-            /**
-             * In the room we are in, the call peers: they come from the connections
-             * this device has open, and that is the most reliable source.
-             *
-             * In other rooms, whoever announced and did not say goodbye. Less
-             * reliable, and on purpose, a presence indicator that only worked
-             * in the room we are already in would indicate nothing, because it
-             * is exactly in other rooms that it serves a purpose.
-             */
-            if (callChannel === active && callRoom === room) {
-              /**
-               * Us first, then the peers.
-               *
-               * `participants` are the connections this device has open, so they
-               * never include us, and without this line someone entering an
-               * empty room saw nobody, not even themselves. They would not know
-               * if they got in. It is also what lets an admin drag us to another
-               * room: you can only drag someone on the list.
-               */
-              /* `presence`: the ring color. Without it the room painted everyone green,
-                 including those who chose "busy". */
-              /* `transmite`: the broadcast signal next to the face. Known here, from
-                 participants and our screen and audio; in other rooms it comes
-                 from the announcement (`transmitePorSala`, phase 1i). */
-              const euTransmito: Transmissao | undefined =
-                screenStream !== null && minhaMusica
-                  ? "ecra+musica"
-                  : screenStream !== null
-                    ? "ecra"
-                    : minhaMusica
-                      ? "musica"
-                      : undefined
-              const eu = address
-                ? [
-                    {
-                      address,
-                      name: nameFor(address),
-                      profile: directory.get(address),
-                      presence: presenceFor(address),
-                      ...(euTransmito ? { transmite: euTransmito } : {}),
-                    },
-                  ]
-                : []
-              /* `naSalaDaChamada` and not just `participants`: whoever announced and
-                 still has no media up is also in the room, and that is the
-                 window where the list stayed empty on entry (owner, October 27,
-                 2026). The broadcast signal is only known for those with media
-                 already. */
-              return [
-                ...eu,
-                ...naSalaDaChamada
-                  .filter((quem) => quem !== address)
-                  .map((quem) => {
-                    const participante = participants.find((p) => p.address === quem)
-                    const transmite = participante ? transmissaoDe(participante) : undefined
-                    return {
-                      address: quem,
-                      name: nameFor(quem),
-                      profile: directory.get(quem),
-                      presence: presenceFor(quem),
-                      ...(transmite ? { transmite } : {}),
-                    }
-                  }),
-              ]
-            }
-            const laDentro = vozPorSala.get(chaveDaSala(active, room))
-            if (!laDentro) return []
-            // The broadcast signal from other rooms comes from the announcement (phase 1i).
-            const transmitem = transmitePorSala.get(chaveDaSala(active, room))
-            // Discarded on read, not just on write: with no more events coming in,
-            // a stale presence would never be cleaned up, and that is exactly the
-            // case for someone who left without saying goodbye.
-            return [...presencasVivas(laDentro, Date.now()).keys()]
-              .filter((quem) => quem !== address)
-              .map((quem) => {
-                const transmite = transmitem?.get(quem)
-                return {
-                  address: quem,
-                  name: nameFor(quem),
-                  profile: directory.get(quem),
-                  presence: presenceFor(quem),
-                  ...(transmite ? { transmite } : {}),
-                }
-              })
-          }}
-          onRoomMenu={(room, at) => setRoomMenu({ room, at })}
-          {...(active && (bridge.channels.mayEdit?.(active) ?? false)
-            ? { onCategoryMenu: (category: string, at: { x: number; y: number }) => setCategoriaMenu({ category, at }) }
-            : {})}
-          onNewRoom={
-            active && (bridge.channels.mayEdit?.(active) ?? false) ? () => setNovaSalaEm(active) : undefined
-          }
+          onReopenRoom={editaOCanal ? barra.reabrirSala : undefined}
+          onRemoveRoom={editaOCanal ? barra.eliminarSala : undefined}
+          voicePresence={presencaNaVozDaBarra}
+          onRoomMenu={barra.menuDaSala}
+          {...(editaOCanal ? { onCategoryMenu: barra.menuDaCategoria } : {})}
+          onNewRoom={editaOCanal ? barra.novaSala : undefined}
           presenceForChannel={presenceForChannel}
           presenceHint={presenceHint}
           active={active}
@@ -7087,7 +7227,7 @@ function Shell({
           /* The reader does not have to open the channel to see where the
              conversation is. `Date.now()` read in the call, not stored: a stale
              presence cannot send anyone to a room that has already emptied. */
-          salaDaChamadaEm={(channel) => salaUnicaDaChamadaDe(channel, vozPorSala, Date.now())}
+          salaDaChamadaEm={salaDaChamadaDaBarra}
           unreads={porLerNosCanais}
           porLerNaSala={porLerNaSala}
           silenciado={silenciadoExacto}
@@ -7095,36 +7235,13 @@ function Shell({
           address={address}
           connection={connection}
           open={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
+          onClose={barra.fechar}
           seccaoConfig={seccaoConfig}
           onSeccaoConfig={setSeccaoConfig}
-          onSelectChannel={(channel) => {
-            // The sidebar lists channels and only channels, and picking one goes to
-            // their destination: without the `setView`, picking from Friends would
-            // light the channel and keep showing the direct message next to it.
-            setCanal(channel)
-            setView("chat")
-            /*
-              The drawer only leaves when the channel has nothing more to say.
-              
-              This is where the phone got lost. Rooms in a channel draw below
-              the OPEN channel, and this tap is what opens it, but it closed
-              the drawer in the same gesture, so the tree appeared behind the
-              panel sliding out. You read "this channel has no rooms", and a
-              channel with rooms became a channel with one conversation only.
-              
-              A channel with a tree stays with the drawer open, which is where
-              rooms are now. A channel without a tree already gave up everything
-              it had (the conversation), and the drawer leaves it alone. Who
-              closes the drawer in the first case is `abrirSala`, at the end of
-              the path. A channel whose rooms have not arrived yet also stays: see
-              `gavetaSaiAoTocar`.
-              */
-            if (gavetaSaiAoTocar(channel)) setSidebarOpen(false)
-          }}
-          onChannelMenu={(channel, at) => setMenu({ channel, at })}
+          onSelectChannel={barra.escolherCanal}
+          onChannelMenu={barra.menuDoCanal}
           onCompose={compose}
-          onEditProfile={() => setEditingProfile(true)}
+          onEditProfile={barra.editarPerfil}
           onActivityMenu={setActivityMenu}
           activity={activity}
           onNotifications={setNotifAt}
@@ -7134,13 +7251,13 @@ function Shell({
           soundOff={soundOff}
           onToggleMic={alternarMicrofone}
           onToggleSound={alternarSom}
-          onMicMenu={(at) => setAudioMenu({ qual: "mic", at })}
-          onSoundMenu={(at) => setAudioMenu({ qual: "som", at })}
-          onAbrirDefinicoes={() => setView("config")}
+          onMicMenu={barra.menuDoMicrofone}
+          onSoundMenu={barra.menuDoSom}
+          onAbrirDefinicoes={barra.abrirDefinicoes}
           latencia={latencia}
-          onLatenciaHover={(dentro) => (dentro ? comecarLatencia() : pararLatencia())}
+          onLatenciaHover={barra.latencia}
           onPrompt={setPrompt}
-          onSaveStatus={guardarEstado}
+          onSaveStatus={barra.guardarEstado}
           pedidoDeEstado={pedidoDeEstado}
           /* The call goes into the panel at the column foot (P1): the side dock is
              the middle box, and the hang up button is the fifth in the row. */

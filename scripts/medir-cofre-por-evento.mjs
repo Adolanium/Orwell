@@ -7,6 +7,7 @@
  * Here we measure only the CPU (backend in memory): Windows disk and IndexedDB add to this.
  *
  *   node scripts/medir-cofre-por-evento.mjs
+ *   TAMANHOS=12,15,27 node scripts/medir-cofre-por-evento.mjs
  */
 import { Vault } from "@enclave/client-core"
 
@@ -34,7 +35,8 @@ class Memoria {
 
 const enchimento = (bytes) => "A".repeat(bytes)
 
-for (const mb of [1, 3, 6, 10, 20]) {
+const TAMANHOS = (process.env.TAMANHOS ?? "1,3,6,10,20").split(",").map(Number)
+for (const mb of TAMANHOS) {
   const vault = new Vault(new Memoria())
   await vault.create(null)
   // Weight lives in `groups` and in the directory, as in a real vault (MLS state and avatars in base64).

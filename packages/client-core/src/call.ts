@@ -123,7 +123,7 @@ export interface Participant {
   /**
    * This person is sharing a screen, whether we asked to see it or not.
    *
-   * Request from the owner on October 5, 2026: when someone shares the screen, others
+   * When someone shares the screen, others
    * should enter the stream only if they want to. The declaration and the stream
    * were the same question for whoever draws; they are now two, because there is a state
    * in between, offered and not accepted.
@@ -327,8 +327,8 @@ export interface CallBridge {
    *
    * Credentials are minted per session and expire in minutes, so the shared TURN
    * secret never leaves the server. Hosts that cannot ask (or servers that offer
-   * nothing) fall back to a public STUN, which works on forgiving networks and
-   * fails on symmetric NAT — see `FALLBACK_ICE_SERVERS`.
+   * nothing) get no ICE servers at all: the direct connection then reaches only
+   * the same network, and the person is told so — see `SEM_SERVIDORES_ICE`.
    */
   iceServers?(): Promise<RTCIceServer[]>
   /**
@@ -465,16 +465,17 @@ interface Peer {
 }
 
 /**
- * Fallback only, for local development against a server that offers nothing.
+ * What the direct (mesh) connection uses when the homeserver gives nothing:
+ * no servers at all.
  *
  * A public STUN server is a third party told the IP address and the exact moment
- * of every call, by a product whose whole argument is that no third party learns
- * anything. In production the homeserver hands out its own STUN and TURN over the
- * authenticated gateway — see `CallBridge.iceServers`. Google's is what remains
- * when there is no server to ask, and it is a development convenience, not a
- * design choice.
+ * of every call. Until 1.3.14 this fell back to one; now there is no third party
+ * at any point. With no servers the connection still gathers host candidates, so
+ * it reaches whoever is on the same network, and the person is told why it may
+ * not reach anyone else ("no stun or turn server for a direct call"). The SFU
+ * call does not use these servers and is not affected.
  */
-const FALLBACK_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }]
+const SEM_SERVIDORES_ICE: RTCIceServer[] = []
 
 /**
  * How often to ask for ICE servers again.
@@ -682,7 +683,7 @@ export function comDtxNoOpus(sdp: string): string {
  *
  * Applies to all Opus in the connection, including screen audio and music: screen
  * audio often carries speech (a video, another call), and over SFU, `cbr=1`
- * comes from the router, which has a single Opus. See `docs/planos/voz-cbr-relatorio.md`.
+ * comes from the router, which has a single Opus.
  */
 export function comDtxECbrNoOpus(sdp: string): string {
   return comParametroNoOpus(comDtxNoOpus(sdp), "cbr", "1")
@@ -3356,7 +3357,7 @@ export class Call extends Emitter<CallEvents> {
    * system audio only exists on Windows, because on macOS the system does not
    * hand it over without an extension installed; and on a MESH call on an engine
    * without `insertable streams` (Safari, Firefox) the entire call runs without
-   * the extra cipher layer, share included. See `docs/PENDENTES.md`.
+   * the extra cipher layer, share included.
    *
    * "On mesh" is not a detail thrown in: on SFU those two engines encrypt,
    * through the `RTCRtpScriptTransform` that `caminhoDaCifra` knows, and the
@@ -3795,7 +3796,7 @@ export class Call extends Emitter<CallEvents> {
   /**
    * View the screen this person is offering.
    *
-   * Request from the owner on October 5, 2026: *when someone shares their
+   * *When someone shares their
    * screen, others should only join the stream if they want to.* It was automatic
    *, any new producer was consumed without looking at the source, and receiving
    * meant 2.5 Mbps forced on you with no way to refuse: there's no simulcast or
@@ -4678,9 +4679,12 @@ export class Call extends Emitter<CallEvents> {
     const agora = Date.now()
     if (this.#ice && agora - this.#ice.em < ICE_REFRESH_MS) return this.#ice.servers
 
-    // No homeserver to ask (tests, development), so we fall back to public STUN.
+    // No homeserver to ask (tests, development): no servers, and a warning.
     // In production the bridge always offers this method.
-    if (!this.bridge.iceServers) return FALLBACK_ICE_SERVERS
+    if (!this.bridge.iceServers) {
+      this.#avisarSemServidoresIce()
+      return SEM_SERVIDORES_ICE
+    }
 
     let offered: RTCIceServer[] | undefined
     try {
@@ -4699,8 +4703,8 @@ export class Call extends Emitter<CallEvents> {
     }
 
     // Don't cache this: the next call asks again.
-    this.#avisarSemRetransmissao()
-    return FALLBACK_ICE_SERVERS
+    this.#avisarSemServidoresIce()
+    return SEM_SERVIDORES_ICE
   }
 
   #semRetransmissaoAvisado = false
@@ -4709,6 +4713,13 @@ export class Call extends Emitter<CallEvents> {
     if (this.#semRetransmissaoAvisado) return
     this.#semRetransmissaoAvisado = true
     this.emit("error", { detail: "no relay server for the call" })
+  }
+
+  /** Neither STUN nor TURN: one warning per call, shared with the one above. */
+  #avisarSemServidoresIce(): void {
+    if (this.#semRetransmissaoAvisado) return
+    this.#semRetransmissaoAvisado = true
+    this.emit("error", { detail: "no stun or turn server for a direct call" })
   }
 
   async #signal(payload: Payload): Promise<void> {
@@ -5082,7 +5093,7 @@ export class Call extends Emitter<CallEvents> {
    * The cost of the second appears with an OLD client that reserves no slot:
    * its camera lands in our screen slot, and because it also never
    * declares `screen`, what you see is a camera that does not appear. Voice call
-   * stays intact, video lost between versions. It is written in `PENDENTES.md`.
+   * stays intact, video lost between versions.
    */
   #chegouPeloLugarDoEcra(
     peerAddress: UserAddress,
@@ -5476,7 +5487,7 @@ once, and it left.
           already arrived, the connection is direct, the sender owns it, and
           there is no consumer that might not exist: **the bandwidth is spent.**
           What the choice does here is only not to show on screen what nobody
-          asked to see, which is the owner's request fulfilled by the half that
+          asked to see, which is the choice honored by the half that
           still remains. Saving bandwidth in the mesh is simulcast and layers,
           and that is outside this slice.
           */

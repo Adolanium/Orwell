@@ -7,7 +7,7 @@
  *
  * Why it exists: the VPS output is 300 to 745 Mbit/s, and the long-term limit is
  * now the MONTHLY TRAFFIC QUOTA (8 TB by default), not the bandwidth. A 50-person
- * call with four cameras burns ~130 GB per hour. See `docs/planos/limites-media-relatorio.md`.
+ * call with four cameras burns ~130 GB per hour.
  *
  * Usage:
  *   node scripts/trafego-do-mes.mjs                 # reads the VPS over SSH

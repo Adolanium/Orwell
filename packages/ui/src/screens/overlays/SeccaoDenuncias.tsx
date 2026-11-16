@@ -7,7 +7,7 @@ import { NomeDePessoa } from "../../components/NomeDePessoa.js"
 
 /**
  * The reports that reached the channel founder, in the Moderation section of
- * properties (`docs/planos/denuncias-design.md`, §6.2).
+ * properties (§6.2 of the reports design).
  *
  * Each report is a card: the reason, the day, the reported person, the channel
  * and room, proof of the report, notes and messages, each marked "Verified" or

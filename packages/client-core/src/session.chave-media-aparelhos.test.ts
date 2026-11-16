@@ -22,7 +22,7 @@ import { Vault, type VaultBackend } from "./vault.js"
  * Two devices on the SAME account on the same call never use the same key/nonce
  * pair.
  *
- * Found on 2 November 2026 (`docs/planos/som-que-se-perde-relatorio.md`):
+ * The bug:
  * `Session.mediaKey` used `leafIndexOf`, which returns the FIRST leaf of the
  * account. Both devices derived the same key and the same `senderId`, and each
  * one reserved counters in its own vault starting from zero: the same nonces

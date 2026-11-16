@@ -1,7 +1,7 @@
 /**
  * "Share audio", the first source: a file played in a call, end to end.
  *
- * Phase 9 de `docs/planos/definicoes-0-9.md`. The subject is the product: the `apps/web`
+ * Phase 9. The subject is the product: the `apps/web`
  * on `vite`, the homeserver (with and without media engine), two accounts
  * created via the screen, an invite accepted via the screen, the voice room
  * clicked, and the "Share audio" button pressed. The file is chosen in the `<input type="file">`

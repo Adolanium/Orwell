@@ -97,6 +97,7 @@ vi.mock("mediasoup-client", () => ({
   },
 }))
 vi.mock("../../../web/src/vault-backend.js", () => ({ BrowserVaultBackend: class {} }))
+vi.mock("../../../web/src/armazem-backend.js", () => ({ BrowserArmazemBackend: class {} }))
 
 /**
  * The `electron`, which is the only mock on this test bench.
@@ -160,6 +161,12 @@ function capacidades(objecto: unknown, prefixo = "", nivel = 0): string[] {
  * be a choice, not an oversight.
  */
 const SO_NA_SECRETARIA: Record<string, string> = {
+  /*
+    The account file is chosen in the main process (Task 11b, fix): the
+    renderer never gives it a path to open. In the browser the `<input
+    type="file">` gives a `Blob`, which the bridge reads in slices, and there is no path.
+  */
+  "vault.escolherFicheiroDeConta": "o browser dá o Blob do input; aqui o principal escolhe e guarda o caminho",
   /*
     Screen sharing with its own picker. In the browser the engine brings its
     picker and asks permission itself; here `getDisplayMedia` falls to a request
@@ -225,10 +232,9 @@ const SO_NA_SECRETARIA_NO_CALL: Record<string, string> = {
 /** What only the browser has, each entry with the reason in writing. */
 const SO_NO_BROWSER: Record<string, string> = {
   /*
-    The permission model for 1.2 (3/11/2026). NOT a platform difference: IPC is
+    The permission model for 1.2. NOT a platform difference: IPC is
     missing. The core, in the main process, refuses the same way; without this
-    the desktop app shows the usual role editor and reads `mayMove`. See
-    `docs/planos/cargos-permissoes-relatorio.md`, D-P3.
+    the desktop app shows the usual role editor and reads `mayMove`.
   */
   "channels.mayMoveIn": "por fazer na secretária: falta o IPC (cargos-permissoes D-P3)",
   "channels.permissoes": "idem",

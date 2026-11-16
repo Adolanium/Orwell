@@ -20,7 +20,7 @@
  * each sound). There it counts only the `start`, because the analyzer is a page timer
  * and does not run with the thread busy. It is informative: a sound requested before
  * rendering arrives, with the thread stuck for more than 400 ms, is dropped on purpose
- * (`ESPERA_MAXIMA_MS`, in `motor.ts`). See `docs/planos/sons-calados-relatorio.md`.
+ * (`ESPERA_MAXIMA_MS`, in `motor.ts`).
  */
 import { build } from "esbuild"
 import { join, dirname } from "node:path"

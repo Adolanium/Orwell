@@ -2,7 +2,7 @@ import { Emitter } from "./emitter.js"
 
 /**
  * CAPTURED sources from the DJ: a browser tab, system audio, or a window.
- * Phase 9 de `docs/planos/definicoes-0-9.md`, the second slice (owner, 2 November 2026: "go").
+ * The second slice of the DJ sources.
  * The first slice is files (`musica.ts`).
  *
  * All three come from the same place, the `getDisplayMedia`, which is what screen

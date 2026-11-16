@@ -39,7 +39,7 @@ const SITE = join(RAIZ, "apps/site")
 const DIST = join(SITE, "dist")
 
 /**
- * Fifty kilobytes per page, owner's decision.
+ * Fifty kilobytes per page.
  *
  * For scale: the Discord homepage runs several megabytes. The argument of this
  * page is itself, and that is why the cap is checked and not wished for. The

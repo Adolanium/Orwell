@@ -55,8 +55,18 @@ contextBridge.exposeInMainWorld("enclaveHost", {
     memorizar: (ligar: boolean) => ipcRenderer.invoke("vault:memorizar", ligar),
     definirPalavraPasse: (frase: string) => ipcRenderer.invoke("vault:definir-palavra-passe", frase),
     destroy: () => ipcRenderer.invoke("vault:destroy"),
-    export: (passphrase?: string) => ipcRenderer.invoke("vault:export", passphrase),
-    import: (data: string, passphrase: string) => ipcRenderer.invoke("vault:import", data, passphrase),
+    export: (passphrase?: string, opcoes?: { incluirImagens?: boolean }) => ipcRenderer.invoke("vault:export", passphrase, opcoes),
+    /*
+      The account file is chosen in the main process (Task 11b): the renderer
+      never gives a path to open. `{ escolhido: true }` is the file the main
+      process chose; a `Blob` goes as bytes; text as always.
+    */
+    escolherFicheiroDeConta: () => ipcRenderer.invoke("vault:escolher-ficheiro"),
+    import: async (ficheiro: Blob | string | { escolhido: true }, passphrase: string) => {
+      if (typeof ficheiro === "string") return ipcRenderer.invoke("vault:import", ficheiro, passphrase)
+      if (!(ficheiro instanceof Blob)) return ipcRenderer.invoke("vault:import", { escolhido: true }, passphrase)
+      return ipcRenderer.invoke("vault:import", new Uint8Array(await ficheiro.arrayBuffer()), passphrase)
+    },
     createProvisional: (passphrase: string | null) => ipcRenderer.invoke("vault:createProvisional", passphrase),
   },
   /** Switch account. See `contas` in `EnclaveBridge`. */
@@ -111,7 +121,33 @@ contextBridge.exposeInMainWorld("enclaveHost", {
     estado: (sha: string) => ipcRenderer.invoke("video:estado", sha),
     bytes: (sha: string) => ipcRenderer.invoke("video:bytes", sha),
   },
-  /** Attachment bytes on demand (S5). See `anexo` in `EnclaveBridge`. */
+  /** The counters for the diagnostic log (1.3.15). See `diagnostico` in `EnclaveBridge`. */
+  diagnostico: {
+    contadores: () => ipcRenderer.invoke("diagnostico:contadores"),
+  },
+  /**
+   * The media store (media out of the vault, design §8). The bytes arrive as
+   * `Uint8Array`, like the video bytes. See `media` in `EnclaveBridge`.
+   */
+  media: {
+    bytes: (sha: string) => ipcRenderer.invoke("media:bytes", sha),
+    fixar: (sha: string) => ipcRenderer.invoke("media:fixar", sha),
+    soltar: (sha: string) => ipcRenderer.invoke("media:soltar", sha),
+    estado: () => ipcRenderer.invoke("media:estado"),
+    definirTecto: (bytes: number) => ipcRenderer.invoke("media:tecto", bytes),
+    libertar: () => ipcRenderer.invoke("media:libertar"),
+    // A plain copy, with only the keys of one of the three shapes.
+    trazer: (id: { sha?: string; a?: string; channel?: string; alvo?: string; indice?: number }) =>
+      ipcRenderer.invoke(
+        "media:trazer",
+        typeof id.sha === "string"
+          ? { sha: id.sha }
+          : typeof id.a === "string"
+            ? { a: id.a }
+            : { channel: id.channel, alvo: id.alvo, indice: id.indice },
+      ),
+  },
+  /** The bytes of an attachment, on demand (S5). See `anexo` in `EnclaveBridge`. */
   anexo: {
     pedir: (id: { channel: string; alvo: string; indice: number }) =>
       ipcRenderer.invoke("anexo:pedir", { channel: id.channel, alvo: id.alvo, indice: id.indice }),
@@ -462,7 +498,10 @@ this channel.
     historico: (handler: (payload: unknown) => void) => subscribe("event:historico", handler),
     sincronia: (handler: (payload: unknown) => void) => subscribe("event:sincronia", handler),
     video: (handler: (payload: unknown) => void) => subscribe("event:video", handler),
+    /** A media item in the store changed: stored, left, failed or arrived. */
+    media: (handler: (payload: unknown) => void) => subscribe("event:media", handler),
     typing: (handler: (payload: unknown) => void) => subscribe("event:typing", handler),
+    recuperacao: (handler: (payload: unknown) => void) => subscribe("event:recuperacao", handler),
     buzz: (handler: (payload: unknown) => void) => subscribe("event:buzz", handler),
     voice: (handler: (payload: unknown) => void) => subscribe("event:voice", handler),
     /**

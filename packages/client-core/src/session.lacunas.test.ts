@@ -29,7 +29,7 @@ import { Vault, type VaultBackend } from "./vault.js"
  *   3. **and the channel does NOT enter `deafChannels()`.** This is the part that cannot
  *      break: reporting it marked channels as deaf where someone had just
  *      joined, and behind deafness comes the repair that pulls the
- *      history. It is the decision from 16 August (`docs/PENDENTES.md`), and
+ *      history. It is a standing decision, and
  *      "not mark as read" and "not count toward deafness" are different things;
  *   4. and it gets asked again on the next connection, one at a time.
  *

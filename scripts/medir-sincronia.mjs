@@ -1,6 +1,5 @@
 /**
- * Time until summaries match, by scenario (§8.2 of the plan
- * `docs/planos/2026-10-20-sincronia-absoluta.md`).
+ * Time until summaries match, by scenario (§8.2 of the plan).
  *
  *   npx tsc -b && npm run build -w @enclave/server
  *   node scripts/medir-sincronia.mjs            # 3 runs

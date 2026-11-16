@@ -15,6 +15,7 @@ import {
   Session,
   tiposDiferentes,
   Vault,
+  ArmazemEmMemoria,
   type ResumoNivel0,
   type TipoDoResumo,
   type VaultBackend,
@@ -239,6 +240,8 @@ export interface ContaDeTeste {
   session: Session
   vault: Vault
   backend: CofreEmMemoria
+  /** The session's media store backend (in memory): the store tests look at it. */
+  armazem: ArmazemEmMemoria
   address: string
   /** The `status` codes that the session emitted, in order. */
   avisos: string[]
@@ -257,7 +260,8 @@ export async function contasDeTeste(servidor: ServidorDeTeste, nomes: readonly s
     const backend = new CofreEmMemoria()
     const vault = new Vault(backend)
     await vault.create("frase-passe-de-teste")
-    const session = new Session(vault)
+    const armazem = new ArmazemEmMemoria()
+    const session = new Session(vault, { armazem })
     const identidade = await session.createIdentity(servidor.casa)
     const avisos: string[] = []
     session.on("status", (evento) => {
@@ -265,7 +269,7 @@ export async function contasDeTeste(servidor: ServidorDeTeste, nomes: readonly s
     })
     await session.connect()
     await session.updateProfile({ displayName: nome, donations: [] })
-    contas.push({ nome, session, vault, backend, address: identidade.address, avisos })
+    contas.push({ nome, session, vault, backend, armazem, address: identidade.address, avisos })
   }
   return contas
 }
@@ -351,7 +355,8 @@ export async function emparelharAparelho(conta: ContaDeTeste, nome = `${conta.no
   const backend = new CofreEmMemoria()
   const vault = new Vault(backend)
   await vault.create("frase-do-telemovel")
-  const session = new Session(vault)
+  const armazem = new ArmazemEmMemoria()
+  const session = new Session(vault, { armazem })
   const avisos: string[] = []
   session.on("status", (evento) => {
     if (evento.code) avisos.push(evento.code)
@@ -370,5 +375,57 @@ export async function emparelharAparelho(conta: ContaDeTeste, nome = `${conta.no
   await session.connect()
   session.concluirEmparelhamento()
   await concluido
-  return { nome, session, vault, backend, address: identidade.address, avisos }
+  return { nome, session, vault, backend, armazem, address: identidade.address, avisos }
+}
+
+// ---------------------------------------------------------------------------
+// The media store (1.3.15): media live in the device store, and the vault keeps
+// the reference. These helpers prove where the bytes are, the way the old tests
+// proved it with `vault.contents.videos` and the `inline` in the vault.
+// ---------------------------------------------------------------------------
+
+/** What this device holds of a media item: the vault reference, the blob on disk, and the bytes read back. */
+export interface MediaNoAparelho {
+  /** `contents.media[sha]` exists in the vault. */
+  referencia: boolean
+  /** The store disk has the encrypted blob (after the write queue drained). */
+  blob: boolean
+  /** The plaintext bytes, read back through the reference. `null` if they are not here. */
+  bytes: Uint8Array | null
+}
+
+export async function mediaNoAparelho(conta: Pick<ContaDeTeste, "session" | "vault" | "armazem">, sha: string): Promise<MediaNoAparelho> {
+  await conta.session.drenarArmazem()
+  return {
+    referencia: conta.vault.contents.media?.[sha] !== undefined,
+    blob: (await conta.armazem.ler(sha)) !== null,
+    bytes: await conta.session.bytesDeMedia(sha),
+  }
+}
+
+/**
+ * The same device after a reload: a new `Vault` and `Session` over the same vault
+ * and store disks, not connected. What it reads is what the disks kept.
+ */
+export async function recarregar(
+  conta: ContaDeTeste,
+  frase = "frase-passe-de-teste",
+): Promise<Pick<ContaDeTeste, "session" | "vault" | "armazem">> {
+  await conta.session.flush()
+  await conta.session.drenarArmazem()
+  const vault = new Vault(conta.backend)
+  await vault.unlock(frase)
+  const session = new Session(vault, { armazem: conta.armazem })
+  await vault.armazemPronto()
+  return { session, vault, armazem: conta.armazem }
+}
+
+/** `ate` for a predicate that has to read the disk (asynchronous). Returns the ms it waited. */
+export async function ateQue(predicado: () => Promise<boolean>, rotulo: string, prazoMs = 15_000, passoMs = 100): Promise<number> {
+  const inicio = Date.now()
+  while (Date.now() - inicio < prazoMs) {
+    if (await predicado()) return Date.now() - inicio
+    await new Promise((resolve) => setTimeout(resolve, passoMs))
+  }
+  throw new Error(`esgotou-se o prazo à espera de: ${rotulo}`)
 }

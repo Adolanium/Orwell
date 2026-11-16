@@ -17,7 +17,7 @@ import {
 /**
  * Absolute sync across accounts: the scenarios in §8.1, MARKED AS MEASUREMENTS.
  *
- * Phase S0 of the plan in `docs/planos/2026-10-20-sincronia-absoluta.md`. Nothing
+ * Phase S0 of the absolute-sync plan. Nothing
  * is fixed here: each scenario runs on today's code and prints today's numbers:
  * how much it diverges, how long until it matches, what never matches within the
  * deadline. So assertions only lock down what the scenario set up, never the goal.

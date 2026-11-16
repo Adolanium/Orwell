@@ -72,8 +72,8 @@ describe("EstadoDaSincronia", () => {
     expect(linhas[0]!.querySelector(".estado-sincronia-hora")).toBeNull()
   })
 
-  // It was "Unnamed" until November 4, 2026; the resource changed to the owner's
-  // address word (owner's order), never the full address.
+  // It used to be "Unnamed"; the resource changed to the owner's
+  // address word, never the full address.
   it("o feed de alguém diz-se pelo dono, e sem nome conhecido pela palavra do endereço dele", async () => {
     montar([linha(MURAL, "igual")])
     await assentar()

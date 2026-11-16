@@ -7,8 +7,10 @@ import {
   Vault,
   type AlvoDaDenuncia,
   type DenunciaPreparada,
+  type FonteDeBytes,
   type EscolhaDaDenuncia,
   type InvitePolicy,
+  type MediaATrazer,
   type PostExtras,
   type StoredProfile,
   type VideoAPublicar,
@@ -40,10 +42,11 @@ import {
   systemPreferences,
 } from "electron"
 import { spawn } from "node:child_process"
+import { monitorEventLoopDelay } from "node:perf_hooks"
 import { constants as fsConstants, readFileSync, rmSync } from "node:fs"
 import { access, readFile, rm, writeFile } from "node:fs/promises"
 import { release } from "node:os"
-import { dirname, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import { CANAIS_DE_ACTUALIZACAO, ENDERECO_DAS_DESCARGAS, verificarActualizacao } from "./actualizacao.js"
 import {
   ARGUMENTOS_DO_INSTALADOR,
@@ -80,6 +83,9 @@ import { enderecoParaAbrirFora } from "./links-externos.js"
 import { ligarOverlayDeJogo } from "./overlay-janela.js"
 import { ligarSfu, type RegistarPedido } from "./sfu.js"
 import { DesktopVaultBackend, escreverInteiro } from "./vault-backend.js"
+import { abrirFonteDoFicheiro, formaDoFicheiroNoDisco, gravarPorPartes } from "./ficheiro-de-conta.js"
+import { ArmazemDaContaActiva } from "./armazem-backend.js"
+import { miniaturistaDaSecretaria } from "./miniaturista.js"
 import { permissaoConcedida } from "./permissoes.js"
 
 /**
@@ -95,7 +101,21 @@ type Campos = Record<string, unknown>
 const eObjecto = (valor: unknown): valor is Campos => typeof valor === "object" && valor !== null && !Array.isArray(valor)
 const textoAte = (valor: unknown, tecto: number): string | null => (typeof valor === "string" && valor.length <= tecto ? valor : null)
 
+/**
+ * How long this process's event loop was held (1.3.15). The histogram samples
+ * every 20 ms; each reading returns the largest delay since the last one, in
+ * ms, and starts over. See `diagnostico:contadores`.
+ */
+const atrasoDoPrincipal = monitorEventLoopDelay({ resolution: 20 })
+atrasoDoPrincipal.enable()
+function lerAtrasoDoPrincipal(): number {
+  const maior = Math.round(atrasoDoPrincipal.max / 1e6)
+  atrasoDoPrincipal.reset()
+  return maior
+}
+
 /** The target of a report from the renderer, rebuilt field by field. `null` if the shape does not fit. */
+
 function alvoDaDenunciaDe(valor: unknown): AlvoDaDenuncia | null {
   if (!eObjecto(valor)) return null
   const canal = textoAte(valor["canal"], 300)
@@ -173,6 +193,18 @@ function mediaDaPublicacao(extras: PostExtras | undefined): PostExtras {
   return { ...extras, media }
 }
 
+/**
+ * What the renderer asks to "Fetch", reduced to one of the three shapes the
+ * core knows. The IPC brings any object: what is neither `sha` nor `a` is an
+ * attachment, and a strange attachment is not found (the core says "ninguem").
+ */
+function mediaATrazer(id: unknown): MediaATrazer {
+  const pedido = (typeof id === "object" && id !== null ? id : {}) as Record<string, unknown>
+  if (typeof pedido["sha"] === "string") return { sha: pedido["sha"] }
+  if (typeof pedido["a"] === "string") return { a: pedido["a"] }
+  return { channel: String(pedido["channel"] ?? ""), alvo: String(pedido["alvo"] ?? ""), indice: Number(pedido["indice"] ?? -1) }
+}
+
 /*
   The accounts on this device (Switch account). Without `contas.json`, the device
   has only the main account, in the usual `vault.enc`. The vault opens on the
@@ -197,8 +229,29 @@ const contas: ContasDoAparelho = new ContasDoAparelho({
 })
 const armazemDoCofre: DesktopVaultBackend = new DesktopVaultBackend(app.getPath("userData"), contas.activa)
 const vault = new Vault(armazemDoCofre)
-// The version goes in both `hello` calls for the 1.0 server to verify. See `Session`.
-const session = new Session(vault, { versaoDaApp: app.getVersion() })
+// The version goes in both `hello` messages, for the 1.0 server to check. See `Session`.
+/*
+  The media store (design §4): files in `media/`, in the active account
+  folder. The session ties it to the vault: it opens with it, locks with it,
+  and `vault.destroy()` deletes it. "Switch account" swaps its folder with the
+  vault's.
+*/
+const armazemDeMedia = new ArmazemDaContaActiva(app.getPath("userData"), contas.activa)
+const session = new Session(vault, {
+  versaoDaApp: app.getVersion(),
+  armazem: armazemDeMedia,
+  miniaturista: miniaturistaDaSecretaria(),
+})
+
+/**
+ * The blobs still in the store queue reach the disk. Before locking (sign out,
+ * switch account) and before quitting: once locked, the queue no longer touches
+ * the disk, which may by then belong to another account. With a deadline, so a
+ * stuck disk does not hold up the quit.
+ */
+function drenarArmazem(prazoMs = 2_000): Promise<void> {
+  return Promise.race([session.drenarArmazem().catch(() => {}), new Promise<void>((resolve) => setTimeout(resolve, prazoMs).unref?.())])
+}
 
 /** Resolve a sibling bundle from `out/main`. See the note in `asset`. */
 const asset = (...parts: string[]): string => join(__dirname, "..", ...parts)
@@ -402,6 +455,12 @@ function createWindow(): BrowserWindow {
        * shuts up exactly when it should speak. Measured: without this, a message
        * arriving from a hidden window is delivered and rendered anyway, because this
        * path is driven by IPC, not timers, which is what throttling delays.
+       *
+       * Looked at again for 1.3.15 (the freeze when restoring from minimized): the
+       * core, its timers and the vault run in this process, which throttling does
+       * not touch, and the renderer is fed by IPC. Turning it off would not stop
+       * that work from piling up, and would break `document.hidden`. What the
+       * return does is now measured instead: see `diagnostico:contadores`.
        */
     },
   })
@@ -487,7 +546,10 @@ function createWindow(): BrowserWindow {
       detail: "As mensagens à espera de ligação perdem-se ao sair.",
     })
     if (escolha === 0) event.preventDefault()
-    else aSair = false
+    else {
+      aSair = false
+      armazemDrenadoParaSair = false
+    }
   })
 
   return window
@@ -548,8 +610,8 @@ function hardenSession(): void {
       }
       /*
         System audio always goes through whenever the system has it, no checkbox,
-        no asking (owner's order, November 2, 2026: "audio is always shared by
-        default"). See `somDoSistema` (Windows always, macOS 14.2+ with permission,
+        no asking: audio is always shared by
+        default. See `somDoSistema` (Windows always, macOS 14.2+ with permission,
         no others) and `escolhaDoEcra`. Where it's not available, sharing goes silent
         and the call says so (error 441).
 
@@ -568,8 +630,7 @@ function hardenSession(): void {
      * resolve or reject, and on the clicker's side a button keeps thinking until
      * the app closes. That happens if the window reloads mid-pick, if the renderer
      * crashes, and **today it always happens where the system picker doesn't
-     * exist**, because the app's picker hasn't been written yet (see
-     * `docs/PENDENTES.md`).
+     * exist**, because the app's picker hasn't been written yet.
      *
      * Deny is the right way out when you don't know: the kernel reads the refusal
      * as "clicked cancel", which is silent and reversible, instead of leaving the
@@ -688,6 +749,8 @@ const PRAZO_DA_ESCOLHA_MS = 120_000
  * quit: `app.quit()`'s `close` is the same as the window button's `close`.
  */
 let aSair = false
+/** `before-quit` has already waited for the store queue (once per quit). */
+let armazemDrenadoParaSair = false
 
 /** The system tray presence. It exists between `whenReady` and quit. */
 let bandeja: Bandeja | null = null
@@ -810,27 +873,42 @@ function registerIpc(window: BrowserWindow): void {
   const nomeDaContaAberta = (): string | undefined =>
     vault.unlocked && !vault.provisorio ? vault.contents.profile.displayName : undefined
   let mudancaDeContaPendente = false
-  const aplicarMudancaDeConta = (): void => {
-    if (!mudancaDeContaPendente) return
+  /*
+    The swap in progress (waiting for the store queue). Whoever asks for the
+    gate during the swap waits for it, and never opens the vault of the account
+    that is leaving.
+  */
+  let trocaEmCurso: Promise<void> | null = null
+  const aplicarMudancaDeConta = (): Promise<void> => {
+    if (trocaEmCurso) return trocaEmCurso
+    if (!mudancaDeContaPendente) return Promise.resolve()
     mudancaDeContaPendente = false
     session.disconnect()
     session.reset()
-    vault.lock()
-    bandeja?.aoTrancar()
-    armazemDoCofre.usarConta(contas.activa)
+    trocaEmCurso = (async () => {
+      // This account's blobs reach its folder before the folder changes.
+      await drenarArmazem()
+      vault.lock()
+      bandeja?.aoTrancar()
+      armazemDoCofre.usarConta(contas.activa)
+      armazemDeMedia.usarConta(contas.activa)
+    })().finally(() => {
+      trocaEmCurso = null
+    })
+    return trocaEmCurso
   }
   window.webContents.on("did-start-navigation", (detalhes) => {
-    if (detalhes.isMainFrame && !detalhes.isSameDocument) aplicarMudancaDeConta()
+    if (detalhes.isMainFrame && !detalhes.isSameDocument) void aplicarMudancaDeConta()
   })
 
   // Header only: a beta vault is never decrypted. See `Vault.estado`.
-  tratar("vault:status", () => {
-    aplicarMudancaDeConta()
+  tratar("vault:status", async () => {
+    await aplicarMudancaDeConta()
     return vault.estado()
   })
 
   tratar("vault:create", async (_event, passphrase: string | null) => {
-    aplicarMudancaDeConta()
+    await aplicarMudancaDeConta()
     await vault.create(passphrase)
     return { ok: true }
   })
@@ -888,10 +966,10 @@ function registerIpc(window: BrowserWindow): void {
   })
 
   tratar("vault:unlock", async (_event, passphrase: string | null) => {
-    aplicarMudancaDeConta()
-    // The silent attempt: an `os` vault opens via keychain, and a password
-    // vault opens via the saved session, if there is one (F1). An `os` vault
-    // never has memory, so the order between the two doesn't show.
+    await aplicarMudancaDeConta()
+    // The silent attempt: an `os` vault opens through the keychain, and a
+    // password vault through the remembered session, if there is one (F1). An
+    // `os` vault never has a memory, so the order of the two is not visible.
     if (passphrase === null && (await vault.abrirMemorizada())) return { ok: true }
     await vault.unlock(passphrase ?? undefined)
     return { ok: true }
@@ -917,6 +995,7 @@ function registerIpc(window: BrowserWindow): void {
     await vault.esquecerSessao().catch(() => {})
     session.disconnect()
     session.reset()
+    await drenarArmazem()
     vault.lock()
     // The unread count is knowledge of what arrived, and dies with the keys:
     // leaving it in the icon tells anyone looking at a locked app's
@@ -940,15 +1019,80 @@ function registerIpc(window: BrowserWindow): void {
     return { ok: true }
   })
 
-  tratar("vault:export", async (_event, passphrase?: string) => ({
-    data: new TextDecoder().decode(await vault.exportVault(passphrase)),
-  }))
+  tratar("vault:export", async (_event, passphrase?: string, opcoes?: { incluirImagens?: boolean }) => {
+    // Without the checkbox, the usual file, as text, for the interface to download.
+    if (opcoes?.incluirImagens !== true) return { data: new TextDecoder().decode(await vault.exportVault(passphrase)) }
+    /*
+      With the images (Task 11b), the container can be hundreds of MB: it is
+      written here, in parts, where the person chooses, and never crosses the
+      IPC. The envelope is built BEFORE the prompt: a missing passphrase throws
+      now, and the interface asks for it as always.
+    */
+    await drenarArmazem()
+    const partes = await vault.exportarComImagens(passphrase, session.armazem)
+    const janela = janelaPrincipal && !janelaPrincipal.isDestroyed() ? janelaPrincipal : null
+    const opcoesDoDialogo = { defaultPath: join(app.getPath("downloads"), "conta.enclave") }
+    const escolha = janela ? await dialog.showSaveDialog(janela, opcoesDoDialogo) : await dialog.showSaveDialog(opcoesDoDialogo)
+    if (escolha.canceled || !escolha.filePath) return { gravado: false }
+    await gravarPorPartes(escolha.filePath, partes)
+    return { gravado: true }
+  })
 
-  tratar("vault:import", async (_event, data: string, passphrase: string) => {
-    session.disconnect()
-    session.reset()
-    await vault.importVault(new TextEncoder().encode(data), passphrase)
-    return { ok: true }
+  /*
+    The account file is chosen HERE (Task 11b fix): the system dialog opens in
+    the main process, and the path stays in this process. The renderer never
+    gives a path to open: a compromised renderer gets no oracle for "this file
+    exists and has this shape", and cannot make the main process hang on a
+    FIFO. The interface receives only the name and the shape.
+  */
+  let ficheiroDeContaEscolhido: string | null = null
+  tratar("vault:escolher-ficheiro", async () => {
+    const janela = janelaPrincipal && !janelaPrincipal.isDestroyed() ? janelaPrincipal : null
+    const opcoesDoDialogo: Electron.OpenDialogOptions = {
+      properties: ["openFile"],
+      filters: [
+        { name: "Orwell", extensions: ["enclave"] },
+        { name: "*", extensions: ["*"] },
+      ],
+    }
+    const escolha = janela ? await dialog.showOpenDialog(janela, opcoesDoDialogo) : await dialog.showOpenDialog(opcoesDoDialogo)
+    const caminho = escolha.filePaths[0]
+    if (escolha.canceled || !caminho) return null
+    const forma = await formaDoFicheiroNoDisco(caminho)
+    ficheiroDeContaEscolhido = forma === "conta" ? caminho : null
+    return { nome: basename(caminho), forma }
+  })
+
+  /*
+    The file arrives in three ways: the mark of the file this process chose
+    (`{ escolhido: true }`), the bytes (a `Blob` without a dialog), or the usual
+    text. The chosen one is read by offset: the container with the images can
+    be hundreds of MB. It is opened BEFORE disconnecting the session: a file
+    that no longer opens does not leave the account disconnected for nothing.
+  */
+  tratar("vault:import", async (_event, ficheiro: unknown, passphrase: string) => {
+    let dados: Uint8Array | FonteDeBytes
+    let fechar: (() => Promise<void>) | null = null
+    if (typeof ficheiro === "string") {
+      dados = new TextEncoder().encode(ficheiro)
+    } else if (ficheiro instanceof Uint8Array) {
+      dados = ficheiro
+    } else if (typeof ficheiro === "object" && ficheiro !== null && (ficheiro as { escolhido?: unknown }).escolhido === true && ficheiroDeContaEscolhido) {
+      const aberto = await abrirFonteDoFicheiro(ficheiroDeContaEscolhido)
+      dados = aberto.fonte
+      fechar = aberto.fechar
+    } else {
+      throw new Error("this is not an enclave account file")
+    }
+    try {
+      session.disconnect()
+      session.reset()
+      const resultado = await vault.importVault(dados, passphrase, { armazem: session.armazem })
+      ficheiroDeContaEscolhido = null
+      return { ok: true, ...resultado }
+    } finally {
+      await fechar?.()
+    }
   })
 
   tratar("vault:destroy", async () => {
@@ -959,11 +1103,15 @@ function registerIpc(window: BrowserWindow): void {
     await session.prepareAccountDeletion()
     session.disconnect()
     session.reset()
+    // Also deletes the account's `media/` (`Vault.destroy` calls the store).
     await vault.destroy()
     // With more than one account on the device, the deleted one leaves the list and
     // the vault passes to whichever account stays active. With just one, nothing changes.
     await contas.esquecerActiva()
+    // `destruir` already waited for the queue; once locked, whatever was there never reaches the next folder.
+    await drenarArmazem()
     armazemDoCofre.usarConta(contas.activa)
+    armazemDeMedia.usarConta(contas.activa)
     return { ok: true }
   })
 
@@ -1057,8 +1205,31 @@ function registerIpc(window: BrowserWindow): void {
   tratar("video:estado", (_event, sha: string) => session.estadoDoVideo(String(sha)))
   tratar("video:bytes", (_event, sha: string) => session.bytesDoVideo(String(sha)))
 
-  // Account state that travels between devices (phase 5). Shallow copies: the
-  // core returns read-only maps, and IPC clones what it gets.
+  /*
+    The media store (design §8). The bytes cross the IPC as `Uint8Array`,
+    like the video bytes. `media:bytes` never throws: a blob that cannot be
+    read is a media item that is not there, and the interface shows the
+    thumbnail with "Fetch".
+  */
+  /*
+    The counters for the diagnostic log (1.3.15), read on the return to the
+    foreground. `principalPresoMs` is this process: the main process is the
+    browser UI thread, and while it is held the window does not answer.
+  */
+  tratar("diagnostico:contadores", () => ({ ...session.diagnostico(), principalPresoMs: lerAtrasoDoPrincipal() }))
+    tratar("media:bytes", (_event, sha: unknown) => session.bytesDeMedia(String(sha)).catch(() => null))
+  tratar("media:fixar", (_event, sha: unknown) => session.fixarMedia(String(sha)))
+  tratar("media:soltar", (_event, sha: unknown) => session.soltarMedia(String(sha)))
+  tratar("media:estado", async () => {
+    await vault.armazemPronto()
+    return session.estadoDoArmazem()
+  })
+  tratar("media:tecto", (_event, bytes: unknown) => session.definirTectoDoArmazem(Number(bytes)))
+  tratar("media:libertar", () => session.libertarArmazem())
+  tratar("media:trazer", (_event, id: unknown) => session.trazerMedia(mediaATrazer(id)))
+
+  // The account state that travels between devices (phase 5). Plain copies: the
+  // core returns read-only maps, and the IPC clones whatever it is given.
   tratar("estado:lidas", () => ({ ...session.lidas() }))
   tratar("estado:marcar-lido", async (_event, channel: string, at: number) => {
     await session.marcarLido(channel, at)
@@ -1172,15 +1343,15 @@ function registerIpc(window: BrowserWindow): void {
       // The same function as the browser host, and it has to be: a
       // message, an image, a poll or a reply sent from the
       // computer and the browser must arrive identical to the same group.
-      await session.send(channel, mensagemAEnviar(body, room, extras, { id: crypto.randomUUID(), sentAt: Date.now() }))
+      await session.send(channel, mensagemAEnviar(body, room, extras, { id: crypto.randomUUID(), sentAt: Date.now() }), { daPessoa: true })
       return { ok: true }
     },
   )
 
   tratar("channel:typing", async (_event, channel: string, room?: string) => {
-    // Ephemeral: the session cuts it before the vault and before the chat line.
+    // Ephemeral: by the encrypted signal, never stored (`sinalizarEscrita`).
     // The deadline is what clears the indicator on the other side without an end message.
-    await session.send(channel, { t: "typing", ...(room ? { room } : {}), until: Date.now() + TYPING_TTL_MS })
+    await session.sinalizarEscrita(channel, room, Date.now() + TYPING_TTL_MS)
     return { ok: true }
   })
 
@@ -1307,8 +1478,8 @@ function registerIpc(window: BrowserWindow): void {
   tratar("relato:enviar", async (_event, pedido: { texto?: unknown }) => {
     const texto = typeof pedido?.texto === "string" ? pedido.texto.slice(0, 64 * 1024) : ""
     if (!texto) throw new Error("the server did not take the log")
-    const endereco = session.identity.address
-    return enviarRelato(origemDoServidorDe(endereco), { endereco, versao: app.getVersion(), texto })
+    const identidade = session.identity
+    return enviarRelato(origemDoServidorDe(identidade.address), identidade, { versao: app.getVersion(), texto })
   })
 
   /*
@@ -1675,8 +1846,10 @@ function registerIpc(window: BrowserWindow): void {
   session.on("historico", (evento) => window.webContents.send("event:historico", structuredClone(evento)))
   session.on("sincronia", (estado) => window.webContents.send("event:sincronia", { ...estado, progresso: estado.progresso.map((p) => ({ ...p })) }))
   session.on("typing", (event) => window.webContents.send("event:typing", event))
+  session.on("recuperacao", (event) => window.webContents.send("event:recuperacao", event))
   session.on("buzz", (event) => window.webContents.send("event:buzz", event))
   session.on("video", (event) => window.webContents.send("event:video", { ...event }))
+  session.on("media", (event) => window.webContents.send("event:media", { ...event }))
 }
 
 const trace = (stage: string): void => {
@@ -1694,8 +1867,7 @@ async function start(): Promise<void> {
     Automatic update before the main window exists. This is what guarantees it
     never updates in the middle of a call: here there's no session, no open
     vault, no call. Only on Windows and only in the packaged app (in
-    development there's no installer to return to). macOS is for later: see
-    `docs/planos/depois-da-1-0.md`.
+    development there's no installer to return to). macOS is for later.
   */
   let ecraDeArranque: BrowserWindow | null = null
   if (app.isPackaged && process.platform === "win32") {
@@ -1772,10 +1944,23 @@ function shutdown(): void {
   void session.flush().catch(() => {
     // Vault already locked, or nothing to write.
   })
+  // The media index (last uses, ceiling) is written every 10 s: what was missing goes now.
+  armazemDeMedia.descarregar()
 }
 
-app.on("before-quit", () => {
-  // From here on, a `close` is a real close, not just hiding the window.
+app.on("before-quit", (event) => {
+  /*
+    First, the blobs in the store queue (a portrait set just before quitting):
+    the vault that `shutdown` writes may reference them. The quit stops, waits
+    at most two seconds, and resumes.
+  */
+  if (!armazemDrenadoParaSair) {
+    armazemDrenadoParaSair = true
+    event.preventDefault()
+    void drenarArmazem().then(() => app.quit())
+    return
+  }
+  // From here on a `close` is a real close, not hiding the window.
   aSair = true
   bandeja?.destruir()
   shutdown()

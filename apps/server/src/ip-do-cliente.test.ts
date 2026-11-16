@@ -56,3 +56,53 @@ describe("o nginx da frente (infra/nginx-enclave.conf)", () => {
     expect(nginx).not.toContain("$proxy_add_x_forwarded_for")
   })
 })
+
+/**
+ * The access log keeps the network, not the person: the same `log_format` and
+ * `map` as the production nginx. The map is run here as nginx runs it (first
+ * regex that matches wins, the named groups rebuilt into the value), so the
+ * test proves what lands in the log, not just that the words are there.
+ */
+describe("o registo de acesso do nginx guarda só a rede", () => {
+  const nginx = readFileSync(fileURLToPath(new URL("../../../infra/nginx-enclave.conf", import.meta.url)), "utf8")
+  const semComentarios = nginx
+    .split("\n")
+    .map((linha) => linha.replace(/#.*$/, ""))
+    .join("\n")
+
+  function ipAnonimo(ip: string): string {
+    const bloco = /map \$remote_addr \$ip_anon \{([^}]*)\}/.exec(semComentarios)
+    expect(bloco).not.toBeNull()
+    const linhas = bloco![1]!.split(";").map((linha) => linha.trim()).filter(Boolean)
+    let omissao = ""
+    for (const linha of linhas) {
+      const [padrao, valor] = [linha.slice(0, linha.search(/\s+"/)), linha.slice(linha.search(/"/) + 1, -1)]
+      if (padrao === "default") {
+        omissao = valor
+        continue
+      }
+      const re = new RegExp(padrao.slice(1).replace(/\(\?P</g, "(?<"))
+      const achado = re.exec(ip)
+      if (achado) return valor.replace(/\$(\w+)/g, (_tudo, nome: string) => achado.groups?.[nome] ?? "")
+    }
+    return omissao
+  }
+
+  it("o formato só leva o IP anonimizado, sem user agent nem referer", () => {
+    const formato = /log_format orwell '([^']*)'/.exec(semComentarios)?.[1]
+    expect(formato).toBeDefined()
+    expect(formato).toContain("$ip_anon")
+    expect(formato).not.toMatch(/\$remote_addr|\$http_user_agent|\$http_referer|\$http_x_forwarded_for/)
+  })
+
+  it("o access_log do orwell.pt usa esse formato", () => {
+    expect(semComentarios).toMatch(/access_log\s+\S+\s+orwell;/)
+    expect(semComentarios).not.toMatch(/access_log\s+(?!off;)\S+;/)
+  })
+
+  it("IPv4 fica no /24, IPv6 no /48, e o resto não deixa nada", () => {
+    expect(ipAnonimo("203.0.113.77")).toBe("203.0.113.0")
+    expect(ipAnonimo("2001:db8:85a3:8d3:1319:8a2e:370:7348")).toBe("2001:db8:85a3::")
+    expect(ipAnonimo("unix:")).toBe("0.0.0.0")
+  })
+})

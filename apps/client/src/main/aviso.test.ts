@@ -4,8 +4,7 @@ import { MAX_ICONE, entregaDoAviso, sanearAviso, sanearPrazo } from "./aviso.js"
 /**
  * The system notice, on the main process side, measured without Electron.
  *
- * Request from the owner and community (November 2, 2026, point 6): the notice
- * also shows with the window in front, and a friend coming online notice
+ * The notice also shows with the window in front, and a friend coming online notice
  * includes the face.
  */
 describe("a entrega do aviso", () => {

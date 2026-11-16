@@ -4,8 +4,8 @@
  * Up to 0.9.x the vault file was the seal and nothing else: a JSON with the nonce,
  * the salt and the ciphertext. The version of the format in it (`version`) is plain text,
  * but only reads AFTER accepting the file is this format, and 1.0
- * won't accept that from a beta vault. The owner's order is that 1.0 never
- * reads a beta vault (plan `moradas-opacas-e-corte.md`, section 2): doesn't ask for a
+ * won't accept that from a beta vault. By design 1.0 never
+ * reads a beta vault: it doesn't ask for a
  * password and doesn't derive any key.
  *
  * So the version goes OUTSIDE the cipher and before everything: six ASCII bytes,

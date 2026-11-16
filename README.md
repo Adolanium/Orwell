@@ -129,6 +129,12 @@ password only unlocks your account on your own device.
   the minute it arrived.
 - In a call, who is in the call with whom. Sound and picture stay encrypted.
 - How many devices an account has.
+- A diagnostic log, only when you press "Send log" in Help and diagnostics.
+  It holds the app's event log for the session (no messages, no text you
+  wrote), filed under your address with the app version and the time. The
+  request is signed by your device, so the address is proven, not claimed.
+  The server keeps it 30 days, then deletes it. It counts the sender's IP in
+  memory for the rate limit and does not write it down.
 
 **One exception.** When someone reports a message, their device decrypts it and
 gives it to the server. That is the only way the server ever reads a message:
@@ -211,6 +217,7 @@ The settings that matter most:
 | `ENCLAVE_LOG` | off | `debug` turns on request logging. An access log records what each user does, so leave it off in production |
 | `ENCLAVE_SFU_PORT` | empty | One port, UDP and TCP, for call media. Empty means no relay, and calls connect people directly |
 | `ENCLAVE_SFU_ANNOUNCED_IP` | empty | The public address the relay announces. Required inside Docker, or calls never connect |
+| `ENCLAVE_TURN_URLS`, `ENCLAVE_TURN_SECRET` | empty | Your own STUN and TURN (coturn) for direct calls. The app never uses a third-party STUN: empty means a direct call connects only people on the same network, and the app says so. See `infra/.env.example` |
 
 `infra/.env.example` explains the rest.
 

@@ -1,4 +1,4 @@
-import { CABECALHO_DO_COFRE, versaoDoTexto } from "@enclave/client-core"
+import { CABECALHO_DO_COFRE, envelopeDeContaValido, fonteDeBlob, formaDoFicheiroDeConta, versaoDoTexto } from "@enclave/client-core"
 
 /**
  * The shape of an account file (`.enclave`), read before asking for anything.
@@ -16,8 +16,7 @@ import { CABECALHO_DO_COFRE, versaoDoTexto } from "@enclave/client-core"
  * we don't repeat that list here, so we don't have two aging separately.
  *
  * What this DOESN'T prove is the password. That takes key derivation and decryption,
- * and the bridge has no path to do it without saving: see the report
- * `docs/planos/portao-barra-cotovelada-relatorio.md`. Until then, what guarantees
+ * and the bridge has no path to do it without saving. Until then, what guarantees
  * a wrong password doesn't wipe anything is `importVault` itself, which decrypts
  * before writing a single byte.
  */
@@ -38,29 +37,17 @@ export function eFicheiroDoBeta(texto: string): boolean {
   return versaoDoTexto(texto) === "beta" && envelopeDeConta(texto)
 }
 
+/**
+ * The shape of a chosen file, read in slices (Task 11b): the container with
+ * the images can be hundreds of MB, and never enters a string whole. The rules
+ * are the core's (`formaDoFicheiroDeConta`), the same the desktop main process
+ * applies to the file it chose.
+ */
+export function formaDoFicheiro(ficheiro: Blob): Promise<"conta" | "beta" | "outro"> {
+  return formaDoFicheiroDeConta(fonteDeBlob(ficheiro))
+}
+
+/** The `enclave-vault` envelope, by the core rules (`envelopeDeContaValido`). */
 function envelopeDeConta(json: string): boolean {
-  let envelope: unknown
-  try {
-    envelope = JSON.parse(json)
-  } catch {
-    return false
-  }
-  if (!objecto(envelope)) return false
-  if (envelope["format"] !== "enclave-vault" || envelope["formatVersion"] !== 1) return false
-  const cofre = envelope["vault"]
-  if (!objecto(cofre)) return false
-  return (
-    cofre["protection"] === "passphrase" &&
-    textoCheio(cofre["salt"]) &&
-    textoCheio(cofre["nonce"]) &&
-    textoCheio(cofre["ciphertext"])
-  )
-}
-
-function objecto(valor: unknown): valor is Record<string, unknown> {
-  return typeof valor === "object" && valor !== null && !Array.isArray(valor)
-}
-
-function textoCheio(valor: unknown): boolean {
-  return typeof valor === "string" && valor.length > 0
+  return envelopeDeContaValido(json)
 }

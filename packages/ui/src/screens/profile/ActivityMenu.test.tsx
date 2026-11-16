@@ -10,8 +10,8 @@ afterEach(cleanup)
 /**
  * The "How you appear" menu, on the account card.
  *
- * Owner's order on October 27 2026: "status is not edited in the profile, it is
- * edited on the card: online, busy, away". Away becomes a hand choice, next to
+ * Status is not edited in the profile, it is
+ * edited on the card: online, busy, away. Away becomes a hand choice, next to
  * the others.
  */
 describe("ActivityMenu", () => {

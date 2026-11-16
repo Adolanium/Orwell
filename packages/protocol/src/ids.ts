@@ -171,7 +171,7 @@ export function serverOf(address: UserAddress | SpaceAddress): ServerName {
 // ------------------------------------------------------------ moradas opacas
 
 /**
- * Opaque channel addresses (1.0 "Arca", `docs/planos/moradas-opacas-e-corte.md`).
+ * Opaque channel addresses (1.0 "Arca").
  *
  * Until 0.9, a channel's address told the server things it should not know:
  * `!dm-<a>.<b>` named the two ends of each conversation, `!feed-<id>` the owner of

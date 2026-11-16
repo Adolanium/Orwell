@@ -12,7 +12,7 @@ import { ProfileScreen, type CanalFundado } from "./ProfileScreen.js"
 afterEach(cleanup)
 
 /**
- * "Channels I founded", on your own profile (owner's request, October 27, 2026).
+ * "Channels I founded", on your own profile.
  * Another person's profile does not show it: `PersonProfile` does not receive
  * the list, and `ProfileBody` only draws it through the slot that you fill.
  */

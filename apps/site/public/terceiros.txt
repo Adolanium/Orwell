@@ -1080,7 +1080,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-electron 43.2.0
+electron 43.8.10
 Licence: MIT
 Used in: desktop app
 ==============================================================================
@@ -1306,7 +1306,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-fast-uri 3.1.4
+fast-uri 3.1.9
 Licence: BSD-3-Clause
 Used in: server
 ==============================================================================
@@ -1343,7 +1343,7 @@ The complete list of contributors can be found at:
 - https://github.com/garycourt/uri-js/graphs/contributors
 
 ==============================================================================
-fast-uri 4.1.1
+fast-uri 4.2.3
 Licence: BSD-3-Clause
 Used in: server
 ==============================================================================
@@ -1380,7 +1380,7 @@ The complete list of contributors can be found at:
 - https://github.com/garycourt/uri-js/graphs/contributors
 
 ==============================================================================
-fastify 5.10.0
+fastify 5.12.8
 Licence: MIT
 Used in: server
 ==============================================================================
@@ -1484,7 +1484,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-find-my-way 9.7.0
+find-my-way 9.10.1
 Licence: MIT
 Used in: server
 ==============================================================================
@@ -2312,14 +2312,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-process-warning 5.0.0
+process-warning 5.1.1
 Licence: MIT
 Used in: server
 ==============================================================================
 
 MIT License
 
-Copyright (c) Fastify
+Copyright (c) 2020-present The Fastify team <https://github.com/fastify/fastify#team>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -2562,7 +2562,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-ret 0.5.0
+ret 0.5.1
 Licence: MIT
 Used in: server
 ==============================================================================
@@ -2668,7 +2668,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-safe-regex2 5.1.1
+safe-regex2 5.1.2
 Licence: MIT
 Used in: server
 ==============================================================================
@@ -3328,7 +3328,7 @@ will be liable to anyone for any damages related to this
 software or this license, under any kind of legal claim.***
 
 ==============================================================================
-zod 4.4.3
+zod 4.6.7
 Licence: MIT
 Used in: desktop app, server, web
 ==============================================================================

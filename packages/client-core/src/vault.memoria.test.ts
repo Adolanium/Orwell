@@ -3,9 +3,9 @@ import { semCabecalho } from "./cabecalhoDoCofre.js"
 import { Vault, type MemoriaDaSessao, type VaultBackend } from "./vault.js"
 
 /**
- * The memorized session (F1 of `docs/planos/memorizar-sessao-plano.md`).
+ * The memorized session (phase F1).
  *
- * What we enforce here are the plan's invariants: the record lives outside the
+ * What we enforce here are the invariants: the record lives outside the
  * vault, export does not include it, it is always the CURRENT key, and without
  * it the password still opens everything.
  */

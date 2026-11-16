@@ -1,6 +1,6 @@
 /**
  * The list of members in the common channel, before and after the name from
- * the URL (owner's order on 4 November 2026), in a real Chromium.
+ * the URL, in a real Chromium.
  *
  *   node scripts/capturar-nome-do-endereco.mjs [commit-before]
  *

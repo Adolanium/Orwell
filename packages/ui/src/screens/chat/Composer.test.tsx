@@ -251,7 +251,7 @@ describe("Composer — pré-visualização de link", () => {
   })
 
   it("um vídeo do YouTube segue reproduzível sem ninguém pedir pré-visualização", async () => {
-    // The owner's request. Without `links` in the message, the reader gets a line
+    // Without `links` in the message, the reader gets a line
     // of text: the card MUST exist when Enter is pressed, not just
     // when the preview comes from the host, which may not come at all.
     const user = userEvent.setup()

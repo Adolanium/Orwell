@@ -5,8 +5,7 @@ import { describe, expect, it } from "vitest"
 /**
  * The site's two languages, verified.
  *
- * Owner's order on November 3, 2026: "I want the site in English first, pt
- * second". English lives at the root and Portuguese under `/pt/`, page by page.
+ * The site is in English first, Portuguese second. English lives at the root and Portuguese under `/pt/`, page by page.
  * What breaks here is what fails silently when someone adds or changes a page
  * in one language and forgets the other: the `hreflang` pair, the selector,
  * the `lang`, links that switch languages unintentionally, old names that stop
@@ -74,7 +73,7 @@ describe.each(PAGINAS)("$ficheiro", (pagina) => {
   })
 
   it('tem o selector "EN · PT" só no rodapé, a levar à mesma página na outra língua', () => {
-    // Owner's request on November 3, 2026: the selector leaves the header and
+    // The selector leaves the header and
     // stays only in the footer. The header is the brand and "Sign in".
     const topo = /<header class="topo">[\s\S]*?<\/header>/.exec(html)?.[0] ?? ""
     const rodape = /<footer class="rodape">[\s\S]*?<\/footer>/.exec(html)?.[0] ?? ""

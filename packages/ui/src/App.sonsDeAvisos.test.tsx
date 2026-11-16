@@ -249,7 +249,7 @@ describe("a chamada a entrar", () => {
   })
 
   /*
-    Request from the owner (2 November 2026, point 7): the ring is only for
+    The ring is only for
     private messages. In a community voice room nothing rings.
   */
   it("numa sala de voz de uma comunidade, não toca", async () => {
@@ -279,7 +279,7 @@ describe("a chamada a entrar", () => {
 })
 
 /*
-  Request from the owner (2 November 2026, point 3): when muting and when unmuting, a
+  When muting and when unmuting, a
   short sound. The "mute all" plays both ways: the sound goes through the alert
   motor, which "mute all" does not silence (it only silences the call voices).
 */
@@ -302,7 +302,7 @@ describe("os sons do silenciar", () => {
 })
 
 /*
-  The sound when sending (request from the owner, 3 November 2026). The rule lives in
+  The sound when sending. The rule lives in
   the outbox (`hooks/useOutbox.ts`); this measures that the shell's message box
   passes through it, and that what arrives from outside never triggers it.
 */
@@ -347,8 +347,7 @@ describe("o som ao enviar", () => {
 })
 
 /*
-  The sound of messages in channels and mentions (request from the owner, 3 November
-  2026). The rules are in `sons/canal.test.ts`; here we measure the shell's link:
+  The sound of messages in channels and mentions. The rules are in `sons/canal.test.ts`; here we measure the shell's link:
   what reaches the engine, with the channel and room.
 */
 describe("o som das mensagens nos canais", () => {

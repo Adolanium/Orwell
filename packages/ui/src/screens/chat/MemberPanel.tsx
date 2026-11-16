@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { memo, useEffect, useRef } from "react"
 import type { Power } from "@enclave/protocol"
 import type { Profile } from "../../bridge.js"
 import { Andante } from "../../components/Andante.js"
@@ -34,7 +34,7 @@ export interface ChannelRole {
  * Loading, failed and empty are three different truths, told apart on purpose:
  * an eternal "A carregar…" over a fetch that already failed is a lie.
  */
-export function MemberPanel({
+function MemberPanelInteira({
   channel,
   open = false,
   onClose,
@@ -263,8 +263,7 @@ export function MemberPanel({
             {profile?.statusText && <Andante className="member-status" texto={profile.statusText} />}
           </span>
           {/* The role, when it exists. The address was here when there was no role, and
-              left on owner's order on October 27, 2026 ("i don't want ids
-              exposed"): it copies via the button next to the line.
+              left because ids are not shown: it copies via the button next to the line.
               
               The role's color comes in by variable, and only when it exists:
               without it the CSS rule falls back to accent, which is what this
@@ -387,7 +386,7 @@ export function MemberPanel({
 
         {/* Without the right to invite, the footer disappears. One button alone: the
             sheet has all three modes (address, link, add now). Primary, in the
-            identity gradient, and without the note below (owner's request, 0.8.0):
+            identity gradient, and without the note below:
             the sheet says what each mode does. */}
         {podeConvidar && (
           <footer className="members-footer">
@@ -401,3 +400,9 @@ export function MemberPanel({
     </>
   )
 }
+
+/**
+ * Memoized (1.3.15): a parent render with the same props does not walk the
+ * whole list again. It only pays when the parent hands over stable props.
+ */
+export const MemberPanel = memo(MemberPanelInteira)

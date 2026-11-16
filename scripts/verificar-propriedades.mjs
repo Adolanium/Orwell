@@ -11,7 +11,7 @@ import { chromium } from "playwright"
 import { APP } from "./ambiente.mjs"
 import { criarContaEEntrar } from "./conta.mjs"
 
-const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "carga-2026"
+const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "carga-orwell-diag-2026"
 const MARCA = Date.now().toString(36)
 const NOME_NOVO = `Ação & Café ${MARCA.slice(-3)}`
 // A 1x1 red PNG, small enough not to mask the problem with a size limit.

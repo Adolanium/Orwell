@@ -4,8 +4,7 @@ import { Modal } from "../../components/Modal.js"
 import { strings } from "../../strings.js"
 
 /**
- * "How it works": six cards, one per idea (phase 6, layer 2, plan
- * `docs/planos/definicoes-0-9.md`).
+ * "How it works": six cards, one per idea (phase 6, layer 2).
  *
  * The source is `docs/COMO-FUNCIONA-A-MIUDOS.html`. The document has twelve sections;
  * the app shows the six that change what the user does: because there is no "forgot password",

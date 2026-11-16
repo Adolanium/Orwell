@@ -34,8 +34,7 @@ import { pagina } from "./MudarDeConta.js"
  *   in a provisional vault, memory-only (`vault.createProvisional`, core 1j),
  *   and the provisional only goes to disk, over the account on this device,
  *   after the new account loads and connects (`pairing.done`). A pairing that
- *   fails halfway deleted nothing. See
- *   `docs/planos/nucleo-1j-cofre-provisorio-relatorio.md`.
+ *   fails halfway deleted nothing.
  *
  * Closing the sheet, at any step, deleted nothing: go back to the gate.
  */

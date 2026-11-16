@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { marcarArranque } from "@enclave/client-core"
 import { TextoDeErro } from "../../components/TextoDeErro.js"
 import { useBridge } from "../../App.js"
 import { Button } from "../../components/Button.js"
@@ -15,11 +16,14 @@ import { Splash } from "./Splash.js"
 
 export function Unlock({
   onDone,
+  onLigacaoFalhou,
   onStartOver,
   semTentativaSilenciosa = false,
 }: {
-  /** The second is the connection that failed on entry, if it failed: the app opens anyway. */
-  onDone: (address: string, ligacaoFalhou?: Error) => void
+  /** The vault is open: enter. Called before the connection ends (see `attempt`). */
+  onDone: (address: string) => void
+  /** The connection started on entry failed, after `onDone`: the app is already open. */
+  onLigacaoFalhou?: (erro: Error) => void
   /**
    * The vault on this device no longer exists: ask the host again what is on
    * disk, which is what the app uses to create the account.
@@ -45,7 +49,7 @@ export function Unlock({
   /** The vault and the platform (F0): protection of this vault and where to store it. */
   const estado = useEstadoDoCofre(bridge)
   const caixa = podeMemorizar(bridge, estado)
-  /** "Memorize the session", on by default (owner's decision 1). */
+  /** "Memorize the session", on by default. */
   const [memorizar, setMemorizar] = useState(true)
   const memorizarDepoisDeAbrir = useMemorizarDepoisDeAbrir(bridge)
   // Read at the moment of `attempt`, which is a `useCallback` without these dependencies.
@@ -60,6 +64,7 @@ export function Unlock({
         let address: string
         try {
           await bridge.vault.unlock(secret)
+          marcarArranque("cofre-aberto")
           // With the text written and the box connected: memorize, before everything else.
           // A failure is reported and does not prevent sign in.
           if (secret !== null) await memorizarDepoisDeAbrir(memorizarAgora.current)
@@ -80,26 +85,31 @@ export function Unlock({
          * Connecting used to sit inside the same try, so a homeserver that was
          * down — or a laptop with no network — turned a perfectly good unlock
          * into a passphrase prompt for a keychain vault that has no passphrase
-         * to type. The account became unreachable offline, including every
-         * message already stored on this device, and the only way out was to
-         * wait for the server. A failed connection is what the banner and the
-         * session's own reconnect loop are for.
+         * to type. A failed connection is what the banner and the session's own
+         * reconnect loop are for.
+         *
+         * **And go in NOW, not when the connection ends (12/11/2026).** Entry
+         * waited for `connect()`, which is the handshake, the catch-up of every
+         * channel one after another, the invite keys and the profile. Measured
+         * on a phone profile (CPU 4x, slow 4G) with five channels: 2.5 s of
+         * gate in front of history the device already had, and more with every
+         * channel (`scripts/medir-arranque-telemovel.mjs`). The vault is open,
+         * so the app opens with what it holds; the connection goes on behind,
+         * and its state shows in the banner like any reconnect. A revocation or
+         * a suspension that the connection finds still takes the app back to
+         * the gate: `handleStatus` in `App.tsx` moves the stage on the status,
+         * wherever it is.
+         *
+         * The failure does not stay quiet: it goes to `onLigacaoFalhou`, for the
+         * connection banner. Swallowed, an early connection that dropped before
+         * `auth.ok` opened an app with no channels and no sign of why.
          */
-        /*
-          Sign in anyway, but the failure does not stay quiet: it goes to whoever
-          opens the app, shown in the connection banner. Swallowed here, an early
-          connection that dropped before `auth.ok` opened an app with no channels
-          and no sign of why.
-        */
-        let falha: Error | undefined
-        await bridge.session.connect().catch((caught: Error) => {
-          falha = caught
-        })
-        if (falha) onDone(address, falha)
-        else onDone(address)
+        const ligacao = bridge.session.connect()
+        onDone(address)
+        await ligacao.catch((caught: Error) => onLigacaoFalhou?.(caught))
       })()
     },
-    [onDone],
+    [onDone, onLigacaoFalhou],
   )
 
   /**

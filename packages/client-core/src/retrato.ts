@@ -11,8 +11,8 @@ import { normalizar, type QuemRelata } from "./sincronia/relato.js"
 import type { StoredPayload, VaultContents } from "./vault.js"
 
 /**
- * The channel portrait in Welcome, from the vault side (phase 1 of
- * `docs/planos/estado-cifrado-plano.md`). The format and crop are in
+ * The channel portrait in Welcome, from the vault side (phase 1 of the
+ * encrypted-state plan). The format and crop are in
  * `retrato.ts` of the protocol; reception is `receberItem` (`sincronia/relato.ts`)
  * with session guards. Here stays what is pure: assemble candidates
  * from the vault, and pick the founder from what arrived.
@@ -28,7 +28,11 @@ export interface FonteDoRetrato {
   conteudo: VaultContents
   /** The accounts with a sheet in the tree of this channel, after the commit that seats the newcomer. */
   membros: readonly string[]
-  /** Our profile, as it goes out to this channel (`#payloadDoPerfil`), or `null` without a name. */
+  /**
+   * Our profile, as it goes out to this channel (`#payloadDoPerfil`), or `null`
+   * without a name. ALREADY INFLATED: the portrait with the exact `inline` (the
+   * media store keeps it outside the vault), so the authorship `m` checks out.
+   */
   perfilProprio: StoredPayload | null
   /** Our powers in this channel: what we can sign again in our name. */
   fundador: boolean
@@ -70,7 +74,21 @@ function assinadoPorNos(canal: string, eu: QuemRelata, payload: Record<string, u
   }
 }
 
-/** The profile without portrait bytes: the lightweight form, which still verifies. */
+/** The profile with the store portrait (`{ ref }`) swapped for the `evicted` marker. The same object if it has none. */
+function retratoComoMarcador(payload: Record<string, unknown>): Record<string, unknown> {
+  const retrato = payload[ANEXO_DO_PERFIL] as Record<string, unknown> | undefined
+  if (!retrato || typeof retrato !== "object" || typeof retrato["ref"] !== "string") return payload
+  return {
+    ...payload,
+    [ANEXO_DO_PERFIL]: {
+      evicted: true,
+      name: typeof retrato["name"] === "string" ? retrato["name"] : "",
+      mediaType: typeof retrato["mediaType"] === "string" ? retrato["mediaType"] : "",
+    },
+  }
+}
+
+/** The profile without the portrait bytes: the light shape, which verifies all the same. */
 function semBytesDoRetrato(payload: Record<string, unknown>): Record<string, unknown> | null {
   const retrato = payload[ANEXO_DO_PERFIL] as Record<string, unknown> | undefined
   if (!retrato || typeof retrato !== "object" || retrato["evicted"] === true) return null
@@ -93,7 +111,9 @@ function perfilAssinado(conteudo: VaultContents, canal: string, membro: string):
   const guardado = conteudo.directory[membro]
   const autoria = conteudo.autoriasDosPerfis?.[canal]?.[membro]
   if (!guardado || !autoria || guardado.payload["updatedAt"] !== autoria.u) return null
-  const { mural: _mural, autoria: _outra, ...base } = guardado.payload as Record<string, unknown>
+  const { mural: _mural, autoria: _outra, ...guardadoSemMural } = guardado.payload as Record<string, unknown>
+  // The portrait in the store (`{ ref }`) goes in the light shape: the marker, which verifies all the same (design §5).
+  const base = retratoComoMarcador(guardadoSemMural)
   const mural = autoria.mural ? conteudo.muraisDosOutros?.[membro] : undefined
   if (autoria.mural && !mural) return null
   return verificado(canal, membro, { ...base, ...(mural ? { mural } : {}), autoria: autoria.autoria } as unknown as StoredPayload)

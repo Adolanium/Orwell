@@ -36,7 +36,7 @@ import { ArquivoDeDenuncias, nomeDoFicheiroDaConta, type Fila } from "./denuncia
 import { Gateway } from "./gateway.js"
 
 /**
- * Account suspension (Task 8; `docs/planos/denuncias-design.md`, §8 and §9b),
+ * Account suspension,
  * end to end with real clients.
  *
  * Suspension is written the way the VPS script writes it (Task 10): the row in

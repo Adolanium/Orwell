@@ -27,7 +27,7 @@ import { NotasDeVersao } from "./NotasDeVersao.js"
 import { ContextMenu } from "../overlays/ContextMenu.js"
 import { DenunciarSheet } from "./DenunciarSheet.js"
 import { PedidoCard } from "./PedidoCard.js"
-import { Composer } from "./Composer.js"
+import { ComposerComRascunho } from "./ComposerComRascunho.js"
 import { EditarMensagem } from "./EditarMensagem.js"
 import { MemberPanel } from "./MemberPanel.js"
 import { PinnedPanel } from "./PinnedPanel.js"
@@ -251,8 +251,10 @@ export function ChatScreen({
   onSend: (channel: string, body: string, extras?: MessageExtras) => void
   onRetryEntry: (id: string) => void
   onDiscardEntry: (id: string) => void
+  /** The root's draft for `active`: where the composer starts. */
   draft: string
-  onDraftChange: (text: string) => void
+  /** The composer gives its text back on a channel change, on send and on unmount, never per key. */
+  onDraftChange: (channel: string, text: string) => void
   /**
    * The open room within the channel. Empty is the default room.
    *
@@ -533,7 +535,12 @@ export function ChatScreen({
    * exactly the right behavior for something ephemeral. None of this ever
    * reaches the vault.
    */
-  const { typists, noteTyping, stopTyping } = useTyping(bridge, active, activeRoom, address, connection)
+  const { typists, noteTyping, stopTyping } = useTyping(bridge, active, activeRoom, address, connection, oficial)
+
+  /** The channels catching up now. See `bridge.on.recuperacao`. */
+  const [aRecuperarCanais, setARecuperarCanais] = useState<ReadonlySet<string>>(() => new Set())
+  useEffect(() => bridge.on.recuperacao?.((evento) => setARecuperarCanais(new Set(evento.canais))), [bridge])
+  const aRecuperar = active !== null && aRecuperarCanais.has(active)
 
   /** The names, not the addresses: an indicator with `@ana:servidor` does not read well. */
   const typistNames = useMemo(() => typists.map(nameFor), [typists, nameFor])
@@ -643,7 +650,7 @@ export function ChatScreen({
             />
             <h1>{labelFor(active)}</h1>
             {oficial && <SeloOficial />}
-            {/* The lock and "Open" left the header at the owner's request
+            {/* The lock and "Open" left the header
                 (0.8.0). That the shared channel is open is said in the people
                 list (`members.openChannel`). The `margin-left: auto` that they
                 had, which pushed the buttons right, stays in this space. */}
@@ -1008,10 +1015,18 @@ export function ChatScreen({
               )}
             </div>
           ) : (
-          <Composer
+          <>
+          {/* The channel is catching up: what is written now waits for it, and goes out when it is done. The notice says only the first part. */}
+          {aRecuperar && (
+            <p className="field-note chat-a-recuperar" role="status">
+              {strings.chat.aPorEmDia}
+            </p>
+          )}
+          <ComposerComRascunho
+            canal={active ?? ""}
+            rascunho={draft}
+            onRascunho={onDraftChange}
             connection={connection}
-            value={draft}
-            onChange={onDraftChange}
             onTyping={noteTyping}
             mentionable={mencionaveis}
             podeMencionarTodos={podeMencionarTodos}
@@ -1041,6 +1056,7 @@ export function ChatScreen({
               stopTyping()
             }}
           />
+          </>
           )}
         </>
       ) : (

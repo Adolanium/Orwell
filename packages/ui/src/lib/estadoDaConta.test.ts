@@ -268,7 +268,7 @@ describe("o estado da conta no modo conta", () => {
     expect(sessao.chamadas).toContain(`desarquivar ${DM_C_D}`)
   })
 
-  it("o Erro 720 (marca de lido recusada) fica oculto, por ordem do dono (28 de Outubro de 2026)", async () => {
+  it("o Erro 720 (marca de lido recusada) fica oculto", async () => {
     const sessao = sessaoFalsa()
     const falhas: Error[] = []
     await ligarEstadoDaConta(sessao.bridge, (erro) => falhas.push(erro))

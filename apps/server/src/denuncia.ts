@@ -27,7 +27,7 @@ import { enderecoCurto, JanelaDeUmaHora } from "./relato.js"
 import type { Store } from "./store.js"
 
 /**
- * Reports (`docs/planos/denuncias-design.md`, §6.1 and §9b), on the server
+ * Reports, on the server
  * side: `POST /_enclave/denuncia`.
  *
  * **Outside the database.** Each report is a file in `<dados>/denuncias/`, and

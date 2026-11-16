@@ -617,3 +617,32 @@ describe('PersonProfile — "Voltar" à vista', () => {
     expect(strings.personProfile.back.startsWith(strings.personProfile.backFromPage)).toBe(true)
   })
 })
+
+describe("PersonProfile: o retrato no armazém de media (Task 10)", () => {
+  it("a folha pede o ORIGINAL pela referência, e não fica com a miniatura do diretório", async () => {
+    const original = `retrato-${Math.random().toString(36).slice(2)}`
+    const bytes = vi.fn(async (sha: string) => (sha === original ? new Uint8Array([1, 2, 3, 4, 5]) : null))
+    const comMedia = { social: socialMock, media: { bytes, fixar: vi.fn(async () => {}), soltar: vi.fn(async () => {}) }, on: {} } as unknown as EnclaveBridge
+    const perfil: Profile = { ...ana, avatarRef: original, avatarMini: "mini-x", avatarDataUrl: "data:image/png;base64,TUlOSQ==" }
+    const { container } = render(
+      <BridgeContext.Provider value={comMedia}>
+        <ToastProvider>
+          <Pagina
+            address="@ana:s"
+            name="Ana"
+            profile={perfil}
+            posts={[]}
+            messages={[]}
+            me="@me:s"
+            directory={new Map()}
+            nameFor={() => "Ana"}
+            onMessage={() => {}}
+            onBack={() => {}}
+          />
+        </ToastProvider>
+      </BridgeContext.Provider>,
+    )
+    expect(bytes).toHaveBeenCalledWith(original)
+    await vi.waitFor(() => expect(container.querySelector(".pessoa-avatar img")?.getAttribute("src")).not.toBe(perfil.avatarDataUrl))
+  })
+})

@@ -1,6 +1,5 @@
 /**
- * The mandatory test for absolute sync (S6, §8.3 of the plan
- * `docs/planos/2026-10-20-sincronia-absoluta.md`), in real browsers.
+ * The mandatory test for absolute sync (S6, §8.3 of the plan), in real browsers.
  *
  *   node scripts/e2e-sincronia.mjs                    (all three engines)
  *   node scripts/e2e-sincronia.mjs chromium webkit    (only these)

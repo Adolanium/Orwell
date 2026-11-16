@@ -20,8 +20,8 @@
  * swapping them. Without signing there's no requirement to save, and the builder
  * throws "Could not get code signature for running application".
  *
- * `electron-builder.yml` says `identity: null` by the owner's decision on August 12,
- * 2026, and the packager shouts it out ("skipped macOS code signing, identity
+ * `electron-builder.yml` says `identity: null` because installers are
+ * deliberately unsigned, and the packager shouts it out ("skipped macOS code signing, identity
  * explicitly is set to null"). It's not a missing tuning; it's the machinery refusing.
  * And it refuses LATE: `electron-updater` only calls `setFeedURL` after downloading
  * the entire ZIP, so what you'd see is a full download followed by an error.

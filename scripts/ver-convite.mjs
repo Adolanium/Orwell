@@ -13,7 +13,7 @@ import { comLingua } from "./ambiente.mjs"
 
 const APP = comLingua("http://127.0.0.1:5173")
 const SERVIDOR = "localhost:8452"
-const FRASE = "frase-de-teste"
+const FRASE = "frase-de-teste-orwell-diag"
 
 const resultados = []
 const check = (label, ok, detalhe = "") => {

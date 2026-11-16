@@ -1,6 +1,7 @@
 import { useId } from "react"
 import type { MediaItem } from "../types.js"
 import { Modal } from "./Modal.js"
+import { MediaLazy } from "./MediaLazy.js"
 import { nomeSeguro } from "../lib/ficheiros.js"
 import { strings } from "../strings.js"
 
@@ -26,7 +27,8 @@ export function Lightbox({ item, onClose }: { item: MediaItem; onClose: () => vo
       <h2 id={titulo} className="sr-only">
         {nome}
       </h2>
-      <img src={item.inline ?? item.url} alt={item.name ? nome : ""} />
+      {/* In the media store: the original, asked for now, with the thumbnail and "Fetch" if it is missing. */}
+      {item.ref ? <MediaLazy item={{ ...item, name: item.name ? nome : "" }} eager /> : <img src={item.inline ?? item.url} alt={item.name ? nome : ""} />}
       <button
         type="button"
         className="lightbox-close"

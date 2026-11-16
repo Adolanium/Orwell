@@ -207,7 +207,7 @@ export const POWERS = [
   "atender",
   "moderar",
   /*
-    The permissions model of 1.2 (`docs/planos/paridade-discord-plano.md`, §4).
+    The permissions model of 1.2.
     Narrow names and always added at the end, as the note above says. A 1.0.x
     or a 1.1.0 reads `role.define` and filters by this list (`rolesOf`): names
     it does not know are dropped, and nothing is rejected. The schema for
@@ -561,8 +561,7 @@ export const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000
  * - **No deadline or close.** There is no shared clock (each payload timestamp
  *   is only what the sender's clock claims), and without an arbiter a deadline
  *   would close at different instants on each screen, accepting on one device a
- *   vote another refuses. A poll stays open while it exists. What it would take to
- *   close it for real is in `docs/PENDENTES.md`.
+ *   vote another refuses. A poll stays open while it exists. What it would take to close it for real is still open.
  * - **No multiple choice.** One vote per person, and that is exactly why
  *   counting needs no counter at all (see `post.reaction.vote`).
  */
@@ -823,8 +822,7 @@ export const TicketMark = z.object({
    * The first message is what names it, and the name doesn't repeat on every
    * line. Repeating it would let two versions of it travel and force a choice
    * between them. Whoever wants to change the subject changes it where it was
-   * said, which is an edit. See `edit`, and see what's left to do in
-   * `docs/PENDENTES.md`.
+   * said, which is an edit. See `edit`.
    */
   subject: z.string().max(120).optional(),
   /**
@@ -1194,7 +1192,7 @@ export const Payload = z.discriminatedUnion("t", [
      * `moradaDoMural(segredo, servidor)` (`ids.ts`), and anyone without the secret does not know it.
      * This is how the secret reaches those who share a channel with the owner,
      * encrypted like the rest of the profile: the board stays only for friends and
-     * co-members (decision D1 in `docs/planos/moradas-opacas-e-corte.md`).
+     * co-members (opaque-addresses design).
      *
      * Optional and with no default, so a profile without a board has the same
      * shape as before. And `catch(undefined)`, like the `video` of `typing`: a corrupt
@@ -1832,8 +1830,7 @@ export const Payload = z.discriminatedUnion("t", [
      * ignored events declare the channel deaf and trigger a repair that DELETES
      * HISTORY. What changes between clients is expressed in fields, never in types.
      *
-     * It exists because of the mirror-image gap in the owner's request on October 5,
-     * 2026: he asked that someone's screen only be seen by choice, and the same
+     * It exists because of the mirror-image gap in seeing someone's screen only by choice, and the same
      * piece has another side: **the sharer does not know who is watching.** With the
      * choice in place, it becomes information that is genuinely missing: before
      * this everyone watched, and knowing who watched said nothing.
@@ -2421,8 +2418,7 @@ export const Payload = z.discriminatedUnion("t", [
      * New field and not new `t`, by house rule: an unknown `t` in an old client is
      * a rejected payload, and consecutive rejects declare the channel deaf. Client
      * 0.5.x does not know the field, throws it away (schemas are not `strict()`) and
-     * reads a refusal of a request it never made: a no-op. The cost of that is in
-     * `docs/PENDENTES.md`.
+     * reads a refusal of a request it never made: a no-op. That is a known cost.
      */
     withdrawn: z.boolean().optional(),
   }),
@@ -2471,7 +2467,7 @@ export const Payload = z.discriminatedUnion("t", [
    * it. And it does not go out at each change: only the last one, with a delay, and
    * never more than three in a row without another event in the feed (see
    * `setShownFriends` in the core). There is no comparison to the list of who reads
-   * it ("mutual friends"): the owner's decision, and the core does not offer it.
+   * it ("mutual friends"): by design, and the core does not offer it.
    *
    * Five hundred is the read limit, ample: a larger list is not a friends list
    * anyone will read, and each address weighs on the same byte limit.

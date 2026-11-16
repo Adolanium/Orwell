@@ -192,7 +192,7 @@ describe("welcomes pendentes", () => {
  * keep logging in as it always has.
  *
  * The numbers here are literals on purpose: `4` and `5`, not the constant. The
- * test pins the owner's decision, and if someone raises the constant they need
+ * test pins the chosen cap, and if someone raises the constant they need
  * to come here and say they did.
  */
 describe("aparelhos", () => {

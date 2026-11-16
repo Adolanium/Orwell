@@ -1,6 +1,7 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { videoAceite } from "@enclave/protocol"
 import { BridgeContext } from "../App.js"
+import { useImagemPequena } from "../hooks/useMedia.js"
 import { nomeSeguro } from "../lib/ficheiros.js"
 import { formatarDuracao } from "../lib/videos.js"
 import { strings } from "../strings.js"
@@ -91,7 +92,11 @@ export function VideoDaPublicacao({ item }: { item: MediaItem }): React.JSX.Elem
   const nome = nomeSeguro(item.name)
   const duracao = formatarDuracao(item.duration ?? 0)
   // Only an image thumbnail: the vault is lenient, and this goes into a `src`.
-  const poster = typeof item.poster === "string" && item.poster.startsWith("data:image/") ? item.poster : null
+  // The poster the vault stored in the media store arrives as `{ ref }` (Task 10, design §3): through the cache.
+  const posterGuardado: unknown = item.poster
+  const poster = useImagemPequena(
+    typeof posterGuardado === "string" ? (posterGuardado.startsWith("data:image/") ? posterGuardado : null) : posterGuardado,
+  )
 
   /**
    * Drop the player and its `blob:` URL: video bytes (up to 25 MB) would stay

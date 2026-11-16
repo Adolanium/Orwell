@@ -5,7 +5,7 @@ import { nomeEmFalta, palavrasRepetidas, vemDoEndereco } from "./format.js"
 /**
  * The name of someone who did not choose one: the first word of their address,
  * with the first letter capitalized, and the second if another account on the same
- * screen starts with the same letter. Owner's order on November 4, 2026.
+ * screen starts with the same letter.
  */
 const GINVODRA = "@ginvodra-sastybis-dirgybus-boblytum:orwell.pt"
 const GINVODRA_OUTRA = "@ginvodra-pelmara-sostrin-quavely:orwell.pt"

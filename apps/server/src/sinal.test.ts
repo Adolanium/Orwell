@@ -344,10 +344,14 @@ describe("channel.sinal", () => {
 
     ana.cliente.enviar({ t: "channel.sinal", channel: canal, sinal: "A".repeat(40) })
     await bruno.cliente.proximaDe("channel.sinal")
-    // Another member, another connection: the bucket belongs to the channel, not to the sender.
+    // Bruno has spent nothing this minute: he passes even over the channel's
+    // cap (the split by sender, 12/11/2026). His second one does not.
     bruno.cliente.enviar({ t: "channel.sinal", channel: canal, sinal: "B".repeat(40) })
+    await ana.cliente.proximaDe("channel.sinal")
+    bruno.cliente.enviar({ t: "channel.sinal", channel: canal, sinal: "B".repeat(10) })
     const ocupado = await bruno.cliente.proximaDe("channel.sinal.rejected")
-    expect(ocupado.code).toBe("sinal-channel-busy")
+    // With two senders the per-sender half (50) bites before the channel's 100.
+    expect(["sinal-channel-busy", "sinal-rate-limited"]).toContain(ocupado.code)
     expect(ocupado.retryAfterMs).toBeGreaterThan(0)
 
     // A signal whose cost alone exceeds the cap does not wait: it is too big.
@@ -355,6 +359,37 @@ describe("channel.sinal", () => {
     const grande = await carla.cliente.proximaDe("channel.sinal.rejected")
     expect(grande.code).toBe("sinal-too-large")
     expect(grande.retryAfterMs).toBeUndefined()
+  })
+
+  it("o balde do canal reparte-se por remetente: quem escreve sem parar não cala quem chega (12/11/2026)", async () => {
+    // Review of 1.3.8, finding 3. Typing goes by signal now; in the common room
+    // many people typing filled the channel bucket, and the server then refused
+    // the profile request (`pp`) of whoever just arrived: no names. The server
+    // must not learn which signal is typing, so the split is by SENDER, for all
+    // signals alike: a sender that has spent little this minute always passes.
+    config.sinal = { bytesPorCanalPorMinuto: 1000 }
+    const ana = guardar(await entrar(NOVO))
+    const bruno = guardar(await entrar(NOVO))
+    const carla = guardar(await entrar(NOVO))
+    const dora = guardar(await entrar(NOVO))
+    const canal = canalNovo()
+    await sentar(ana.cliente, [bruno, carla, dora], canal)
+
+    // Ana and Bruno "type" until the server refuses them (40 chars to 3 members = 120 each).
+    for (const quem of [ana, bruno]) {
+      for (let i = 0; i < 20; i++) quem.cliente.enviar({ t: "channel.sinal", channel: canal, sinal: "A".repeat(40), ref: `e${i}` })
+      const recusa = await quem.cliente.proximaDe("channel.sinal.rejected")
+      expect(["sinal-rate-limited", "sinal-channel-busy"]).toContain(recusa.code)
+    }
+    // Neither of them took more than half the channel's minute.
+    await carla.cliente.sincronizar()
+    const recebidos = carla.cliente.pendentes().filter((f) => f.t === "channel.sinal").length
+    // Two senders, each held at half the channel's minute (500 / 120 = 4 signals).
+    expect(recebidos).toBeLessThanOrEqual(8)
+
+    // Dora, who has sent nothing this minute, gets through with a bigger one.
+    dora.cliente.enviar({ t: "channel.sinal", channel: canal, sinal: "D".repeat(100), ref: "pp" })
+    expect((await carla.cliente.proximaDe("channel.sinal")).sinal).toBe("D".repeat(100))
   })
 
   it("não fecha à primeira; fecha com sinal-abuse quem insiste depois das recusas", async () => {

@@ -29,7 +29,7 @@ import { comLingua } from "./ambiente.mjs"
 
 const URL_BASE = comLingua(arg("--url") ?? "http://127.0.0.1:5176")
 const SERVIDOR = arg("--servidor") ?? "localhost:8453"
-const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "sons-2026"
+const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "sons-orwell-diag-2026"
 const CORRIDA = `sons-${Date.now().toString(36)}`
 
 function arg(nome) {

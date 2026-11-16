@@ -88,6 +88,45 @@ function dobrar(texto: string): string {
     .toLowerCase()
 }
 
+/** A candidate with its name and address already folded, so a key only compares. */
+interface Dobrado {
+  candidato: MentionCandidate
+  nome: string
+  palavras: readonly string[]
+  /** The address words, for the address rule below. */
+  endereco: readonly string[]
+}
+
+const ORDEM_DOS_NOMES = new Intl.Collator("pt")
+
+/**
+ * Each candidate list folded once, sorted by name, by list identity (1.3.15).
+ *
+ * Before, every key folded all the names again (`normalize` 400 times in a
+ * channel of 400) and sorted with `localeCompare`. The composer list is memoized
+ * by the conversation screen, so here it changes only when the members do.
+ */
+const DOBRADOS = new WeakMap<readonly MentionCandidate[], readonly Dobrado[]>()
+
+function dobrados(candidatos: readonly MentionCandidate[]): readonly Dobrado[] {
+  let lista = DOBRADOS.get(candidatos)
+  if (!lista) {
+    lista = [...candidatos]
+      .sort((a, b) => ORDEM_DOS_NOMES.compare(a.name, b.name))
+      .map((candidato) => {
+        const nome = dobrar(candidato.name)
+        return {
+          candidato,
+          nome,
+          palavras: nome.split(/[\s._-]+/),
+          endereco: dobrar(candidato.address).replace(/^@/, "").split(/[-:.]/),
+        }
+      })
+    DOBRADOS.set(candidatos, lista)
+  }
+  return lista
+}
+
 /**
  * Who matches what is being typed, in order of usefulness.
  *
@@ -98,6 +137,10 @@ function dobrar(texto: string): string {
  *
  * An empty search (@ just typed) returns everyone, which is what Facebook does and
  * what works for choosing without knowing the name by heart.
+ *
+ * The names come folded and sorted from `dobrados`: each group keeps name order,
+ * so the groups are joined without sorting, and the walk stops once the first
+ * group alone fills the list.
  */
 export function sugerirMencoes(
   candidatos: readonly MentionCandidate[],
@@ -105,24 +148,20 @@ export function sugerirMencoes(
   limite = MENTION_LIMIT,
 ): MentionCandidate[] {
   const alvo = dobrar(procura)
-  const pontuados: { candidato: MentionCandidate; peso: number }[] = []
+  const grupos: MentionCandidate[][] = [[], [], [], []]
 
-  for (const candidato of candidatos) {
-    const nome = dobrar(candidato.name)
-    if (alvo === "") {
-      pontuados.push({ candidato, peso: 0 })
+  for (const { candidato, nome, palavras, endereco } of dobrados(candidatos)) {
+    if (alvo === "" || nome.startsWith(alvo)) {
+      grupos[0]!.push(candidato)
+      if (grupos[0]!.length >= limite) break
       continue
     }
-    if (nome.startsWith(alvo)) {
-      pontuados.push({ candidato, peso: 0 })
-      continue
-    }
-    if (nome.split(/[\s._-]+/).some((palavra) => palavra.startsWith(alvo))) {
-      pontuados.push({ candidato, peso: 1 })
+    if (palavras.some((palavra) => palavra.startsWith(alvo))) {
+      grupos[1]!.push(candidato)
       continue
     }
     if (nome.includes(alvo)) {
-      pontuados.push({ candidato, peso: 2 })
+      grupos[2]!.push(candidato)
       continue
     }
     /**
@@ -133,16 +172,10 @@ export function sugerirMencoes(
      * looking for Rita. Three letters minimum, and hitting the start of a word: that way
      * only who was really looked for shows up.
      */
-    if (alvo.length >= 3) {
-      const palavras = dobrar(candidato.address).replace(/^@/, "").split(/[-:.]/)
-      if (palavras.some((palavra) => palavra.startsWith(alvo))) pontuados.push({ candidato, peso: 3 })
-    }
+    if (alvo.length >= 3 && endereco.some((palavra) => palavra.startsWith(alvo))) grupos[3]!.push(candidato)
   }
 
-  return pontuados
-    .sort((a, b) => a.peso - b.peso || a.candidato.name.localeCompare(b.candidato.name, "pt"))
-    .slice(0, limite)
-    .map((entrada) => entrada.candidato)
+  return grupos.flat().slice(0, limite)
 }
 
 /**

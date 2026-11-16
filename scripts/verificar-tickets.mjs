@@ -20,7 +20,7 @@ import { chromium } from "playwright"
 import { APP, SERVIDOR } from "./ambiente.mjs"
 import { criarContaEEntrar } from "./conta.mjs"
 
-const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "carga-2026"
+const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "carga-orwell-diag-2026"
 const MARCA = Date.now().toString(36)
 const ASSUNTO = `Impressora avariada ${MARCA.slice(-3)}`
 

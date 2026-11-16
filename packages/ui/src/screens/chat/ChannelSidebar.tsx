@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import type { Activity, ChannelRoom, ConnectionState, Profile } from "../../bridge.js"
 import type { View } from "../../types.js"
 import { Button } from "../../components/Button.js"
@@ -387,7 +387,7 @@ function RoomRow({
   )
 }
 
-export function ChannelSidebar({
+function ChannelSidebarInteira({
   view,
   rooms,
   aEsperaDeEntrada = [],
@@ -1384,3 +1384,11 @@ export function ChannelSidebar({
     </aside>
   )
 }
+
+/**
+ * Memoized (1.3.15): a parent render with the same props does not walk the
+ * whole list again. It only pays when the parent hands over stable props.
+ * `App` builds them with `useEstavel` (handlers) and `useCallback` (what is
+ * read while rendering): see `App.escrita.test.tsx`.
+ */
+export const ChannelSidebar = memo(ChannelSidebarInteira)

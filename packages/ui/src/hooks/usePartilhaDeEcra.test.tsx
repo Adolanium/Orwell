@@ -11,8 +11,7 @@ import { usePartilhaDeEcra } from "./usePartilhaDeEcra.js"
  *
  * What was built and without a caller: `ecra:fontes`, `ecra:escolher`,
  * `ecra:permissao` and `ecra:abrirDefinicoes`, four tested names on the main
- * process side with not a single line of UI reading them. The result was the
- * defect described in `docs/PENDENTES.md`: where the system picker does not
+ * process side with not a single line of UI reading them. The result was a defect: where the system picker does not
  * exist, the request fell into our handler and had no one to choose it, until
  * the two-minute timeout denied it.
  *

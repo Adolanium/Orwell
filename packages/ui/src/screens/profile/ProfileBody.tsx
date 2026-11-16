@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import type { Profile } from "../../bridge.js"
-import type { ChatMessage } from "../../types.js"
+import type { ChatMessage, MediaItem } from "../../types.js"
+import { useMedia } from "../../hooks/useMedia.js"
 import { DistintivoDeEmbaixador } from "../../components/DistintivoDeEmbaixador.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { BotaoCopiarId } from "../../components/BotaoCopiarId.js"
@@ -35,10 +36,25 @@ function tipos(): { kind: PostKind; label: string }[] {
  * dumped from the vault leave nothing: the row gets an empty square and the
  * name stays there, which is what matters in a list.
  */
-function rowThumbOf(payload: ChatMessage["payload"]): string | undefined {
-  const cover = payload.media?.find((item) => !item.evicted && (item.inline || item.url))
-  if (cover) return cover.inline ?? cover.url
-  return payload.links?.find((link) => link.thumbnail)?.thumbnail
+function rowThumbOf(payload: ChatMessage["payload"]): MediaItem | undefined {
+  // An image in the media store (Task 10) counts like the others: its thumbnail is shown.
+  const cover = payload.media?.find((item) => !item.evicted && (item.inline || item.url || item.ref))
+  if (cover) return cover
+  // A card thumbnail: as text (live) or `{ ref }` (from the vault, in the media store).
+  for (const link of payload.links ?? []) {
+    const miniatura: unknown = link.thumbnail
+    if (typeof miniatura === "string" && miniatura) return { inline: miniatura }
+    const ref = typeof miniatura === "object" && miniatura !== null ? (miniatura as { ref?: unknown }).ref : undefined
+    if (typeof ref === "string") return { ref }
+  }
+  return undefined
+}
+
+/** The thumbnail of a row or a square: the `inline`, or the store thumbnail. Without bytes, `vazio`. */
+function Capa({ item, className, vazio }: { item: MediaItem | undefined; className?: string; vazio: React.ReactNode }): React.JSX.Element {
+  const { src } = useMedia(item ?? {}, { visivel: item !== undefined, tamanho: "mini" })
+  if (!src) return <>{vazio}</>
+  return <img {...(className ? { className } : {})} src={src} alt="" loading="lazy" />
 }
 
 /** What the row adds to the date: how many photographs, or what brings a link. */
@@ -94,13 +110,16 @@ export function ProfileBody({
   depoisDaCabeca?: React.ReactNode
 }): React.JSX.Element {
   const displayName = profile?.displayName || nomeEmFalta(address ?? undefined)
+  // The sheet shows the portrait ORIGINAL (design §8); the lists, the thumbnail.
+  const retrato = useMedia({ ...(profile?.avatarRef ? { ref: profile.avatarRef } : {}) }, { visivel: true, tamanho: "original" })
+  const cara = retrato.src ?? profile?.avatarDataUrl
 
   return (
     <>
       <section className="profile-head">
         <span className="profile-avatar">
-          {profile?.avatarDataUrl ? (
-            <img src={profile.avatarDataUrl} alt="" />
+          {cara ? (
+            <img src={cara} alt="" />
           ) : (
             (profile?.displayName[0] ?? address?.[1] ?? "?").toUpperCase()
           )}
@@ -117,8 +136,7 @@ export function ProfileBody({
             {action}
           </div>
           {/*
-            The status is the line BELOW THE NAME, by the owner's decision on
-            August 19, 2026.
+            The status is the line BELOW THE NAME.
             
             It was after the post count, and so it read as one more fact in
             the list. As it is now, it is the person's caption: whoever looks
@@ -235,11 +253,7 @@ export function PublicacoesDoPerfil({
                   title={strings.profile.openPost}
                   onClick={() => onOpenPost(post)}
                 >
-                  {thumb ? (
-                    <img src={thumb} alt="" loading="lazy" />
-                  ) : (
-                    <span className="post-tile-sem-imagem">{postTitleOf(post.payload)}</span>
-                  )}
+                  <Capa item={thumb} vazio={<span className="post-tile-sem-imagem">{postTitleOf(post.payload)}</span>} />
                   {/* Only from the second on: a "1" on top of each square would be noise in all
                       normal posts. */}
                   {contagem > 1 && (
@@ -277,11 +291,7 @@ export function PublicacoesDoPerfil({
                   title={strings.profile.openPost}
                   onClick={() => onOpenPost(post)}
                 >
-                  {thumb ? (
-                    <img className="post-row-thumb" src={thumb} alt="" loading="lazy" />
-                  ) : (
-                    <span className="post-row-thumb empty" aria-hidden="true" />
-                  )}
+                  <Capa item={thumb} className="post-row-thumb" vazio={<span className="post-row-thumb empty" aria-hidden="true" />} />
                   <span className="post-row-labels">
                     <span className="post-row-title">{postTitleOf(post.payload)}</span>
                     <span className="post-row-meta">

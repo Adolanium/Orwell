@@ -1,8 +1,7 @@
 /**
  * Frame an image before compressing: the math of the crop, and the crop itself.
  *
- * Request from the owner and community (November 2, 2026, item 4 of
- * `docs/planos/depois-da-1-0.md`): when choosing a profile photo, move and
+ * When choosing a profile photo, move and
  * zoom inside a circle before saving; the same for the channel icon
  * (rounded-corner square) and for a post cover (16:10).
  *

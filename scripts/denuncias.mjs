@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The script for the reports VPS (`docs/planos/denuncias-design.md`, §6 to §9b).
+ * The script for the reports VPS.
  * A person runs it; nothing on the server suspends by itself.
  *
  * Usage:

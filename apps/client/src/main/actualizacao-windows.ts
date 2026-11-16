@@ -9,8 +9,7 @@
  * is a hash served by the SAME server that serves the installer. Whoever gained
  * write access to `orwell.pt` could execute anything on all machines.
  *
- * This file removes that lever from the server with our own key (approved by
- * owner Nov 2, 2026, design in `docs/planos/depois-da-1-0.md`):
+ * This file removes that lever from the server with our own key:
  *
  *  - the Ed25519 private key lives on the owner's Mac and NEVER goes to the
  *    server;

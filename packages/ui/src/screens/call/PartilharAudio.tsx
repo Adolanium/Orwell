@@ -33,9 +33,7 @@ export function formatarTempo(segundos: number): string {
 }
 
 /**
- * The "Share audio" sheet: the DJ player. Phase 9, remade 27 October 2026 at
- * the owner's request ("much sexier"; "think Winamp and Windows Media Player.
- * Nostalgia.").
+ * The "Share audio" sheet: the DJ player. Phase 9, styled after Winamp and Windows Media Player.
  *
  * Top to bottom, like Winamp: the DISPLAY (time in large digits, track name
  * scrolling like a marquee, bar spectrum with peaks, and position bar you can

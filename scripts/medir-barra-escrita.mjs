@@ -160,7 +160,7 @@ if (dm) {
     q.every((c) => Math.abs(c.largura - c.altura) <= 1),
     q.map((c) => `${c.classe}=${c.largura}×${c.altura}`).join("  "),
   )
-  // The owner's request: the nudge next to the emoji button.
+  // The nudge sits next to the emoji button.
   const iEmoji = dm.findIndex((c) => c.classe.includes("composer-emoji"))
   const iBuzz = dm.findIndex((c) => c.classe.includes("composer-buzz"))
   check("a cotovelada vive na barra de escrita", iBuzz !== -1, `índice ${iBuzz}`)

@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { CABECALHO_DO_COFRE } from "@enclave/client-core"
+import { CABECALHO_DO_COFRE, cabecaDoContentor } from "@enclave/client-core"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { BridgeContext } from "../../App.js"
 import type { EnclaveBridge } from "../../bridge.js"
+import { ToastProvider } from "../../components/Toast.js"
 import { strings } from "../../strings.js"
 import { ImportAccount } from "./ImportAccount.js"
+import "../../testes/blobDoJsdom.js"
 
 afterEach(cleanup)
 
@@ -50,10 +52,12 @@ function ponte(): EnclaveBridge {
   } as unknown as EnclaveBridge
 }
 
-function ecra(replacing = false): void {
+function ecra(replacing = false, ponteDoTeste: EnclaveBridge = ponte()): void {
   render(
-    <BridgeContext.Provider value={ponte()}>
-      <ImportAccount replacing={replacing} onDone={vi.fn()} />
+    <BridgeContext.Provider value={ponteDoTeste}>
+      <ToastProvider>
+        <ImportAccount replacing={replacing} onDone={vi.fn()} />
+      </ToastProvider>
     </BridgeContext.Provider>,
   )
 }
@@ -127,7 +131,10 @@ describe("importar por cima pede a palavra, como apagar a conta", () => {
       target: { value: strings.settings.destroyConfirmWord },
     })
     fireEvent.click(within(folha).getByRole("button", { name: strings.settings.destroyConfirm }))
-    await waitFor(() => expect(importar).toHaveBeenCalledWith(FICHEIRO, "frase do ficheiro"))
+    // The bridge receives the chosen file, not its text: the container with the images can be hundreds of MB.
+    await waitFor(() => expect(importar).toHaveBeenCalledWith(expect.any(Blob), "frase do ficheiro"))
+    const enviado = (importar.mock.calls[0] as unknown as [Blob, string])[0]
+    expect(await enviado.text()).toBe(FICHEIRO)
   })
 
   it("cancelar não importa nada", async () => {
@@ -164,5 +171,89 @@ describe("um ficheiro de conta do beta", () => {
     expect(screen.getByText(/131/)).toBeTruthy()
     expect(screen.queryByLabelText(strings.gate.importPassLabel)).toBeNull()
     expect(importar).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The account file with the images (Task 11b): the `orwv2\n orwc1\n`
+ * container. It is read in slices, heads only, and a container cut halfway is
+ * reported at once.
+ */
+describe("um ficheiro de conta com as imagens", () => {
+  const ENVELOPE = JSON.stringify({ ...JSON.parse(FICHEIRO.slice(CABECALHO_DO_COFRE.length)), mediaCount: 1 })
+  const SHA = new Uint8Array(32).fill(7)
+  function contentor(blob: Uint8Array): Uint8Array<ArrayBuffer> {
+    const cabeca = cabecaDoContentor(ENVELOPE)
+    const registo = new Uint8Array(40)
+    registo.set(SHA, 0)
+    new DataView(registo.buffer).setBigUint64(32, 100n)
+    const saida = new Uint8Array(cabeca.length + 40 + blob.length)
+    saida.set(cabeca, 0)
+    saida.set(registo, cabeca.length)
+    saida.set(blob, cabeca.length + 40)
+    return saida
+  }
+
+  it("abre o formulário e entrega o ficheiro à ponte", async () => {
+    ecra(false)
+    const entrada = document.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(entrada, { target: { files: [new File([contentor(new Uint8Array(100))], "conta.enclave")] } })
+    await waitFor(() => expect(screen.queryByLabelText(strings.gate.importPassLabel)).toBeTruthy())
+    fireEvent.change(screen.getByLabelText(strings.gate.importPassLabel), { target: { value: "frase" } })
+    fireEvent.click(screen.getByRole("button", { name: strings.gate.importAction }))
+    await waitFor(() => expect(importar).toHaveBeenCalledWith(expect.any(Blob), "frase"))
+  })
+
+  it("cortado a meio de um blob, diz que não é um ficheiro de conta e não abre o formulário", async () => {
+    ecra()
+    const entrada = document.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(entrada, { target: { files: [new File([contentor(new Uint8Array(60))], "conta.enclave")] } })
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy())
+    expect(screen.queryByLabelText(strings.gate.importPassLabel)).toBeNull()
+    expect(importar).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Fix, round 1 (Task 11b). On the desktop the file is chosen in the main
+ * process: the renderer never gives it a path to open. And an import where not
+ * all the images stayed is reported, without an error code.
+ */
+describe("importar: a secretária escolhe o ficheiro, e as imagens em falta dizem-se", () => {
+  function ponteDaSecretaria(forma: "conta" | "beta" | "outro", resultado: Record<string, unknown> = { ok: true }) {
+    const base = ponte() as unknown as { vault: Record<string, unknown> }
+    importar.mockImplementation(async () => resultado as { ok: boolean })
+    base.vault["escolherFicheiroDeConta"] = vi.fn(async () => ({ nome: "conta.enclave", forma }))
+    return base as unknown as EnclaveBridge
+  }
+
+  afterEach(() => importar.mockImplementation(async () => ({ ok: true })))
+
+  it("sem input de ficheiro: o botão pede ao principal, e a ponte recebe a marca, nunca um caminho", async () => {
+    ecra(false, ponteDaSecretaria("conta"))
+    expect(document.querySelector('input[type="file"]')).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: strings.gate.importPick }))
+    await waitFor(() => expect(screen.queryByLabelText(strings.gate.importPassLabel)).toBeTruthy())
+    expect(screen.getByRole("button", { name: "conta.enclave" })).toBeTruthy()
+    fireEvent.change(screen.getByLabelText(strings.gate.importPassLabel), { target: { value: "frase" } })
+    fireEvent.click(screen.getByRole("button", { name: strings.gate.importAction }))
+    await waitFor(() => expect(importar).toHaveBeenCalledWith({ escolhido: true }, "frase"))
+  })
+
+  it("um ficheiro do beta escolhido no principal diz-se como no browser", async () => {
+    ecra(false, ponteDaSecretaria("beta"))
+    fireEvent.click(screen.getByRole("button", { name: strings.gate.importPick }))
+    await waitFor(() => expect(screen.getByText(/131/)).toBeTruthy())
+    expect(screen.queryByLabelText(strings.gate.importPassLabel)).toBeNull()
+  })
+
+  it("imagens em falta: o aviso diz quantas e onde as ir buscar", async () => {
+    ecra(false, ponteDaSecretaria("conta", { ok: true, imagens: 5, emFalta: 3 }))
+    fireEvent.click(screen.getByRole("button", { name: strings.gate.importPick }))
+    await waitFor(() => expect(screen.queryByLabelText(strings.gate.importPassLabel)).toBeTruthy())
+    fireEvent.change(screen.getByLabelText(strings.gate.importPassLabel), { target: { value: "frase" } })
+    fireEvent.click(screen.getByRole("button", { name: strings.gate.importAction }))
+    expect(await screen.findByText(strings.gate.importImagensEmFalta(3))).toBeTruthy()
+    expect(strings.gate.importImagensEmFalta(3)).toBe("A conta entrou. 3 imagens não ficaram neste aparelho. Pode trazê-las de outro aparelho.")
   })
 })

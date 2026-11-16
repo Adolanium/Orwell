@@ -117,8 +117,7 @@ function partir(combinacao: string): { mods: string[]; tecla: string } {
  * Accepts any single key, and mouse buttons 4 and 5.
  *
  * Up to 1.0.5 a lone key was not accepted: only Mod, Alt, F1 to F12, or Shift
- * with a key that does not type. The owner and the community asked for the
- * opposite (point 8 of `docs/planos/depois-da-1-0.md`): people who play games
+ * with a key that does not type. Since then the opposite is allowed: people who play games
  * use F13, `` ` `` or a mouse button, and do not want Ctrl. The risk of a key
  * that types is still there, and it is handled elsewhere: the recorder warns
  * (`avisoDaCombinacao`), the text box keeps what it types

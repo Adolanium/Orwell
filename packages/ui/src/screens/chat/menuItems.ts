@@ -303,7 +303,7 @@ export const BARRA_DO_VOLUME = { min: 0, max: Math.round(VOLUME_MAX * 100), pass
 
 /**
  * Someone on a CALL: the menu of the voice room person, plus what is call-specific
- * (phase 3, owner's request on October 27: "cards on call should have a user menu").
+ * (phase 3: cards on a call have a user menu).
  *
  * **One menu only.** It is `itensDaPessoaEmVoz` exactly as is (View profile,
  * Message, friendship, nickname, Move to..., Remove, per powers), with a call

@@ -2,8 +2,23 @@ import { xchacha20poly1305 } from "@noble/ciphers/chacha.js"
 import { argon2id } from "@noble/hashes/argon2.js"
 import { fromBase64, toBase64, type CorpoDaDenuncia, type Motivo } from "@enclave/protocol"
 import { chavesDeOrdem, chaveDoEvento, venceCarimbo } from "./dobras.js"
+import { carriesBytes, entryMediaBytes, LINK_KEY, MEDIA_KEYS, thumbnailBytes } from "./medidaDeMedia.js"
 import { comCabecalho, semCabecalho, versaoDoFicheiro, type VersaoDoFicheiroDoCofre } from "./cabecalhoDoCofre.js"
 import { registarFicha, type FichaDoCanal, type FichaQueChega } from "./tipoDoCanal.js"
+import { acabarSelo, comecarSelo, comprimentoDoFim } from "./seloDoCofre.js"
+import type { ArmazemDeMedia } from "./armazem/armazem.js"
+import { decifrarBlob } from "./armazem/blob.js"
+import {
+  cabecaDoContentor,
+  cabecaDoRegisto,
+  eContentor,
+  fonteDeBytes,
+  lerContentor,
+  shaEmBruto,
+  TECTO_DO_FICHEIRO_SIMPLES,
+  type FonteDeBytes,
+  type RegistoDoContentor,
+} from "./armazem/contentor.js"
 
 /**
  * The encrypted local store, with the platform swapped out behind an interface.
@@ -29,6 +44,12 @@ export interface StoredProfile {
   donations: { kind: string; label: string; value: string }[]
   /** Data URL. Small by policy; anything large belongs in an attachment. */
   avatarDataUrl?: string
+  /**
+   * The portrait in the media store: the `sha` of the reference in
+   * `contents.media` (`absorverRetrato`). Next to `avatarDataUrl`, which the
+   * migration empties.
+   */
+  avatarRef?: string
   updatedAt: number
 }
 
@@ -102,6 +123,38 @@ export interface StoredPeerProfile {
    * version or higher (`upsertDirectory` replaces the entry).
    */
   parcial?: true
+}
+
+/**
+ * The reference of a media item in the vault (`contents.media[sha]`), design §2.2.
+ */
+export interface RefDeMedia {
+  v: 1
+  /** The blob key, 32 bytes base64url. Random per blob. */
+  k: string
+  /** O nonce, 24 bytes base64url. */
+  n: string
+  /** Bytes em claro. */
+  b: number
+  /** The MIME type the sender declared. */
+  t: string
+  /** Dimensions in pixels, for an image: the box reserved before loading. */
+  w?: number
+  h?: number
+  /**
+   * How the exact `inline` the authorship signed (`m`) is rebuilt:
+   * "bytes": `p` + classic padded base64 of the bytes (what `FileReader` and `canvas.toDataURL` produce);
+   * "texto": the blob keeps the `inline` text as it came (a sender that wrote non-canonical base64).
+   */
+  f: "bytes" | "texto"
+  /** The data URL prefix when `f` is "bytes" (`data:image/png;base64,`). */
+  p?: string
+  /** The `sha` of the permanent thumbnail, for an image. Absent for a file, a video (it has `poster`), or until it is made. */
+  mini?: string
+  /** Classe: "original" sai pelo tecto; "mini" nunca sai. */
+  c: "original" | "mini"
+  /** When it was stored. */
+  at: number
 }
 
 /** What an attachment becomes once its bytes are evicted. The text around it stays. */
@@ -232,6 +285,18 @@ export interface VaultContents {
    */
   profileRepairRound?: number
   /**
+   * The channels where the pending repair round already went out (hotfix 1.3.14).
+   *
+   * The round only counts as done when the profile went out in ALL channels. One
+   * channel that keeps failing (offline group, rate refusal, vault full) left it
+   * pending, and the next connection forced the profile into every channel
+   * again: on an account with 72 channels, 72 profiles on every login, each one
+   * encrypted and written on the device and applied by every member. With this
+   * list the next connection only forces the channels still missing. Removed
+   * when the round is recorded.
+   */
+  profileRepairChannels?: string[]
+  /**
    * How far the SFrame counter has gone for each of our keys, with headroom.
    *
    * Keyed by `canal|keyId`, which is what identifies the material: the media
@@ -315,7 +380,7 @@ export interface VaultContents {
    *
    * Blocking is a decision made on THIS device: what we send out from here (the friendship cut,
    * leaving their feed) reaches everyone, but the filter on what comes in lives here and only here.
-   * Two devices on the same account do not share the list. See `docs/PENDENTES.md`.
+   * Two devices on the same account do not share the list.
    */
   blocked?: Record<string, number>
   /**
@@ -501,10 +566,25 @@ export interface VaultContents {
    */
   estadoDoCanal: Record<string, StoredChatMessage[]>
   /**
-   * The bytes of post videos, by SHA-256 (26/10/2026). See `guardarVideo`. Absent in
-   * an older vault: no video stored.
+   * LEGACY from version 2: the bytes of the post videos, by SHA-256
+   * (26/10/2026). Only the migration to the store reads it, and deletes it at
+   * the end (design §6). `guardarVideo` still writes here until it moves to the
+   * store (Task 7). Absent in an older vault: no video stored.
    */
   videos?: Record<string, VideoGuardado>
+  /**
+   * The media store state as seen from the vault (design §6). `porMigrar`: the
+   * vault came from version 2 or earlier, and the bytes it still carries move
+   * to the store; set by `#adopt`, removed by the migration at the end.
+   * `migracao`: when it started, and the units already done (resumable).
+   */
+  armazem?: { porMigrar?: true; migracao?: { comecou: number; feitos: string[] } }
+  /**
+   * The references of the media in the device store, by `sha` (design §2.2).
+   * The vault keeps each blob's key; the bytes stay outside. See
+   * `armazem/referencias.ts`. Absent in an older vault: nothing absorbed.
+   */
+  media?: Record<string, RefDeMedia>
   /** Latest profile payload seen per address, so names survive a reload. */
   directory: Record<string, StoredPeerProfile>
   /**
@@ -705,8 +785,8 @@ export interface VaultContents {
    */
   historico?: EstadoDoHistorico
   /**
-   * The reports that arrived at this device as founder, by channel
-   * (`docs/planos/denuncias-design.md`, §6.2). Opened and verified here, when
+   * The reports that arrived at this device as founder, by channel.
+   * Opened and verified here, when
    * reading the mailbox (`Session.recolherDenuncias`). No info about who reported.
    */
   denuncias?: Record<string, DenunciaRecebida[]>
@@ -793,7 +873,23 @@ export interface CanalNoPlano {
   /** The summary of the channel on the sibling, when the plan was made. Ends up in `trazidos` at the finish. */
   resumo: string
   fim?: true
+  /**
+   * Entries of this channel the sibling holds and could not send (12/11/2026):
+   * an entry that does not serialize, skipped by `paginaDe`. They leave the
+   * total, so the counter can reach it, and the notice says they were lost.
+   */
+  perdidas?: number
 }
+
+/**
+ * Why the history from a sibling stopped short (12/11/2026). Codes, never
+ * text: the interface says each one in a line.
+ *
+ * - `sem-irmao`: no device of the account answered (the main device is off).
+ * - `irmao-calado`: the sibling answered, then went silent with the plan half done.
+ * - `ilegiveis`: the sibling holds entries it could not send.
+ */
+export type RazaoDoHistorico = "sem-irmao" | "irmao-calado" | "ilegiveis"
 
 /**
  * The state of history between devices, in the vault: resumable after a
@@ -808,7 +904,16 @@ export interface EstadoDoHistorico {
     canais: Record<string, CanalNoPlano>
     /** The phase for media: absent until we ask for the list; `porTrazer` shrinks. */
     media?: { total: number; feitas: number; porTrazer: ItemDeMediaDoIrmao[] }
+    /**
+     * The plan gave up for now (12/11/2026): no progress for
+     * `TECTOS_DO_FIO_DO_HISTORICO.desistirAposMs`. The notice closes with the
+     * reason; the plan stays and retries slowly, and the first progress takes
+     * this away.
+     */
+    parado?: { em: number; razao: RazaoDoHistorico }
   }
+  /** A fresh device that found no sibling to ask, for the same deadline (no plan yet). */
+  semIrmaoDesde?: number
   /**
    * Per channel, the summary of the sibling we already pulled. A sibling with
    * the same summary has nothing new for this device, even if this one has
@@ -972,193 +1077,79 @@ export function mayRepair(
  * own cap: see `LEDGER_MAX_PER_CHANNEL` and `ehDoLivro`.
  */
 export const HISTORY_MAX_PER_CHANNEL = 400
-/** How many newest entries from each room in a channel keep the bytes of their media. See `foraDaJanelaDeMedia`. */
-export const HISTORY_MEDIA_RECENT = 40
-/** Total media bytes tolerated across all channels before eviction starts. */
-export const HISTORY_MEDIA_BUDGET_BYTES = 4_000_000
+export { entryMediaBytes }
 
-/** The payload arrays that can carry base64 media: `message.attachments`, `post.media`. */
-const MEDIA_KEYS = ["attachments", "media"] as const
+/** The fields that, with text inside, are media bytes (design §0, rule 1). */
+const CAMPOS_DE_BYTES = new Set(["inline", "avatarDataUrl", "b64", "thumbnail", "poster"])
 
 /**
- * `post.links`, which loads bytes in another way and so gets its own step.
+ * The vault paths where there are still media bytes: an `inline`,
+ * `avatarDataUrl`, `b64`, `thumbnail` or `poster` with text, or a `url` with a
+ * data URL. Empty is the version 3 invariant (`vault.sem-bytes.test.ts`): the
+ * vault carries references, and the bytes live in the store.
  *
- * An attachment is an object whose bytes are in `inline`, or at most in a `url`
- * that starts with `data:`. A link card is nothing like that: the thumbnail is
- * the string `thumbnail` in there, and the `url` beside it is the page, never a
- * `data:`. `carriesBytes` looked for the two things a card doesn't have, and
- * concluded that a post with 400 KB of thumbnails weighed zero, they stayed in
- * the vault forever, without counting against any limit.
- *
- * The dump is different too. A dumped attachment becomes a marker because the
- * name and type are what's left of it; a dumped card leaves everything but the
- * image, the address, title, description, and site still read, and a card
- * without a thumbnail is already a normal state, that of someone who posted a
- * link that had no image at all. So here we remove the field and don't put a
- * marker in its place.
+ * It sweeps the whole vault, not a list of places: a new place with bytes
+ * shows up here without anyone remembering to add it.
  */
-const LINK_KEY = "links"
-
-/** Bytes the card thumbnail is using. Zero if it has none. */
-function thumbnailBytes(item: unknown): number {
-  if (typeof item !== "object" || item === null) return 0
-  const thumbnail = (item as Record<string, unknown>).thumbnail
-  return typeof thumbnail === "string" ? thumbnail.length : 0
-}
-
-function carriesBytes(item: unknown): item is Record<string, unknown> {
-  if (typeof item !== "object" || item === null) return false
-  const record = item as Record<string, unknown>
-  if (record.evicted === true) return false
-  return (
-    (typeof record.inline === "string" && record.inline.length > 0) ||
-    (typeof record.url === "string" && record.url.startsWith("data:"))
-  )
-}
-
-function bytesOf(item: Record<string, unknown>): number {
-  const inline = typeof item.inline === "string" ? item.inline.length : 0
-  const url = typeof item.url === "string" && item.url.startsWith("data:") ? item.url.length : 0
-  return inline + url
-}
-
-/** Media bytes one stored entry is holding. Zero once evicted. */
-export function entryMediaBytes(entry: StoredChatMessage): number {
-  let total = 0
-  for (const key of MEDIA_KEYS) {
-    const list = entry.payload[key]
-    if (!Array.isArray(list)) continue
-    for (const item of list) if (carriesBytes(item)) total += bytesOf(item)
+export function semBytes(contents: VaultContents): string[] {
+  const caminhos: string[] = []
+  const passo = (base: string, chave: string): string =>
+    /^[A-Za-z_$][\w$]*$/.test(chave) ? (base ? `${base}.${chave}` : chave) : `${base}[${JSON.stringify(chave)}]`
+  const visitar = (valor: unknown, caminho: string): void => {
+    if (Array.isArray(valor)) {
+      valor.forEach((item, indice) => visitar(item, `${caminho}[${indice}]`))
+      return
+    }
+    if (typeof valor !== "object" || valor === null) return
+    for (const [chave, membro] of Object.entries(valor)) {
+      const aqui = passo(caminho, chave)
+      if (typeof membro === "string") {
+        if ((CAMPOS_DE_BYTES.has(chave) && membro.length > 0) || (chave === "url" && membro.startsWith("data:"))) caminhos.push(aqui)
+      } else {
+        visitar(membro, aqui)
+      }
+    }
   }
-  const links = entry.payload[LINK_KEY]
-  if (Array.isArray(links)) for (const item of links) total += thumbnailBytes(item)
-  return total
-}
-
-/** Replace an entry's media with markers. The words survive; the bytes do not. */
-export function evictEntryMedia(entry: StoredChatMessage): void {
-  for (const key of MEDIA_KEYS) {
-    const list = entry.payload[key]
-    if (!Array.isArray(list)) continue
-    entry.payload[key] = list.map((item): unknown =>
-      carriesBytes(item)
-        ? ({
-            evicted: true,
-            name: typeof item.name === "string" ? item.name : "",
-            mediaType: typeof item.mediaType === "string" ? item.mediaType : "",
-          } satisfies EvictedMedia)
-        : item,
-    )
-  }
-
-  const links = entry.payload[LINK_KEY]
-  if (!Array.isArray(links)) return
-  // New map instead of deleting from the existing one: what the vault stores
-  // might be the same reference that something else already read, and eviction
-  // must never reach back and mutate it. See `appendHistory`, which clones for
-  // the same reason.
-  entry.payload[LINK_KEY] = links.map((item): unknown => {
-    if (thumbnailBytes(item) === 0) return item
-    const card = { ...(item as Record<string, unknown>) }
-    delete card.thumbnail
-    return card
-  })
+  visitar(contents, "")
+  return caminhos
 }
 
 /**
- * A copy of the payload without media over `limit` characters per item (the
- * cross-device history): large attachments become markers, like in eviction,
- * and large thumbnails are dropped. Small ones stay: they go with the text
- * already, and large ones go later, in the background (`juntarMediaDoIrmao`).
- * Returns whether anything was removed.
- */
-export function semMediaPesada(payload: StoredPayload, limite: number): { payload: StoredPayload; tirou: boolean } {
-  const copia = structuredClone(payload)
-  let tirou = false
-  for (const key of MEDIA_KEYS) {
-    const list = copia[key]
-    if (!Array.isArray(list)) continue
-    copia[key] = list.map((item): unknown => {
-      if (!carriesBytes(item) || bytesOf(item) <= limite) return item
-      tirou = true
-      return {
-        evicted: true,
-        name: typeof item.name === "string" ? item.name : "",
-        mediaType: typeof item.mediaType === "string" ? item.mediaType : "",
-      } satisfies EvictedMedia
-    })
-  }
-  const links = copia[LINK_KEY]
-  if (Array.isArray(links)) {
-    copia[LINK_KEY] = links.map((item): unknown => {
-      if (thumbnailBytes(item) <= limite) return item
-      tirou = true
-      const card = { ...(item as Record<string, unknown>) }
-      delete card.thumbnail
-      return card
-    })
-  }
-  return { payload: copia, tirou }
-}
-
-/**
- * The bytes of a video post, in the vault.
+ * The bytes of a post video, in the vault: LEGACY.
  *
- * Outside entries, in a map by SHA-256: the video attachment in the `post`
- * carries no bytes (see `video.ts` in the protocol), and the same video in two
- * posts is one. `b64` is base64url, like the rest of the vault; `at` is the
- * time it was stored.
+ * Up to version 3 the videos lived in `contents.videos`, in a map by SHA-256.
+ * The migration (`armazem/migracao.ts`) moves them to the store, under the same
+ * `sha`. `b64` is base64url, like the rest of the vault; `at` is when it was
+ * stored.
  */
 export interface VideoGuardado {
   b64: string
   at: number
 }
 
-/** The bytes a stored video takes up in the vault, in characters. */
-function pesoDoVideo(video: VideoGuardado): number {
-  return video.b64.length
-}
+/**
+ * The largest video that still goes into `contents.videos`, in base64
+ * characters. Provisional: `guardarVideo` moves to the store (Task 7), and this
+ * goes with it.
+ */
+export const VIDEO_NO_COFRE_MAX_CARACTERES = 4_000_000
 
 /**
- * Store the bytes of a video, within the media budget.
- *
- * **Counts in the same budget as photos** (`HISTORY_MEDIA_BUDGET_BYTES`)
- * and **evicts first** when the budget overflows: a video weighs what dozens
- * of photos weigh, and evicting it frees more with less loss. From the evicted
- * video everything in the `post` remains: the name, duration, and thumbnail.
- *
- * A video larger than the entire budget does not enter: it would enter and
- * leave in the same write, and cost the write. It stays in the session memory
- * (`VideosDaSessao`). Returns whether it was stored.
+ * Store a video's bytes in `contents.videos` (provisional, until Task 7 moves
+ * it to the store). The vault no longer evicts: a video up to
+ * `VIDEO_NO_COFRE_MAX_CARACTERES` enters; a larger one stays in the session
+ * memory (`VideosDaSessao`). Says whether it was stored.
  */
 export function guardarVideo(contents: VaultContents, sha: string, b64: string, at: number): boolean {
-  if (!videoCabeNoCofre(contents, b64.length)) return false
+  if (b64.length > VIDEO_NO_COFRE_MAX_CARACTERES) return false
   contents.videos = { ...contents.videos, [sha]: { b64, at } }
-  enforceMediaBudget(contents)
-  return contents.videos?.[sha] !== undefined
-}
-
-/**
- * Whether a video of `characters` in base64 fits in the vault alongside photos.
- *
- * Stored videos do not count: they evict first to make room. Photos count: if
- * the video does not fit alongside them, it would enter, evict all old videos,
- * and leave in the same write. Refusing early keeps old videos where they are.
- * Also prevents passing a 25 MB base64 video that will not fit (`videos.ts`).
- */
-export function videoCabeNoCofre(contents: VaultContents, caracteres: number): boolean {
-  if (caracteres > HISTORY_MEDIA_BUDGET_BYTES) return false
-  let fotografias = 0
-  for (const list of [...Object.values(contents.history), ...Object.values(contents.estadoDoCanal ?? {})]) {
-    for (const entry of list) fotografias += entryMediaBytes(entry)
-  }
-  return caracteres + fotografias <= HISTORY_MEDIA_BUDGET_BYTES
+  return true
 }
 
 /** Delete the bytes of a video from the vault (the send was cancelled, or the post deleted). Returns whether they were there. */
 export function apagarVideo(contents: VaultContents, sha: string): boolean {
   if (!contents.videos || !Object.hasOwn(contents.videos, sha)) return false
-  // New map instead of deleting from the existing one, for the same reason as `evictEntryMedia`.
+  // A new map instead of deleting in the existing one: the caller may be holding the old one.
   const ficam = { ...contents.videos }
   delete ficam[sha]
   contents.videos = ficam
@@ -1170,47 +1161,6 @@ export function videoNoCofre(contents: VaultContents, sha: string): string | nul
   const videos = contents.videos
   if (!videos || !Object.hasOwn(videos, sha)) return null
   return videos[sha]?.b64 ?? null
-}
-
-function enforceMediaBudget(contents: VaultContents): void {
-  const carriers: StoredChatMessage[] = []
-  let total = 0
-  // Videos count first and evict first: oldest first.
-  const videos = Object.entries(contents.videos ?? {}).sort(([, a], [, b]) => a.at - b.at)
-  for (const [, video] of videos) total += pesoDoVideo(video)
-  // The two lists: posts with photos live in the state book.
-  for (const list of [...Object.values(contents.history), ...Object.values(contents.estadoDoCanal ?? {})]) {
-    for (const entry of list) {
-      const bytes = entryMediaBytes(entry)
-      if (bytes > 0) {
-        carriers.push(entry)
-        total += bytes
-      }
-    }
-  }
-  if (total <= HISTORY_MEDIA_BUDGET_BYTES) return
-
-  // Videos before photos. New map instead of deleting from the existing one,
-  // for the same reason as `evictEntryMedia`.
-  if (videos.length > 0) {
-    const ficam = { ...contents.videos }
-    for (const [sha, video] of videos) {
-      if (total <= HISTORY_MEDIA_BUDGET_BYTES) break
-      total -= pesoDoVideo(video)
-      delete ficam[sha]
-    }
-    contents.videos = ficam
-    if (total <= HISTORY_MEDIA_BUDGET_BYTES) return
-  }
-
-  // Oldest first, by the sender-claimed timestamp: the newest images are the
-  // ones someone is most likely to still be looking at.
-  carriers.sort((a, b) => a.at - b.at)
-  for (const entry of carriers) {
-    if (total <= HISTORY_MEDIA_BUDGET_BYTES) break
-    total -= entryMediaBytes(entry)
-    evictEntryMedia(entry)
-  }
 }
 
 /**
@@ -1479,50 +1429,16 @@ function apararEstado(contents: VaultContents, channel: string): void {
   list.length = escrita
 }
 
-/** The room of an entry: the `room` tag, or the default room (`""`). */
-function salaDaEntrada(entry: StoredChatMessage): string {
-  const sala = entry.payload["room"]
-  return typeof sala === "string" ? sala : ""
-}
-
 /**
- * Entries in a list that fall OUTSIDE the media window: those not among the
- * `HISTORY_MEDIA_RECENT` most recent messages in their room.
- *
- * **Per room, not by the channel's entire list.** The rooms in a community are
- * tags (`room`) inside a single MLS channel, so they share the channel's two
- * lists. Counted by the list, the window was for all rooms together: 41 messages
- * in the "announcements" room would take the thumbnail of a video said in the
- * "chat" room out of the vault, and it would never come back (owner report on
- * 3/11/2026: "YouTube thumbnails show in private messages but not in community
- * rooms"). A direct is one room only, and stays as it was. The global budget
- * (`HISTORY_MEDIA_BUDGET_BYTES`) stays the limit for everything.
+ * A channel's ceilings: the conversation messages and the ledger. Since
+ * version 3 the vault no longer evicts media: the bytes live in the store,
+ * which has its own ceiling (design §4), and the vault keeps only the
+ * references.
  */
-function foraDaJanelaDeMedia(list: readonly StoredChatMessage[]): Set<StoredChatMessage> {
-  const fora = new Set<StoredChatMessage>()
-  const vistas = new Map<string, number>()
-  for (let index = list.length - 1; index >= 0; index--) {
-    const entry = list[index]
-    if (!entry) continue
-    const sala = salaDaEntrada(entry)
-    const n = (vistas.get(sala) ?? 0) + 1
-    vistas.set(sala, n)
-    if (n > HISTORY_MEDIA_RECENT) fora.add(entry)
-  }
-  return fora
-}
-
 function enforceHistoryLimits(contents: VaultContents, channel: string): void {
   const conversa = contents.history[channel]
   if (conversa) apararConversa(conversa)
   apararEstado(contents, channel)
-  // The media window is by list and by room: the 40 most recent in each room
-  // of the chat and book (the posts) store the bytes.
-  for (const list of [contents.history[channel], contents.estadoDoCanal?.[channel]]) {
-    if (!list) continue
-    for (const entry of foraDaJanelaDeMedia(list)) evictEntryMedia(entry)
-  }
-  enforceMediaBudget(contents)
 }
 
 /** The list this entry lives in: the state book or the chat. */
@@ -1536,44 +1452,45 @@ function listaDe(contents: VaultContents, channel: string, entry: StoredChatMess
 
 /**
  * Append one entry to a channel's history and enforce every limit in the same
- * mutation: the per-channel cap, the per-channel media window, and the global
- * media budget. The entry is cloned on the way in, so later evictions can
+ * mutation: the per-channel cap and the ledger caps (no media eviction since
+ * vault version 3). The entry is cloned on the way in, so later changes can
  * never reach back and mutate a payload the UI is still rendering.
  *
- * **Route to the right list.** State entries go to the state book
- * (`estadoDoCanal`), outside the message cap; conversation entries go to
+ * **It goes to the right list.** What decides state goes to the ledger
+ * (`estadoDoCanal`), outside the message cap; the conversation goes to
  * `history`. See `tipoDoEstado`.
  *
- * **Don't store what's already stored** (S1, §7.4 of the plan). Two keys, and
- * either one is enough:
+ * **What is already stored is not stored again** (S1, §7.4 of the plan). Two
+ * keys, and either one is enough:
  *
- * - the server's `seq`, which is unique in the channel: the same event fetched
- *   twice (live and recovery, or on a `backfillBefore` page);
- * - `tipo|autor|id` (`chaveDoEvento`), for what is resent with a new `seq`:
- *   wall republishes, comment resends, likes, votes and own tickets, outbox.
- *   Without this, each resend would be a new entry, the screen would show
- *   duplicates, and the cap would fill with what was already there. A tombstone
- *   doesn't repeat, and that's how a deleted post came back.
+ * - the server `seq`, which is unique in the channel: the same event recovered
+ *   twice (live and in the recovery, or in a `backfillBefore` page);
+ * - `tipo|autor|id` (`chaveDoEvento`), for what is said again with a new
+ *   `seq`: the wall republication, the resend of own comments, likes, votes and
+ *   tickets, the outbox. Without this, each resend was a new entry, the screen
+ *   showed copies and the cap filled up with what was already there. A
+ *   tombstone is not repeated, and that was how a deleted post came back.
  *
- * By author too, not just by `id`: the `id` comes from the sender, and an `id`
- * repeated by someone else is a different message. Without the author in the
- * key, one member could hide another's message by publishing first with their
- * `id`.
+ * By author too, not only by `id`: the `id` comes from the sender, and an `id`
+ * repeated by another person is another message. Without the author in the
+ * key, a member could hide another's message by posting first with its `id`.
  *
- * What gets lost, stated in full: a republish can bring photos that the stored
- * copy already lost to the media budget, and keeping the stored copy means
- * losing them. See `colapsarCopias` in `dobras.ts`, which picks the copy with
- * media among those in view.
+ * What is lost, said in full: a republication may bring the photos the stored
+ * copy does not have (an `evicted` marker from an old sibling or from a
+ * version 2 vault), and keeping the stored one means going without them. See
+ * `colapsarCopias` in `dobras.ts`, which picks the copy with media among those
+ * in view.
  */
-export function appendHistory(contents: VaultContents, channel: string, entry: StoredChatMessage): void {
+export function appendHistory(contents: VaultContents, channel: string, entry: StoredChatMessage, presente?: Presente): void {
+  const peso: PesoDaCopia = { media: contents.media, presente }
   if (entry.seq >= 0) {
     const ocupada = entradaComSeq(contents, channel, entry.seq)
-    const ocupacao = ocupada ? cederSeqRelatado(ocupada, entry) : "cede"
+    const ocupacao = ocupada ? cederSeqRelatado(ocupada, entry, peso) : "cede"
     if (ocupacao === "confirmou-com-bytes") enforceHistoryLimits(contents, channel)
     if (ocupacao !== "cede") return
   }
   const list = listaDe(contents, channel, entry)
-  const guardada = jaGuardada(list, entry)
+  const guardada = jaGuardada(list, entry, peso)
   if (guardada === "confirmou-com-bytes") enforceHistoryLimits(contents, channel)
   if (guardada !== "nova") return
   list.push({ ...entry, payload: structuredClone(entry.payload) })
@@ -1607,10 +1524,10 @@ function seqGuardado(contents: VaultContents, channel: string, seq: number): boo
  * - The occupant is not reported, or the arrival is also a report: the `seq` is
  *   already taken, as always. Returns `"tomada"`.
  */
-function cederSeqRelatado(ocupada: StoredChatMessage, chega: StoredChatMessage): "cede" | Confirmacao {
+function cederSeqRelatado(ocupada: StoredChatMessage, chega: StoredChatMessage, peso: PesoDaCopia): "cede" | Confirmacao {
   if (!ocupada.relatada || chega.relatada) return "tomada"
   const chave = chaveDoEvento(chega)
-  if (chave !== null && chave === chaveDoEvento(ocupada)) return confirmarRelato(ocupada, chega)
+  if (chave !== null && chave === chaveDoEvento(ocupada)) return confirmarRelato(ocupada, chega, peso)
   const seq = ocupada.seq
   ocupada.seq = -1
   ocupada.apos = seq - 1
@@ -1623,6 +1540,15 @@ function cederSeqRelatado(ocupada: StoredChatMessage, chega: StoredChatMessage):
  * enforce the vault limits again.
  */
 type Confirmacao = "tomada" | "confirmou" | "confirmou-com-bytes"
+
+/** Whether a `sha`'s blob is in this device's store (`armazem.tem`). Absent: every reference counts. */
+export type Presente = (sha: string) => boolean
+
+/** How a copy is weighed (`entryMediaBytes`): the vault references and what the store has (Ruling R15). */
+interface PesoDaCopia {
+  media: VaultContents["media"]
+  presente: Presente | undefined
+}
 
 /**
  * The server confirms a stored report: the event from the same author, same `id`,
@@ -1642,13 +1568,13 @@ type Confirmacao = "tomada" | "confirmou" | "confirmou-com-bytes"
  * Only in confirmation: after it, a republish or a new report find an entry that
  * is no longer reported, and change nothing.
  */
-function confirmarRelato(guardada: StoredChatMessage, chega: StoredChatMessage): Confirmacao {
+function confirmarRelato(guardada: StoredChatMessage, chega: StoredChatMessage, peso: PesoDaCopia): Confirmacao {
   if (!guardada.relatada || chega.relatada || chega.seq < 0) return "tomada"
   guardada.seq = chega.seq
   delete guardada.apos
   delete guardada.relatada
-  if (entryMediaBytes(chega) <= entryMediaBytes(guardada)) return "confirmou"
-  // A new copy, not the same one changed, for the reason in `evictEntryMedia`.
+  if (entryMediaBytes(chega, peso.presente, peso.media) <= entryMediaBytes(guardada, peso.presente, peso.media)) return "confirmou"
+  // A new copy and not the same one changed: whoever read the old payload may be holding it.
   guardada.payload = structuredClone(chega.payload)
   return "confirmou-com-bytes"
 }
@@ -1660,12 +1586,12 @@ function confirmarRelato(guardada: StoredChatMessage, chega: StoredChatMessage):
  * A stored report and the same event arriving from the server: keep the stored
  * one, with the server's `seq` and bytes (`confirmarRelato`).
  */
-function jaGuardada(list: readonly StoredChatMessage[], entry: StoredChatMessage): "nova" | Confirmacao {
+function jaGuardada(list: readonly StoredChatMessage[], entry: StoredChatMessage, peso: PesoDaCopia): "nova" | Confirmacao {
   const chave = chaveDoEvento(entry)
   if (chave === null) return "nova"
   const guardada = list.find((item) => chaveDoEvento(item) === chave)
   if (!guardada) return "nova"
-  return confirmarRelato(guardada, entry)
+  return confirmarRelato(guardada, entry, peso)
 }
 
 /**
@@ -1673,8 +1599,9 @@ function jaGuardada(list: readonly StoredChatMessage[], entry: StoredChatMessage
  * Deduplicated by `seq` and by `chaveDoEvento`, each entry to its own list,
  * then run through the same limits as any append.
  */
-export function mergeOlderHistory(contents: VaultContents, channel: string, older: StoredChatMessage[]): void {
+export function mergeOlderHistory(contents: VaultContents, channel: string, older: StoredChatMessage[], presente?: Presente): void {
   if (older.length === 0) return
+  const peso: PesoDaCopia = { media: contents.media, presente }
   contents.estadoDoCanal ??= {}
   const conversa = contents.history[channel] ?? []
   const estado = contents.estadoDoCanal[channel] ?? []
@@ -1685,7 +1612,7 @@ export function mergeOlderHistory(contents: VaultContents, channel: string, olde
   for (const item of older) {
     const ocupada = item.seq >= 0 ? porSeq.get(item.seq) : undefined
     if (!ocupada) continue
-    const ocupacao = cederSeqRelatado(ocupada, item)
+    const ocupacao = cederSeqRelatado(ocupada, item, peso)
     if (ocupacao === "cede") known.delete(item.seq)
     if (ocupacao === "confirmou-com-bytes") comBytes = true
   }
@@ -1695,11 +1622,11 @@ export function mergeOlderHistory(contents: VaultContents, channel: string, olde
     const doEstado = tipoDoEstado(entry) !== null
     const guardadas = doEstado ? estado : conversa
     const frescas = doEstado ? frescasEstado : frescasConversa
-    // Compared against what is stored and against what this screen already brought:
-    // the screen can have the original and the repost both inside it.
-    const nestas = jaGuardada(guardadas, entry)
+    // Against what is stored AND against what this page already brought: the
+    // page may have both the original and the republication inside.
+    const nestas = jaGuardada(guardadas, entry, peso)
     if (nestas === "confirmou-com-bytes") comBytes = true
-    if (nestas !== "nova" || jaGuardada(frescas, entry) !== "nova") continue
+    if (nestas !== "nova" || jaGuardada(frescas, entry, peso) !== "nova") continue
     known.add(entry.seq)
     frescas.push({ ...entry, payload: structuredClone(entry.payload) })
   }
@@ -1713,27 +1640,27 @@ export function mergeOlderHistory(contents: VaultContents, channel: string, olde
 }
 
 /**
- * Entries that a SIBLING device had in a channel, for this device's vault (the
- * cross-device history, 1.0 "Arca"). Returns how many went in.
+ * Entries a SIBLING device had in a channel, for this one's vault (the history
+ * between devices, 1.0 "Arca"). Returns how many got in.
  *
- * Not `mergeOlderHistory`: that puts a server page ahead of what is stored, and
- * only accepts real `seq` values. A sibling also has what came after this
- * device's position (what this device missed while offline) and account sends
- * that never got an echo (`seq` -1 with `apos`). So here each entry goes to its
- * place by sort key, and entries already here don't change order among
- * themselves.
+ * It is not `mergeOlderHistory`: that one puts a server page in front of what
+ * is stored, and only accepts real `seq` values. A sibling also has what came
+ * after this device's position (what this one missed while disconnected) and
+ * the account's sends that never had an echo (`seq` -1 with `apos`). So here
+ * each entry goes to its place by the order key, and those already here do not
+ * change order among themselves.
  *
- * **No duplicates** (same rule as `appendHistory`): the server `seq`, and
- * `tipo|autor|id` (`chaveDoEvento`). A send with no echo and no `id` has no
- * key, and doesn't go in: without a key, each repeated transfer made a copy.
+ * **No duplicates** (the same rule as `appendHistory`): the server `seq`, and
+ * `tipo|autor|id` (`chaveDoEvento`). An echo-less send without an `id` has no
+ * key at all, and does not enter: without a key, each repeated transfer would
+ * give a copy.
  *
- * **Tombstones stay.** A tombstone (`redact`) comes with the rest of the state
- * book, and folds hide the target, as always. A tombstone this device has and
- * the sibling doesn't hides the original that the sibling sends.
+ * **Tombstones stay.** A tombstone (`redact`) comes with the rest of the
+ * ledger, and the folds hide the target, as always. A tombstone this device
+ * has and the sibling does not hides the original the sibling sends.
  *
- * **The vault cap wins at the end**, like any write (`enforceHistoryLimits`):
- * 400 messages per channel, the state book caps, the window, and the media
- * budget.
+ * **The vault cap rules at the end**, as in any write
+ * (`enforceHistoryLimits`): 400 messages per channel, the ledger caps.
  */
 export function fundirEntradasDoIrmao(contents: VaultContents, channel: string, entradas: readonly StoredChatMessage[]): number {
   contents.estadoDoCanal ??= {}
@@ -1830,9 +1757,21 @@ function intercalarPorOrdem(guardadas: StoredChatMessage[], novas: StoredChatMes
  * there. The text and the rest of the entry stay as they are here. Returns
  * whether anything changed.
  *
- * After, the vault's media budget rules, as in any write.
+ * Desde a versão 3, uma referência (`{ ref }`) cujo blob `presente` diz estar
+ * cá conta como os bytes; uma cujo blob saiu recebe o `inline` do irmão, e quem
+ * chama absorve-o.
  */
-export function juntarMediaDoIrmao(contents: VaultContents, channel: string, chave: string, payload: StoredPayload): boolean {
+export function juntarMediaDoIrmao(
+  contents: VaultContents,
+  channel: string,
+  chave: string,
+  payload: StoredPayload,
+  presente: Presente = () => true,
+): boolean {
+  const refPresente = (valor: unknown): boolean => {
+    const ref = typeof valor === "object" && valor !== null ? (valor as Record<string, unknown>)["ref"] : undefined
+    return typeof ref === "string" && presente(ref)
+  }
   let mudou = false
   for (const list of [contents.history[channel] ?? [], contents.estadoDoCanal?.[channel] ?? []]) {
     const entrada = list.find((item) => chaveDoEvento(item) === chave)
@@ -1844,7 +1783,7 @@ export function juntarMediaDoIrmao(contents: VaultContents, channel: string, cha
       if (!Array.isArray(aqui) || !Array.isArray(la)) continue
       proximo[key] = aqui.map((item: unknown, indice) => {
         const doIrmao: unknown = la[indice]
-        if (carriesBytes(item) || !carriesBytes(doIrmao)) return item
+        if (carriesBytes(item) || refPresente(item) || !carriesBytes(doIrmao)) return item
         const marca = item as Record<string, unknown>
         // Same attachment: same name and same type. Different, and leave it alone.
         if (marca["name"] !== doIrmao["name"] || marca["mediaType"] !== doIrmao["mediaType"]) return item
@@ -1858,13 +1797,14 @@ export function juntarMediaDoIrmao(contents: VaultContents, channel: string, cha
       proximo[LINK_KEY] = cartoesAqui.map((cartao: unknown, indice) => {
         const doIrmao: unknown = cartoesLa[indice]
         if (thumbnailBytes(cartao) > 0 || thumbnailBytes(doIrmao) === 0) return cartao
+        if (typeof cartao === "object" && cartao !== null && refPresente((cartao as Record<string, unknown>)["thumbnail"])) return cartao
         const deLa = doIrmao as Record<string, unknown>
         if (typeof cartao !== "object" || cartao === null || (cartao as Record<string, unknown>)["url"] !== deLa["url"]) return cartao
         mudou = true
         return { ...(cartao as Record<string, unknown>), thumbnail: deLa["thumbnail"] }
       })
     }
-    // A new copy, not the same one changed, for the reason in `evictEntryMedia`.
+    // A new copy and not the same one changed: whoever read the old payload may be holding it.
     if (mudou) entrada.payload = proximo
     break
   }
@@ -1873,17 +1813,22 @@ export function juntarMediaDoIrmao(contents: VaultContents, channel: string, cha
 }
 
 /**
- * If the entry with this key is here without the bytes the sibling has, and fits
- * in the vault's media window (the `HISTORY_MEDIA_RECENT` most recent ones in
- * its room, in its list: `foraDaJanelaDeMedia`). Outside the window, the bytes
- * would enter and leave in the same write: do not request them.
+ * Whether the entry with this key is here with fewer media bytes than the
+ * sibling has (`entryMediaBytes`, in the same unit). Since version 3 there is
+ * no window: the vault no longer evicts, and anything missing can be asked
+ * for.
  */
-export function faltaMediaDaEntrada(contents: VaultContents, channel: string, chave: string, bytesNoIrmao: number): boolean {
+export function faltaMediaDaEntrada(
+  contents: VaultContents,
+  channel: string,
+  chave: string,
+  bytesNoIrmao: number,
+  presente?: Presente,
+): boolean {
   for (const list of [contents.history[channel] ?? [], contents.estadoDoCanal?.[channel] ?? []]) {
     const entrada = list.find((item) => chaveDoEvento(item) === chave)
     if (!entrada) continue
-    if (foraDaJanelaDeMedia(list).has(entrada)) return false
-    return entryMediaBytes(entrada) < bytesNoIrmao
+    return entryMediaBytes(entrada, presente, contents.media) < bytesNoIrmao
   }
   return false
 }
@@ -2246,7 +2191,7 @@ export interface MemoriaDaSessao {
  *
  * `protection` is from THIS vault (read from the plaintext envelope, without
  * decrypting), not from the device: it is what `supportsOsProtection` never said
- * (finding 9 from `docs/PENDENTES.md`). `memoriaDisponivel` and `sessaoMemorizada`
+ * (a known gap). `memoriaDisponivel` and `sessaoMemorizada`
  * only exist when the platform knows how to remember.
  */
 export interface EstadoDoCofre {
@@ -2278,7 +2223,7 @@ interface VaultFile {
  * While the format was only an encrypted blob with all fields inside, the cost of
  * that was small: `#adopt` copies what it does not know and returns it intact at
  * the next save. It stops being small on the day the format changes SHAPE, and
- * that is what is proposed in `docs/PENDENTES.md`, with history leaving the blob
+ * that is the proposal, with history leaving the blob
  * for its own pieces. That day, an old client opening a new vault reads
  * `history: {}`, concludes there is no history, and saves that conclusion over
  * what was there. The whole conversation, erased by an old version that did
@@ -2287,7 +2232,7 @@ interface VaultFile {
  * So: backward it opens (that is what `#adopt` does, and that is the migration
  * that exists); forward it refuses, with a message that says what to do.
  */
-export const VERSAO_DO_COFRE = 2
+export const VERSAO_DO_COFRE = 3
 
 /*
   Version 2 (20/10/2026, phase S2 of absolute sync): the state book
@@ -2298,15 +2243,27 @@ export const VERSAO_DO_COFRE = 2
   friendships and tickets.
 */
 
+/*
+  Version 3 (media out of the vault, design §6): the vault stops carrying media
+  bytes. It carries references (`contents.media[sha]`, with each blob's key),
+  and the bytes live in the device store. The vault stops evicting. A version 2
+  or earlier vault opens, gets `armazem.porMigrar` (set in `#adopt`), and is
+  written as 3 on the next write; the byte migration runs afterwards, outside
+  `#adopt`, because the store is asynchronous. A 1.1.x to 1.3.x bundle refuses
+  a version 3 vault (Erro 105): it would read `{ ref }` where it expected
+  `inline`, and write over it a vault without images.
+*/
+
 /**
  * The version of this file, or the refusal to read it.
  *
- * A vault without the field counts as the initial format: absence is before the
- * mechanism, never after.
+ * A vault without the field counts as the initial format: the absence predates
+ * the mechanism, never the reverse. `maxima` is the version this bundle can
+ * read; only tests change it, to play an old bundle.
  */
-function versaoLegivel(file: VaultFile): number {
+export function versaoLegivel(file: { version?: unknown }, maxima: number = VERSAO_DO_COFRE): number {
   const versao = typeof file.version === "number" ? file.version : 1
-  if (versao > VERSAO_DO_COFRE) {
+  if (versao > maxima) {
     throw new Error("this vault was written by a newer version of the app")
   }
   return versao
@@ -2335,23 +2292,45 @@ const VALORES_BASE64 = (() => {
 
 /** Bytes to base64url without padding. Same as `toBase64` in the protocol. */
 export function bytesParaBase64(bytes: Uint8Array): string {
+  return codificarBase64(bytes, CODIGOS_BASE64, false)
+}
+
+const CODIGOS_BASE64_CLASSICO = Uint8Array.from(
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+  (letra) => letra.charCodeAt(0),
+)
+const ENCHIMENTO = "=".charCodeAt(0)
+
+/**
+ * Bytes to CLASSIC base64, with `+`, `/` and `=` padding: what `FileReader`
+ * and `canvas.toDataURL` write in a data URL. It is the "bytes" shape of a
+ * media reference (`RefDeMedia.f`): `p` + this must give the `inline` the
+ * authorship signed, character by character.
+ */
+export function paraBase64Classico(bytes: Uint8Array): string {
+  return codificarBase64(bytes, CODIGOS_BASE64_CLASSICO, true)
+}
+
+function codificarBase64(bytes: Uint8Array, codigos: Uint8Array, enchimento: boolean): string {
   const inteiros = Math.floor(bytes.length / 3)
   const resto = bytes.length % 3
-  const saida = new Uint8Array(inteiros * 4 + (resto === 0 ? 0 : resto + 1))
+  const cauda = resto === 0 ? 0 : enchimento ? 4 : resto + 1
+  const saida = new Uint8Array(inteiros * 4 + cauda)
   let j = 0
   for (let i = 0; i < inteiros * 3; i += 3) {
     const n = ((bytes[i] as number) << 16) | ((bytes[i + 1] as number) << 8) | (bytes[i + 2] as number)
-    saida[j++] = CODIGOS_BASE64[n >>> 18] as number
-    saida[j++] = CODIGOS_BASE64[(n >>> 12) & 63] as number
-    saida[j++] = CODIGOS_BASE64[(n >>> 6) & 63] as number
-    saida[j++] = CODIGOS_BASE64[n & 63] as number
+    saida[j++] = codigos[n >>> 18] as number
+    saida[j++] = codigos[(n >>> 12) & 63] as number
+    saida[j++] = codigos[(n >>> 6) & 63] as number
+    saida[j++] = codigos[n & 63] as number
   }
   if (resto > 0) {
     const a = bytes[inteiros * 3] as number
     const b = resto === 2 ? (bytes[inteiros * 3 + 1] as number) : 0
-    saida[j++] = CODIGOS_BASE64[a >>> 2] as number
-    saida[j++] = CODIGOS_BASE64[((a & 3) << 4) | (b >>> 4)] as number
-    if (resto === 2) saida[j++] = CODIGOS_BASE64[(b & 15) << 2] as number
+    saida[j++] = codigos[a >>> 2] as number
+    saida[j++] = codigos[((a & 3) << 4) | (b >>> 4)] as number
+    if (resto === 2) saida[j++] = codigos[(b & 15) << 2] as number
+    while (j < saida.length) saida[j++] = ENCHIMENTO
   }
   return new TextDecoder().decode(saida)
 }
@@ -2433,8 +2412,34 @@ interface GravacaoAdiada {
   temporizador: ReturnType<typeof setTimeout>
 }
 
+/**
+ * What `importVault` says after the account is in: how many images from the
+ * container stayed on this device, and how many did not (disk full, a file
+ * that stopped being readable, a damaged blob, or no store). The plain file
+ * gives zero and zero. The missing ones come back from another device
+ * ("Fetch").
+ */
+export interface ResultadoDoImportar {
+  imagens: number
+  emFalta: number
+}
+
+/**
+ * The media store as seen by the vault (design §9): it opens when the vault
+ * opens, locks when the vault locks, and is destroyed with the account. It is
+ * the `ArmazemDeMedia`; the vault only knows these three doors.
+ */
+export interface ArmazemDoCofre {
+  abrir(): Promise<void>
+  trancar(): void
+  destruir(): Promise<void>
+}
+
 export class Vault {
   #backend: VaultBackend
+  #armazem: ArmazemDoCofre | null = null
+  /** The store opening for this vault opening. Null with the vault closed. */
+  #armazemAberto: Promise<void> | null = null
   #key: Uint8Array | null = null
   // Annotated, not inferred: `new Uint8Array(16)` narrows to
   // `Uint8Array<ArrayBuffer>`, which then rejects the decoded salt.
@@ -2460,6 +2465,32 @@ export class Vault {
 
   get supportsOsProtection(): boolean {
     return this.#backend.supportsOsProtection
+  }
+
+  /**
+   * Attach the media store to this vault (the session does it at birth). With
+   * the vault already open, the store opens now. From then on it opens with the
+   * vault, locks with `lock` and is destroyed with `destroy`.
+   */
+  ligarArmazem(armazem: ArmazemDoCofre): void {
+    this.#armazem = armazem
+    this.#armazemAberto = null
+    if (this.unlocked) this.#abrirArmazem()
+  }
+
+  /**
+   * Resolves when this vault opening's store has read the inventory. Before
+   * that the store keeps nothing (`tem` always says no). Never rejects: a store
+   * that does not open leaves the media "on another device", and the vault
+   * goes on.
+   */
+  armazemPronto(): Promise<void> {
+    return this.#armazemAberto ?? Promise.resolve()
+  }
+
+  #abrirArmazem(): void {
+    const armazem = this.#armazem
+    this.#armazemAberto = armazem ? armazem.abrir().catch(() => {}) : null
   }
 
   get unlocked(): boolean {
@@ -2607,7 +2638,11 @@ export class Vault {
   async create(passphrase: string | null, initial = newVaultContents()): Promise<void> {
     await this.#chaveNova(passphrase)
     this.#provisorio = false
+    // A snapshot that still carries media bytes (an old sibling, Ruling
+    // R15): the migration moves them to the store, as in a version 2 vault.
+    if (semBytes(initial).length > 0) initial.armazem = { ...initial.armazem, porMigrar: true }
     this.#contents = initial
+    this.#abrirArmazem()
     try {
       await this.#persist()
       // A new vault has a new key: any memory that was there belonged to another.
@@ -2689,6 +2724,7 @@ export class Vault {
     this.#adoptarChave(nova)
     this.#contents = newVaultContents()
     this.#provisorio = true
+    this.#abrirArmazem()
   }
 
   /** The open vault lives in memory only, and the disk one is something else. */
@@ -2725,9 +2761,9 @@ export class Vault {
     if (!raw) throw new Error("no vault to open")
 
     const file = this.#lerFicheiro(raw)
-    // Before touching the key: a vault of a version this app does not know does
-    // not open, so it is not rewritten with old rules.
-    versaoLegivel(file)
+    // Before touching the key: a vault from a version this app does not know
+    // is not opened, so it is not rewritten with the old rules.
+    const versao = versaoLegivel(file)
     this.#provisorio = false
     this.#protection = file.protection
 
@@ -2754,12 +2790,12 @@ export class Vault {
       throw new Error("wrong passphrase, or the vault is damaged")
     }
 
-    this.#adopt(JSON.parse(new TextDecoder().decode(plaintext)) as Partial<VaultContents>)
+    this.#adopt(JSON.parse(new TextDecoder().decode(plaintext)) as Partial<VaultContents>, versao)
   }
 
   /** Merge decrypted contents over defaults, so a vault written before a
-   * field existed still opens. */
-  #adopt(stored: Partial<VaultContents>): void {
+   * field existed still opens. `versao` is the file's (`versaoLegivel`). */
+  #adopt(stored: Partial<VaultContents>, versao: number): void {
     const defaults = newVaultContents()
     this.#contents = {
       ...defaults,
@@ -2777,6 +2813,7 @@ export class Vault {
       repairAttempts: stored.repairAttempts ?? {},
       publishedProfileAt: stored.publishedProfileAt ?? {},
       ...(stored.profileRepairRound !== undefined ? { profileRepairRound: stored.profileRepairRound } : {}),
+      ...(stored.profileRepairChannels !== undefined ? { profileRepairChannels: stored.profileRepairChannels } : {}),
       ...(stored.sframeReservas !== undefined ? { sframeReservas: stored.sframeReservas } : {}),
       ...(stored.lacunas !== undefined ? { lacunas: stored.lacunas } : {}),
       ...(stored.serverResetAtMinute !== undefined ? { serverResetAtMinute: stored.serverResetAtMinute } : {}),
@@ -2790,6 +2827,11 @@ export class Vault {
     // The migration from version 1 (the state book outside `history`). Idempotent:
     // in a version 2 vault it finds nothing to change.
     migrarParaLivroDeEstado(this.#contents)
+    // Version 3: the media of an older vault are left to migrate to the store
+    // (design §6). The mark goes in the next write, which already goes out as
+    // 3, and only the migration removes it.
+    if (versao < 3) this.#contents.armazem = { ...this.#contents.armazem, porMigrar: true }
+    this.#abrirArmazem()
   }
 
   /**
@@ -2815,7 +2857,7 @@ export class Vault {
     if (!raw) throw new Error("no vault to open")
 
     const file = this.#lerFicheiro(raw)
-    versaoLegivel(file)
+    const versao = versaoLegivel(file)
     if (file.protection !== "passphrase") throw new Error("this vault needs the system keychain")
     this.#provisorio = false
     if (file.salt) this.#salt = fromBase64(file.salt)
@@ -2830,7 +2872,7 @@ export class Vault {
       this.#key = null
       throw new Error("wrong passphrase, or the vault is damaged")
     }
-    this.#adopt(JSON.parse(new TextDecoder().decode(plaintext)) as Partial<VaultContents>)
+    this.#adopt(JSON.parse(new TextDecoder().decode(plaintext)) as Partial<VaultContents>, versao)
   }
 
   /**
@@ -2854,9 +2896,16 @@ export class Vault {
    * what it means: `Session.flush` restores the dirty marks and the next write
    * takes it all. The test that fixes this contract is in `vault.test.ts`, and
    * it exists precisely so the inversion is not done blind again.
-   *
-   * See `docs/PENDENTES.md`, "O cofre: o que se corrigiu e o que se recusou".
    */
+  /**
+   * Called synchronously right before the contents are serialized (a write, an
+   * export), with the live contents. The session uses it to put in what it kept
+   * out of the contents until then because it is expensive to build on every
+   * event: the MLS groups of a deferred write (hotfix 1.3.12, see
+   * `#gruposAdiados` in `session.ts`). It must not await anything.
+   */
+  aoSerializar: ((contents: VaultContents) => void) | null = null
+
   async update(mutate: (contents: VaultContents) => void): Promise<void> {
     if (!this.#key) throw new Error("vault is locked")
     mutate(this.#contents)
@@ -2864,7 +2913,7 @@ export class Vault {
     // already in the content, and this write takes the whole thing.
     const adiada = this.#tirarAdiada()
     try {
-      await this.#persist()
+      await this.#gravarPartilhada()
     } catch (erro) {
       adiada?.rejeitar(erro)
       throw erro
@@ -2893,9 +2942,10 @@ export class Vault {
    * SFrame counters, key packages, unconfirmed commits) still uses `update`, which
    * writes now and carries what is deferred.
    */
-  updateEmBreve(mutate: (contents: VaultContents) => void): Promise<void> {
+  updateEmBreve(mutate: (contents: VaultContents) => void, janelaMs: number = Vault.JANELA_DA_GRAVACAO_MS): Promise<void> {
     if (!this.#key) return Promise.reject(new Error("vault is locked"))
     mutate(this.#contents)
+    // One deferred write at a time: a later caller rides the one already armed, whatever its window.
     if (this.#adiada) return this.#adiada.promessa
     let resolver!: () => void
     let rejeitar!: (erro: unknown) => void
@@ -2903,7 +2953,16 @@ export class Vault {
       resolver = sim
       rejeitar = nao
     })
-    const temporizador = setTimeout(() => void this.gravarAdiada().catch(() => {}), Vault.JANELA_DA_GRAVACAO_MS)
+    const esperadoEm = Date.now() + janelaMs
+    const temporizador = setTimeout(() => {
+      // A hidden page throttles this timer: the diagnostic log counts it (`Session.diagnostico`).
+      const atraso = Date.now() - esperadoEm
+      if (atraso > 1_000) {
+        this.#atrasosDaAdiada.n++
+        this.#atrasosDaAdiada.maiorMs = Math.max(this.#atrasosDaAdiada.maiorMs, atraso)
+      }
+      void this.gravarAdiada().catch(() => {})
+    }, janelaMs)
     this.#adiada = { promessa, resolver, rejeitar, temporizador }
     return promessa
   }
@@ -2921,7 +2980,7 @@ export class Vault {
     const adiada = this.#tirarAdiada()
     if (!adiada) return
     try {
-      await this.#persist()
+      await this.#gravarPartilhada()
     } catch (erro) {
       adiada.rejeitar(erro)
       throw erro
@@ -2939,29 +2998,122 @@ export class Vault {
     return adiada
   }
 
+  /**
+   * The ordinary write: never two at once, and shared by whoever arrives during one.
+   *
+   * Hotfix 1.3.10. Each write holds the whole vault several times in memory (the
+   * JSON, the plaintext bytes, the ciphertext, the base64, the disk's copy), and
+   * the session calls `update` from frames handled in parallel. Twenty at the same
+   * instant were twenty copies of the vault in flight, and a phone browser kills
+   * the page for that ("A problem repeatedly occurred"). So: one write in flight,
+   * and at most one waiting. A caller who arrives while one runs cannot ride it,
+   * because its change came after that snapshot; it rides the waiting one, which
+   * has not started and so takes its change too. It is resolved only when its
+   * change is on the disk, as before.
+   *
+   * Only for `update` and `gravarAdiada`, which write the contents as they are.
+   * The writes that change the key (`create`, `definirPalavraPasse`,
+   * `confirmarProvisorio`) keep their own write and their own undo.
+   */
+  #gravarPartilhada(): Promise<void> {
+    if (this.#escritaEmEspera) return this.#escritaEmEspera.promessa
+    const emVoo = this.#escritaEmVoo
+    if (!emVoo) return this.#arrancarEscrita()
+    let resolver!: () => void
+    let rejeitar!: (erro: unknown) => void
+    const promessa = new Promise<void>((sim, nao) => {
+      resolver = sim
+      rejeitar = nao
+    })
+    this.#escritaEmEspera = { promessa, resolver, rejeitar }
+    void emVoo.catch(() => {}).then(() => this.#soltarEscritaEmEspera())
+    return promessa
+  }
+
+  /**
+   * Start the waiting write now. Called when the one in flight ends, and by
+   * `lock`, so a change already made is not lost because the key went away
+   * while it waited: the snapshot is taken here, with the key still present.
+   */
+  #soltarEscritaEmEspera(): void {
+    const espera = this.#escritaEmEspera
+    if (!espera) return
+    // Cleared BEFORE it starts: whoever arrives from here on changed what this snapshot will not see.
+    this.#escritaEmEspera = null
+    this.#arrancarEscrita().then(espera.resolver, espera.rejeitar)
+  }
+
+  #arrancarEscrita(): Promise<void> {
+    // `#persist` takes its snapshot synchronously, before its first `await`.
+    const escrita = this.#persist()
+    this.#escritaEmVoo = escrita
+    const largar = (): void => {
+      if (this.#escritaEmVoo === escrita) this.#escritaEmVoo = null
+    }
+    escrita.then(largar, largar)
+    return escrita
+  }
+
+  #escritaEmVoo: Promise<void> | null = null
+  #escritaEmEspera: { promessa: Promise<void>; resolver: () => void; rejeitar: (erro: unknown) => void } | null = null
+
   async #persist(): Promise<void> {
     if (!this.#key) throw new Error("vault is locked")
     // Temporary: memory is the vault, and disk holds the old account until
     // `confirmarProvisorio`. See `criarProvisorio`.
     if (this.#provisorio) return
-
     const nonce = crypto.getRandomValues(new Uint8Array(24))
-    const plaintext = new TextEncoder().encode(JSON.stringify(this.#contents))
-    const ciphertext = xchacha20poly1305(this.#key, nonce).encrypt(plaintext)
-
-    const file: VaultFile = {
+    this.aoSerializar?.(this.#contents)
+    /*
+      Synchronous until `backend.write`, on purpose, and it stays so. The tab handoff
+      seals the backend right after `disconnect` starts this write (`pararDeEscrever`
+      in the web bridge), `pagehide` only gets the write if its transaction is born
+      in the handler, and the desktop backend reads the account folder at the call.
+      A write that yielded to the page here broke all three. See the 1.3.12 report.
+    */
+    /*
+      One buffer for the whole file (hotfix 1.3.13, see `seloDoCofre.ts`): the JSON
+      text and that buffer are the only copies of the vault, and the bytes are
+      the ones `comCabecalho(JSON.stringify(file))` gave.
+    */
+    const contents = this.#contents
+    const key = this.#key
+    const inicio: VaultFile = {
       version: VERSAO_DO_COFRE,
       protection: this.#protection,
       nonce: toBase64(nonce),
-      ciphertext: bytesParaBase64(ciphertext),
+      ciphertext: "",
       ...(this.#protection === "passphrase" ? { salt: toBase64(this.#salt) } : {}),
-      ...(this.#protection === "os" && this.#backend.wrapKey
-        ? { wrappedKey: toBase64(await this.#backend.wrapKey(this.#key)) }
-        : {}),
     }
+    const envelope = JSON.stringify(inicio)
+    const embrulha = this.#protection === "os" && this.#backend.wrapKey !== undefined
+    const selo = comecarSelo(() => JSON.stringify(contents), key, nonce, envelope, embrulha ? 0 : comprimentoDoFim(envelope))
+    const final =
+      embrulha && this.#backend.wrapKey
+        ? JSON.stringify({ ...inicio, wrappedKey: toBase64(await this.#backend.wrapKey(key)) } satisfies VaultFile)
+        : envelope
 
-    await this.#backend.write(comCabecalho(JSON.stringify(file)))
+    await this.#backend.write(acabarSelo(selo, final))
+    this.#gravacoes++
   }
+
+  /**
+   * How many times this vault went to disk since it was created in this process.
+   * Mechanics only, for the diagnostic log (`Session.diagnostico`): a burst of
+   * writes on the return to the foreground is a burst of whole-vault encryptions.
+   */
+  get gravacoes(): number {
+    return this.#gravacoes
+  }
+
+  #gravacoes = 0
+
+  /** The deferred writes whose timer fired more than a second late, and the largest delay. */
+  get atrasosDaAdiada(): { n: number; maiorMs: number } {
+    return { ...this.#atrasosDaAdiada }
+  }
+
+  #atrasosDaAdiada = { n: 0, maiorMs: 0 }
 
   /**
    * The account as a file: the encrypted vault, wrapped in a small envelope.
@@ -2973,8 +3125,49 @@ export class Vault {
    * passphrase holds everything, and the UI says so in as many words.
    */
   async exportVault(passphrase?: string): Promise<Uint8Array> {
-    // With an open provisional, the file on disk is the OLD account: exporting it
-    // now would give the wrong account to the caller.
+    return comCabecalho(JSON.stringify(await this.#envelopeDeExportacao(passphrase)))
+  }
+
+  /**
+   * The account file WITH the images (Task 11b, design §9 B): the container
+   * from `armazem/contentor.ts`, with the store blobs as they are. Only the
+   * blobs the vault references go (orphans have no key anywhere).
+   *
+   * The envelope is built now (a missing passphrase throws here, as in
+   * `exportVault`); the blob list only when the first part is asked for. The
+   * blobs go out in parts, one at a time, so the caller writes them wherever
+   * it wants without gathering hundreds of MB in memory. While the parts go
+   * out, the blobs stay pinned: the ceiling does not remove them halfway.
+   */
+  async exportarComImagens(passphrase: string | undefined, armazem: ArmazemDeMedia): Promise<AsyncIterable<Uint8Array>> {
+    const envelope = await this.#envelopeDeExportacao(passphrase)
+    const contents = this.#contents
+    return (async function* partes() {
+      // The list and the pins only now, on the first part asked for: between the
+      // passphrase and this moment the desktop still opens the save dialog, and a
+      // blob that left through the ceiling in that time would break the file (Erro 521).
+      const refs = contents.media ?? {}
+      const shas = armazem.shas().filter((sha) => refs[sha] !== undefined && shaEmBruto(sha) !== null)
+      for (const sha of shas) armazem.fixar(sha)
+      try {
+        yield cabecaDoContentor(JSON.stringify({ ...envelope, mediaCount: shas.length }))
+        for (const sha of shas) {
+          const blob = await armazem.lerEmBruto(sha)
+          // The `mediaCount` has already been written: a blob that disappeared meanwhile does not let the file finish.
+          if (!blob) throw new Error("media store failed")
+          yield cabecaDoRegisto(sha, blob.length)
+          yield blob
+        }
+      } finally {
+        for (const sha of shas) armazem.soltar(sha)
+      }
+    })()
+  }
+
+  /** The account file envelope, the same with and without the images. */
+  async #envelopeDeExportacao(passphrase?: string): Promise<{ format: "enclave-vault"; formatVersion: 1; exportedAt: number; vault: VaultFile }> {
+    // With a provisional open, the file on disk is the OLD account: exporting it
+    // now would give the wrong account to whoever asked for it.
     if (this.#provisorio) throw new Error("vault is locked")
     // The account file leaves the disk: first what is still only in memory.
     await this.gravarAdiada()
@@ -2994,6 +3187,7 @@ export class Vault {
       const salt = crypto.getRandomValues(new Uint8Array(16))
       const key = await this.#derivar(passphrase, salt, KDF)
       const nonce = crypto.getRandomValues(new Uint8Array(24))
+      this.aoSerializar?.(this.#contents)
       const ciphertext = xchacha20poly1305(key, nonce).encrypt(
         new TextEncoder().encode(JSON.stringify(this.#contents)),
       )
@@ -3007,11 +3201,9 @@ export class Vault {
       }
     }
 
-    // The account file has the same header as the vault: that is why 1.0
+    // The account file carries the same header as the vault: that is how 1.0
     // refuses a file exported by 0.9.x without decrypting it.
-    return comCabecalho(
-      JSON.stringify({ format: "enclave-vault", formatVersion: 1, exportedAt: Date.now(), vault: payload }),
-    )
+    return { format: "enclave-vault", formatVersion: 1, exportedAt: Date.now(), vault: payload }
   }
 
   /**
@@ -3020,19 +3212,50 @@ export class Vault {
    * The passphrase is verified by actually decrypting before a single byte is
    * written, so a typo can never destroy the local vault. The caller owns the
    * are-you-sure ceremony; by the time this runs, the decision is made.
+   *
+   * It accepts both files: the plain one (vault only) and the container with
+   * the images (`armazem/contentor.ts`). The container is validated whole
+   * before the passphrase; the blobs are only written after the passphrase
+   * opens the vault and the vault is written, and only those the imported vault
+   * references. Without `armazem`, the container enters with the vault only.
    */
-  async importVault(data: Uint8Array, passphrase: string): Promise<void> {
-    // The header first, before any key. An account file without
-    // it is from 0.9.x: say that and nothing else, without deriving the phrase and without
-    // decrypting (1.0 never reads a beta vault). A file that is not even
-    // an account continues to say what it always said.
-    const json = semCabecalho(data)
-    if (json === null) {
-      if (pareceEnvelopeDeConta(new TextDecoder().decode(data))) {
-        throw new Error("this account file is from the beta")
+  async importVault(
+    data: Uint8Array | FonteDeBytes,
+    passphrase: string,
+    opcoes: { armazem?: ArmazemDeMedia } = {},
+  ): Promise<ResultadoDoImportar> {
+    const fonte = data instanceof Uint8Array ? fonteDeBytes(data) : data
+    let json: string | null = null
+    let registos: RegistoDoContentor[] = []
+    let bytes: Uint8Array | null = null
+    // Everything read before the passphrase fails with the same sentence: the
+    // screen never tells an unreadable file from one that is not an account file.
+    try {
+      if (eContentor(await fonte.ler(0, Math.min(fonte.tamanho, 12)))) {
+        // Validate the whole container (heads and lengths) before any key.
+        ;({ json, registos } = await lerContentor(fonte))
+      } else {
+        // The plain file is small (vault only): it is read whole, as always, up to the ceiling.
+        if (fonte.tamanho > TECTO_DO_FICHEIRO_SIMPLES) throw new Error("this is not an enclave account file")
+        bytes = data instanceof Uint8Array ? data : await fonte.ler(0, fonte.tamanho)
+        json = semCabecalho(bytes)
       }
+    } catch {
       throw new Error("this is not an enclave account file")
     }
+    if (bytes) {
+      // The header first, before any key. An account file without it is from
+      // 0.9.x: say that and nothing else, without deriving the passphrase and
+      // without decrypting (1.0 never reads a beta vault). A file that is not
+      // even an account file still says what it always said.
+      if (json === null) {
+        if (pareceEnvelopeDeConta(new TextDecoder().decode(bytes))) {
+          throw new Error("this account file is from the beta")
+        }
+        throw new Error("this is not an enclave account file")
+      }
+    }
+    if (json === null) throw new Error("this is not an enclave account file")
     let envelope: { format?: string; formatVersion?: number; vault?: VaultFile }
     try {
       envelope = JSON.parse(json) as {
@@ -3076,8 +3299,11 @@ export class Vault {
       passphrase stays the one that opens this vault.
     */
     let selado: VaultFile
+    // The imported vault's references: they say which container blobs get in, and with which class.
+    let refs: Record<string, RefDeMedia> = {}
     try {
       const conteudo = JSON.parse(new TextDecoder().decode(plaintext)) as Partial<VaultContents>
+      refs = conteudo.media ?? {}
       conteudo.assumirPosse = toBase64(crypto.getRandomValues(new Uint8Array(18)))
       const nonce = crypto.getRandomValues(new Uint8Array(24))
       const cifrado = xchacha20poly1305(key, nonce).encrypt(new TextEncoder().encode(JSON.stringify(conteudo)))
@@ -3092,6 +3318,17 @@ export class Vault {
     this.lock()
     await this.#backend.write(comCabecalho(JSON.stringify(selado)))
     await this.#largarMemoria()
+    // From here on the account is in: nothing throws, and what does not stay is counted.
+    const referenciados = registos.filter(({ sha }) => refs[sha] !== undefined)
+    if (!opcoes.armazem) return { imagens: 0, emFalta: referenciados.length }
+    /*
+      The store of the account that was here goes first (1.3.15). The imported vault
+      has no key for any of its blobs, and a sha common to both (a friend's portrait,
+      an image in a shared channel) kept the old account's blob, which the backends
+      never overwrite: the image failed with Erro 522 and "Fetch" never fixed it.
+    */
+    await opcoes.armazem.destruir().catch(() => {})
+    return guardarBlobsImportados(fonte, referenciados, refs, opcoes.armazem)
   }
 
   lock(): void {
@@ -3099,6 +3336,8 @@ export class Vault {
     // server restores (see `updateEmBreve`), and whoever was waiting for it does not
     // hang.
     this.#tirarAdiada()?.resolver()
+    // A write that waited for the one in flight takes its snapshot now, while there is a key.
+    this.#soltarEscritaEmEspera()
     // Overwrite before dropping the reference. JS cannot guarantee the page was
     // not already copied, but leaving a live key in a long-running process is
     // strictly worse than trying.
@@ -3106,6 +3345,9 @@ export class Vault {
     this.#key = null
     this.#contents = newVaultContents()
     this.#provisorio = false
+    // The store forgets the inventory and the keys it had in memory; the blobs stay on disk, unreadable.
+    this.#armazem?.trancar()
+    this.#armazemAberto = null
   }
 
   /** Irreversibly discard the account. There is no server-side copy. */
@@ -3114,6 +3356,8 @@ export class Vault {
     // Memory first: if `clear` fails halfway, no key from a
     // vault that the person asked to delete stays behind.
     await this.#largarMemoria()
+    // The account's media before the vault: without the vault, their keys no longer exist, and the disk is left clean.
+    await this.#armazem?.destruir()
     await this.#backend.clear()
   }
 }
@@ -3132,6 +3376,46 @@ function proteccaoEmClaro(raw: Uint8Array): "os" | "passphrase" | undefined {
   } catch {
     return undefined
   }
+}
+
+/**
+ * The blobs of an imported container, one at a time, into this device's
+ * store. The caller has already filtered those the imported vault references.
+ * A blob that does not open with its reference does not get in. A file read or
+ * a store write that fails stops here (a full disk does not get better, and
+ * neither does a file that stopped being readable): the vault is already
+ * written, and what did not get in is counted in `emFalta`, for the screen to
+ * say. Never throws.
+ */
+async function guardarBlobsImportados(
+  fonte: FonteDeBytes,
+  registos: readonly RegistoDoContentor[],
+  refs: Record<string, RefDeMedia>,
+  armazem: ArmazemDeMedia,
+): Promise<ResultadoDoImportar> {
+  let imagens = 0
+  for (const { sha, inicio, bytes } of registos) {
+    const ref = refs[sha] as RefDeMedia
+    let blob: Uint8Array
+    try {
+      blob = await fonte.ler(inicio, inicio + bytes)
+    } catch {
+      break
+    }
+    if (blob.length !== bytes) break
+    try {
+      decifrarBlob(blob, fromBase64(ref.k), fromBase64(ref.n), sha, ref.c).fill(0)
+    } catch {
+      continue
+    }
+    try {
+      await armazem.guardarEmBruto(sha, blob.slice(), ref.c)
+    } catch {
+      break
+    }
+    imagens++
+  }
+  return { imagens, emFalta: registos.length - imagens }
 }
 
 /** A JSON with the wrapper of an account file, without looking at the vault inside. */
@@ -3385,4 +3669,25 @@ export function adoptarPerfil(contents: VaultContents, perfil: PerfilQueChega): 
     updatedAt: perfil.updatedAt,
   }
   return true
+}
+
+/**
+ * Let the page take a turn: input, a frame, a timer. `scheduler.yield` where it
+ * exists (Chromium), which keeps our place ahead of other queued work; otherwise a
+ * `MessageChannel` message, a real macrotask in every engine and in Node that test
+ * fake timers do not hold (a zero `setTimeout` would wait for the fake clock).
+ * Used by the recovery (`#recuperarUmaVez`), never inside a vault write.
+ */
+export function cederAVez(): Promise<void> {
+  const agendador = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler
+  if (typeof agendador?.yield === "function") return agendador.yield()
+  if (typeof MessageChannel !== "function") return Promise.resolve()
+  return new Promise((resolve) => {
+    const canal = new MessageChannel()
+    canal.port1.onmessage = () => {
+      canal.port1.close()
+      resolve()
+    }
+    canal.port2.postMessage(null)
+  })
 }

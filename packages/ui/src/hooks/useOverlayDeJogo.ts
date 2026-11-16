@@ -27,8 +27,7 @@ import { criarDetectorDeFala, mesmoConjunto } from "../lib/quemFala.js"
  * in a hidden window. Here we measure with `setInterval` at 10 Hz. A page
  * playing sound is not throttled, and in a call with someone speaking there is
  * sound playing; in a silent room Chromium may space the clock to 1 s, and the
- * first ring lights with that delay. This is documented in the report
- * (`docs/planos/overlay-jogo-relatorio.md`).
+ * first ring lights with that delay. This was measured.
  */
 
 const PERIODO_DA_MEDIDA_MS = 100

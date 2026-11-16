@@ -913,6 +913,13 @@ export class Store {
       if (proxima !== undefined && epoch !== proxima) {
         return { ok: false as const, reason: "stale-groupinfo" as const, epoch: proxima }
       }
+      /*
+        A card already waiting describes this same epoch (a stale one is refused
+        above), so another copy changes nothing (12/11/2026). Clients up to 1.3.7
+        all publish after every commit: ~20 writes of 1.1 MB per join into the
+        common room on 10/11. The first one stays.
+      */
+      if (proxima !== undefined && this.hasGroupInfo(channel)) return { ok: true as const }
       this.#db
         .prepare(
           `INSERT INTO group_infos (channel, info, at_minute) VALUES (?, ?, ?)
@@ -1105,7 +1112,7 @@ export class Store {
    * has already removed from the table is still served; one that's in the table
    * and the account doesn't list is not. This is the only reading that's
    * consistent with the client, which checks each package against the manifest
-   * and never against a table it can't see. (Closes C3 in docs/PENDENTES.md.)
+   * and never against a table it can't see.
    *
    * `devices`, if given, restricts to the requested devices, and a request that
    * isn't in the manifest is ignored: the inviter only asks for the devices

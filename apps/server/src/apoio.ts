@@ -36,7 +36,7 @@ import { dirname } from "node:path"
  * last good value, or there is no bar. No disguised retry.
  */
 
-/** The campaign's first goal, in euros (owner's request, 3 November 2026). */
+/** The campaign's first goal, in euros. */
 export const PRIMEIRA_META = 2200
 
 /** The total goal, if the page does not carry one. */

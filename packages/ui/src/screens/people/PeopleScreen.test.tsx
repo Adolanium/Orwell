@@ -262,7 +262,7 @@ describe("PeopleScreen — pedidos de amizade e presença", () => {
   /**
    * The id is not shown, neither in the list nor in requests: you copy it.
    *
-   * Order from the owner on October 27, 2026: "I do not want ids exposed". In a
+   * Ids are not exposed. In a
    * request the address was how you knew who was knocking, and it still is: it
    * is one click away, on the button next to the name.
    */
@@ -360,8 +360,8 @@ describe("PeopleScreen — quem ainda não tem nome", () => {
   const SEM_NOME = "@garbicis-xapsensis-giprete-birmyris:orwell.pt"
 
   /*
-    Until November 4, 2026 this said "No name". It changed by order of the owner:
-    with the wave of Reddit accounts the common channel was a column of identical
+    This used to say "No name". It changed:
+    with a wave of new accounts the common channel was a column of identical
     "No name" entries. Now it is the first word of the address, subtle
     (`PersonName`), and never the full address.
   */
@@ -384,7 +384,7 @@ describe("PeopleScreen — quem ainda não tem nome", () => {
     expect(screen.queryByText(SEM_NOME)).toBeNull()
     expect(screen.queryByText(strings.profile.noName)).toBeNull()
     // The full id is still within reach for anyone who wants it: in the copy button,
-    // next to the name (order from the owner on October 27, 2026).
+    // next to the name.
     expect(screen.getByRole("button", { name: strings.copiarId.de("Garbicis") })).toBeTruthy()
   })
 

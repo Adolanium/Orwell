@@ -73,7 +73,7 @@ const TRAMAS_MAXIMAS = 3_000
  * The two sections it guards run in tens of MILLISECONDS with a healthy queue
  *, measured: 46 ms output with four sends alongside. Five seconds are
  * two orders of magnitude of headroom, which is what a loaded machine needs
- * (see `docs/RETOMAR.md`, where three nearby tests blow timeouts for this reason), and
+ * (three nearby tests blow smaller timeouts for this reason), and
  * still catch a deadlock in five seconds instead of holding the suite
  * until the vitest limit.
  */
@@ -549,8 +549,8 @@ describe("duas coisas ao mesmo tempo no mesmo canal", () => {
  * `set`. Two of these sequences overlapped always give the same thing: whoever
  * writes last wins, and the other's work vanishes without complaint.
  *
- * **What was proven here, different from what was suspected.** It was written
- * in `docs/PENDENTES.md` that the danger of these paths was the sender's ratchet
+ * **What was proven here, different from what was suspected.** It was suspected
+ * that the danger of these paths was the sender's ratchet
  * going backward, and with it the nonce. By measuring, it is not: `#invite`,
  * `#unseat`, `expel` and `#admit` COMMIT, and a commit advances the epoch.
  * The new epoch brings a new secret tree and generations starting from zero,

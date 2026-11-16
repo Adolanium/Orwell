@@ -59,7 +59,7 @@ async function ateAoUltimoPasso(pessoa: ReturnType<typeof userEvent.setup>): Pro
 const caixa = (): HTMLInputElement => screen.getByRole("checkbox", { name: strings.gate.canalOficial }) as HTMLInputElement
 
 describe('Setup: "Entrar no canal Orwell"', () => {
-  it("a omissão é marcada (decisão do dono)", () => {
+  it("a omissão é marcada", () => {
     expect(ENTRAR_NO_CANAL_OFICIAL_POR_OMISSAO).toBe(true)
   })
 

@@ -13,8 +13,7 @@ import { describe, expect, it } from "vitest"
  * distance or less opacity, with `!important` against the universal rule in
  * `base.css` (0.01 ms, a single iteration), like the opening ring.
  *
- * The proof in the three engines, with `document.getAnimations()`, is in
- * `docs/planos/release-1.3.7-prova.md`.
+ * The proof in the three engines, with `document.getAnimations()`, is done in a real browser, outside this file.
  */
 const ler = (relativo: string): string => readFileSync(fileURLToPath(new URL(relativo, import.meta.url)), "utf8")
 const semComentarios = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, "")

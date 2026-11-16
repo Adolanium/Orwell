@@ -556,7 +556,7 @@ function LinhaDeCitacao({
   )
 }
 
-export function Timeline({
+function TimelineInteira({
   channel,
   conversa,
   messages,
@@ -1294,3 +1294,9 @@ export function Timeline({
     </div>
   )
 }
+
+/**
+ * Memoized (1.3.15): a parent render with the same props does not walk the
+ * whole list again. It only pays when the parent hands over stable props.
+ */
+export const Timeline = memo(TimelineInteira)

@@ -859,8 +859,8 @@ describe("Shell — Amigos: conversas na coluna, pedidos na faixa", () => {
   })
 
   /**
-   * The owner's request, word for word: "It should not be possible to make admin
-   * in the private conversation between two users".
+   * The rule: it should not be possible to make admin
+   * in the private conversation between two users.
    *
    * Proven in the shell and not just in the pure function because what matters is what
    * reaches the screen: in a two-person conversation, the menu of whoever is there
@@ -1544,7 +1544,7 @@ describe("Shell — numa conversa directa não há fundador para etiquetar", () 
 
     const lista = await listaDeMembros()
     expect(within(lista).queryByText(strings.roomProperties.roleFounder)).toBeNull()
-    // The address moved below the name (owner's order, October 27, 2026).
+    // The address moved below the name.
     expect(within(lista).queryByText(shortAddress(ME))).toBeNull()
     expect(lista.querySelector(".member-sub")).toBeNull()
   })
@@ -1554,7 +1554,7 @@ describe("Shell — numa conversa directa não há fundador para etiquetar", () 
 
     const lista = await listaDeMembros()
     expect(within(lista).queryByText(strings.roomProperties.roleFounder)).toBeNull()
-    // The address moved below the name (owner's order, October 27, 2026).
+    // The address moved below the name.
     expect(within(lista).queryByText(shortAddress(ME))).toBeNull()
     expect(lista.querySelector(".member-sub")).toBeNull()
   })

@@ -5,7 +5,7 @@ import { payloadSemBytes, prepararItem, type QuemRelata } from "./sincronia/rela
 import type { StoredChatMessage } from "./vault.js"
 
 /**
- * The report built from the vault (`docs/planos/denuncias-design.md`, §5).
+ * The report built from the vault.
  *
  * Pure: receives the channel history and returns what leaves the device. Each item
  * is the ORIGINAL payload, with the author's signature (proof from §7) and without the bytes

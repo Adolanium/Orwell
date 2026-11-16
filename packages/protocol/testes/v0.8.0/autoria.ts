@@ -9,7 +9,7 @@ import { fromBase64, toBase64 } from "../../src/canonical.js"
 
 /**
  * Authorship of an event: the signature of the device that wrote it (phase S4
- * of absolute sync, `docs/planos/2026-10-20-sincronia-absoluta.md`, §4.1).
+ * of absolute sync, §4.1).
  *
  * **The problem.** MLS authenticates the leaf that SENDS. If I relay Ana's
  * comment, it arrives signed by my leaf and gets my name. So until now, only
@@ -46,8 +46,8 @@ import { fromBase64, toBase64 } from "../../src/canonical.js"
  *
  * **What this costs in deniability.** Authorship makes a payload portable
  * proof of who wrote it. MLS was already not deniable (each message carries
- * the leaf's signature), but the proof needed the group context. This is the
- * owner's decision 1 (§12), approved on 20/10/2026: authorship on everything,
+ * the leaf's signature), but the proof needed the group context. This is a
+ * deliberate choice: authorship on everything,
  * messages included.
  */
 

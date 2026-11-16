@@ -6,7 +6,7 @@ import { MotorDeMedia, ORCAMENTO_DA_MUSICA, ORCAMENTO_DO_SOM_DO_ECRA, RecusaDeMe
 /**
  * The MUSIC of a call: an audio producer with source `musica`.
  *
- * Phase 9 of `docs/planos/definicoes-0-9.md`: the DJ talks and plays at the
+ * The DJ talks and plays at the
  * same time. Screen audio was already a second track, but it is only accepted
  * behind the same person's screen video (`ecra-som-sem-imagem`). Music has no
  * image, so it has its own source. These tests fail with the old server: the

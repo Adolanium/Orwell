@@ -29,10 +29,10 @@ import { TextoDeErro } from "../../components/TextoDeErro.js"
  * in Settings, which is where identifiers already lived and where they make
  * sense, next to the time and what happened.
  *
- * ## By sections, from 3/11/2026
+ * ## By sections
  *
- * Request from the owner: properties arranged in tabs or a side column, so they
- * read well (plan `docs/planos/paridade-discord-plano.md` §5.3). On a wide
+ * Properties are arranged in tabs or a side column, so they
+ * read well (§5.3 of the Discord-parity plan). On a wide
  * screen, the sections column stays on the left and content on the right, like
  * Discord settings. On mobile, sections are a row of tabs on top. Sections live
  * in `seccoesDoCanal.ts`.
@@ -69,13 +69,13 @@ export function RoomProperties({
   seccaoDenuncias,
 }: {
   channel: string
-  initial: { name: string; topic?: string | undefined; icon?: string | undefined } | null
-  /** False shows properties read-only. The real save is in the core. */
+  initial: { name: string; topic?: string | undefined; icon?: string | undefined; iconRef?: string | undefined } | null
+  /** False shows the properties read-only. The real guard is in the core. */
   mayEdit?: boolean | undefined
   /** Null means a channel with no owner, and in that case you are offered to take it. */
   founder?: string | null | undefined
   onClaim?: (() => Promise<void>) | undefined
-  onSubmit: (next: { name: string; topic?: string; icon?: string }) => Promise<void>
+  onSubmit: (next: { name: string; topic?: string; icon?: string; iconRef?: string }) => Promise<void>
   onCancel: () => void
   /**
    * What roles this channel declared, and how to create and delete them.
@@ -146,6 +146,12 @@ export function RoomProperties({
   const [name, setName] = useState(initial?.name ?? porOmissao)
   const [topic, setTopic] = useState(initial?.topic ?? "")
   const [icon, setIcon] = useState(initial?.icon)
+  /*
+    The icon in the media store (Task 10): the `icon` above is only the URL to
+    draw. While nobody changes it, saving sends the `iconRef`, and the core
+    reuses the stored attachment. A `blob:` URL is never published.
+  */
+  const [iconRef, setIconRef] = useState(initial?.iconRef)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -200,6 +206,7 @@ export function RoomProperties({
   const aplicarIcone = (file: File, imagem: CompressedImage): void => {
     setError(null)
     setIcon(imagem.dataUrl)
+    setIconRef(undefined)
     setAvisoDoGif(avisoDeAnimacaoPerdida(file, imagem, IMAGE_BUDGETS.icon))
   }
 
@@ -223,7 +230,11 @@ export function RoomProperties({
     }
     setBusy(true)
     setError(null)
-    void onSubmit({ name: limpo, ...(topic.trim() ? { topic: topic.trim() } : {}), ...(icon ? { icon } : {}) })
+    void onSubmit({
+      name: limpo,
+      ...(topic.trim() ? { topic: topic.trim() } : {}),
+      ...(iconRef ? { iconRef } : icon ? { icon } : {}),
+    })
       .catch((cause: Error) => {
         setBusy(false)
         setError(traduzirErro(cause))
@@ -269,6 +280,7 @@ export function RoomProperties({
               type="button"
               onClick={() => {
                 setIcon(undefined)
+                setIconRef(undefined)
                 setAvisoDoGif(null)
               }}
             >

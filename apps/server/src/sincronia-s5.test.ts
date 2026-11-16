@@ -3,10 +3,14 @@ import { appendFileSync } from "node:fs"
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished } from "vitest"
 import {
   ate,
+  ateQue,
   canalComTodos,
   contasDeTeste,
   desligarContas,
+  emparelharAparelho,
   levantarServidor,
+  mediaNoAparelho,
+  recarregar,
   type ContaDeTeste,
   type ServidorDeTeste,
 } from "../testes/cliente-de-teste.js"
@@ -14,7 +18,7 @@ import {
 /**
  * Phase S5 of absolute sync: the snapshot for late arrivals and attachments on
  * request, with three real sessions against a real server
- * (`docs/planos/2026-10-20-sincronia-absoluta.md`, §5 and §8.1).
+ * (§5 and §8.1 of the plan).
  *
  * Each scenario writes a line `MEDIDA-S5` with the time and bytes of the
  * snapshot (§5.5): that is what `scripts/medir-sincronia.mjs` collects.
@@ -319,16 +323,31 @@ describe("S5: os anexos a pedido", () => {
     expect(recusado.ok).toBe(false)
     expect(carla!.session.history(canal).find((e) => e.payload["id"] === id)!.payload["media"]).toMatchObject([{ evicted: true }])
 
-    // The second time, no swap: the bytes arrive, match, and go into the vault.
+    // The second time, no swap: the bytes arrive, match, and go into the store, with the reference in the vault (1.3.15).
     const inicio = Date.now()
     const desfecho = await carla!.session.pedirAnexo(canal, id, 0)
     registar({ cenario: "anexo-a-pedido", ms: Date.now() - inicio, bytes: bruno!.session.estatisticasDaSincronia.bytesDeAnexos })
     expect(desfecho.ok).toBe(true)
     if (desfecho.ok) expect(desfecho.anexo["inline"]).toBe(IMAGEM)
-    await ate(
-      () => (carla!.session.history(canal).find((e) => e.payload["id"] === id)!.payload["media"] as { inline?: string }[])[0]?.inline === IMAGEM,
-      "os bytes no cofre da Carla",
-    )
+    const refDaCarla = (): string | undefined =>
+      (carla!.session.history(canal).find((e) => e.payload["id"] === id)!.payload["media"] as { ref?: string }[])[0]?.ref
+    await ate(() => refDaCarla() !== undefined, "a referência no cofre da Carla")
+    const sha = refDaCarla()!
+    const comoImagem = (b: Uint8Array | null): string | null => (b ? `data:image/png;base64,${Buffer.from(b).toString("base64")}` : null)
+    const naCarla = await mediaNoAparelho(carla!, sha)
+    expect(naCarla.referencia && naCarla.blob).toBe(true)
+    expect(comoImagem(naCarla.bytes)).toBe(IMAGEM)
     expect(bruno!.session.estatisticasDaSincronia.anexosEnviados).toBe(2)
+
+    // After a reload, from the disks; and on Carla's sibling device, by "Fetch" from her.
+    expect(comoImagem(await (await recarregar(carla!)).session.bytesDeMedia(sha))).toBe(IMAGEM)
+    const irmao = await emparelharAparelho(carla!)
+    abertas.push(irmao)
+    await ate(() => corpos(irmao, canal, "com fotografia").length === 1, "a publicação chega ao irmão da Carla", 60_000)
+    if ((await irmao.session.bytesDeMedia(sha)) === null) expect(await irmao.session.trazerMedia({ sha })).toEqual({ ok: true })
+    await ateQue(async () => (await irmao.session.bytesDeMedia(sha)) !== null, "a imagem no armazém do irmão", 30_000)
+    const noIrmao = await mediaNoAparelho(irmao, sha)
+    expect(noIrmao.referencia && noIrmao.blob).toBe(true)
+    expect(comoImagem(noIrmao.bytes)).toBe(IMAGEM)
   }, 180_000)
 })

@@ -1,8 +1,7 @@
 /**
  * The quotes users see are straight ("), never angular (" ").
  *
- * Owner's order on 3 November 2026: "I don't want these quotes, always these
- * """. Applies to pt and en, in the app, on the site and in release notes.
+ * Straight quotes are the rule for what users read. Applies to pt and en, in the app, on the site and in release notes.
  * Code comments and internal docs stay as they are: they are not text users read.
  *
  * This module finds angular quotes only where there is user-facing text: inside

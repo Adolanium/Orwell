@@ -975,7 +975,7 @@ describe("o esquema", () => {
  * Phase M2: `sfu.keyframe`, over the whole wire.
  *
  * The engine already proves the cap and owner (`media.fotograma-chave-pedido.test.ts`).
- * Here we prove the path: the capability in `hello.ok`, the owner's request
+ * Here we prove the path: the capability in `hello.ok`, the owner's keyframe request
  * reaching the engine, and that nothing answers: not to the owner (a request gets no
  * confirmation), and not to whoever uses the transport from another connection
  * (no `sfu.error` either).
@@ -1000,7 +1000,7 @@ describe("o fotograma-chave a pedido (sfu.keyframe)", () => {
     client.close()
   })
 
-  it("o pedido do dono chega ao motor, sem resposta; o de outra ligação não chega a nada", async () => {
+  it("o pedido de quem partilha chega ao motor, sem resposta; o de outra ligação não chega a nada", async () => {
     const motor = enclave.media!
     const dono = await entrar()
     const par = await entrar()

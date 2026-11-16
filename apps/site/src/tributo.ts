@@ -5,8 +5,8 @@
  * `vite.config.ts` replaces the markers `%TRIBUTO%` and `%TRIBUTO_LINHA%` with what
  * these functions return, just as it does with the version.
  *
- * Since November 2, 2026 the credits are a simple list of names, in the owner's order:
- * "the credits are a mix, no need for discrimination". Each name is whatever the person
+ * The credits are a simple list of names, a mix of
+ * people and communities with no distinction between them. Each name is whatever the person
  * or community wants to see written, without saying which is which or where they came from.
  *
  * Names are escaped. They come from a file the owner writes by hand, but a name with `<`

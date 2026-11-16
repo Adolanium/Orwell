@@ -2,7 +2,7 @@ import { temAnfitriaoDeAvisos } from "../../lib/notifications.js"
 import { useEffect, useId, useRef, useState } from "react"
 import { copiarTexto } from "../../lib/copiar.js"
 import { useBridge } from "../../App.js"
-import type { ConnectionState } from "../../bridge.js"
+import type { ConnectionState, FicheiroDeContaExportado } from "../../bridge.js"
 import { Button } from "../../components/Button.js"
 import { ApagarConta } from "../../components/ConfirmarDestruicao.js"
 import { ConnectionBanner } from "../../components/ConnectionBanner.js"
@@ -23,6 +23,7 @@ import { readPrefs, REGRAS_DE_PEDIDOS, usePrefs } from "../../hooks/usePrefs.js"
 import { CopyIcon, SetaParaTrasIcon } from "../../icons.js"
 import { diagnosticsSnapshot, formatDiagnostics } from "../../lib/diagnostics.js"
 import { connectionLabel } from "../../lib/format.js"
+import { formatarBytes } from "../../lib/ficheiros.js"
 import { prefsDeMediaParaONucleo } from "../../lib/mediaPrefs.js"
 import { VERSAO_DA_APP } from "../../lib/versao.js"
 import { SeccaoDeSons } from "../../sons/SeccaoDeSons.js"
@@ -275,8 +276,28 @@ export function SettingsScreen({
   /** Only OS-protected vaults (desktop) need this: the keychain cannot travel. */
   const [exportPassphrase, setExportPassphrase] = useState<string | null>(null)
   /**
-   * Does this device have the account key? `null` while unknown, and on a host
-   * that does not know how to pair: then it shows what has always been shown.
+   * "Include the images" (Task 11b, design §13 C). Unchecked by default: the
+   * file carries only the vault, as always. Checked, it also carries the store,
+   * and the note says how much more (this device's originals and thumbnails).
+   */
+  const [incluirImagens, setIncluirImagens] = useState(false)
+  const [bytesDasImagens, setBytesDasImagens] = useState<number | null>(null)
+  useEffect(() => {
+    if (seccao !== "aparelhos" || !bridge.media) return
+    let vivo = true
+    void bridge.media
+      .estado()
+      .then(({ usados, usadosPelasMinis }) => {
+        if (vivo) setBytesDasImagens(usados + usadosPelasMinis)
+      })
+      .catch(() => {})
+    return () => {
+      vivo = false
+    }
+  }, [bridge, seccao])
+  /**
+   * Does this device have the account key? `null` while it is not known, and on
+   * a host that cannot pair: there, what was always shown is shown.
    */
   const [temChaveDeConta, setTemChaveDeConta] = useState<boolean | null>(null)
   useEffect(() => {
@@ -293,8 +314,13 @@ export function SettingsScreen({
     }
   }, [bridge])
 
-  const download = (data: string): void => {
-    const blob = new Blob([data], { type: "application/json" })
+  const download = (exportado: FicheiroDeContaExportado): void => {
+    // The desktop already wrote it where the person chose; cancelling says nothing.
+    if ("gravado" in exportado) {
+      if (exportado.gravado) toast(strings.settings.exported)
+      return
+    }
+    const blob = "ficheiro" in exportado ? exportado.ficheiro : new Blob([exportado.data], { type: "application/json" })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement("a")
     anchor.href = url
@@ -321,11 +347,11 @@ export function SettingsScreen({
   const exportAccount = (passphrase?: string): void => {
     if (aExportar.current) return
     aExportar.current = true
-    void bridge.vault
-      .export(passphrase)
-      .then(({ data }) => {
+    // Without the checkbox, the usual call: the plain file, with only the vault.
+    void (incluirImagens ? bridge.vault.export(passphrase, { incluirImagens: true }) : bridge.vault.export(passphrase))
+      .then((exportado) => {
         setExportPassphrase(null)
-        download(data)
+        download(exportado)
       })
       .catch((error: Error) => {
         // The desktop keychain cannot travel: ask for a passphrase to re-seal.
@@ -391,7 +417,7 @@ export function SettingsScreen({
                   {strings.settings.editProfile}
                 </Button>
               )}
-              {/* Button only: the id is not shown (owner's decision, October 27, 2026). It
+              {/* Button only: the id is not shown. It
                   remains what you give to anyone who wants to add you. */}
               <Button
                 variant="ghost"
@@ -823,9 +849,22 @@ export function SettingsScreen({
                   <p className="field-note">{strings.settings.exportNeedsAccountKey}</p>
                 </>
               ) : (
-                <Button variant="ghost" onClick={() => exportAccount()}>
-                  {strings.settings.exportAction}
-                </Button>
+                <>
+                  {/* The single checkbox rule (`components.css`): no styling of its own here. */}
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      name="incluir-imagens"
+                      checked={incluirImagens}
+                      onChange={(event) => setIncluirImagens(event.target.checked)}
+                    />
+                    {strings.settings.exportImagens}
+                  </label>
+                  {bytesDasImagens !== null && <p className="field-note">{strings.settings.exportImagensNota(formatarBytes(bytesDasImagens))}</p>}
+                  <Button variant="ghost" onClick={() => exportAccount()}>
+                    {strings.settings.exportAction}
+                  </Button>
+                </>
               )}
               {/* This stays: not an explanation of the button, but the fact that the user
                   has no way to guess it from any label. The phrasing changed the

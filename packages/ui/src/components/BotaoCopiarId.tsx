@@ -7,7 +7,7 @@ import { ToastContext } from "./Toast.js"
 /**
  * The small button that copies a person's id, next to their name.
  *
- * Order from the owner to 27 October 2026: "I don't want ids exposed". The
+ * Ids are not shown on screen. The
  * address (`@palavra-palavra-palavra-palavra:servidor`) came out of the profile text, the person's page, the members
  * panel and settings. It stays what you give someone to be added, and so it doesn't
  * disappear: it's one click away, on this button, and never in sight.

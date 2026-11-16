@@ -10,16 +10,17 @@
  * motion) saw the "Remember session" mark off-center when signing in, after
  * 33c6f526 removed the padding from the boxes. Measured with `caixas-medidas.mjs`:
  *
- *  1. **The grid.** The app stylesheet built on a page with just 64 marked
- *     boxes at fractional positions (0, 1/8, ..., 7/8 of a pixel on both axes).
- *     It catches the rounding: a box can only land on a good position.
+ *  1. **The grid.** The built app stylesheet, on a page with only 64 checked
+ *     boxes at fractional positions (0, 1/8, ..., 7/8 of a pixel on both
+ *     axes). This is what catches the rounding: a single box can happen to
+ *     land on a good position.
  *  2. **The web.** The gate in Chromium: "Remember session" when creating the
- *     account, "Enter the Orwell channel" at the last step, "Remember session"
- *     when signing in (the telemetry screen), and marked boxes from Settings ›
- *     Notifications.
- *  3. **The desktop.** The same gate in the real Electron app (`secretaria.mjs`),
- *     with `force-device-scale-factor`: when creating the account and when
- *     signing in.
+ *     account, "Join the Orwell channel" in the last step, "Remember session"
+ *     when signing in (the report screen), the checked boxes of Settings ›
+ *     Notifications, and "Include the images" in Settings › Devices (Task 11b).
+ *  3. **The desktop.** The same gate in the real Electron app
+ *     (`secretaria.mjs`), with `force-device-scale-factor`: when creating the
+ *     account and when signing in.
  *
  * Passes when the center of the mark is within half a pixel of the center of
  * the box on both axes. Half a pixel is the floor: at 125 % a 17 px CSS box is
@@ -175,6 +176,14 @@ try {
       const rotulo = (await marcadas.nth(i).evaluate((el) => el.closest("label")?.textContent?.trim() ?? "")).slice(0, 40)
       provar(`${onde}: Notificações, «${rotulo}»`, await medirCaixa(page, marcadas.nth(i)))
     }
+
+    // Settings › Devices: "Include the images" (Task 11b). It starts
+    // unchecked; it is checked by hand to measure the mark. Checking exports nothing.
+    await page.getByRole("button", { name: "Aparelhos", exact: true }).first().click()
+    const imagens = page.locator('input[name="incluir-imagens"]')
+    await imagens.waitFor({ timeout: 15_000 })
+    await imagens.setChecked(true)
+    provar(`${onde}: Aparelhos, «Incluir as imagens»`, await medirCaixa(page, imagens))
 
     await page.evaluate(() => sessionStorage.clear())
     await page.reload()

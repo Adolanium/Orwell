@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url"
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js"
 import { argon2id } from "@noble/hashes/argon2.js"
 import { DatabaseSync } from "node:sqlite"
-import { Session, Vault, chaveDoEvento, dobrarConversa, ticketsOf } from "@enclave/client-core"
+import { ArmazemDeMedia, ArmazemEmMemoria, Session, Vault, chaveDoEvento, dobrarConversa, inflarPayload, ticketsOf } from "@enclave/client-core"
 import { moradaDeSala } from "@enclave/protocol"
 import { chromium } from "playwright"
 import { criarConta } from "./conta.mjs"
@@ -228,6 +228,58 @@ async function cofreDe(page, frase) {
 
 
 
+/**
+ * The page's media store (`enclave-media*` in IndexedDB), copied into a store
+ * here in Node. Since media left the vault, the vault holds a `{ ref }` and the
+ * bytes live in the store: the photo is checked by inflating the entry back to
+ * the exact `inline` it was signed with.
+ */
+async function armazemDe(page) {
+  const blobs = await page.evaluate(async () => {
+    const abrir = (nome) =>
+      new Promise((resolve, reject) => {
+        const pedido = indexedDB.open(nome)
+        pedido.onerror = () => reject(pedido.error)
+        pedido.onsuccess = () => resolve(pedido.result)
+      })
+    const tudo = (db, store) =>
+      new Promise((resolve, reject) => {
+        if (!db.objectStoreNames.contains(store)) return resolve([])
+        const tx = db.transaction(store, "readonly")
+        const chaves = tx.objectStore(store).getAllKeys()
+        const valores = tx.objectStore(store).getAll()
+        tx.oncomplete = () => resolve(chaves.result.map((chave, i) => [chave, valores.result[i]]))
+        tx.onerror = () => reject(tx.error)
+      })
+    const saida = []
+    for (const { name } of await indexedDB.databases()) {
+      if (!name?.startsWith("enclave-media")) continue
+      const db = await abrir(name)
+      const indice = new Map(await tudo(db, "indice"))
+      for (const [sha, blob] of await tudo(db, "blobs")) {
+        const meta = indice.get(sha) ?? {}
+        let texto = ""
+        for (const byte of new Uint8Array(blob)) texto += String.fromCharCode(byte)
+        saida.push({ sha, b64: btoa(texto), bytes: meta.b ?? 0, classe: meta.k ?? "original", ultimoUso: meta.u ?? 0 })
+      }
+      db.close()
+    }
+    return saida
+  })
+  const backend = new ArmazemEmMemoria()
+  for (const { sha, b64, bytes, classe, ultimoUso } of blobs) await backend.escrever(sha, Buffer.from(b64, "base64"), { bytes, classe, ultimoUso })
+  const armazem = new ArmazemDeMedia(backend, null)
+  await armazem.abrir()
+  return armazem
+}
+
+/** The `inline` of the first attachment of the entry, with the bytes back from the store. */
+async function inlineDaFoto(page, cofre, entrada) {
+  if (!entrada) return null
+  const payload = await inflarPayload(cofre, entrada.payload, await armazemDe(page))
+  return payload.attachments?.[0]?.inline ?? null
+}
+
 class CofreEmMemoria {
   bytes = null
   supportsOsProtection = false
@@ -346,12 +398,12 @@ try {
     await ate(async () => {
       cofrePc = await cofreDe(pc, FRASE)
       const conversa = corposVistos(cofrePc, dm)
-      const foto = entradas(cofrePc, dm).find((e) => e.payload.body === "a fotografia do rio")
+      const foto = await inlineDaFoto(pc, cofrePc, entradas(cofrePc, dm).find((e) => e.payload.body === "a fotografia do rio"))
       const mural = Object.keys(cofrePc.history ?? {}).concat(Object.keys(cofrePc.estadoDoCanal ?? {})).some((c) => entradas(cofrePc, c).some((e) => e.payload.id === publicacao))
       return (
         conversa.filter((c) => c.startsWith("mensagem ")).length === 30 &&
         !conversa.includes("esta vai ser apagada") &&
-        foto?.payload.attachments?.[0]?.inline === FOTOGRAFIA &&
+        foto === FOTOGRAFIA &&
         mural &&
         entradas(cofrePc, canal).some((e) => e.payload.ticket?.removed === true)
       )
@@ -442,7 +494,8 @@ try {
   const ids = entradas(cofreTel, dm).map((e) => chaveDoEvento(e) ?? `seq:${e.seq}`)
   check("a conversa inteira, sem duplicados", corposVistos(cofreTel, dm).filter((c) => c.startsWith("mensagem ")).length === 30 && new Set(ids).size === ids.length, `${ids.length} entradas`)
   check("a mensagem apagada continua apagada", !corposVistos(cofreTel, dm).includes("esta vai ser apagada"))
-  check("a fotografia, com os bytes", entradas(cofreTel, dm).find((e) => e.payload.body === "a fotografia do rio")?.payload.attachments?.[0]?.inline === FOTOGRAFIA)
+  const fotoTel = entradas(cofreTel, dm).find((e) => e.payload.body === "a fotografia do rio")
+  check("a fotografia, com os bytes (no armazém, pela referência)", (await inlineDaFoto(tel, cofreTel, fotoTel)) === FOTOGRAFIA && fotoTel?.payload.attachments?.[0]?.inline === undefined)
   const canaisTel = [...new Set([...Object.keys(cofreTel.history ?? {}), ...Object.keys(cofreTel.estadoDoCanal ?? {})])]
   check("a publicação do mural do Bruno", canaisTel.some((c) => entradas(cofreTel, c).some((e) => e.payload.id === publicacao)))
   const tickets = ticketsOf([...entradas(cofreTel, canal)].sort((a, b) => a.seq - b.seq), "", () => false, (quem) => quem === bruno.address)

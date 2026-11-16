@@ -4,7 +4,7 @@
  *
  * The card tests run in jsdom, which does not apply stylesheets: they say
  * the mute button and the slider are INSIDE the footer, they do not say if
- * something covers something else. The owner's request came from that: the
+ * something covers something else. The bug came from that: the
  * footer with the track name covered the mute button. This sets up the real
  * `CallChip`, with the real stylesheet, in the room grid (`.call-people`),
  * from the side of the LISTENER (with listener gestures), next to our DJ

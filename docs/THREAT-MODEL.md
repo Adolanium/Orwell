@@ -76,6 +76,7 @@ adds a line here.
 | Invite records, including short codes in the clear | It manages invites | See "Invites" |
 | The app version (`hello.versao`) | Minimum version check | Never written down |
 | IP addresses and connection times; in calls, who is with whom and who speaks | It is a server; the SFU forwards packets | Not logged by default. See "Calls" |
+| **A diagnostic log, when the person sends one** ("Send log" in Help and diagnostics; `POST /_enclave/relato`, `apps/server/src/relato.ts`): the app's event log for that session, the account address, the app version and the second it arrived, in `<data>/relatos/<day>-<address>.txt`, outside `enclave.sqlite` | The operator reads it when the person describes a problem; it saves pasting the log by hand | Sent only on a click, never on its own. The log holds events, not messages and not text the person wrote, and is capped at 64 kB, 10 per hour per address and 30 per hour per IP. **From the 1.3.15 server on, the request is signed** by a device of the account (the signed request below, the same as the report routes), the account must have logged in here, and a revoked device is refused: the address on the file is proven, not claimed. Before that the route was open and the address was what the caller declared. The IP is counted in memory for the cap and never written. Each file is **deleted after 30 days** (`RELATO_DIAS`), by a sweep every six hours |
 
 **It never has:** message text, the author of a stored message, display names,
 avatars, topics, reactions, mentions, read receipts, typing, attachment names or
@@ -305,6 +306,11 @@ founder, through the server, which cannot open it.
   address, device key, time, nonce, route and body, 15-minute window, per-hour
   caps (5 reports per address, 20 per IP). Replies are uniform: `200 {}` after a
   random delay whether or not the person exists or a copy was made.
+- **The diagnostic log route** (`/_enclave/relato`) takes the same signed
+  request from the 1.3.15 server on, with its own caps (10 per hour per
+  address, 30 per IP) and the same nonce store. A body that is not a log is
+  refused before the cap, so it spends no slot. An older app sends the log
+  unsigned and gets `401`, which it shows as "the server did not take the log".
 - **Alerts.** The server sends none. It writes `denuncias/fila.json` with counts,
   reasons and dates, never content, for the operator's tooling.
 
@@ -464,6 +470,24 @@ take the epoch, as above.
 The client accepts a common room only on its own homeserver and only if it is a
 room, not a direct conversation, feed or account channel. A server naming some
 other private room it routes cannot be caught by the client alone.
+
+## The media store on the device's disk (from 1.3.15)
+
+From 1.3.15 images, files and post videos live outside the vault, in a media
+store on each device (IndexedDB `enclave-media` on the web, `<account
+folder>/media/` on the desktop). Each blob is encrypted with XChaCha20-Poly1305
+under its own random key, and the key lives only in the vault. Someone who has
+the disk but not the vault passphrase cannot read any content. What they **can**
+see, which the vault of 1.3.14 kept inside its seal:
+
+| Visible without the vault | Why | What it gives away |
+|---|---|---|
+| **The name of each blob is the SHA-256 of its plaintext** (base64url) | The store is content addressed: the same image is stored once, and the address is checked on arrival | **Confirmation of a known file.** Whoever has a file can hash it and look for that name: they learn whether that exact file is on this device. They learn nothing about files they do not already have |
+| **The index**: each blob's size, class (original or thumbnail) and last use; the ceiling | The ceiling and the least-recently-used eviction run before the vault is open | How many media items there are, how big, which are thumbnails, and when each was last shown |
+
+Planned for 1.3.16 (a store format change): the name on disk becomes an HMAC of
+the `sha` under a secret kept in the vault, so a known file can no longer be
+confirmed; inside the vault the blobs stay addressed by `sha`.
 
 ## Other known limits
 

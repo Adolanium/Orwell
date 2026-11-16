@@ -199,8 +199,8 @@ describe("DenunciarSheet", () => {
     expect(vista.container.querySelector("img")).toBeNull()
   })
 
-  // Said "No name" until November 4, 2026; the fallback became the
-  // address word (owner's order), subtle. With the new sheet the address
+  // The fallback used to say "No name"; it is now the
+  // address word, subtle. With the new sheet the address
   // stays in addresses, never beside or in place of the name.
   it("sem `nomeDe`, cada autor diz a palavra do endereço, discreta, e o endereço fica nos endereços", async () => {
     montar({ semNomeDe: true })

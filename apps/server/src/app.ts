@@ -224,12 +224,13 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
     return resposta.header("cache-control", `public, max-age=${CACHE_DO_JSON_S}`).send(apoio)
   })
 
-  // The app's "Enviar registo" (send log) button (Help and diagnostics): see `relato.ts`.
-  const pararRelatos = registarRelatos(app, config.dataDir)
-
-  // Reports (`denuncia.ts`): files in `<dados>/denuncias/`, outside the
-  // database. One nonce store for the signed requests covers every report route.
+  // One nonce store for the signed requests covers every signed route.
   const nonces = new NoncesVistos()
+
+  // The app's "Enviar registo" (send log) button (Help and diagnostics): see `relato.ts`.
+  const pararRelatos = registarRelatos(app, { dataDir: config.dataDir, store, serverName: config.serverName, nonces })
+
+  // Reports (`denuncia.ts`): files in `<dados>/denuncias/`, outside the database.
   const pararDenuncias = registarDenuncias(app, { store, config, nonces })
 
   // Supersedeen welcomes are dead weight that used to be re-delivered for

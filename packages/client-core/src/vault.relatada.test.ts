@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { appendHistory, entradasDoCanal, mergeOlderHistory, newVaultContents, type StoredChatMessage } from "./vault.js"
+import { ArmazemDeMedia } from "./armazem/armazem.js"
+import { ArmazemEmMemoria } from "./armazem/emMemoria.js"
+import { absorverPayload } from "./armazem/referencias.js"
+import { appendHistory, entradasDoCanal, mergeOlderHistory, newVaultContents, semBytes, type StoredChatMessage } from "./vault.js"
 
 /**
  * The `seq` of a report (phase S4) is stated by the caller and not signed. It
@@ -133,6 +136,20 @@ describe("o relato antes do evento do servidor: a miniatura do servidor fica", (
     appendHistory(c, CANAL, comVideo(-1, false, { relatada: true, apos: 49 }))
     expect(entradasDoCanal(c, CANAL)).toHaveLength(1)
     expect(miniaturas(c)).toEqual([MINIATURA])
+  })
+
+  it("na versão 3: a cópia do servidor com a miniatura já absorvida (uma referência) também confirma e fica", async () => {
+    const armazem = new ArmazemDeMedia(new ArmazemEmMemoria(), null)
+    await armazem.abrir()
+    const c = newVaultContents()
+    appendHistory(c, CANAL, comVideo(50, false, { relatada: true }))
+    const doServidor = comVideo(50, true)
+    appendHistory(c, CANAL, { ...doServidor, payload: absorverPayload(c, doServidor.payload, armazem) })
+    expect(entradasDoCanal(c, CANAL)).toHaveLength(1)
+    const thumbnail = (entradasDoCanal(c, CANAL)[0]!.payload["links"] as { thumbnail?: unknown }[])[0]!.thumbnail as { ref?: string }
+    expect(typeof thumbnail.ref).toBe("string")
+    expect(armazem.tem(thumbnail.ref!)).toBe(true)
+    expect(semBytes(c)).toEqual([])
   })
 
   it("o mesmo id dito por OUTRA pessoa não dá a miniatura dela ao relato", () => {

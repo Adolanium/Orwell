@@ -265,7 +265,7 @@ describe("um amigo fica online", () => {
     expect(mostrados[0]?.notice.body).toBe(strings.notifications.amigoOnline("Ana"))
     expect(mostrados[0]?.notice.icon).toBe(CARA)
     expect(mostrados[0]?.notice.countable).toBe(false)
-    // Closes by itself in 2 s: owner's order, November 2, 2026.
+    // Closes by itself in 2 s.
     expect(mostrados[0]?.notice.expiraEmMs).toBe(2000)
     expect(screen.queryByText(strings.notifications.amigoOnline("Ana"))).toBeNull()
     expect(sonsDoAmigo()).toBe(1)
@@ -356,7 +356,7 @@ describe("os avisos do sistema com a janela à frente", () => {
 })
 
 /*
-  The other friend alerts (owner's request, November 3, 2026): the same
+  The other friend alerts: the same
   card, the same rules. The pure rules are in `lib/avisosDeAmigos.test.ts`.
 */
 

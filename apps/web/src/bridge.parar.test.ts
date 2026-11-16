@@ -30,6 +30,15 @@ vi.mock("@enclave/client-core", () => ({
     disconnect(): void {
       registo.push("disconnect")
     }
+    // The core half: stops writing, seals the media store and disconnects (like the real one).
+    pararDeEscrever(): void {
+      registo.push("selar-armazem")
+      this.disconnect()
+    }
+    drenarArmazem(): Promise<void> {
+      registo.push("drenar-armazem")
+      return Promise.resolve()
+    }
     connect(): Promise<void> {
       registo.push("connect")
       return Promise.resolve()
@@ -39,6 +48,8 @@ vi.mock("@enclave/client-core", () => ({
 }))
 
 vi.mock("@enclave/crypto", () => ({ kindOf: () => "application" }))
+// The media store is born with the bridge; like the vault, without IndexedDB here.
+vi.mock("./armazem-backend.js", () => ({ BrowserArmazemBackend: class {} }))
 vi.mock("./vault-backend.js", () => ({
   BrowserVaultBackend: class {
     selar(): void {
@@ -59,15 +70,16 @@ vi.mock("./vault-backend.js", () => ({
 const { createBrowserBridge } = await import("./bridge.js")
 
 describe("pararDeEscrever", () => {
-  it("desliga, sela, e só resolve quando a última escrita acaba", async () => {
+  it("desliga, sela o cofre e o armazém, e só resolve quando a última escrita acaba", async () => {
     registo.length = 0
     const ponte = createBrowserBridge()
     let resolvido = false
     const parado = ponte.pararDeEscrever().then(() => {
       resolvido = true
     })
-    await Promise.resolve()
-    expect(registo).toEqual(["disconnect", "selar", "a-esperar-escritas"])
+    await vi.waitFor(() => expect(registo).toContain("a-esperar-escritas"))
+    // The second `disconnect` is the one from `Session.pararDeEscrever`: it has nothing left to write.
+    expect(registo).toEqual(["disconnect", "drenar-armazem", "selar", "selar-armazem", "disconnect", "a-esperar-escritas"])
     expect(resolvido).toBe(false)
     terminarEscrita()
     await parado
@@ -78,6 +90,7 @@ describe("pararDeEscrever", () => {
     registo.length = 0
     const ponte = createBrowserBridge()
     const parado = ponte.pararDeEscrever()
+    await vi.waitFor(() => expect(registo).toContain("a-esperar-escritas"))
     terminarEscrita()
     await parado
     registo.length = 0
@@ -93,8 +106,9 @@ describe("pararDeEscrever", () => {
     registo.length = 0
     const ponte = createBrowserBridge()
     const parado = ponte.pararDeEscrever({ gravar: false })
-    await Promise.resolve()
-    expect(registo).toEqual(["selar", "disconnect", "a-esperar-escritas"])
+    await vi.waitFor(() => expect(registo).toContain("a-esperar-escritas"))
+    // Without writing there is no wait for the store queue: the seal comes first, and the `disconnect` is the session's.
+    expect(registo).toEqual(["selar", "selar-armazem", "disconnect", "a-esperar-escritas"])
     terminarEscrita()
     await parado
   })
@@ -103,11 +117,14 @@ describe("pararDeEscrever", () => {
     registo.length = 0
     const ponte = createBrowserBridge()
     const primeira = ponte.pararDeEscrever()
+    await vi.waitFor(() => expect(registo).toContain("a-esperar-escritas"))
     terminarEscrita()
     await primeira
+    const depoisDaPrimeira = [...registo]
     const segunda = ponte.pararDeEscrever()
     terminarEscrita()
     await segunda
-    expect(registo.filter((passo) => passo === "disconnect")).toHaveLength(1)
+    // The second one only waits for the disk: it does not disconnect, drain or seal again.
+    expect(registo.slice(depoisDaPrimeira.length)).toEqual(["a-esperar-escritas", "escritas-acabadas"])
   })
 })

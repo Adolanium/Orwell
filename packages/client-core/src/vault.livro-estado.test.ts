@@ -289,8 +289,8 @@ describe("migração do cofre da versão 1 para a 2", () => {
     expect(vault.contents.estadoDoCanal["!estragado:s"]).toBeUndefined()
   })
 
-  it("lê um cofre antigo sem perder nada: o estado passa para o livro, a conversa fica, e grava-se como 2", async () => {
-    expect(VERSAO_DO_COFRE).toBe(2)
+  it("lê um cofre antigo sem perder nada: o estado passa para o livro, a conversa fica, e grava-se como 3", async () => {
+    expect(VERSAO_DO_COFRE).toBe(3)
     const disco = new Disco()
     await new Vault(disco).create(null)
 
@@ -324,12 +324,13 @@ describe("migração do cofre da versão 1 para a 2", () => {
     // The order read by folds is the same as before migration.
     expect(entradasDoCanal(c, SALA).map((e) => e.payload["id"] ?? e.payload.t)).toEqual(["m1", "p", "c", "m4", "friend.request"])
 
-    // The next write saves version 2, and reopening gives the same thing.
+    // The next write stores version 3 (with the media left to migrate), and reopening gives the same.
     await vault.update(() => {})
     const ficheiro = JSON.parse(semCabecalho(disco.bytes as Uint8Array) as string) as { version: number }
-    expect(ficheiro.version).toBe(2)
+    expect(ficheiro.version).toBe(3)
     const reaberto = new Vault(disco)
     await reaberto.unlock()
+    expect(reaberto.contents.armazem?.porMigrar).toBe(true)
     expect(reaberto.contents.estadoDoCanal).toEqual(c.estadoDoCanal)
     expect(reaberto.contents.history).toEqual(c.history)
   })

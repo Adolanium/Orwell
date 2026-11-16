@@ -448,9 +448,39 @@ describe("a saída por Web Audio", () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(new Set(renderizados).size).toBe(renderizados.length)
     expect(saida.tocar("directa", 0.2)).toBe(true)
+    await new Promise((r) => setTimeout(r, 0))
     saida.tocar("directa", 0.2)
     expect(iniciados).toEqual([buffer, buffer])
     expect(renderizados.filter((t) => t === "directa")).toHaveLength(1)
+  })
+})
+
+describe("a preparação dos sons, ao primeiro gesto", () => {
+  /*
+    The first gesture made 28 audio contexts: the one that plays, and one
+    `OfflineAudioContext` per sound, all 27 rendered at once (~60 MB of the
+    page's physical footprint, 13/11/2026). Now one context: each sound renders
+    the first time it plays.
+  */
+  it("cria um só contexto e não desenha nenhum som antes de tocar", async () => {
+    let contextos = 0
+    const desenhados: TipoDeSom[] = []
+    const contexto = { state: "running", resume: () => {} } as unknown as AudioContext
+    const saida = criarSaidaWebAudio({
+      criarContexto: () => {
+        contextos += 1
+        return contexto
+      },
+      renderizar: async (tipo) => {
+        desenhados.push(tipo)
+        return null
+      },
+    })
+    saida.preparar()
+    saida.preparar()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(contextos).toBe(1)
+    expect(desenhados).toEqual([])
   })
 })
 

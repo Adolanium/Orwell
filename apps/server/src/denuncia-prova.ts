@@ -15,8 +15,7 @@ import type { DenunciaGuardada } from "./denuncia.js"
 import type { Store } from "./store.js"
 
 /**
- * The authenticity proof of each item in a report
- * (`docs/planos/denuncias-design.md`, §7).
+ * The authenticity proof of each item in a report.
  *
  * The reporter hands over other people's text. The server does not read it to judge,
  * but verifies that each item is what the author signed, on the channel the report

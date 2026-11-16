@@ -12,7 +12,7 @@ import { chromium } from "playwright"
 import { APP } from "./ambiente.mjs"
 import { criarContaEEntrar } from "./conta.mjs"
 
-const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "carga-2026"
+const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "carga-orwell-diag-2026"
 const MARCA = Date.now().toString(36)
 
 const ctx = await chromium.launchPersistentContext(`/tmp/orwell-dono/${MARCA}`, {

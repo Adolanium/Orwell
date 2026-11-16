@@ -66,7 +66,7 @@ const ONDE = process.argv.find((a) => a.startsWith("--onde="))?.split("=")[1] ??
  * deploy, which is when fixes are still cheap.
  */
 const URL_BASE = process.argv.find((a) => a.startsWith("--url="))?.split("=")[1] ?? alvoApp(undefined)
-const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "carga-2026"
+const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "carga-orwell-diag-2026"
 const SALA = `carga-${Date.now().toString(36)}`
 
 const ARGS = [

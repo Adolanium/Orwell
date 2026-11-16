@@ -31,8 +31,18 @@ export function chavesDaConta(conta: string): { cofre: string; sessao: string } 
 }
 
 /**
- * IndexedDB failure uses interface key 114, with the browser exception in
- * `cause` for diagnostics.
+ * Each account's media store database (design §4): separate from `enclave`,
+ * so its version does not have to go up (an old open tab would block). The same
+ * rule as `chavesDaConta`: the main one without a suffix, the others with the id.
+ */
+export function nomeDaBaseDeMedia(conta: string): string {
+  if (!idDeContaValido(conta)) throw new Error("there is no such account on this device")
+  return conta === CONTA_PRINCIPAL ? "enclave-media" : `enclave-media:${conta}`
+}
+
+/**
+ * The IndexedDB failure as an interface key (114), with the browser exception
+ * in `cause` for diagnostics.
  *
  * Full quota passes through unchanged: `write` recognizes it by `DOMException`
  * and gives it its own key ("vault storage is full"), which tells the user what
@@ -345,9 +355,17 @@ export class BrowserVaultBackend implements VaultBackend {
   write(bytes: Uint8Array): Promise<void> {
     if (this.#selado) return Promise.reject(new Error(RECUSA_DE_ESCRITA, { cause: { porque: "selado" } }))
     // Store a copy detached from any larger buffer, so IndexedDB does not retain
-    // more of memory than the record itself.
-    const copy = new Uint8Array(bytes.length)
-    copy.set(bytes)
+    // more of memory than the record itself. A view that already IS its whole
+    // buffer (what the vault hands over since 1.3.13, see `seloDoCofre.ts`) goes as
+    // it is: the copy would be one more vault in memory for nothing. The vault
+    // never touches a buffer after handing it to `write`.
+    const inteiro = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer
+    let copy: Uint8Array<ArrayBuffer>
+    if (inteiro) copy = bytes as Uint8Array<ArrayBuffer>
+    else {
+      copy = new Uint8Array(bytes.length)
+      copy.set(bytes)
+    }
     return this.#seguir(
       this.#escreverComFicha(copy.buffer).catch((error: unknown) => {
         /**

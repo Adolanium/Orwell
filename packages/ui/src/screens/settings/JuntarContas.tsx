@@ -17,8 +17,8 @@ import { fraseDoCampo } from "../gate/fraseDoCampo.js"
  * "Merge with other account" (phase 8.2 of 0.9), in Devices, on the device of the
  * additional account.
  *
- * Owner's request (27/10/2026): people create a new account just because they change
- * devices. His order: **merge friends and channels, and merge nothing else; the
+ * People create a new account just because they change
+ * devices. The rule: **merge friends and channels, and merge nothing else; the
  * secondary account is destroyed and hidden from all spaces.** Two keys do not merge into one.
  * This is what happens, in this order:
  *

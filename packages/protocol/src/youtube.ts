@@ -1,7 +1,7 @@
 /**
  * YouTube videos in a post or a message.
  *
- * **There is no embedded player.** Since the owner's request on 2 November 2026, a YouTube
+ * **There is no embedded player.** A YouTube
  * video renders as a thumbnail, and a click opens the video in a new browser tab, or in the
  * system browser in the desktop app. Nothing embeds, and so security policies went back to
  * `frame-src 'none'` and `podeSair` (in `@enclave/client-core`) lost its gate to Google.

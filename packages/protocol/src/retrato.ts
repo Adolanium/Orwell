@@ -2,7 +2,7 @@ import { z } from "zod"
 import { ItemRelatado } from "./autoria.js"
 
 /**
- * The snapshot of the channel in the Welcome (phase 1 of `docs/planos/estado-cifrado-plano.md`).
+ * The snapshot of the channel in the Welcome (phase 1 of the encrypted-state plan).
  *
  * **The problem.** When someone joins a channel they cannot decrypt anything
  * that was said there before (forward secrecy). The name, the rooms, the

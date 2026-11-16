@@ -1,30 +1,36 @@
 import { appendFile, mkdir, readdir, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
-import { parseAddress } from "@enclave/protocol"
+import { CorpoDoRelato, RELATO_MAX_BYTES, ROTA_DO_RELATO } from "@enclave/protocol"
 import type { FastifyInstance } from "fastify"
+import { verificarPedidoAssinado, type NoncesVistos } from "./pedido-assinado.js"
+import type { Store } from "./store.js"
 
 /**
  * "Enviar registo" (send log; Help and diagnostics, phase 4 of the 0.9 settings).
  *
  * The app sends the session's diagnostic log (the same text as "Copiar registo",
- * which holds no messages and no user text) with the address and version. The
- * server keeps it in one file per day and per address, for 30 days, so the
- * server operator can read it when the user describes the problem.
+ * which holds no messages and no user text) with the version. The server keeps
+ * it in one file per day and per address, for 30 days, so the server operator
+ * can read it when the user describes the problem.
  *
  * **The route lives under `/_enclave/`**, not under `/relato` at the root: in
- * production Caddy only passes to the server what is under `/_enclave/*`
- * (`infra/Caddyfile`), and the page CSP already allows `fetch` to the same
- * origin (`connect-src 'self'`). Nothing changes in the infra.
+ * production the reverse proxy only passes to the server what is under
+ * `/_enclave/*`, and the page CSP already allows `fetch` to the same origin
+ * (`connect-src 'self'`).
  *
- * **No authentication, so it has caps.** The address is what the app declares,
- * not proof: it is used to file and to count, not to trust. The
- * caps protect the disk: 64 kB per log, 10 per hour per address, and 30 per
- * hour per IP (the address is chosen by the caller; the IP is not). None of
- * this goes into the access log, which is off.
+ * **Signed request** (`pedido-assinado.ts`, the same as the report routes):
+ * the device of an open session signs it, the chain links the device to the
+ * account, the account must have logged in here before, and a revoked device
+ * is refused. The address written in the file is proven, not claimed. Before
+ * 1.3.15 the route was open; an old app now gets a 401, which it already shows
+ * as "the server did not take the log".
+ *
+ * **Caps** protect the disk: 64 kB per log, 10 per hour per address, and 30 per
+ * hour per IP. The IP is only counted in memory, never written. None of this
+ * goes into the access log.
  */
 
-/** The largest log accepted, in bytes of text. A 200-event log stays well below. */
-export const RELATO_MAX_BYTES = 64 * 1024
+export { RELATO_MAX_BYTES }
 /** How many logs per hour, per address. */
 export const RELATOS_POR_HORA = 10
 /** How many logs per hour, per IP: the cap a declared address cannot get around. */
@@ -34,9 +40,6 @@ export const RELATO_DIAS = 30
 
 const HORA_MS = 3_600_000
 const DIA_MS = 24 * HORA_MS
-
-/** The version as the app writes it (`0.9.2`, `0.9.2-beta.1`). */
-const VERSAO = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-+][0-9A-Za-z.-]{1,24})?$/
 
 /**
  * A sliding one-hour window, per key. In memory: a restart starts the count over, and that is enough.
@@ -86,19 +89,14 @@ export function dataDoFicheiro(agora: Date): string {
   return agora.toISOString().slice(0, 10)
 }
 
-/** What the route accepts, already validated. `null` is a malformed request. */
-export function lerPedidoDeRelato(corpo: unknown): { endereco: string; versao: string; texto: string } | null {
-  if (!corpo || typeof corpo !== "object") return null
-  const { endereco, versao, texto } = corpo as Record<string, unknown>
-  if (typeof endereco !== "string" || endereco.length > 256) return null
-  if (typeof versao !== "string" || !VERSAO.test(versao)) return null
-  if (typeof texto !== "string" || texto.length === 0) return null
-  try {
-    if (parseAddress(endereco).sigil !== "@") return null
-  } catch {
-    return null
-  }
-  return { endereco, versao, texto }
+/**
+ * The `corpo` of the signed request, already validated. `null` is a malformed
+ * body. The 64 kB cap is checked apart, in UTF-8 bytes (`texto.length` counts
+ * UTF-16 units), so an oversized log gets its own answer.
+ */
+export function lerCorpoDoRelato(corpo: unknown): CorpoDoRelato | null {
+  const lido = CorpoDoRelato.safeParse(corpo)
+  return lido.success ? lido.data : null
 }
 
 /** Deletes logs older than `RELATO_DIAS`. A failure on one file does not stop the others. */
@@ -130,31 +128,43 @@ export async function varrerRelatos(pasta: string, agora = Date.now()): Promise<
  * Registers `POST /_enclave/relato` and the daily sweep. Returns a function that
  * stops the sweep (the server's `close` calls it).
  */
-export function registarRelatos(app: FastifyInstance, dataDir: string): () => void {
-  const pasta = join(dataDir, "relatos")
+export function registarRelatos(
+  app: FastifyInstance,
+  deps: { dataDir: string; store: Store; serverName: string; nonces: NoncesVistos },
+): () => void {
+  const pasta = join(deps.dataDir, "relatos")
   const porEndereco = new JanelaDeUmaHora(RELATOS_POR_HORA)
   const porIp = new JanelaDeUmaHora(RELATOS_POR_HORA_POR_IP)
 
   app.post(
-    "/_enclave/relato",
-    // The body is JSON with the text inside: a bit above the 64 kB of text, for
-    // escaped quotes and the rest of the object. The exact cap is below.
-    { bodyLimit: RELATO_MAX_BYTES * 2 },
+    ROTA_DO_RELATO,
+    // The signed envelope wraps JSON with the text inside: well above the 64 kB
+    // of text, for escaped characters and the rest of the object. The exact cap is below.
+    { bodyLimit: RELATO_MAX_BYTES * 8 },
     async (request, reply) => {
-      const pedido = lerPedidoDeRelato(request.body)
-      if (!pedido) return reply.code(400).send({ error: "malformed-report" })
-      if (Buffer.byteLength(pedido.texto, "utf8") > RELATO_MAX_BYTES) {
+      // The body first, so a bad one does not spend a slot of the cap or a nonce.
+      // Tampering with it after signing still fails the signature below.
+      const corpo = lerCorpoDoRelato((request.body as { corpo?: unknown } | null)?.corpo)
+      const verificado = verificarPedidoAssinado(request.body, ROTA_DO_RELATO, {
+        store: deps.store,
+        serverName: deps.serverName,
+        nonces: deps.nonces,
+        // IP first: many accounts on the same machine cannot get around the cap.
+        tecto: (endereco) => corpo !== null && porIp.tentar(request.ip) && porEndereco.tentar(endereco),
+      })
+      if (!verificado.ok) {
+        return reply.code(401).send({ error: verificado.razao === "stale-request" ? "stale-request" : "unauthorized" })
+      }
+      if (!corpo) return reply.code(400).send({ error: "malformed-report" })
+      if (Buffer.byteLength(corpo.texto, "utf8") > RELATO_MAX_BYTES) {
         return reply.code(413).send({ error: "report-too-large" })
       }
-      // IP first: an address made up for each request cannot get around the cap.
-      if (!porIp.tentar(request.ip) || !porEndereco.tentar(pedido.endereco)) {
-        return reply.code(429).send({ error: "too-many-reports" })
-      }
+      if (!verificado.coube) return reply.code(429).send({ error: "too-many-reports" })
       const agora = new Date()
-      const ficheiro = join(pasta, `${dataDoFicheiro(agora)}-${enderecoCurto(pedido.endereco)}.txt`)
-      const cabecalho = `--- ${agora.toISOString()} · ${pedido.endereco} · versão ${pedido.versao}\n`
+      const ficheiro = join(pasta, `${dataDoFicheiro(agora)}-${enderecoCurto(verificado.endereco)}.txt`)
+      const cabecalho = `--- ${agora.toISOString()} · ${verificado.endereco} · versão ${corpo.versao}\n`
       await mkdir(pasta, { recursive: true })
-      await appendFile(ficheiro, `${cabecalho}${pedido.texto}\n\n`, { encoding: "utf8", mode: 0o600 })
+      await appendFile(ficheiro, `${cabecalho}${corpo.texto}\n\n`, { encoding: "utf8", mode: 0o600 })
       return { ok: true }
     },
   )

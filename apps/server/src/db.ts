@@ -425,7 +425,7 @@ export function openDatabase(path: string): DatabaseSync {
  * rewrite the table (SQLite only changes the schema; old rows read NULL), so it
  * runs in milliseconds whatever the pool size, and does not touch the existing
  * rows. Without `PRAGMA user_version` or an ordered list of steps, this is a
- * debt documented in docs/PENDENTES.md: as long as a column can be detected by
+ * known debt: as long as a column can be detected by
  * its absence, it works; the day a step depends on another, it does not.
  *
  * The index comes AFTER the column and outside the big `exec`, because an index

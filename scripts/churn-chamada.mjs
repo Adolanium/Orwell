@@ -41,7 +41,7 @@ import { APP, SERVIDOR as SERVIDOR_OMISSAO } from "./ambiente.mjs"
 import { criarContaEEntrar } from "./conta.mjs"
 
 /**
- * Eight by default, by order of the owner.
+ * Eight by default.
  *
  * Three was the number from the report and the minimum that tells "these two don't
  * see each other" from "nobody sees anybody". Eight is the ceiling the mesh has
@@ -101,7 +101,7 @@ const MODO = process.argv.find((a) => a.startsWith("--modo="))?.split("=")[1] ??
  * minutes of wait per bot and the wrong conclusion that the product was broken.
  */
 const SALA = process.argv.find((a) => a.startsWith("--sala="))?.split("=")[1] ?? "propria"
-const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "churn-2026"
+const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "churn-orwell-diag-2026"
 const CORRIDA = `churn-${Date.now().toString(36)}`
 /** The own channel, when `--sala=propria`. Unique per run. */
 const NOME_CANAL = `churn-${CORRIDA.slice(-6)}`

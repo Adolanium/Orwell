@@ -425,8 +425,8 @@ export const SONS: Record<TipoDeSom, DescricaoDeSom> = {
 /* -------------------------------------------------------------- the timbre */
 
 /*
-  The marimba (3/11/2026, owner's request: more inspired by MSN). The numbers are
-  from the rehearsal the owner heard and chose, and the engine plays them exactly.
+  The marimba, inspired by MSN. The numbers are
+  from the chosen rehearsal, and the engine plays them exactly.
 */
 
 /**

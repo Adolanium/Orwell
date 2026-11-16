@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { EnclaveBridge } from "../bridge.js"
+import { cacheDeMedia } from "../lib/cacheDeMedia.js"
 import type { ChatMessage } from "../types.js"
 
 /** The separator key for the channel list: NUL, which no address has. */
@@ -9,7 +10,16 @@ const SEPARADOR = "\u0000"
 export interface SpaceMeta {
   name: string
   topic?: string
+  /** What is drawn: the data URL, or the URL of the store thumbnail. Only a data URL is published. */
   icon?: string
+  /**
+   * The icon in the media store (Task 10): the `sha` of the reference. Saving
+   * the properties without changing the icon sends this back (`setMeta`), and
+   * the core reuses the stored attachment. An `icon` resolved from here is
+   * never published.
+   */
+  iconRef?: string
+  iconMini?: string
   updatedAt?: number
 }
 
@@ -92,7 +102,46 @@ export function useSpaceMeta(
     return mapa
   }, [doCofre, messages])
 
-  return { spaceMeta, refresh }
+  // The icons by reference: through the thumbnail, once per `sha`, through the media cache.
+  const [icones, setIcones] = useState<ReadonlyMap<string, string>>(new Map())
+  // Goes up when the core says one of these arrived: ask again (a null does not stay in the cache).
+  const [volta, setVolta] = useState(0)
+  const shas = useMemo(() => {
+    const lista = new Set<string>()
+    for (const meta of spaceMeta.values()) if (!meta.icon && meta.iconRef) lista.add(meta.iconMini ?? meta.iconRef)
+    return [...lista].sort().join(" ")
+  }, [spaceMeta])
+  useEffect(() => {
+    const media = ponte.current.media
+    if (!media || !shas) return
+    let vivo = true
+    const lista = shas.split(" ")
+    for (const sha of lista) {
+      cacheDeMedia.prender(sha)
+      void cacheDeMedia.obter(sha, "", (s) => media.bytes(s)).then((url) => {
+        if (vivo && url) setIcones((antes) => (antes.get(sha) === url ? antes : new Map(antes).set(sha, url)))
+      })
+    }
+    const largar = ponte.current.on?.media?.((evento) => {
+      if ((evento.estado === "chegou" || evento.estado === "guardado") && lista.includes(evento.sha)) setVolta((n) => n + 1)
+    })
+    return () => {
+      vivo = false
+      largar?.()
+      for (const sha of lista) cacheDeMedia.soltar(sha)
+    }
+  }, [shas, volta])
+  const comIcones = useMemo(() => {
+    if (icones.size === 0) return spaceMeta
+    const mapa = new Map(spaceMeta)
+    for (const [canal, meta] of spaceMeta) {
+      const url = !meta.icon && meta.iconRef ? icones.get(meta.iconMini ?? meta.iconRef) : undefined
+      if (url) mapa.set(canal, { ...meta, icon: url })
+    }
+    return mapa
+  }, [spaceMeta, icones])
+
+  return { spaceMeta: comIcones, refresh }
 }
 
 /** Two view maps with the same content? See `refresh`. */
@@ -100,7 +149,7 @@ function mesmoConteudo(a: Map<string, SpaceMeta>, b: Map<string, SpaceMeta>): bo
   if (a.size !== b.size) return false
   for (const [channel, meta] of a) {
     const outro = b.get(channel)
-    if (!outro || outro.name !== meta.name || outro.topic !== meta.topic || outro.icon !== meta.icon) return false
+    if (!outro || outro.name !== meta.name || outro.topic !== meta.topic || outro.icon !== meta.icon || outro.iconRef !== meta.iconRef) return false
   }
   return true
 }

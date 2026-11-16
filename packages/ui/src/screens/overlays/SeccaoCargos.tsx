@@ -5,8 +5,8 @@ import { type MembroDoCanal, RoleEditor } from "../chat/RoleEditor.js"
 /**
  * What the "Roles" section of channel properties receives.
  *
- * This is the section boundary (3/11/2026): item #7 of the parity plan
- * (`docs/planos/paridade-discord-plano.md` §4, the roles and permissions model)
+ * This is the section boundary: item #7 of the parity plan
+ * (§4, the roles and permissions model)
  * will swap or extend this tab's content. Whoever changes it gets these
  * properties and nothing else, and the panel does not know what is inside.
  */

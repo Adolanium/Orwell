@@ -164,7 +164,7 @@ describe("Carrossel", () => {
     // was worse than no button. It is the same rule as the feed grid.
     render(<Carrossel media={[{ evicted: true, name: "praia.png", mediaType: "image/png" }]} onOpen={vi.fn()} />)
 
-    expect(screen.getByText(strings.common.mediaEvicted)).toBeTruthy()
+    expect(screen.getByText(strings.media.noutroAparelho)).toBeTruthy()
     expect(document.querySelector(".carrossel-palco img")).toBeNull()
     expect(document.querySelector(".image-open")).toBeNull()
   })

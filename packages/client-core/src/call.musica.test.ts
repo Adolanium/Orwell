@@ -8,7 +8,7 @@ import { MotorSfu, type ConsumidorDeMedia, type DispositivoDeMedia, type Produto
  * MUSIC in the call: the producer is born and dies, independent of the
  * microphone.
  *
- * Phase 9 of `docs/planos/definicoes-0-9.md`. Two halves, like screen audio:
+ * Two halves, like screen audio:
  * on SFU it's its own producer, source `musica`, stereo Opus; on the mesh it's
  * an extra audio m-line, reserved in the first offer between two clients who
  * said `musica`. The mesh doubles mimic Chromium in the two rules that decide

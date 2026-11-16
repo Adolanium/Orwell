@@ -12,8 +12,7 @@ import { normalizar } from "./sincronia/relato.js"
 import type { DenunciaRecebida, ItemDaDenunciaRecebida, VaultContents } from "./vault.js"
 
 /**
- * A copy opened by the founder, stored as it is kept in the vault
- * (`docs/planos/denuncias-design.md`, §5 to §7).
+ * A copy opened by the founder, stored as it is kept in the vault.
  *
  * The reporter builds the copy, and can lie. So the founder
  * verifies each item again, like the server: the author's signature on the

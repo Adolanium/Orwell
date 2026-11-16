@@ -12,10 +12,10 @@
  * by default. At 390 px the browser presents as an iPhone. Measures what can be
  * measured without eyes: nothing exceeds window width, console is clean,
  * `<html lang>` matches the language and the "EN · PT" selector is visible in
- * the footer, not the top (since 3 November 2026, owner request).
+ * the footer, not the top.
  *
  * `vite preview` does not perform Caddyfile redirects: those are tested
- * with Caddy (see `docs/planos/site-ingles-relatorio.md`).
+ * with Caddy.
  */
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"

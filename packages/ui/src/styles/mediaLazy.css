@@ -1,0 +1,92 @@
+/*
+  The media out of the vault (Task 10, design §8): `MediaLazy`.
+
+  The reserved box is an empty canvas with the reference `width` and `height`:
+  it takes the image's exact place before there are bytes, with the same rules
+  as the `<img>` (the conversation max height, the wall crop). The thumbnail
+  appears first, blurred while the original loads. With reduced motion: no
+  transition and no blur; the sharp thumbnail, and then the original. Nothing
+  stays stuck halfway.
+*/
+.media-lazy {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.media-lazy > img,
+.media-lazy > .media-caixa {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-caixa {
+  background: rgb(255 255 255 / 0.03);
+}
+
+.message-media .post-images .media-caixa {
+  max-height: var(--altura-maxima-da-imagem);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .media-lazy.media-transicao > img {
+    transition: filter 0.2s ease-out;
+  }
+
+  .media-lazy.media-transicao.a-carregar > img {
+    filter: blur(8px);
+  }
+}
+
+/* "Fetch": a small button over the thumbnail, in the bottom corner. */
+.media-trazer {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
+  max-width: calc(100% - 2 * var(--space-2));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+/* Without a thumbnail (the old-device sentence), and in a file row: in the flow, below or beside. */
+.media-evicted + .media-trazer,
+.file-attachment .media-trazer {
+  position: static;
+  max-width: none;
+  margin-top: var(--space-1);
+  align-items: center;
+}
+
+.file-attachment .media-trazer {
+  margin-top: 0;
+  flex-direction: row;
+}
+
+.media-trazer-botao,
+.media-trazer-frase {
+  font: inherit;
+  font-size: var(--font-xs);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: rgb(0 0 0 / 0.65);
+  color: var(--text);
+}
+
+.media-trazer-botao {
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.media-trazer-botao:disabled {
+  cursor: progress;
+}
+
+.media-trazer-frase {
+  text-align: right;
+}

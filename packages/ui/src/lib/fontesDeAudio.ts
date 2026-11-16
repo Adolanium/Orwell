@@ -1,7 +1,7 @@
 /**
  * Audio source options, and what THIS host can supply from each.
  *
- * Phase 9 table from `docs/planos/definicoes-0-9.md`, written as code:
+ * The phase 9 table, written as code:
  *
  * | Source | Web | Desktop app |
  * |---|---|---|

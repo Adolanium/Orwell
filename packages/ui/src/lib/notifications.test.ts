@@ -122,7 +122,7 @@ describe("systemNoticeVerdictOf", () => {
   })
 
   /*
-    Owner's request (November 2, 2026, item 6): the system alert also shows when
+    The system alert also shows when
     the window is in front. Only the alert from the open conversation that is being
     read gets muted: it is already on screen.
   */

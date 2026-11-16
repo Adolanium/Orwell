@@ -31,8 +31,7 @@
  * `-webkit-touch-callout: none` in `screens.css` exists to silence) does not
  * appear here, nor do the compatibility mouse events at real WebKit timings. The
  * virtual keyboard also does not exist: we measure the mechanics that receive it,
- * pushing `--teclado` by hand. These three only show up on device, and are noted
- * in `docs/PENDENTES.md`.
+ * pushing `--teclado` by hand. These three only show up on device.
  *
  * The account and channels are set up with the window WIDE, where the sidebar is
  * a column not a drawer, what we want to measure is the drawer working, not a

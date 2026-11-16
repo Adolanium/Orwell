@@ -111,16 +111,13 @@
 	# `/app/c` and `/app/a`. The fragment never reaches the server, and the browser
 	# preserves it across the redirect (RFC 9110, 10.2.2): the code and id stay out
 	# of this access log. 302, not 301, so no browser stores the destination forever
-	# if it changes one day. See docs/planos/moradas-opacas-e-corte.md section 1.6
-	# and arca-fatia-4-servidor-relatorio.md section 5.
+	# if it changes one day.
 	@curta path /c /c/
 	redir @curta /app/c 302
 	@amigo path /a /a/
 	redir @amigo /app/a 302
 
-	# The site in two languages, since 3 November 2026: English at the root and
-	# Portuguese at /pt/ (owner's order: "I want the site in English first, pt
-	# second"). See docs/planos/site-ingles-relatorio.md.
+	# The site in two languages: English at the root and Portuguese at /pt/.
 	#
 	# The old Portuguese names lived at the root and there are shared links to them.
 	# They 301 to the same page at /pt/: the destination won't change again, and

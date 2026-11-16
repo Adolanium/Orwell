@@ -46,16 +46,6 @@ export const pt = {
     /** An old host that does not bring the gesture it was asked for. */
     unsupported: "esta versão da app ainda não faz isso",
     cancel: "Cancelar",
-    mediaEvicted: "imagem já não está neste aparelho",
-    /**
-     * The same, for an attachment that is not an image.
-     *
-     * Its own sentence and not the one above: calling a PDF that was evicted an
-     * "imagem" would be lying about what was there. The name and the type
-     * survive the eviction (see `evictEntryMedia` in the vault), so the line
-     * still says what it was.
-     */
-    fileEvicted: "ficheiro já não está neste aparelho",
     connectionOnline: "ligado",
     connectionConnecting: "a ligar…",
     connectionReconnecting: "a reconectar…",
@@ -113,6 +103,22 @@ export const pt = {
      * this needs to know there is a gesture waiting there.
      */
     spoilerShow: "Mostrar texto escondido",
+  },
+
+  /*
+    The media out of the vault (Task 10, design §8). The sentence "image is no
+    longer on this device" was removed: an image by reference always has the
+    thumbnail, and the original comes back with "Fetch". The two "stored on
+    another device" sentences stay for what has no thumbnail (a marker from an
+    old device). A sentence of its own for the file: calling a PDF an "image"
+    would lie about what was there.
+  */
+  media: {
+    noutroAparelho: "Imagem guardada noutro aparelho.",
+    ficheiroNoutroAparelho: "Ficheiro guardado noutro aparelho.",
+    trazer: "Trazer",
+    aTrazer: "A trazer...",
+    ninguemTem: "Nenhum aparelho da conta nem membro ligado tem a imagem. Tenta mais tarde.",
   },
 
   connection: {
@@ -259,11 +265,10 @@ export const pt = {
     askName: "Como queres mostrar o teu nome?",
     askNameLead: "É assim que apareces a quem fala contigo. Podes mudar o nome mais tarde.",
     /*
-      The profile image, right after the name (owner's request, 27 October
-      2026), in the same question tone as the other pages. «Saltar» has the
+      The profile image, right after the name, in the same question tone as the other pages. «Saltar» has the
       same weight as going forward: the account does not need a face, and
       without an image the name's initial stays. «Imagem de perfil» and not
-      «fotografia», by the owner's order: it can be a drawing or a GIF, and
+      «fotografia», because it can be a drawing or a GIF, and
       «fotografia» promised a face.
     */
     askPhoto: "Queres pôr uma imagem de perfil?",
@@ -306,6 +311,11 @@ export const pt = {
       perfil: "Perfil",
     } as Record<"cofre" | "identidade" | "ligacao" | "perfil", string>,
     importLead: "Tens o ficheiro da conta (.enclave)? Importa-o aqui.",
+    /* Fix 11b: the account got in, but not all the images in the file stayed on this device (disk full, a file that stopped being readable). */
+    importImagensEmFalta: (n: number): string =>
+      n === 1
+        ? "A conta entrou. 1 imagem não ficou neste aparelho. Pode trazê-la de outro aparelho."
+        : `A conta entrou. ${n} imagens não ficaram neste aparelho. Pode trazê-las de outro aparelho.`,
     importPick: "Importar conta",
     importPassLabel: "Palavra-passe do ficheiro",
     importing: "A importar…",
@@ -345,8 +355,8 @@ export const pt = {
     memorizarNotaIos: "No iPhone, sete dias sem abrir o Orwell podem apagar a sessão e a conta deste aparelho.",
     memorizarFalhou: "Entraste, mas não foi possível memorizar a sessão neste aparelho.",
     /*
-      The box on the last registration step (owner's request, 3/11/2026). The
-      sentence is the owner's, word for word, and it is the only one outside
+      The box on the last registration step. The
+      sentence is fixed, word for word, and it is the only one outside
       the rail that says "comunidade": it talks about the people who are there,
       not about the encrypted group. See `terminologia.test.ts`.
     */
@@ -404,9 +414,8 @@ export const pt = {
     sasTitle: "São as mesmas palavras?",
     sasLead: 'Compara as seis palavras nos dois ecrãs. Se forem diferentes, carrega em "Não são".',
     /**
-     * What happens to history, on the six-word screen (1.0 «Arca»,
-     * 29/10/2026). There is no checkbox and no question (owner's decision:
-     * «quero fora»): just the sentence, so whoever pairs knows.
+     * What happens to history, on the six-word screen (1.0 «Arca»). There is no checkbox and no question:
+     * just the sentence, so whoever pairs knows.
      */
     sasHistoricoAqui: "Depois de emparelhar, este aparelho recebe as conversas antigas e os ficheiros do outro aparelho.",
     sasHistoricoNoNovo: "Depois de emparelhar, o aparelho novo recebe as conversas antigas e os ficheiros deste aparelho.",
@@ -753,11 +762,14 @@ export const pt = {
      * Above three names you stop reading names and start reading a wall, and
      * the line is narrow: from there on it counts how many there are.
      */
+    /** The channel is catching up; a message waits for it (12/11/2026). */
+    aPorEmDia: "A pôr a conversa em dia…",
     typing: (nomes: string[]): string => {
       if (nomes.length === 1) return `${nomes[0] ?? ""} está a escrever…`
       if (nomes.length === 2) return `${nomes[0] ?? ""} e ${nomes[1] ?? ""} estão a escrever…`
       if (nomes.length === 3) return `${nomes[0] ?? ""}, ${nomes[1] ?? ""} e ${nomes[2] ?? ""} estão a escrever…`
-      return `${nomes.length} pessoas estão a escrever…`
+      // More than three (owner, 12/11/2026): no names and no count.
+      return "Várias pessoas estão a escrever…"
     },
 
     /**
@@ -990,7 +1002,7 @@ export const pt = {
    * frankness with which `roles.note` separates what the encryption
    * guarantees from what clients agree among themselves.
    *
-   * The seal went from word to symbol at the owner's request, and `seloTitle`
+   * The seal went from word to symbol, and `seloTitle`
    * gained all the weight from it: it was the explanation next to a word that
    * already said half of it, and it became the whole explanation. Do not
    * shorten it.
@@ -1037,7 +1049,7 @@ export const pt = {
       It had three: the introduction, an invitation to write and a pointer to
       where to report faults. A welcome card with three paragraphs is required
       reading at the door of a conversation, and nobody does it: the first line
-      is read and the card is closed. Owner's decision on 14 August 2026.
+      is read and the card is closed.
     */
     apresentacaoBody: "Este é o canal comum do servidor. Todas as contas o podem ler.",
     apresentacaoFechar: "Fechar",
@@ -1509,7 +1521,7 @@ export const pt = {
      * not the voice).
      */
     screenSoundVolume: "Volume do som do ecrã",
-    /** The share stage in full screen (owner's request, 2/11/2026). Also with double click; Esc exits. */
+    /** The share stage in full screen. Also with double click; Esc exits. */
     ecraInteiro: "Ver em ecrã inteiro",
     sairDoEcraInteiro: "Sair do ecrã inteiro",
     /** The sign for whoever shares: the system sound is going out. */
@@ -1522,7 +1534,7 @@ export const pt = {
     /**
      * The invitation to watch someone's screen, and the way out of it.
      *
-     * Owner's request on 5 October 2026: *when someone shares their screen, the
+     * *When someone shares their screen, the
      * others should join the stream only if they want to.* Until then the stage
      * opened by itself and took 2.5 Mbps with it, without anyone choosing
      * anything.
@@ -1762,7 +1774,7 @@ export const pt = {
      *
      * The system sound is everything the computer plays: music, notifications,
      * and the call's own voice. It goes ALWAYS when the system provides it,
-     * without a checkbox: owner's request on 2/11/2026. This line only informs,
+     * without a checkbox. This line only informs,
      * and says how to mute it.
      */
     somDoSistemaNota:
@@ -2239,6 +2251,18 @@ export const pt = {
      */
     historico: (feitas: number, total: number): string => `A trazer o histórico: ${feitas} de ${total} mensagens.`,
     historicoMedia: (feitas: number, total: number): string => `A trazer os ficheiros: ${feitas} de ${total}.`,
+    /**
+     * When the history from the sibling stops short (12/11/2026): one line, the
+     * reason, and what the app does next. The progress bar closes.
+     */
+    historicoSemIrmao: "O aparelho principal não responde. As mensagens antigas chegam quando ele ligar.",
+    historicoParado: (faltam: number): string =>
+      `O aparelho principal parou de responder. ${faltam === 1 ? "Falta 1 mensagem antiga" : `Faltam ${faltam} mensagens antigas`}. Chegam quando ele ligar.`,
+    historicoPerdidas: (perdidas: number): string =>
+      perdidas === 1
+        ? "1 mensagem antiga não chegou: o aparelho principal não a conseguiu enviar."
+        : `${perdidas} mensagens antigas não chegaram: o aparelho principal não as conseguiu enviar.`,
+    historicoFechar: "Fechar o aviso do histórico",
     /** One part of the bar: how much of one type has arrived. */
     parte: (nome: string, recebidos: number, esperados: number): string => `${nome}: ${recebidos} de ${esperados}`,
     tipos: {
@@ -2505,8 +2529,8 @@ export const pt = {
   },
 
   /**
-   * Music in the call, owner's requests of 27 October 2026 (23:40 and 23:50):
-   * the DJ chooses the volume of what GOES OUT, and whoever listens mutes only
+   * Music in the call: one shared player, so everyone hears the same track at the same position.
+   * The DJ chooses the volume of what GOES OUT, and whoever listens mutes only
    * one person's music without muting their voice.
    */
   musicaNaChamada: {
@@ -2607,7 +2631,7 @@ export const pt = {
 
   /*
     The sheet for framing an image (profile photo, channel icon, a post's
-    cover). Request from the owner and the community, 2 November 2026.
+    cover).
     Sentences in STE100: short, active, one instruction per sentence.
   */
   enquadrar: {
@@ -2638,7 +2662,7 @@ export const pt = {
     name: "Nome",
     namePlaceholder: "Como queres aparecer",
     /*
-      «Biografia» and not «Sobre ti» (owner's request on 27 October 2026): the
+      «Biografia» and not «Sobre ti»: the
       name says it is something other than the status, and the help sentence
       says the difference.
     */
@@ -2667,6 +2691,20 @@ export const pt = {
 
   settings: {
     media: "Microfone e câmara",
+    /* This device's media store (design §8). The screen is `settings/Armazem.tsx`. */
+    armazem: {
+      titulo: "Espaço para imagens e ficheiros neste aparelho",
+      emUso: (usados: string, minis: string): string => `Em uso: ${usados}, mais ${minis} de miniaturas que ficam sempre.`,
+      libertar: "Libertar espaço",
+      semTecto: "Sem tecto",
+      nota: "Esta escolha vale só para este aparelho. As miniaturas não contam para o tecto.",
+      /* On the web, when the browser gives less space than the chosen ceiling (design §4). */
+      quota: (efectivo: string): string => `Este browser limita o que esta app pode guardar. Neste aparelho, o tecto é ${efectivo}.`,
+      libertarTitulo: "Libertar espaço?",
+      libertarCorpo:
+        "A app apaga deste aparelho os originais das imagens e dos ficheiros que não estão no ecrã. As miniaturas ficam. Um original que nenhum aparelho da conta nem membro tenha não volta.",
+      libertado: "Os originais saíram deste aparelho. As miniaturas ficaram.",
+    },
     /*
       Settings › Voice: the voice chain (see `client-core/src/audio/README.md`).
       STE100: short, active sentences, one term per thing. «Redução de ruído» is
@@ -2709,7 +2747,7 @@ export const pt = {
     */
     atalhos: "Atalhos de teclado",
     /*
-      1.0.6 (points 5 and 8 of `docs/planos/depois-da-1-0.md`): any key alone
+      1.0.6: any key alone
       and mouse buttons 4 and 5; in the desktop app, the microphone and sound
       are global during a call. In the browser, only with the page in front.
     */
@@ -2843,6 +2881,9 @@ export const pt = {
     exportAction: "Exportar conta",
     exportPassLabel: "Palavra-passe para o ficheiro",
     exported: "conta exportada. O ficheiro é a conta, guarda-o bem",
+    /* Design §13 (C): by default the file carries only the vault; this checkbox also carries the store images. */
+    exportImagens: "Incluir as imagens",
+    exportImagensNota: (tamanho: string): string => `O ficheiro fica com mais ${tamanho}.`,
     /**
      * What is said instead of the button to a paired device.
      *
@@ -3049,7 +3090,7 @@ export const pt = {
     amigoOnlineDiscreto: "Um amigo está online",
     abrirConversa: "Abrir conversa",
     /*
-      The other friend notices (owner's request, 3 November 2026). The same
+      The other friend notices. The same
       card as «está online», and the same rule: with «Mostrar o conteúdo» off,
       neither name nor place.
     */
@@ -3998,7 +4039,7 @@ export const pt = {
     entendi: "Entendi",
   },
   /*
-    «Partilhar áudio» in the call (phase 9 of `docs/planos/definicoes-0-9.md`).
+    «Partilhar áudio» in the call (phase 9).
 
     The DJ talks and plays at the same time: the music is a second track,
     next to the voice. In this version only the first source is wired (files
@@ -4155,7 +4196,7 @@ export const pt = {
     enviarRegistoNota: '"Enviar" manda o registo para o servidor, com o teu endereço e a versão. Sem mensagens. O servidor guarda-o 30 dias.',
   },
   /**
-   * The presence ring around faces (owner's request, 27 October 2026). The
+   * The presence ring around faces. The
    * colour says the state; these words say it to whoever cannot see the colour.
    */
   aneis: {
@@ -4163,11 +4204,10 @@ export const pt = {
     away: "ausente",
   },
   /**
-   * The button that copies someone's id, next to the name (owner's order on 27
-   * October 2026: «não quero os ids expostos»). See `BotaoCopiarId`.
+   * The button that copies someone's id, next to the name (ids are not shown). See `BotaoCopiarId`.
    */
   /**
-   * The desktop app's game overlay (owner's request on 2 November 2026): the
+   * The desktop app's game overlay: the
    * card in Settings › Voice, and the sentences of the join and leave notice.
    * The notice sentences travel to the overlay window, which does not load
    * this catalogue; the name goes first, highlighted.
@@ -4190,8 +4230,7 @@ export const pt = {
     copiado: "id copiado",
   },
   /**
-   * Muting a room, a channel or a private conversation (owner's request of 27
-   * October 2026). Muted: no sound, no system notification and no number. A
+   * Muting a room, a channel or a private conversation. Muted: no sound, no system notification and no number. A
    * mention still lights up. See `lib/silenciados.ts`.
    */
   silencio: {
@@ -4225,7 +4264,7 @@ export const pt = {
   },
   /**
    * The broadcast sign next to the face of whoever, in a voice room, shares
-   * the screen or plays music (owner's request of 27 October 2026, 23:55).
+   * the screen or plays music.
    * See `MarcaDeTransmissao`.
    */
   transmissao: {
@@ -4260,7 +4299,7 @@ export const pt = {
     nenhumaOutra: "Ainda não há outra conta neste aparelho.",
   },
   /**
-   * «Juntar a outra conta» (phase 8.2), in Devices. The owner's order: it
+   * «Juntar a outra conta» (phase 8.2), in Devices. It
    * merges friends and channels, and nothing else; the extra account is deleted.
    */
   juntar: {
@@ -4282,8 +4321,7 @@ export const pt = {
     voltarAoInicio: "Voltar ao início",
   },
   /**
-   * The composer's slash commands, IRC style (owner's request of 28 October
-   * 2026). See `lib/comandosDaBarra.ts`. Each one's description is the line
+   * The composer's slash commands, IRC style. See `lib/comandosDaBarra.ts`. Each one's description is the line
    * that appears in the list when typing `/`.
    */
   barra: {
@@ -4305,8 +4343,7 @@ export const pt = {
   },
   /**
    * The 1.0 «Arca» cutover screen (`screens/gate/SaiuDeBeta.tsx`). The text is
-   * D3, approved by the owner on 27 October 2026
-   * (`docs/planos/moradas-opacas-e-corte.md`, section 2): not a word changes
+   * fixed: not a word changes
    * without a new decision. A test pins it.
    */
   saiuDeBeta: {
@@ -4709,6 +4746,8 @@ export const errosPt: Record<string, FraseDeErro> = {
   "the network blocks the call to that person":
     "Não foi possível ligar a uma pessoa da chamada. A rede de um dos lados bloqueia a chamada.",
   "no relay server for the call": "Sem servidor de retransmissão. A chamada pode não ligar a quem está noutra rede.",
+  "no stun or turn server for a direct call":
+    "Este servidor não tem STUN nem TURN. A chamada directa só liga a quem está na mesma rede. Não usamos servidores de terceiros.",
   "you are not in a call": "Não estás em nenhuma chamada. Entra numa chamada e depois partilha o ecrã.",
   "this call server carries only voice": "O servidor desta chamada só leva voz. A imagem não passa. Nada foi partilhado.",
   "the afk room has no voice and no text": "Na sala AFK não há voz nem texto.",
@@ -4803,7 +4842,12 @@ export const errosPt: Record<string, FraseDeErro> = {
   "the video upload failed": "O envio do vídeo parou. A publicação foi apagada. Publica outra vez.",
   "the attachment request failed": "O pedido do ficheiro falhou. Tenta outra vez.",
 
-  /* Friendships and feed. */
+  /* This device's media store (520 to 522). */
+  "media store is full": "O armazenamento de imagens deste aparelho está cheio. As imagens novas não ficam guardadas aqui.",
+  "media store failed": "Não foi possível guardar a imagem neste aparelho.",
+  "media blob is damaged": "A imagem neste aparelho está danificada. Usa \"Trazer\" para a ter outra vez.",
+
+  /* Amizades e feed. */
   "too many friend lists in a row":
     "A lista de amigos mostrada mudou 3 vezes seguidas. A lista nova sai com a próxima publicação.",
 

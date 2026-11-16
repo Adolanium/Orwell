@@ -416,7 +416,7 @@ describe("a reconstrução das amizades", () => {
    * channels.
    *
    * Recovery itself is not fixed here (a channel at the cap has nowhere to save
-   * what is older than the cap, and that is in `docs/PENDENTES.md`). What is
+   * what is older than the cap, which is a known limit). What is
    * fixed is the lie.
    */
   it("num canal no tecto o livro entra na mesma, e devolve o que ficou", async () => {
@@ -475,7 +475,7 @@ describe("a reconstrução das amizades", () => {
    * after it in the array and before it in time. The fold read request→remove and
    * called a link UNDONE that never ended, and with the loop to reseat that was
    * in `syncFriendships` for a few hours, that was a destructive, automatic commit
-   * with no warning. The loop is gone (`docs/PENDENTES.md`); the disorder is
+   * with no warning. The loop is gone; the disorder is
    * fixed here, at the root, because it affects more than that.
    *
    * **And our sends do not go to the end**, which was the obvious alternative and

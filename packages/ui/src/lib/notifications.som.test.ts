@@ -75,7 +75,7 @@ describe("por onde sai o aviso, e se faz som", () => {
 })
 
 /**
- * Muted silences it (owner's request on October 27, 2026): no system alert and
+ * Muted silences it: no system alert and
  * no sound. Mentions still go through, like on Discord.
  */
 describe("silenciado cala o aviso e o som, menos a menção", () => {

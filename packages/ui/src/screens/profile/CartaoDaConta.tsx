@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import type { Activity, ConnectionState, Profile } from "../../bridge.js"
 import { Andante } from "../../components/Andante.js"
 import { atributosDoAnel, type EstadoDoAnel } from "../../components/Avatar.js"
+import { useMedia } from "../../hooks/useMedia.js"
 import { useToqueLongo } from "../../hooks/useToqueLongo.js"
 import { BellIcon, GearIcon, HangUpIcon, HeadphonesIcon, MicIcon } from "../../icons.js"
 import { strings } from "../../strings.js"
@@ -166,6 +167,9 @@ export function CartaoDaConta({
 }): React.JSX.Element {
   /* The audio menus, with finger down. See `useToqueLongo`. */
   const aoDedo = useToqueLongo()
+  // The own portrait in the media store (Task 10): by reference, only for drawing.
+  const retrato = useMedia({ ...(profile.avatarRef ? { ref: profile.avatarRef } : {}) }, { visivel: true, tamanho: "original" })
+  const cara = profile.avatarDataUrl ?? retrato.src
 
   /*
     The status text line, only while being edited.
@@ -320,8 +324,8 @@ export function CartaoDaConta({
       >
         <span className="me-avatar" {...atributosDoAnel(estadoDoAnelProprio, emChamada)}>
           <span className="avatar">
-            {profile.avatarDataUrl ? (
-              <img src={profile.avatarDataUrl} alt="" />
+            {cara ? (
+              <img src={cara} alt="" />
             ) : (
               (profile.displayName[0] ?? address?.[1] ?? "?").toUpperCase()
             )}

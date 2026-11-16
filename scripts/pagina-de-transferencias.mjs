@@ -1,9 +1,9 @@
 /**
  * The downloads page, in both languages.
  *
- * Since 3 November 2026 the site is in English first: English lives at
+ * The site is in English first: English lives at
  * `/transferencias/` and Portuguese at `/pt/transferencias/`, like the other
- * pages (see `docs/planos/site-ingles-relatorio.md`). The English path keeps
+ * pages. The English path keeps
  * the Portuguese name because it's the one from before: the installed app
  * fetches `versao.json` and `actualizacao-windows.json` from that folder, and
  * there are shared links to it.

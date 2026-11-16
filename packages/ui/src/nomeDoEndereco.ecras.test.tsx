@@ -16,8 +16,7 @@ import { SeccaoDenuncias } from "./screens/overlays/SeccaoDenuncias.js"
 import { strings } from "./strings.js"
 
 /**
- * The name from the address, on the main screens (owner's order on 4 November
- * 2026). Someone who did not pick a name shows as the first word of their
+ * The name from the address, on the main screens Someone who did not pick a name shows as the first word of their
  * address, italic and in the secondary color (`.nome-do-endereco`, with title
  * "From the address"); someone who did pick one shows as is, with no mark.
  * Names come from `useDirectory` for real, so collision is the app's.

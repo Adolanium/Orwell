@@ -13,7 +13,7 @@ import {
 } from "./retrato.js"
 
 /**
- * The snapshot of the Welcome (phase 1 of `docs/planos/estado-cifrado-plano.md`):
+ * The snapshot of the Welcome (phase 1 of the encrypted-state plan):
  * the priority-based cut, the cap, the schema, and the profile authorship (D1).
  */
 

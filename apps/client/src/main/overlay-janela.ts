@@ -12,7 +12,7 @@
  *  - Windows: most DX11 and DX12 games in "fullscreen" on Windows 10
  *    and 11 corre with fullscreen optimizations (the DWM composites the game as a window), and there a "topmost" window shows up on top. The game can put itself to the front when it gets focus: the controller reaffirms the top 2 em
  *    2 s (`PERIODO_DO_TOPO_MS`) and when the overlay window ITSELF loses "always on top" (`always-on-top-changed`), and `showInactive` shows without stealing focus.
- *  - Exclusive fullscreen: off, by owner's decision (anti-cheat risk). Orwell never injects code or reads other processes' memory.
+ *  - Exclusive fullscreen: off, by design (anti-cheat risk). Orwell never injects code or reads other processes' memory.
  *
  * **Nothing here looks at the game.** Windows from other processes aren't enumerated, the game window isn't tracked, and there are no global keyboard or mouse hooks beyond the shortcuts that already existed (`atalhos.ts`). The top is reaffirmed only by the overlay window's state: its events and a timer.
  *

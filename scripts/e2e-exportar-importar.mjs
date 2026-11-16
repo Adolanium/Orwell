@@ -106,7 +106,19 @@ async function exportar(aparelho, destino) {
 async function importar(aparelho, ficheiro, frase) {
   const { page } = aparelho
   await irParaONome(page)
-  await page.locator('.import-account input[type="file"]').setInputFiles(ficheiro)
+  if (aparelho.tipo === "sec") {
+    /*
+      In the installed app the file is chosen in the system dialog, opened by
+      the main process (Task 11b): here the main process receives the choice
+      already made, which is what the dialog would do.
+    */
+    await aparelho.sec.app.evaluate(({ dialog }, caminho) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [caminho] })
+    }, ficheiro)
+    await page.locator(".import-account button.file").click()
+  } else {
+    await page.locator('.import-account input[type="file"]').setInputFiles(ficheiro)
+  }
   await page.locator('input[name="import-password"]').fill(frase)
   await page.getByRole("button", { name: "Importar", exact: true }).click()
   await dentro(page)

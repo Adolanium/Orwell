@@ -276,12 +276,11 @@ describe("todas as páginas", () => {
   })
 
   it.each(paginas)("%s não identifica quem a faz", (_nome, pagina) => {
-    // Owner's decision, October 16, 2026: the site has no name, photo, email,
+    // The site has no name, photo, email,
     // phone, IBAN or address of whoever makes Orwell. The only exception is the
-    // data controller statement in the privacy policy (GDPR, article 13), by owner's
-    // decision on November 4, 2026: the name, without tax ID or address. Outside
+    // data controller statement in the privacy policy (GDPR, article 13): the name, without tax ID or address. Outside
     // that statement, the name stays forbidden. The public repository address
-    // (9/11/2026, owner's order) includes the GitHub account name, and is the
+    // includes the GitHub account name, and is the
     // other exception.
     const semResponsavel = pagina
       .replace(/O responsável pelo tratamento dos teus dados é Duarte Bivar\.|The controller of your data is Duarte Bivar\./g, "")
@@ -334,7 +333,7 @@ describe.each(VERSOES)("a homepage ($lingua)", (versao) => {
   const html = ler(versao.entrada)
 
   it('acaba no "Apoiar", sem os quatro pontos e sem a frase de fecho', () => {
-    // Owner's request on November 3, 2026: the last section is support.
+    // The last section is support.
     const main = /<main[\s\S]*?<\/main>/.exec(html)?.[0] ?? ""
     const seccoes = [...main.matchAll(/<section\b[^>]*>/g)].map((m) => m[0])
     expect(seccoes.at(-1)).toContain('id="apoiar"')
@@ -351,9 +350,9 @@ describe.each(VERSOES)("a homepage ($lingua)", (versao) => {
 
   it("abre com a alternativa europeia e não com criptografia", () => {
     /*
-      Benefit on top, technology on the bottom. Owner's decision on August 14, 2026.
-      We check the POSITION: MLS and ML-KEM stay on the page, they just cannot
-      become the first thing someone reads again.
+      Benefit on top, technology below. What
+      is checked is the POSITION: MLS and ML-KEM stay on the page, they just
+      cannot go back to being the first thing someone reads.
     */
     const alternativa = html.indexOf(versao.alternativa)
     const beneficio = html.indexOf(versao.beneficio)

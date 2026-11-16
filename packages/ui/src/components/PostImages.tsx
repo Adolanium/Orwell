@@ -2,6 +2,7 @@ import { Fragment } from "react"
 import type { MediaItem } from "../types.js"
 import { strings } from "../strings.js"
 import { ImagemAPedido } from "./AnexoAPedido.js"
+import { MediaLazy } from "./MediaLazy.js"
 import { eVideo, VideoDaPublicacao } from "./VideoDaPublicacao.js"
 import { dimensoesDaImagem, reserva } from "../lib/dimensoesDaImagem.js"
 
@@ -29,6 +30,8 @@ export function PostImages({
         if (eVideo(item)) return <VideoDaPublicacao key={index} item={item} />
         // Without the bytes: the marker, or, inside a message that states it, the request to other members (S5).
         if (item.evicted) return <ImagemAPedido key={index} item={item} onOpen={onOpen} />
+        // In the media store: the reserved box, the bytes on entering the screen, the thumbnail and "Fetch".
+        if (item.ref) return <MediaLazy key={index} item={item} onOpen={onOpen} />
         const src = item.inline ?? item.url
         // The reserved box before the image decodes: without this the row
         // was born with zero height and grew after, and the conversation scrolled out

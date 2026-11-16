@@ -694,8 +694,8 @@ describe("com SFU, o ecrã passa pelo servidor — e recusa quando não há cami
 
   it("a VINTE ainda partilha, e à 21.ª recusa antes de abrir o selector", async () => {
     /*
-     * The number written, not read from `PESSOAS_COM_ECRA`: it was 11 until
-     * 3/11/2026 and became 20 with the load test (`docs/planos/limites-media-relatorio.md`).
+     * The number written, not read from `PESSOAS_COM_ECRA`: it was 11 and
+     * became 20 with the load test.
      * A test that reads the constant passes with whatever number is there.
      */
     let selectorAberto = 0

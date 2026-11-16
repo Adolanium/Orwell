@@ -14,7 +14,7 @@ const N = Number(process.argv[2] ?? 3)
 const ESPERA = Number(process.argv[3] ?? 40)
 /** Seconds between each account, to replay who arrives late. */
 const ATRASO = Number(process.argv.find((a) => a.startsWith("--atraso="))?.split("=")[1] ?? 0)
-const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "carga-2026"
+const FRASE = process.env.ORWELL_DIAG_PASSPHRASE ?? "carga-orwell-diag-2026"
 const MARCA = Date.now().toString(36)
 
 async function abrir(indice) {

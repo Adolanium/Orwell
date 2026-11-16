@@ -86,11 +86,17 @@ describe("crescimentos na recuperação", () => {
       and repairs the rooms of restored channels) and the cascade, once, at the
       end of recovery. Before this fix there were four: one for the connection
       and one per entry (4 profiles and 12 `channel.meta`).
+
+      And no rooms at all since 1.3.12: neither the connection nor the cascade
+      repeats authority and rooms (`republicar-so-com-sinal.test.ts` in the
+      server). Bruno invited each of them, and his Welcome portrait carried them.
+      Up to 1.3.10 this was `2 * salas` here.
     */
     expect(envios.get("profile")).toBe(2)
     const salas = ana!.session.roomsOf(canal).length
     expect(salas).toBeGreaterThan(0)
-    expect(envios.get("channel.meta") ?? 0).toBe(2 * salas)
+    expect(envios.get("channel.meta") ?? 0).toBe(0)
+    expect(envios.get("role.assign") ?? 0).toBe(0)
 
     // And whoever joined learns: Ana's name and the rooms of the channel.
     for (const novo of novos) {

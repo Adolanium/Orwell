@@ -1,8 +1,8 @@
 import type { Motivo } from "@enclave/protocol"
 
 /**
- * Rules for the report sheet, decoupled from the screen (`docs/planos/denuncias-design.md`,
- * §4 e §9b). Pure logic for reading and testing without rendering the sheet.
+ * Rules for the report sheet, decoupled from the screen (§4 and §9b of the
+ * reports design). Pure logic for reading and testing without rendering the sheet.
  *
  * ```
  * motivo (com a nota, a boa-fé, o nome e o email) → pré-visualização → aviso → enviada

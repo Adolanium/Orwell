@@ -212,7 +212,7 @@ export class RecusaDeMedia extends Error {
  *    answer it builds for the send side starts from these parameters
  *    (`RemoteAnswerMediaSection`), which is the fmtp that Chrome reads to
  *    set up the encoder. It applies to all Opus (voice, screen audio,
- *    music): the router has only one. See `docs/planos/voz-cbr-relatorio.md`.
+ *    music): the router has only one.
  *
  * **They have to be on both sides**, here and in the producer's `codecOptions` on
  * the client: with them only in the router, Chrome ignores them. See `scripts/sfu-prova/pagina.js`,
@@ -246,11 +246,9 @@ const CODECS: types.RouterRtpCodecCapability[] = [
 /**
  * How many connections fit in a scope.
  *
- * **Fifty since 3 November 2026, and the number was MEASURED.** It was
+ * **Fifty, and the number was MEASURED.** It was
  * sixteen, counted against an output of ~50 Mbit/s that no one had measured.
- * The measured output of the VPS is 300 to 745 Mbit/s (`docs/planos/depois-da-1-0.md`,
- * "VPS Bandwidth"), and the load test (`scripts/sfu-carga/`, report in
- * `docs/planos/limites-media-relatorio.md`) measured what fifty costs:
+ * The measured output of the VPS is 300 to 745 Mbit/s, and the load test (`scripts/sfu-carga/`) measured what fifty costs:
  *
  *   50 people, 10 speaking and 40 in DTX    2 450 consumers      36 Mbit/s
  *                                          29 400 packets/s     ~56 % of one VPS core
@@ -308,8 +306,7 @@ export const PRODUTORES_POR_TRANSPORTE = 5
  * Mbit/s: four come back without taking quality from any of them.
  *
  * The math is `bitrate × quem consome × quantas câmaras`, and the worst case the
- * product lets you set up is this, measured in the load test
- * (`docs/planos/limites-media-relatorio.md`):
+ * product lets you set up is this, measured in the load test:
  *
  *   50 people, 4 cameras, 10 speaking    4 × 49 × 1.2 Mbit/s + voice = 290 Mbit/s
  *                                        ~77 % of one VPS core (estimated)
@@ -325,7 +322,7 @@ export const PRODUTORES_POR_TRANSPORTE = 5
  *
  * **More than four calls for simulcast**, not a bigger number: someone who sees a person
  * as a thumbnail does not need to receive 720p, and that is what the output pays for today
- * (section 6 of the plan, and the M3 in `docs/planos/estado-cifrado-plano.md`).
+ * (the M3 slice of the media plan).
  */
 export const CAMARAS_POR_AMBITO = 4
 
@@ -628,8 +625,7 @@ export class MotorDeMedia {
    * flows), and the wrong scaling only shows up on a bad day. This is written here because
    * this is where someone would change it without thinking.
    *
-   * **Measured on November 3, 2026** (`scripts/sfu-carga/`, report in
-   * `docs/planos/limites-media-relatorio.md`): one worker takes ~115,000 packets
+   * **Measured with the load test** (`scripts/sfu-carga/`): one worker takes ~115,000 packets
    * per second at 72% of an M4 core, giving ~55,000 at 70% of a VPS core,
    * estimated. At that point ~400 Mbit/s is already leaving, which is the measured
    * output of the machine. A second worker would take the core away from the site and databases to

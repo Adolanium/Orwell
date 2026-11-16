@@ -4,7 +4,7 @@ import { hkdf } from "@noble/hashes/hkdf.js"
 import { sha256 } from "@noble/hashes/sha2.js"
 
 /**
- * The seal on the copy that goes to the founder (`docs/planos/denuncias-design.md`, §6.2).
+ * The seal on the copy that goes to the founder.
  *
  * The reporter seals the copy to the founder's ACCOUNT key (Ed25519,
  * converted to X25519 as in `ids.ts`). The seal carries no sender: the sealing

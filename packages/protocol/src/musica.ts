@@ -3,7 +3,7 @@ import { TECTO_DO_SOM_DO_ECRA, type FonteDeMedia } from "./wire.js"
 /**
  * The source of MUSIC in a call: files or playlists played by a member.
  *
- * Phase 9 of `docs/planos/definicoes-0-9.md`. The DJ speaks and plays at the
+ * The DJ speaks and plays at the
  * same time: music is a track separate from the voice, like screen audio, but with
  * no video attached. So it can't be `ecra` (the server only accepts screen audio
  * behind the same person's video, and the receiver puts it behind the

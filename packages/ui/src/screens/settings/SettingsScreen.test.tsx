@@ -205,6 +205,61 @@ describe("Configurações: exportar num aparelho sem a chave da conta", () => {
   })
 })
 
+/**
+ * Export with the images, by choice (Task 11b, design §13 C). By default the
+ * file is the usual one, with only the vault; the "Include the images"
+ * checkbox also carries the store, and the note says how much the file grows.
+ */
+describe("Configurações: exportar com as imagens", () => {
+  function ponteDeExportar(resposta: unknown = { data: "orwv2\n{}" }) {
+    const exportar = vi.fn(async () => resposta)
+    const ponte = {
+      pairing: {
+        status: vi.fn(async () => ({ temChaveDeConta: true, servidorSuporta: true })),
+        devices: vi.fn(async () => []),
+      },
+      vault: { export: exportar },
+      media: {
+        estado: vi.fn(async () => ({ tecto: 0, tectoEfectivo: 0, usados: 40_000_000, usadosPelasMinis: 2_000_000, originais: 3, minis: 3, emFalta: 0 })),
+        definirTecto: vi.fn(async () => {}),
+        libertar: vi.fn(async () => {}),
+      },
+    } as unknown as EnclaveBridge
+    return { ponte, exportar }
+  }
+
+  beforeEach(() => {
+    Object.assign(URL, { createObjectURL: vi.fn(() => "blob:conta"), revokeObjectURL: vi.fn() })
+  })
+
+  it("a caixa vem desmarcada, e a nota diz o tamanho das imagens", async () => {
+    const { ponte } = ponteDeExportar()
+    renderSettings({ seccao: "aparelhos", bridge: ponte })
+    const caixa = await screen.findByRole("checkbox", { name: strings.settings.exportImagens })
+    expect((caixa as HTMLInputElement).checked).toBe(false)
+    expect(await screen.findByText(strings.settings.exportImagensNota("42 MB"))).toBeTruthy()
+  })
+
+  it("desmarcada, a ponte exporta como sempre; marcada, recebe { incluirImagens: true }", async () => {
+    const { ponte, exportar } = ponteDeExportar({ ficheiro: new Blob([new Uint8Array([1, 2, 3])]) })
+    renderSettings({ seccao: "aparelhos", bridge: ponte })
+    const botao = await screen.findByRole("button", { name: strings.settings.exportAction })
+
+    fireEvent.click(botao)
+    await vi.waitFor(() => expect(exportar).toHaveBeenCalledTimes(1))
+    expect(exportar).toHaveBeenLastCalledWith(undefined)
+
+    fireEvent.click(screen.getByRole("checkbox", { name: strings.settings.exportImagens }))
+    await vi.waitFor(() => expect((screen.getByRole("checkbox", { name: strings.settings.exportImagens }) as HTMLInputElement).checked).toBe(true))
+    // The previous export ends outside this tick: wait for the guard to release it.
+    await vi.waitFor(async () => {
+      fireEvent.click(botao)
+      expect(exportar).toHaveBeenCalledTimes(2)
+    })
+    expect(exportar).toHaveBeenLastCalledWith(undefined, { incluirImagens: true })
+  })
+})
+
 describe("Configurações — sons", () => {
   it("o toggle vem ligado e traz volume e amostra", () => {
     renderSettings({ seccao: "avisos" })
@@ -456,7 +511,7 @@ describe("Configurações — o interruptor das notificações", () => {
   })
 })
 
-/** In Account, the id is copied and not displayed (owner's decision, October 27, 2026). */
+/** In Account, the id is copied and not displayed. */
 describe("SettingsScreen — Conta: o teu id", () => {
   it('só o botão "Copiar o teu id", sem o campo com o endereço', async () => {
     const user = userEvent.setup()

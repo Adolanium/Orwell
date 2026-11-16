@@ -233,7 +233,7 @@ describe.each(ENTRADAS)("o topo (%s)", (nome) => {
   const html = ler(nome)
   const topo = /<header class="topo">[\s\S]*?<\/header>/.exec(html)?.[0] ?? ""
 
-  it("não tem faixa de apoio por baixo (pedido do dono, 9/11/2026)", () => {
+  it("não tem faixa de apoio por baixo", () => {
     expect(html).not.toContain("faixa-apoio")
   })
 

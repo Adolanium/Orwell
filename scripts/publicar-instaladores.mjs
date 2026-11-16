@@ -1,7 +1,7 @@
 /**
  * Publish the installers, with checksums alongside.
  *
- * The installers are not signed, by the owner's decision on 12 August 2026:
+ * The installers are not signed, on purpose:
  * on macOS the first run requires approval in System Settings, and on Windows
  * the blue SmartScreen appears. The defense against a corrupted file is the
  * SHA-256 checksum, and a checksum is only useful if published alongside the

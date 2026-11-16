@@ -34,8 +34,7 @@ import { z } from "zod"
 export const VIDEO_TIPOS = ["video/mp4", "video/webm", "video/quicktime"] as const
 
 /**
- * The size cap for a post's video, in bytes. See `docs/PENDENTES.md`,
- * "Vídeo nas publicações: as medidas", for the reasoning behind the number.
+ * The size cap for a post's video, in bytes.
  */
 export const VIDEO_MAX_BYTES = 25 * 1024 * 1024
 

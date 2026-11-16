@@ -1,4 +1,4 @@
-import { dobrarConversa, dobrarMural, etiquetasDe, type OpcoesDaConversa } from "@enclave/client-core"
+import { dobrarConversa, dobrarMural, etiquetasDe, type OpcoesDaConversa, type PesoDosMedia, type RefDeMedia } from "@enclave/client-core"
 import type { ConnectionState, Profile } from "../bridge.js"
 import type { ChatMessage } from "../types.js"
 import { eImagem } from "./ficheiros.js"
@@ -37,7 +37,28 @@ import { strings } from "../strings.js"
  * and React's list would get two equal `key` for the same card.
  */
 export function feedOf(messages: ChatMessage[]): ChatMessage[] {
-  return dobrarMural(messages, (channel) => (isFeed(channel) ? feedOwnerOf(channel) : null))
+  return dobrarMural(messages, (channel) => (isFeed(channel) ? feedOwnerOf(channel) : null), pesoDoEcra(messages))
+}
+
+/**
+ * The presence and weight of the media by reference, with what the bridge
+ * sends on each item (`ref`, `b`, `mini`, `falta`; R16). Between two copies of
+ * the same post, the wall keeps the one with the photo on THIS device; the
+ * thumbnail counts without the original (the `entryMediaBytes` rule).
+ */
+function pesoDoEcra(messages: readonly ChatMessage[]): PesoDosMedia {
+  const media: Record<string, RefDeMedia> = {}
+  const faltam = new Set<string>()
+  for (const message of messages) {
+    if (message.payload.t !== "post") continue
+    for (const item of [...(message.payload.media ?? []), ...(message.payload.attachments ?? [])]) {
+      if (!item.ref || item.evicted) continue
+      // Only the weight counts here: "texto" measures it in `b`, without a prefix.
+      media[item.ref] = { v: 1, k: "", n: "", b: item.b ?? 0, t: "", f: "texto", c: "original", at: 0, ...(item.mini ? { mini: item.mini } : {}) }
+      if (item.falta) faltam.add(item.ref)
+    }
+  }
+  return { presente: (sha) => !faltam.has(sha), media }
 }
 
 /**
@@ -437,9 +458,8 @@ export function shortName(channel: string): string {
  * letter capitalized. `@ginvodra-sastybis-dirgybus-boblytum:orwell.pt` becomes
  * "Ginvodra", and the same for addresses on other servers.
  *
- * Order from the owner on November 4, 2026. Between October 27 and that day the
- * resource was "Sem nome" (ids were not shown), and with the wave of Reddit
- * accounts the common channel filled with identical lines: "Sem nome" does not
+ * Before this, the fallback was "Sem nome" (ids are not shown), and with a wave of
+ * new accounts the common channel filled with identical lines: "Sem nome" does not
  * tell anyone apart. The first word does, and it is not the full address.
  *
  * **Collision.** When two accounts on the same screen share the first word, both
