@@ -266,7 +266,7 @@ describe("Carril e barra — o por ler de uma sala do canal aberto", () => {
 
 /**
  * Muted: no number on the rail or on the line, and mention still lights up
- * (owner request from 27 October 2026).
+ * (muted means quiet, but a mention still counts).
  */
 describe("Carril e barra — o que está silenciado não acende", () => {
   function silenciar(...chaves: string[]): void {

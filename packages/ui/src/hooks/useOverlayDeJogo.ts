@@ -8,8 +8,8 @@ import { criarDetectorDeFala, mesmoConjunto } from "../lib/quemFala.js"
 /**
  * The game overlay, from the shell side: what it shows, and who speaks.
  *
- * Owner request November 2, 2026 (proposal 4 from
- * `~/Downloads/Orwell-overlays-jogo/`). The overlay is another window, drawn
+ * Proposal 4 from
+ * `~/Downloads/Orwell-overlays-jogo/`. The overlay is another window, drawn
  * by the main process (`apps/client/src/main/overlay-janela.ts`); here we send
  * the bare minimum it needs, and only when it changes:
  *

@@ -13,6 +13,7 @@ import {
   pairIdDe,
   palavrasDoSas,
   partirEstado,
+  privadaDaConta,
   signDeviceCert,
   toBase64,
   verifyDeviceChain,
@@ -35,12 +36,16 @@ import {
  * from `pair.ts` and the four-payload protocol (device key in both directions,
  * host certificate, guest ready, rejected from either).
  *
- * **What never crosses here:** the account private key. The `certificate`
- * carries the address, account PUBLIC key and the signature over the guest
- * device key; the guest stores that and its own device key, and cannot sign
- * manifests, certificates and revocations. This is the design decision for the
- * slice (docs/PLANO_MULTIDISPOSITIVO.md §10), and `pair.ts` has no field for
- * the private key at all.
+ * **The account private key crosses here since 1.3.16** (the fix for
+ * "Erro 609": the phone opens new direct conversations by itself).
+ * The `certificate` carries the address, account PUBLIC key, the signature over
+ * the guest device key and the account PRIVATE key, inside the box AEAD and
+ * only after the SAS on both screens. The guest writes the private key only if
+ * it closes with the account public key (`privadaDaConta`). There is no notice
+ * and no choice: "Cancel" cancels the whole pairing, and there is no phone
+ * paired without the key. A guest before 1.3.16 drops the field and pairs as
+ * before. What removing a device rests on now is the server refusing it
+ * (`aparelhosRevogados`), see `revogacao.ts`.
  *
  * **The SAS is the only thing the person does**, and it is the entire defense
  * against someone with the secret but not the phone in hand (a photo of the QR,
@@ -122,6 +127,12 @@ export interface CofreDeAparelho {
   accountKey: Uint8Array
   /** The account signature over `deviceSigningPublicKey`. */
   deviceCert: Uint8Array
+  /**
+   * The account PRIVATE key, checked against `accountKey`. Absent with a host
+   * before 1.3.16: the phone gets it later through the account channel
+   * (`chaveDaConta.ts`).
+   */
+  accountPrivateKey?: Uint8Array
   deviceSigningPrivateKey: Uint8Array
   /**
    * The snapshot of the account state (phase 5), if the host sent it and it
@@ -339,6 +350,7 @@ export class AnfitriaoDeEmparelhamento {
       address: this.identity.address,
       accountKey: toBase64(this.identity.signingPublicKey),
       deviceCert: toBase64(deviceCert),
+      accountPrivateKey: toBase64(this.identity.signingPrivateKey),
       ...(partes.length > 0 ? { estado: partes.length } : {}),
     })
     // The snapshot pieces follow the certificate immediately, through the same box and in order,
@@ -666,12 +678,24 @@ export class ConvidadoDeEmparelhamento {
       this.#terminar("cadeia-invalida")
       return
     }
+    // The account private key, when the host sends it (1.3.16), must be the private
+    // half of the account the chain names. One that does not close is a host that
+    // sent something else: the pairing fails, it does not go on without the key.
+    let accountPrivateKey: Uint8Array | undefined
+    if (payload.accountPrivateKey !== undefined) {
+      accountPrivateKey = fromBase64(payload.accountPrivateKey)
+      if (!privadaDaConta(accountPrivateKey, accountKey)) {
+        this.#terminar("cadeia-invalida")
+        return
+      }
+    }
     this.#certificado = {
       address: payload.address,
       homeserver,
       accountKey,
       deviceCert,
       deviceSigningPrivateKey: this.#deviceSigningPrivateKey,
+      ...(accountPrivateKey ? { accountPrivateKey } : {}),
     }
     /*
       The snapshot comes after, in pieces, if the host sends it (phase 5). A

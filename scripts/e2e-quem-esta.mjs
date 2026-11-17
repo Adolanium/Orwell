@@ -3,7 +3,7 @@
  *
  *   node scripts/e2e-quem-esta.mjs          (needs `npm run build` first)
  *
- * Owner's report on 5 October 2026, after a call with other people:
+ * The bug, seen after a call with other people:
  * "some people do not see who is in the room before they enter."
  *
  * The cause is not an oversight. The list of who is in a voice room is built

@@ -39,7 +39,9 @@ export function usePins(
    * of the business of deciding what a pin is.
    */
   const carimbo = messages.reduce(
-    (conta, message) => (message.channel === channel && message.payload.t === "channel.meta" ? conta + 1 : conta),
+    (conta, message) =>
+      // A `redact` too: deleting a pinned message takes its copy away (12/11/2026).
+      message.channel === channel && (message.payload.t === "channel.meta" || message.payload.t === "redact") ? conta + 1 : conta,
     0,
   )
 

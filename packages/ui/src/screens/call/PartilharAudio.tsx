@@ -212,7 +212,7 @@ export function PartilharAudio({
         </div>
 
         <div className="audio-volumes" role="group" aria-label={strings.leitorDeMusica.volumes}>
-          {/* What GOES to the call (owner, October 27, 2026). Except "Volume for you",
+          {/* What GOES to the call. Except "Volume for you",
               which is only what the DJ hears. */}
           <label className="audio-volume-local audio-volume-emissao" title={strings.musicaNaChamada.volumeDaEmissaoNota}>
             <span>{strings.musicaNaChamada.volumeDaEmissao}</span>

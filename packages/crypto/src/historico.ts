@@ -16,7 +16,7 @@ import { sha256 } from "@noble/hashes/sha2.js"
  * - the responder generates another and sends its public key in the first response;
  * - both derive the same key (`chaveDoHistorico`), and no one else can.
  *
- * Why the second layer: the owner asked for "device-to-device encryption".
+ * Why the second layer: the requirement is "device-to-device encryption".
  * A third device on the account, or a device that joins the account channel later,
  * cannot open what passed between the two. And the ephemeral keys live only in memory:
  * after the transfer, not even the two devices have them.

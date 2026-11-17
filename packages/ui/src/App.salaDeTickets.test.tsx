@@ -10,7 +10,7 @@ const MURAL_EU = moradaDeTeste("mural eu", "casa.pt")
 /**
  * Opening a ticket room must not silence the call in progress.
  *
- * Reported by the owner on September 13, 2026: "when a user goes to the ticket
+ * The bug: "when a user goes to the ticket
  * room they exit the voice room". No one exits: `abrirSala` only joins a call
  * when the room is voice, and never calls `leave`. What happens is that
  * `TicketsScreen` takes the place of `ChatScreen`, and the `CallPanel` inside

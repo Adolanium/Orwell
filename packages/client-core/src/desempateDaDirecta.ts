@@ -16,7 +16,7 @@
  * and resays everything already said (`#reenviarDepoisDaCorrida`). If the loser's old Welcome
  * reached the winner AFTER that, the winner saw the peer speaking, no longer broke the tie,
  * and adopted the group the loser had abandoned. Both swapped groups and went deaf to each other,
- * forever. This is the account owner's report for 1d.
+ * forever. This is the bug fixed in 1d.
  *
  * The distinction that remains is between a race and a real repair (the peer lost state and
  * remade the direct chat). In a repair, everything the peer said in our group comes BEFORE

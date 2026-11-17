@@ -19,7 +19,7 @@ import { strings } from "../../strings.js"
  * `USAR_SELECTOR_DO_SISTEMA` in `apps/client/src/main/ecra.ts`.
  *
  * **System audio always goes**, where the system gives it (`somDisponivel`). It
- * was a box off by default until 2/11/2026, and the owner does not want it: "that
+ * was a box off by default, and the box went away: "that
  * does not need to be an option, audio is also broadcast by default". A line stays
  * that says this, because system audio also carries the call voice, and explains
  * how to mute it midway ("Mute screen sound", in the call).

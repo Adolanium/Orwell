@@ -63,3 +63,57 @@ describe("ENCLAVE_QUOTA_*", () => {
     expect(() => com({ ENCLAVE_QUOTA_MENSAL_TB: "oito" })).toThrow(/ENCLAVE_QUOTA_MENSAL_TB must be a non-negative number of TB/)
   })
 })
+
+describe("ENCLAVE_PUSH, ENCLAVE_PUSH_CONTACTO e ENCLAVE_PUSH_SERVICOS", () => {
+  const com = (env: Record<string, string>) => loadConfig(env as NodeJS.ProcessEnv).push
+
+  it("desligado por omissão: ausente, vazio ou off", () => {
+    expect(com({})).toBeUndefined()
+    expect(com({ ENCLAVE_PUSH: "" })).toBeUndefined()
+    expect(com({ ENCLAVE_PUSH: "off" })).toBeUndefined()
+    expect(com({ ENCLAVE_PUSH: " OFF " })).toBeUndefined()
+  })
+
+  it("on liga, com os quatro serviços de push conhecidos e sem contacto", () => {
+    expect(com({ ENCLAVE_PUSH: "on" })).toEqual({
+      contacto: "",
+      servicos: ["fcm.googleapis.com", "web.push.apple.com", "updates.push.services.mozilla.com", "*.notify.windows.com"],
+    })
+    expect(com({ ENCLAVE_PUSH: " On " })).toBeDefined()
+  })
+
+  it("lixo é um erro no arranque", () => {
+    expect(() => com({ ENCLAVE_PUSH: "talvez" })).toThrow(/ENCLAVE_PUSH/)
+  })
+
+  it("o contacto é mailto: ou https:, e mais nada", () => {
+    expect(com({ ENCLAVE_PUSH: "on", ENCLAVE_PUSH_CONTACTO: " mailto:ops@exemplo.pt " })?.contacto).toBe("mailto:ops@exemplo.pt")
+    expect(com({ ENCLAVE_PUSH: "on", ENCLAVE_PUSH_CONTACTO: "https://exemplo.pt" })?.contacto).toBe("https://exemplo.pt")
+    expect(() => com({ ENCLAVE_PUSH: "on", ENCLAVE_PUSH_CONTACTO: "ops@exemplo.pt" })).toThrow(/ENCLAVE_PUSH_CONTACTO/)
+  })
+
+  it("os serviços extra juntam-se aos conhecidos, em minúsculas", () => {
+    expect(com({ ENCLAVE_PUSH: "on", ENCLAVE_PUSH_SERVICOS: " Push.Exemplo.pt , *.outro.pt,," })?.servicos.slice(4)).toEqual(["push.exemplo.pt", "*.outro.pt"])
+    expect(() => com({ ENCLAVE_PUSH: "on", ENCLAVE_PUSH_SERVICOS: "https://push.exemplo.pt" })).toThrow(/ENCLAVE_PUSH_SERVICOS/)
+  })
+})
+
+describe("a chave VAPID", () => {
+  it("nasce no primeiro arranque com modo 0600, e a mesma volta no segundo", async () => {
+    const { mkdtempSync, rmSync, statSync } = await import("node:fs")
+    const { tmpdir } = await import("node:os")
+    const { join } = await import("node:path")
+    const { loadOrCreatePushKey } = await import("./config.js")
+    const dir = mkdtempSync(join(tmpdir(), "enclave-vapid-"))
+    try {
+      const um = loadOrCreatePushKey(dir)
+      expect(um.publicKey.length).toBe(65)
+      expect(um.publicKey[0]).toBe(4)
+      expect(statSync(join(dir, "push.key.json")).mode & 0o777).toBe(0o600)
+      const dois = loadOrCreatePushKey(dir)
+      expect(Buffer.from(dois.privateKey).toString("hex")).toBe(Buffer.from(um.privateKey).toString("hex"))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

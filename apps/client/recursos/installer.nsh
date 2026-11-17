@@ -6,7 +6,7 @@
 ; `perMachine` is not `true` (`assistedInstaller.nsh`, PAGE_INSTALL_MODE).
 ; `allowElevation: false` only disables the "for everyone" button, and the page
 ; still appears. `oneClick: true` would remove the page, but also the folder
-; choice, which the owner wants to keep. The loophole left is this: the
+; choice, which must stay. The loophole left is this: the
 ; `customInstallMode`, which the page entry function calls before drawing it.
 ; With one of the two `isForce...` set to "1", the page does `Abort` and
 ; doesn't appear.

@@ -3,6 +3,7 @@ import { copiarTexto } from "../../lib/copiar.js"
 import { TextoDeErro } from "../../components/TextoDeErro.js"
 import { useBridge } from "../../App.js"
 import type { PairEvento } from "../../bridge.js"
+import { AvisoDoEnvio, useHistoricoDosIrmaos } from "../../components/BarraDoHistorico.js"
 import { Button } from "../../components/Button.js"
 import { Modal } from "../../components/Modal.js"
 import { PalavrasDoSas } from "../../components/PalavrasDoSas.js"
@@ -32,6 +33,7 @@ type Fase =
 
 export function AcrescentarAparelho({ onClose, onConcluido }: { onClose: () => void; onConcluido?: () => void }): React.JSX.Element {
   const bridge = useBridge()
+  const historico = useHistoricoDosIrmaos()
   const toast = useToast()
   const heading = useId()
   const [fase, setFase] = useState<Fase>({ que: "a-abrir" })
@@ -161,6 +163,8 @@ export function AcrescentarAparelho({ onClose, onConcluido }: { onClose: () => v
         {fase.que === "concluido" && (
           <>
             <p className="field-note">{strings.pairing.doneHostBody}</p>
+            {/* "Keep this device on", with the progress, right where the pairing ended (16/11/2026). */}
+            <AvisoDoEnvio estado={historico} />
             <div className="sheet-actions">
               <Button variant="primary" type="button" onClick={onClose}>
                 {strings.common.close}

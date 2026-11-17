@@ -11,8 +11,9 @@
  * both screens show the SAME six words; the person confirms on both; the phone
  * enters the account, channel, and common room; a third person invites the
  * account and both devices receive it; and what DOES NOT happen: the link
- * secret does not appear in request, trace, console or logs, and the phone's
- * vault does not hold the account's private key.
+ * secret does not appear in request, trace, console or logs, and the account
+ * private key, which the phone receives since 1.3.16 (Erro 609), never crosses
+ * in the clear. The phone opens a new direct conversation by itself.
  *
  * And the Welcome portrait (phase 1 of 1.1): before pairing, Carla enters the
  * vault where Ana creates the "barrica" room and closes the browser. The phone
@@ -55,8 +56,8 @@ const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
 const SERVIDOR_JS = join(RAIZ, "apps/server/dist/main.js")
 const CAPTURAS = join(RAIZ, "capturas")
-const PORTA_DA_FRENTE = 8472
-const PORTA_DO_SERVIDOR = 8473
+const PORTA_DA_FRENTE = Number(process.env.E2E_PORTA_DA_FRENTE ?? 8472)
+const PORTA_DO_SERVIDOR = Number(process.env.E2E_PORTA_DO_SERVIDOR ?? 8473)
 const NOME = `localhost:${PORTA_DA_FRENTE}`
 const SALA_COMUM = `!orwell:${NOME}`
 const APP = `http://${NOME}/app/?lingua=pt`
@@ -520,8 +521,9 @@ try {
     (erro) => check("o telemóvel recebeu o certificado, escreveu o cofre e ligou-se", false, erro.message.split("\n")[0]),
   )
   const textoFinal = await tel.locator(".gate-card").innerText()
-  check("a frase do fim: recebe a partir de agora, as anteriores ficam nos outros aparelhos", textoFinal.includes("Este aparelho recebe as mensagens a partir de agora") && textoFinal.includes("As anteriores ficam nos outros aparelhos"))
-  check("e a de que os aparelhos se gerem no aparelho principal", textoFinal.includes("no aparelho principal da conta"))
+  // Since history between devices (29/10/2026) the old conversations come from the other device.
+  check("a frase do fim: recebe as novas, e as conversas antigas chegam do outro aparelho", textoFinal.includes("Este aparelho já recebe as mensagens novas") && textoFinal.includes("As conversas antigas chegam do outro aparelho"))
+  check("e a de que os aparelhos se gerem a partir de qualquer aparelho", textoFinal.includes("Podes gerir os aparelhos a partir de qualquer um dos teus aparelhos."))
   await folha.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 30_000 }).then(
     () => check("o computador concluiu", true),
     () => check("o computador concluiu", false),
@@ -545,13 +547,14 @@ try {
   check("cada aparelho tem a sua piscina de key packages", piscinas === 2, String(piscinas))
 
   // ---------------------------------------------------------------------------
-  // 6. The phone's vault: public account key and certificate, never the private key.
+  // 6. The phone's vault: since 1.3.16 (Erro 609) it has the account private key,
+  //    the computer's, received inside the pairing box and never in the clear.
   // ---------------------------------------------------------------------------
   const cofre = await cofreDe(tel, FRASE)
-  check("o cofre do telemóvel NÃO tem signingPrivateKey", cofre.signingPrivateKey === "", JSON.stringify(cofre.signingPrivateKey).slice(0, 10))
-  check("e tem accountPublicKey, deviceCert e a sua chave de aparelho", typeof cofre.accountPublicKey === "string" && cofre.accountPublicKey.length === 43 && typeof cofre.deviceCert === "string" && cofre.deviceCert.length === 86 && cofre.deviceSigningPrivateKey.length === 43)
   const cofrePc = await cofreDe(pc, FRASE)
-  check("o cofre do computador tem a privada, e a pública do telemóvel é a dela", cofrePc.signingPrivateKey.length === 43 && cofrePc.accountPublicKey === "")
+  check("o cofre do telemóvel TEM a chave privada da conta, a do computador", cofre.signingPrivateKey.length === 43 && cofre.signingPrivateKey === cofrePc.signingPrivateKey)
+  check("e tem accountPublicKey, deviceCert e a sua chave de aparelho, diferente da do computador", typeof cofre.accountPublicKey === "string" && cofre.accountPublicKey.length === 43 && typeof cofre.deviceCert === "string" && cofre.deviceCert.length === 86 && cofre.deviceSigningPrivateKey.length === 43 && cofre.deviceSigningPrivateKey !== cofrePc.deviceSigningPrivateKey)
+  check("o cofre do computador tem a privada", cofrePc.signingPrivateKey.length === 43 && cofrePc.accountPublicKey === "")
   check("a privada do computador não aparece em nada que saiu do telemóvel nem do computador", [...redeTel, ...redePc].filter((l) => l.includes(cofrePc.signingPrivateKey)).length === 0)
 
   // The state (phase 5): the phone is born with the computer's.
@@ -600,6 +603,26 @@ try {
   // One per channel where the computer seats the phone: the vault, the direct chat with
   // Bruno, and the account channel (phase 5). Never more than Ana's channels.
   check("e gastou pacotes do aparelho do telemóvel, só os que faltavam", gastosAna >= 1 && gastosAna <= 4, String(gastosAna))
+
+  // Erro 609 is gone (1.3.16): the phone opens a NEW direct conversation by itself,
+  // with someone the account never spoke to in private (Carla, offline).
+  await tel.getByRole("button", { name: "Amigos", exact: true }).first().click()
+  await tel.locator(".people-destination").waitFor({ timeout: 15_000 })
+  await tel.locator(".people-tabs").getByRole("button", { name: "Encontrar" }).click()
+  await tel.getByLabel("Cola um link ou endereço").fill(enderecoCarla)
+  await tel.getByRole("button", { name: "Abrir perfil" }).click()
+  await tel.locator(".person-profile").getByRole("button", { name: "Mensagem", exact: true }).click()
+  // Between people who are not friends the conversation opens with the friend request at the
+  // bottom, not the text box: the proof is the direct in the phone's vault, with Carla.
+  let abriuDirecta = false
+  for (let volta = 0; volta < 30 && !abriuDirecta; volta++) {
+    await wait(2000)
+    const doTel = await cofreDe(tel, FRASE).catch(() => null)
+    abriuDirecta = Object.values(doTel?.fichasDosCanais ?? {}).some((ficha) => ficha.tipo === "directa" && ficha.par === enderecoCarla)
+  }
+  const textoTel = await tel.locator("body").innerText().catch(() => "")
+  check("o telemóvel abre uma conversa directa nova sozinho (sem o Erro 609)", abriuDirecta && !textoTel.includes("609"), textoTel.includes("609") ? "apareceu o 609" : "")
+  await tel.getByRole("button", { name: "Comunidades" }).first().click().catch(() => {})
 
   await pc.getByRole("button", { name: "Comunidades" }).click().catch(() => {})
   await abrirCanal(pc, "adega")
@@ -656,7 +679,8 @@ try {
   // by the card, not by the name form on the server.
   const cofrePcDepois = await cofreDe(pc, FRASE)
   const directas = Object.entries(cofrePcDepois.fichasDosCanais ?? {})
-    .filter(([, ficha]) => ficha.tipo === "directa")
+    // Not the one the phone opened with Carla (the Erro 609 check above).
+    .filter(([, ficha]) => ficha.tipo === "directa" && ficha.par !== enderecoCarla)
     .map(([canal]) => canal)
   const dm = db
     .prepare("SELECT channel FROM events GROUP BY channel")
@@ -739,6 +763,15 @@ try {
   check("nenhum erro de página em nenhum dos três browsers", erros.length === 0, erros[0]?.slice(0, 80) ?? "")
 } catch (erro) {
   check("o guião chegou ao fim", false, String(erro?.message ?? erro).split("\n")[0])
+  // What each page showed when it stopped, for the diagnosis.
+  const { mkdirSync } = await import("node:fs")
+  const pasta = new URL("../.verify-data/emparelhar-falha/", import.meta.url).pathname
+  mkdirSync(pasta, { recursive: true })
+  let n = 0
+  for (const b of [browserPc, browserTel]) {
+    for (const ctx of b?.contexts() ?? []) for (const p of ctx.pages()) await p.screenshot({ path: `${pasta}${n++}.png` }).catch(() => {})
+  }
+  console.log(`capturas da falha em ${pasta}`)
 }
 
 console.log("")

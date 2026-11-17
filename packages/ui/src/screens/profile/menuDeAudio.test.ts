@@ -38,7 +38,7 @@ describe("o menu do microfone", () => {
     ])
     // The account is NOT here, and that is on purpose: you reach it through the
     // identity on the same card. An entry that shows in three places tells you none
-    // of them is the right place. Owner decision on August 19, 2026.
+    // of them is the right place.
     expect(itens.some((item) => item.label === "A minha conta…")).toBe(false)
     // And the entry that is there actually leads somewhere.
     itens[0]?.onSelect()

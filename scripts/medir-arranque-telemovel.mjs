@@ -6,7 +6,7 @@
  *   node scripts/medir-arranque-telemovel.mjs --motor webkit
  *   node scripts/medir-arranque-telemovel.mjs --sem-pc        (the computer closes before the phone reloads)
  *
- * Owner report (12/11/2026): "the phone loading is extremely slow". This
+ * The bug: "the phone loading is extremely slow". This
  * script builds the case and times it:
  *
  *   1. Ana creates her account on a desktop browser. Bruno, a core account in
@@ -52,7 +52,18 @@ const DIST = resolve(argumento("--dist", join(RAIZ, "apps/web/dist")))
 const ROTULO = argumento("--rotulo", "agora")
 const MOTOR = argumento("--motor", "chromium")
 const SEM_PC = process.argv.includes("--sem-pc")
+/** A Windows machine may have reduced motion on: the opening must not get longer there. */
+const REDUZIDO = process.argv.includes("--movimento-reduzido")
+/** Only the remembered-session opens (no password open): quicker, for the opening measures. */
+const SO_REABRIR = process.argv.includes("--so-reabrir")
 const MENSAGENS = Number(argumento("--mensagens", 60))
+/**
+ * A loaded common room, built while the phone is closed: `--membros N` more
+ * core accounts join it (N commits; production has 409 members), and each one
+ * writes `--sala-comum-depois M` messages there.
+ */
+const MEMBROS = Number(argumento("--membros", 0))
+const NA_SALA_DEPOIS = Number(argumento("--sala-comum-depois", 0))
 const SAIDA = argumento("--saida", null)
 const PORTA_DA_FRENTE = Number(process.env.E2E_PORTA_DA_FRENTE ?? 8496)
 const PORTA_DO_SERVIDOR = Number(process.env.E2E_PORTA_DO_SERVIDOR ?? 8497)
@@ -147,12 +158,15 @@ const SONDA = () => {
     if (d.querySelector(".channel-name")) marcar(notas.ecra, "canais")
     if (d.querySelector(".message, .msg, [data-message-id]")) marcar(notas.ecra, "mensagem")
     if (d.querySelector('input[placeholder="Escreve uma mensagem"]')) marcar(notas.ecra, "caixa")
+    // Usable: the app is there, and the opening (and its fading copy) no longer covers it.
+    const html = d.documentElement
+    if (notas.ecra.app !== undefined && !d.querySelector(".abertura") && !html.classList.contains("abertura-a-segurar") && !html.classList.contains("abertura-a-sair")) marcar(notas.ecra, "utilizavel")
   }
-  new MutationObserver(olhar).observe(document, { subtree: true, childList: true, attributes: false })
+  new MutationObserver(olhar).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] })
   void t0
 }
 
-const resultado = { rotulo: ROTULO, motor: MOTOR, semPc: SEM_PC, rede: REDE, cpu: MOTOR === "chromium" ? 4 : 1, corridas: [] }
+const resultado = { rotulo: ROTULO, motor: MOTOR, semPc: SEM_PC, reduzido: REDUZIDO, rede: REDE, cpu: MOTOR === "chromium" ? 4 : 1, corridas: [] }
 let browserPc
 let browserTel
 async function arrumar(codigo) {
@@ -202,9 +216,22 @@ async function medirAbertura(ctx, rotulo, { frase = null, alvo } = {}) {
     const agora = await page.evaluate(() => performance.now())
     return agora - n > 3_000
   }, 120_000, 1_000)
-  const notas = await page.evaluate(() => ({
+  const notas = await page.evaluate(async () => ({
     ...window.__arranque,
     marcas: performance.getEntriesByType("mark").filter((m) => m.name.startsWith("orwell:")).map((m) => [m.name, Math.round(m.startTime)]),
+    recuperacoes: performance
+      .getEntriesByType("measure")
+      .filter((m) => m.name === "orwell:recuperar")
+      .map((m) => ({ canal: String(m.detail?.canal ?? "").slice(0, 12), inicio: Math.round(m.startTime), ms: Math.round(m.duration), eventos: m.detail?.eventos, commits: m.detail?.commits })),
+    cofreBytes: await new Promise((r) => {
+      const o = indexedDB.open("enclave", 1)
+      o.onsuccess = () => {
+        const g = o.result.transaction("vault", "readonly").objectStore("vault").get("current")
+        g.onsuccess = () => r(g.result ? g.result.byteLength ?? g.result.length ?? 0 : 0)
+        g.onerror = () => r(-1)
+      }
+      o.onerror = () => r(-1)
+    }),
     nav: (() => {
       const n = performance.getEntriesByType("navigation")[0]
       return n ? { domInteractive: Math.round(n.domInteractive), domContentLoaded: Math.round(n.domContentLoadedEventEnd), load: Math.round(n.loadEventEnd) } : null
@@ -214,12 +241,13 @@ async function medirAbertura(ctx, rotulo, { frase = null, alvo } = {}) {
   const bytesDescidos = casa.bytesDescidos()
   casa.redeLenta(false)
   const arredondar = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, Math.round(v)]))
-  const corrida = { rotulo, entrou, msAteApp: tEntrou, msAteConversa: tConversa, bytesDescidos, nav: notas.nav, frames: arredondar(notas.frames), ecra: arredondar(notas.ecra), contagens: notas.contagens, marcas: notas.marcas, recursos: notas.recursos }
+  const corrida = { cofreBytes: notas.cofreBytes, recuperacoes: notas.recuperacoes, rotulo, entrou, msAteApp: tEntrou, msAteConversa: tConversa, bytesDescidos, nav: notas.nav, frames: arredondar(notas.frames), ecra: arredondar(notas.ecra), contagens: notas.contagens, marcas: notas.marcas, recursos: notas.recursos }
   resultado.corridas.push(corrida)
   console.log(`\n== ${rotulo}: app em ${tEntrou} ms, conversa em ${tConversa} ms, ${Math.round(bytesDescidos / 1024)} KiB descidos`)
   console.log("   ecrã:", JSON.stringify(corrida.ecra))
   console.log("   tramas:", JSON.stringify(Object.fromEntries(Object.entries(corrida.frames).filter(([k]) => /ws:|hello|auth|subscribe|backfill|welcome|keypackage|pronto|cofre|estado/.test(k)))))
   console.log("   contagens:", JSON.stringify(corrida.contagens), "marcas:", JSON.stringify(corrida.marcas))
+  console.log(`   cofre: ${(notas.cofreBytes / 1_048_576).toFixed(2)} MB; recuperação por canal: ${JSON.stringify(notas.recuperacoes)}`)
   await page.close()
   return corrida
 }
@@ -264,7 +292,7 @@ try {
   await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
   browserTel = await motorTel.launch({ headless: true })
-  const ctxTel = await browserTel.newContext({ locale: "pt-PT", viewport: { width: 390, height: 844 }, deviceScaleFactor: MOTOR === "webkit" ? 3 : 2, isMobile: MOTOR !== "firefox", hasTouch: true })
+  const ctxTel = await browserTel.newContext({ ...(REDUZIDO ? { reducedMotion: "reduce" } : {}), locale: "pt-PT", viewport: { width: 390, height: 844 }, deviceScaleFactor: MOTOR === "webkit" ? 3 : 2, isMobile: MOTOR !== "firefox", hasTouch: true })
   await ctxTel.addInitScript(SONDA)
   const tel = await ctxTel.newPage()
   await tel.goto(APP, { waitUntil: "domcontentloaded" })
@@ -293,10 +321,28 @@ try {
 
   // More while the phone is closed: work for the next start's catch-up.
   for (const canal of canais) for (let i = 1; i <= 20; i++) await bruno.session.send(canal, mensagem(`${i} depois no ${canais.indexOf(canal) + 1}`))
+  if (MEMBROS > 0 || NA_SALA_DEPOIS > 0) {
+    const t1 = Date.now()
+    const entram = []
+    for (let i = 0; i < MEMBROS; i++) entram.push(await contaNoNode(`Membro ${i + 1}`))
+    const sala = casa.salaComum
+    await ate(async () => entram.every((c) => c.session.channels.includes(sala)), 600_000, 1_000)
+    const escrevem = [bruno, ...entram]
+    for (let i = 1; i <= NA_SALA_DEPOIS; i++) {
+      await Promise.all(escrevem.map((c) => c.session.send(sala, mensagem(`sala ${i} de ${c.nome}`)).catch(() => {})))
+    }
+    const base2 = new DatabaseSync(casa.base, { readOnly: true })
+    const linhas = base2.prepare("SELECT kind, count(*) AS n FROM events WHERE channel = ? GROUP BY kind").all(sala)
+    base2.close()
+    console.log(`  ..  sala comum com o telemóvel fechado: ${MEMBROS} membros novos, ${NA_SALA_DEPOIS * escrevem.length} mensagens, em ${Date.now() - t1} ms; eventos no servidor: ${JSON.stringify(linhas)}`)
+    // The new members go away: the phone opens alone with them, like most of the 409.
+    for (const c of entram) c.session.disconnect()
+  }
   if (SEM_PC) await ctxPc.close()
 
   await medirAbertura(ctxTel, "reabrir (sessão memorizada)", { alvo: { canal: "canal 1", texto: "20 depois no 1" } })
   await medirAbertura(ctxTel, "reabrir outra vez (sem trabalho novo)", { alvo: { canal: "canal 1", texto: "20 depois no 1" } })
+  if (SO_REABRIR) throw new Error("fim (--so-reabrir)")
   // Forget the remembered session: the next open asks for the password.
   const p = await ctxTel.newPage()
   await p.goto(APP, { waitUntil: "domcontentloaded" })

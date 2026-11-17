@@ -4,6 +4,7 @@ import {
   signDeviceManifest,
   signDeviceRevocation,
   toBase64,
+  verifyDeviceManifest,
   verifyDeviceRevocation,
   type DeviceManifest,
   type DeviceManifestWire,
@@ -344,4 +345,33 @@ export function notarAvisado(cofre: object, aparelho: string, canal: string): bo
 
 export function canaisAvisados(cofre: object, aparelho: string): readonly string[] {
   return (cofre as CofreComAvisos).revogacoesAvisadas?.[aparelho] ?? []
+}
+
+/**
+ * Is this manifest proof that the account removed THIS device (1.3.16)?
+ *
+ * The server sends it with `device-revoked`, and only with it does the device sign
+ * out and erase its vault. The server is not trusted to say so: it could erase any
+ * device's history with one frame. What must hold, all of it:
+ *
+ * - it verifies, and it is the manifest of this account (signed by the account key);
+ * - it does not list this device;
+ * - its version is ABOVE the highest one this vault saw. An older manifest, from
+ *   before the device was added, also does not list it: replaying it proves nothing.
+ *   A vault that never saw its own manifest has nothing to compare with, and does
+ *   not erase.
+ *
+ * Returns, never throws.
+ */
+export function provaDeRemocao(
+  manifesto: unknown,
+  address: string,
+  aparelho: string,
+  versaoVista: number | undefined,
+): boolean {
+  if (manifesto === undefined || manifesto === null || versaoVista === undefined) return false
+  const verificado = verifyDeviceManifest(manifesto)
+  if (!verificado.ok || verificado.manifest.address !== address) return false
+  if (verificado.manifest.version <= versaoVista) return false
+  return !verificado.manifest.devices.some((device) => toBase64(device.deviceKey) === aparelho)
 }

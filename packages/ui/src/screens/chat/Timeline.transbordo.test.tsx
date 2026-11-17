@@ -11,7 +11,7 @@ import { Timeline } from "./Timeline.js"
 /**
  * No conversation container scrolls sideways.
  *
- * The bug (owner report on Windows, 4/11/2026): "there is a slider above the
+ * The bug (on Windows): "there is a slider above the
  * text send box". It was the HORIZONTAL scrollbar of the conversation itself:
  * the tooltip of the button at the end of each message's actions ("Copy text",
  * "More"), invisible but centered on the button, extended 53 px past the right

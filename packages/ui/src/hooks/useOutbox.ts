@@ -3,7 +3,6 @@ import type { ConnectionState, EnclaveBridge } from "../bridge.js"
 import type { ChatMessage, MessageExtras } from "../types.js"
 import { strings, traduzirErro } from "../strings.js"
 import type { ToastLevel } from "./useToasts.js"
-import { motor, type Motor } from "../sons/motor.js"
 
 /**
  * A message of ours that has not been confirmed yet.
@@ -109,20 +108,14 @@ export function outboxReducer(state: OutboxEntry[], action: OutboxAction): Outbo
  * send that fails because the connection dropped mid-send goes back to
  * `waiting`, not `failed`: nobody rejected it, there was just no path forward.
  *
- * **Send sound** (owner request, November 3, 2026). Plays once, when the bridge
- * confirms a message that just left the outbox: only in the `.then` of a
- * `send`, never before or on error. A message with attachments is one send and
- * makes one sound. Does not play on "Retry" or on messages that were waiting
- * for connection: they leave on their own, sometimes many at once, and the
- * person is no longer looking at the outbox. The engine handles the rest:
- * the master switch, the "sent" type switch, volume, "Busy" and delay.
+ * **No send sound** (16/11/2026). Sending is an event of this account, and
+ * no sound or notice plays for one, from this device or any other. The sound it
+ * had (since 3/11/2026) is gone, with its switch.
  */
 export function useOutbox(
   bridge: EnclaveBridge,
   connection: ConnectionState,
   notify: (detail: string, level?: ToastLevel) => void,
-  /** Who plays the send sound. Tests pass their own. */
-  motorDoSom: Pick<Motor, "tocar"> = motor,
 ): {
   entries: OutboxEntry[]
   send: (channel: string, body: string, room?: string, extras?: MessageExtras) => void
@@ -140,12 +133,11 @@ export function useOutbox(
   connectionRef.current = connection
 
   const deliver = useCallback(
-    (entry: OutboxEntry, daCaixa = false) => {
+    (entry: OutboxEntry) => {
       void bridge.channels
         .send(entry.channel, entry.body, entry.room, entry.extras)
         .then(() => {
           dispatch({ type: "remove", id: entry.id })
-          if (daCaixa) motorDoSom.tocar({ tipo: "enviada" })
         })
         .catch((error: Error) => {
           // By the error, not just the state: the `.catch` runs before the render that
@@ -159,7 +151,7 @@ export function useOutbox(
           notify(traduzirErro(error), "error")
         })
     },
-    [bridge, notify, motorDoSom],
+    [bridge, notify],
   )
 
   const send = useCallback(
@@ -176,7 +168,7 @@ export function useOutbox(
       // Writer stopped: no wait holds. See the effect below.
       if (bridge.session?.escreve?.() === false) entry.state = "failed"
       dispatch({ type: "add", entry })
-      if (entry.state === "sending") deliver(entry, true)
+      if (entry.state === "sending") deliver(entry)
     },
     [deliver, bridge],
   )

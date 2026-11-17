@@ -21,7 +21,7 @@ function PlayIcon({ size = 30 }: { size?: number }): React.JSX.Element {
 /**
  * A YouTube video: the thumbnail, and clicking it opens the video OUTSIDE the app.
  *
- * Owner request on November 2, 2026: "show YouTube thumbnails visually, but when
+ * The requirement: "show YouTube thumbnails visually, but when
  * the user clicks the thumbnail it opens a new window or tab with the link".
  * Until then clicking spawned the YouTube player in an `iframe` inside the chat.
  * It's gone, and with it the `frame-src` exception in both policies and YouTube's

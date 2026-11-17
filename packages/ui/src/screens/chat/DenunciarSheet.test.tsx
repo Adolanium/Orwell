@@ -84,7 +84,7 @@ function montar(
 const AVISO = "O fundador do canal recebe uma cópia sem o teu nome. Numa conversa pequena, pode adivinhar quem foste."
 
 // Since 4/11/2026 the note, good faith and contact appear in the reason step,
-// below the reasons (design chosen by the owner). Choosing the reason no longer
+// below the reasons (the chosen design). Choosing the reason no longer
 // changes the step: "Continue" is what validates and advances.
 function escolherMotivo(texto: string): void {
   fireEvent.click(screen.getByLabelText(texto))

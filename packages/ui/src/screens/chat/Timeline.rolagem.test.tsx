@@ -9,7 +9,7 @@ import { Timeline } from "./Timeline.js"
  * The conversation opens paused at the right place, and only auto-scrolls for
  * those at the bottom.
  *
- * The bug (owner report, 4/11/2026): "when we click a chat room, it scrolls
+ * The bug: "when we click a chat room, it scrolls
  * automatically". Measured live at 1920x1080 (`scripts/medir-scroll-da-sala.mjs`):
  *
  * - **The room was not the conversation.** `Timeline` only knew the CHANNEL;

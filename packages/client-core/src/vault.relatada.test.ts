@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { ArmazemDeMedia } from "./armazem/armazem.js"
 import { ArmazemEmMemoria } from "./armazem/emMemoria.js"
 import { absorverPayload } from "./armazem/referencias.js"
-import { appendHistory, entradasDoCanal, mergeOlderHistory, newVaultContents, semBytes, type StoredChatMessage } from "./vault.js"
+import { appendHistory, entradasDoCanal, mergeOlderHistory, newVaultContents, relatoJaGuardado, semBytes, type StoredChatMessage } from "./vault.js"
 
 /**
  * The `seq` of a report (phase S4) is stated by the caller and not signed. It
@@ -72,7 +72,7 @@ describe("um relato em cima de um buraco, e depois o evento real", () => {
  * A report carries the card WITHOUT the thumbnail (the thumbnail is not signed:
  * `payloadSemBytes`). In a community, the report may arrive before the server
  * event. The server copy has the thumbnail and comes from the author,
- * authenticated by MLS: its bytes stay (report from owner with 1.1.0, "the app
+ * authenticated by MLS: its bytes stay (bug in 1.1.0: "the app
  * still has no YouTube thumbnails in communities").
  */
 describe("o relato antes do evento do servidor: a miniatura do servidor fica", () => {
@@ -159,5 +159,31 @@ describe("o relato antes do evento do servidor: a miniatura do servidor fica", (
     const doBruno = entradasDoCanal(c, CANAL).find((e) => e.sender === BRUNO)
     expect(doBruno!.relatada).toBe(true)
     expect((doBruno!.payload["links"] as { thumbnail?: string }[])[0]!.thumbnail).toBeUndefined()
+  })
+})
+
+describe("um relato sem id de um evento que o cofre já tem (16/11/2026)", () => {
+  const reaccao = (remove: boolean, autoria?: string) => ({
+    t: "reaction",
+    target: "m1",
+    emoji: "👍",
+    remove,
+    ...(autoria ? { autoria } : {}),
+  })
+
+  it("o mesmo autor e o mesmo acto no mesmo seq: já está guardado", () => {
+    const c = newVaultContents()
+    appendHistory(c, CANAL, { seq: 24, sender: ANA, at: 1, payload: reaccao(false, "assinatura") })
+    // The report may carry the payload in another key order, or without the signature.
+    expect(relatoJaGuardado(c, CANAL, 24, ANA, { remove: false, emoji: "👍", target: "m1", t: "reaction" })).toBe(true)
+  })
+
+  it("outro autor, outro acto, ou outro seq: não está", () => {
+    const c = newVaultContents()
+    appendHistory(c, CANAL, { seq: 24, sender: ANA, at: 1, payload: reaccao(false) })
+    expect(relatoJaGuardado(c, CANAL, 24, BRUNO, reaccao(false))).toBe(false)
+    expect(relatoJaGuardado(c, CANAL, 24, ANA, reaccao(true))).toBe(false)
+    expect(relatoJaGuardado(c, CANAL, 25, ANA, reaccao(false))).toBe(false)
+    expect(relatoJaGuardado(c, CANAL, -1, ANA, reaccao(false))).toBe(false)
   })
 })

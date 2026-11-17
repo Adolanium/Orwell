@@ -36,6 +36,8 @@ async function conta(servidor: ServidorDeTeste): Promise<Session> {
   await vault.create("frase-passe-de-teste")
   const session = new Session(vault)
   await session.createIdentity(servidor.casa)
+  // Joining the common room is opt-in since 12/11/2026: this account ticked the box.
+  await session.escolherSalaComum(true)
   await session.connect()
   abertas.push(session)
   return session

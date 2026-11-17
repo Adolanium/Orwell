@@ -1,4 +1,4 @@
-import { newRoomId } from "@enclave/protocol"
+import { newRoomId, type SoLeitura } from "@enclave/protocol"
 import { useId, useState } from "react"
 import { Button } from "../../components/Button.js"
 import { Field } from "../../components/Field.js"
@@ -6,6 +6,8 @@ import { Interruptor } from "../../components/Interruptor.js"
 import { Modal } from "../../components/Modal.js"
 import { strings, traduzirErro } from "../../strings.js"
 import { TextoDeErro } from "../../components/TextoDeErro.js"
+import type { ChannelRole } from "../../bridge.js"
+import { EscolhaDeQuemEscreve } from "./QuemEscreve.js"
 
 /**
  * Create a room inside a channel.
@@ -24,6 +26,7 @@ export function NewRoom({
   onCancel,
   categorias = [],
   minutosAfk,
+  cargos,
 }: {
   onSubmit: (next: {
     room: string
@@ -32,6 +35,8 @@ export function NewRoom({
     kind: "text" | "voice"
     layout?: string
     afk?: { minutos: number }
+    /** Born read-only, with these roles writing. Only in a text room. See `QuemEscreve`. */
+    soLeitura?: SoLeitura
   }) => Promise<void>
   onCancel: () => void
   /** The categories that already exist, to pick instead of typing. */
@@ -42,6 +47,12 @@ export function NewRoom({
    * it).
    */
   minutosAfk?: number | undefined
+  /**
+   * The channel roles, for the read-only choice (12/11/2026). Absent hides the
+   * choice: a host without the permissions model, or someone who cannot set
+   * room overrides.
+   */
+  cargos?: readonly ChannelRole[] | undefined
 }): React.JSX.Element {
   const heading = useId()
   const [name, setName] = useState("")
@@ -58,10 +69,11 @@ export function NewRoom({
    * Here at the top it is a single choice because for whoever creates the room,
    * it is a single choice: nobody wants to decide twice what the room is.
    */
-  const [escolha, setEscolha] = useState<"text" | "voice" | "tickets">("text")
+  const [escolha, setEscolha] = useState<"text" | "voice" | "tickets" | "polls">("text")
   const kind = escolha === "voice" ? "voice" : "text"
   /** "AFK room": voice room only. See `SalaAfk` in the protocol. */
   const [afk, setAfk] = useState(false)
+  const [soLeitura, setSoLeitura] = useState<SoLeitura>({ soLeitura: false, quemEscreve: [] })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -93,7 +105,9 @@ export function NewRoom({
       category: category.trim(),
       kind,
       ...(escolha === "tickets" ? { layout: "tickets" } : {}),
+      ...(escolha === "polls" ? { layout: "polls" } : {}),
       ...(escolha === "voice" && afk && minutosAfk !== undefined ? { afk: { minutos: minutosAfk } } : {}),
+      ...((escolha === "text" || escolha === "polls") && cargos !== undefined && soLeitura.soLeitura ? { soLeitura } : {}),
     }).catch((cause: Error) => {
       setBusy(false)
       setError(traduzirErro(cause))
@@ -184,17 +198,31 @@ export function NewRoom({
             >
               {strings.newRoom.kindTickets}
             </Button>
+            <Button
+              type="button"
+              ariaLabel={strings.newRoom.kindPolls}
+              variant={escolha === "polls" ? "primary" : "ghost"}
+              onClick={() => setEscolha("polls")}
+            >
+              {strings.newRoom.kindPolls}
+            </Button>
           </div>
         </Field>
 
         {/* Said only where it matters: the ticket caveat speaks about a choice the
             person just made, and showing it always taught them to ignore both. */}
         {escolha === "tickets" && <p className="hint">{strings.newRoom.ticketsNote}</p>}
+        {escolha === "polls" && <p className="hint">{strings.newRoom.pollsNote}</p>}
         {escolha === "voice" && minutosAfk !== undefined && (
           <>
             <Interruptor ligado={afk} onMudar={setAfk} rotulo={strings.newRoom.afkLabel} />
             {afk && <p className="hint">{strings.newRoom.afkNote}</p>}
           </>
+        )}
+        {/* A text room only: a ticket room is where members open tickets, and a
+            voice room has no writing bar to replace. */}
+        {(escolha === "text" || escolha === "polls") && cargos !== undefined && (
+          <EscolhaDeQuemEscreve valor={soLeitura} onMudar={setSoLeitura} roles={cargos} />
         )}
         <p className="hint">{strings.newRoom.note}</p>
         {error && (

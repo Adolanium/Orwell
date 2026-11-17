@@ -31,7 +31,7 @@
   
   The three things this header said were OUT OF SCOPE, touch targets for 44 px,
   long press instead of right click, and the virtual keyboard covering the write
-  bar, all landed in September 2026, in the slice the owner asked for after using
+  bar, all landed in September 2026, in the slice that came from using
   the app on a real phone. Targets and hover are in `screens.css` (under `pointer: coarse`), long
   press in `hooks/useToqueLongo.ts`, and the keyboard at the end of this file. What stays out is
   the touch redesign of `docs/PLANO_MOVEL.md`: bottom navigation bar, edge drag, landscape.

@@ -17,7 +17,7 @@ import {
 /**
  * Channel state is said again only when someone lacks it (hotfix 1.3.12, 12/11/2026).
  *
- * Owner's report: "the app restarts on mobile for no obvious reason". Up to 1.3.10,
+ * The bug: "the app restarts on mobile for no obvious reason". Up to 1.3.10,
  * `connect()` ran `republishAuthority` and `republishRooms` for every restored
  * channel, on every connection, on every admin device. In the common room that is
  * ~176 frames per connection (one `role.assign` per person with a role, every

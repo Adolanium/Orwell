@@ -9,7 +9,7 @@ import { pt } from "../../linguas/pt.js"
 import { ProfileEditor } from "./ProfileEditor.js"
 
 /**
- * "Bio", not "About you" (requested by the owner on October 27, 2026).
+ * "Bio", not "About you".
  *
  * Bio already existed, separate from status; what changes is the name and the
  * sentence that tells the difference between the two.

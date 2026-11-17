@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import type { Power } from "@enclave/protocol"
 import type { Profile } from "../../bridge.js"
 import { Andante } from "../../components/Andante.js"
@@ -55,6 +55,7 @@ function MemberPanelInteira({
   apelidoDe,
   micCaladoDe,
   oficial = false,
+  pedirPerfis,
 }: {
   channel: string
   /** On narrow screens the panel is a slide-in overlay; this is it, open.
@@ -72,6 +73,11 @@ function MemberPanelInteira({
    */
   onClose?: (() => void) | undefined
   members: string[]
+  /**
+   * Ask for the names of these accounts (the common room). Called only for the
+   * rows of the offline list that are on screen. Absent: an older host.
+   */
+  pedirPerfis?: ((contas: string[]) => void) | undefined
   /** Each person's nickname in this channel (phase 3), before their name. */
   apelidoDe?: ((address: string) => string | undefined) | undefined
   state: "loading" | "error" | "ready"
@@ -213,7 +219,20 @@ function MemberPanelInteira({
    */
   const estaCa = (address: string): boolean => (presenceFor ? presenceFor(address) !== "idle" : true)
 
-  const grupos = agruparMembros(members, {
+  /*
+    A big channel shows only who is online (12/11/2026). The rest is one
+    line, "+X people on this server", that opens a windowed list on request.
+    With 409 members, drawing (and asking names for) everyone on every login
+    was work for people nobody was looking at.
+  */
+  const grande = presenceFor !== undefined && members.length > MEMBROS_PARA_SO_LIGADOS
+  const [verTodos, setVerTodos] = useState(false)
+  const visiveis = grande ? members.filter(estaCa) : members
+  // Sorted only when open: closed, the line needs only the count.
+  const foraDeLinha = grande ? members.filter((membro) => !estaCa(membro)) : []
+  if (verTodos) foraDeLinha.sort((a, b) => nameFor(a).localeCompare(nameFor(b), "pt") || a.localeCompare(b))
+
+  const grupos = agruparMembros(visiveis, {
     online: estaCa,
     cargoDe: (address) => roleFor?.(address) ?? null,
     nameFor,
@@ -256,8 +275,8 @@ function MemberPanelInteira({
             {volumeDe(member) === 0 && (
               <MarcaDeChamada tipo="silenciado" nome={nameFor(member)} className="member-silenced" size={14} />
             )}
-            {/* The personal message NEXT TO the name, like in Messenger (owner, October
-                28, 2026): in italics and faded, after the name, and not on a line
+            {/* The personal message NEXT TO the name, like in Messenger:
+                in italics and faded, after the name, and not on a line
                 below. When it does not fit, it scrolls like a news ticker (the
                 `Andante`), instead of cutting with ellipsis. */}
             {profile?.statusText && <Andante className="member-status" texto={profile.statusText} />}
@@ -295,7 +314,7 @@ function MemberPanelInteira({
         >
           {labels}
         </button>
-        {/* No copy-id button next to the name (owner, October 28, 2026: "it is
+        {/* No copy-id button next to the name ("it is
             already in the menu …"): the "⋯" and right-click give the same menu,
             and that is where the id copies. The line is the name and the "⋯",
             and nothing else. */}
@@ -381,6 +400,15 @@ function MemberPanelInteira({
               </li>
             ))}
 
+          {state === "ready" && grande && foraDeLinha.length > 0 && (
+            <li className="member-group offline">
+              <button type="button" className="member-mais" aria-expanded={verTodos} onClick={() => setVerTodos((antes) => !antes)}>
+                {verTodos ? strings.members.esconderMaisPessoas : strings.members.maisPessoas(foraDeLinha.length)}
+              </button>
+              {verTodos && <ListaEmJanela membros={foraDeLinha} linhaDe={linhaDe} semNome={(m) => !directory.get(m)?.displayName} pedirPerfis={pedirPerfis} />}
+            </li>
+          )}
+
           {state === "ready" && members.length === 0 && <li className="member-empty">{strings.members.empty}</li>}
         </ul>
 
@@ -398,6 +426,64 @@ function MemberPanelInteira({
         )}
       </aside>
     </>
+  )
+}
+
+/** Above this many members, the panel shows only who is online. */
+export const MEMBROS_PARA_SO_LIGADOS = 50
+
+/** The height of one member row in the windowed list, in px. Pinned by `.member-janela li` in the CSS. */
+const ALTURA_DA_LINHA = 44
+/** Rows drawn above and below the window, so a fast scroll never shows a gap. */
+const MARGEM_DE_LINHAS = 8
+
+/**
+ * The offline members of a big channel, drawn only where the eye is: a fixed
+ * row height, a scroll box, and the rows of the window plus a margin. Asks for
+ * the names of the nameless rows that come into view, once each.
+ */
+function ListaEmJanela({
+  membros,
+  linhaDe,
+  semNome,
+  pedirPerfis,
+}: {
+  membros: readonly string[]
+  linhaDe: (membro: string) => React.JSX.Element
+  semNome: (membro: string) => boolean
+  pedirPerfis?: ((contas: string[]) => void) | undefined
+}): React.JSX.Element {
+  const [topo, setTopo] = useState(0)
+  const [altura, setAltura] = useState(ALTURA_DA_LINHA * 10)
+  const caixa = useRef<HTMLUListElement>(null)
+  const pedidos = useRef(new Set<string>())
+  useEffect(() => {
+    const elemento = caixa.current
+    if (elemento && elemento.clientHeight > 0) setAltura(elemento.clientHeight)
+  }, [])
+  const inicio = Math.max(0, Math.floor(topo / ALTURA_DA_LINHA) - MARGEM_DE_LINHAS)
+  const fim = Math.min(membros.length, Math.ceil((topo + altura) / ALTURA_DA_LINHA) + MARGEM_DE_LINHAS)
+  const janela = membros.slice(inicio, fim)
+  useEffect(() => {
+    if (!pedirPerfis) return
+    const novos = janela.filter((membro) => semNome(membro) && !pedidos.current.has(membro))
+    if (novos.length === 0) return
+    for (const membro of novos) pedidos.current.add(membro)
+    pedirPerfis(novos)
+    // Asked once per row that comes into view; the window moves with `inicio`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inicio, fim, membros])
+  return (
+    <ul
+      ref={caixa}
+      className="member-group-list member-janela"
+      style={{ maxHeight: `min(60vh, ${membros.length * ALTURA_DA_LINHA}px)`, overflowY: "auto" }}
+      onScroll={(evento) => setTopo(evento.currentTarget.scrollTop)}
+    >
+      {inicio > 0 && <li aria-hidden="true" style={{ height: inicio * ALTURA_DA_LINHA }} />}
+      {janela.map((membro) => linhaDe(membro))}
+      {fim < membros.length && <li aria-hidden="true" style={{ height: (membros.length - fim) * ALTURA_DA_LINHA }} />}
+    </ul>
   )
 }
 

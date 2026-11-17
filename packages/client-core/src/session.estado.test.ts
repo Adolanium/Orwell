@@ -385,7 +385,8 @@ function esperarFase<F extends PairEvento["fase"]>(session: Session, fase: F, pr
 }
 
 /** Pair a new phone to the `pc`, through the whole path. Also return the phases the phone saw. */
-async function emparelhar(pc: Conta): Promise<Conta & { fases: string[] }> {
+/** `semChaveDaConta`: a phone paired before 1.3.16, without the account private key. */
+async function emparelhar(pc: Conta, opcoes: { semChaveDaConta?: boolean } = {}): Promise<Conta & { fases: string[] }> {
   const vault = new Vault(new MemoryBackend())
   await vault.create("frase-passe")
   const telemovel = new Session(vault)
@@ -407,6 +408,11 @@ async function emparelhar(pc: Conta): Promise<Conta & { fases: string[] }> {
   await telemovel.confirmarSas()
   await pc.session.confirmarSas()
   await certificado
+  if (opcoes.semChaveDaConta) {
+    await vault.update((contents) => {
+      contents.signingPrivateKey = ""
+    })
+  }
   const identidade = telemovel.loadIdentity()
   await telemovel.connect()
   await settle(40)
@@ -857,7 +863,8 @@ describe("o aparelho com a chave, surdo no canal da conta (I5)", () => {
     await ana.vault.update((contents) => {
       contents.profile = { displayName: "", donations: [], updatedAt: 0 }
     })
-    const telemovel = await emparelhar(ana)
+    // A phone paired before 1.3.16: the one that repairs here has no account key.
+    const telemovel = await emparelhar(ana, { semChaveDaConta: true })
     const proprio = canalDaConta(ana)
     await ate(() => telemovel.vault.contents.groups[proprio] !== undefined, "o telemóvel entrar no canal da conta")
     await ate(async () => (await folhasDe(ana, proprio, ana.address)).length === 2, "as duas folhas no canal da conta")

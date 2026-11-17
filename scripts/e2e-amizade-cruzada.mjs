@@ -3,7 +3,7 @@
  *
  *   node scripts/e2e-amizade-cruzada.mjs          (needs `npm run build` first)
  *
- * Owner report (27/10/2026): "if one user sends a friend request at the same
+ * The bug: "if one user sends a friend request at the same
  * time another does, they are automatically accepted. I see accepted and pending
  * requests at the same time". The cause was two folds in friendships, the core
  * one and the UI one; now there is one, the core one.

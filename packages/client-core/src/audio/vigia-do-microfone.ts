@@ -1,7 +1,7 @@
 /**
  * The microphone watchdog: catch it when capture dies silently (4/11/2026).
  *
- * The owner's report: "I stopped hearing a user. It looks like Orwell stopped
+ * The bug: "I stopped hearing a user. It looks like Orwell stopped
  * capturing my mic. I left and came back and it worked." No error, no warning.
  *
  * Measured on Chromium for real (`scripts/mic-recupera-evidencia/`): with the voice
@@ -42,6 +42,37 @@ export interface SaudeDoMicrofone {
   readonly contexto?: { readonly state: string } | null
   /** The worklet of the voice chain, if there is a chain. See `CadeiaMontada`. */
   readonly cadeia?: { readonly ultimoBatimento: number; readonly rebentou: boolean } | null
+  /**
+   * The page is hidden on a system that suspends capture in the background:
+   * a phone or a tablet with the screen locked, or another app in front. See
+   * `sistemaSuspendeCaptura`.
+   *
+   * There the system may mute the capture on purpose (iOS does it to an
+   * installed web app) and suspend the context, and opening the microphone
+   * again fails. Nothing read while hidden counts, an ended track included; the
+   * verdict waits for the page to come back. See `VigiaDoMicrofone.#verificar`.
+   */
+  readonly escondida?: boolean
+}
+
+/**
+ * Whether this system suspends microphone capture while the page is hidden: a
+ * touch screen (`pointer: coarse`, phones and tablets) or iOS (an iPad that
+ * reports itself as a Mac included). A computer does not: a minimized window
+ * or a background tab keeps capturing, so a microphone that dies there is a
+ * real death and the watchdog must act on it.
+ */
+export function sistemaSuspendeCaptura(
+  ambiente: {
+    matchMedia?: (consulta: string) => { matches: boolean }
+    navigator?: { userAgent?: string; platform?: string; maxTouchPoints?: number }
+  } = globalThis as never,
+): boolean {
+  if (ambiente.matchMedia?.("(pointer: coarse)").matches === true) return true
+  const nav = ambiente.navigator
+  if (!nav) return false
+  if (/iPhone|iPad|iPod/.test(nav.userAgent ?? "")) return true
+  return nav.platform === "MacIntel" && (nav.maxTouchPoints ?? 0) > 1
 }
 
 export interface RelogioDaVigia {
@@ -85,6 +116,8 @@ export class VigiaDoMicrofone {
   /** The first beat read after (re)arming: the chain may be new. */
   #batimentoDeReferencia: number | null = null
   #referenciaEm = 0
+  /** The last read saw the page hidden. The first visible read after it judges at once. */
+  #estavaEscondida = false
 
   constructor(
     private readonly ler: () => SaudeDoMicrofone | null,
@@ -109,6 +142,7 @@ export class VigiaDoMicrofone {
   }
 
   #recomecar(): void {
+    this.#estavaEscondida = false
     this.#ultimaLeitura = this.relogio.agora()
     this.#caladoDesde = null
     this.#contextoParadoDesde = null
@@ -130,6 +164,30 @@ export class VigiaDoMicrofone {
     const saude = this.ler()
     if (!saude?.faixa) return
     const { faixa } = saude
+
+    /*
+      Hidden: no verdict, and no counts carried over. A muted track or a
+      stopped context here is the system's choice, not a death, and reopening
+      the microphone in the background fails until the watchdog gives up.
+      An ended track waits too: the check on return below reopens it.
+    */
+    if (saude.escondida) {
+      this.#estavaEscondida = true
+      this.#caladoDesde = null
+      this.#contextoParadoDesde = null
+      this.#batimentoDeReferencia = null
+      return
+    }
+    /*
+      Back on screen. A track that ended, or is still muted, will not come back
+      by itself: reopen it now, the person may already be talking. A stopped
+      context gets the usual grace, the chain resumes it on `visibilitychange`.
+    */
+    if (this.#estavaEscondida) {
+      this.#estavaEscondida = false
+      if (faixa.readyState === "ended") return this.#morreu("terminou", "ao voltar")
+      if (faixa.muted) return this.#morreu("calado", "ao voltar")
+    }
 
     if (faixa.readyState === "ended") return this.#morreu("terminou", "")
 

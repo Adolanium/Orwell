@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 /**
- * The account bar (chosen by the owner on October 27 2026): the contrast of
+ * The account bar (the chosen design): the contrast of
  * what is read on it.
  *
  * Buttons have no border at rest, and the muted microphone is said by pink on a

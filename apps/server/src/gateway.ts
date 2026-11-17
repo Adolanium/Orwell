@@ -8,6 +8,7 @@ import {
   verify,
   verifyDeviceChain,
   type ClientFrame,
+  type DeviceManifestWire,
   type ServerFrame,
   type ServerName,
   CAPACIDADE_APARELHOS,
@@ -15,8 +16,10 @@ import {
   CAPACIDADE_COFRE_CIFRADO,
   CAPACIDADE_EMPARELHAMENTO,
   CAPACIDADE_ENVIO_RECUSADO,
+  CAPACIDADE_HISTORICO_RECUSADO,
   CAPACIDADE_ESTREIA_DA_DIRECTA,
   CAPACIDADE_LIGACOES_CURTAS,
+  CAPACIDADE_BUGS,
   CAPACIDADE_MORADAS_OPACAS,
   CAPACIDADE_RESGATE_POR_PROVA,
   CAPACIDADE_REVOGACAO,
@@ -24,6 +27,7 @@ import {
   CAPACIDADE_SFU,
   CAPACIDADE_SFU_FOTOGRAMA_CHAVE,
   CAPACIDADE_SINAL_EFEMERO,
+  CAPACIDADE_WEB_PUSH,
   CODIGO_COFRE_ABUSO,
   CODIGO_VERSAO_ANTIGA,
   PROTOCOL_VERSION,
@@ -31,11 +35,15 @@ import {
   type CodigoDeRecusaDoCofre,
   type CodigoDeRecusaDoSinal,
   type RazaoDeRecusaDaEntrada,
+  type RazaoDeRecusaDoPush,
 } from "@enclave/protocol"
 import { createHash, createHmac, randomUUID } from "node:crypto"
 import type { WebSocket } from "ws"
 import { ehCommit, ehCommitExterno, lerCabecalhoMls } from "./cabecalho-mls.js"
 import { ehSalaComum, eVersaoAntiga, tectosDoCofre, tectosDoSinal, type ServerConfig } from "./config.js"
+import { currentMinute } from "./db.js"
+import { endpointPermitido, type CarteiroDoPush } from "./push.js"
+import { validarP256dh } from "./push-cifra.js"
 import type { Store } from "./store.js"
 import type { Federation } from "./federation.js"
 import { fetchLinkPreview } from "./link-preview.js"
@@ -52,6 +60,8 @@ interface Connection {
   socket: WebSocket
   /** The clock for control pings on this connection. See `BATIMENTO_MS`. */
   batimento: ReturnType<typeof setInterval> | null
+  /** Control pings counted as missed since the last pong or frame. See `PINGS_SEM_PONG_MAXIMOS`. */
+  pingsSemPong: number
   /**
    * Who this CONNECTION is, for the media engine.
    *
@@ -122,6 +132,8 @@ interface Connection {
    * `channel.rejected` with `rate-limited`. See `#recusarEnvioPorRitmo`.
    */
   envioRecusado: boolean
+  /** Whether this connection announced `CAPACIDADE_HISTORICO_RECUSADO`: only these get the history refusal. */
+  historicoRecusado: boolean
   /**
    * Whether this connection announced `CAPACIDADE_COFRE_CIFRADO` in `hello`. Only these
    * receive `cofre.*` frames (the versions after `auth.ok` and each
@@ -247,6 +259,17 @@ export class Gateway {
     this.declararSfu(() => motor.estaDePe())
   }
 
+  #push: PushDoGateway | undefined
+
+  /**
+   * Attach the push sender. Only then does `hello.ok` announce
+   * `CAPACIDADE_WEB_PUSH`: the capability and the sender come from the same
+   * line, like the SFU's.
+   */
+  attachPush(push: PushDoGateway): void {
+    this.#push = push
+  }
+
   /**
    * What this server can do, told to the client in `hello.ok`.
    *
@@ -287,6 +310,9 @@ export class Gateway {
       // leaf from the channels), but should say the device can still connect.
       // See `CAPACIDADE_REVOGACAO`.
       CAPACIDADE_REVOGACAO,
+      // Takes bug reports at `ROTA_DOS_BUGS` (`bugs.ts`). A client that does not
+      // see this hides the "Report a bug" button.
+      CAPACIDADE_BUGS,
       // Forwards `channel.sinal` to the other connected members of a channel,
       // without storing it. Only to connections that announced it in `hello`.
       // See `CAPACIDADE_SINAL_EFEMERO` and `#sinal`.
@@ -312,6 +338,10 @@ export class Gateway {
       // `cofre.get`, `cofre.del`), only for connections that announce it in `hello`.
       // See `CAPACIDADE_COFRE_CIFRADO` and `#cofre`.
       CAPACIDADE_COFRE_CIFRADO,
+      // Wakes closed apps with an empty Web Push, only while a sender is
+      // attached (`ENCLAVE_PUSH` not `off`). See `CAPACIDADE_WEB_PUSH` and
+      // `acordarAparelhos`.
+      ...(this.#push ? [CAPACIDADE_WEB_PUSH] : []),
       ...(this.config.communityMode ? ["community"] : []),
       // Plus the viewer's keyframe request, only while the SFU is up (Phase M2).
       ...(this.#sfuDePe() ? [CAPACIDADE_SFU, CAPACIDADE_SFU_FOTOGRAMA_CHAVE] : []),
@@ -330,6 +360,35 @@ export class Gateway {
    * reaches the client code.
    */
   static BATIMENTO_MS = 30_000
+
+  /**
+   * Missed pongs before a connection WITH media in the SFU is closed.
+   *
+   * A phone whose page the system suspended (screen locked, installed web app
+   * on iOS) answers nothing, and its TCP connection can stay up for many
+   * minutes. Kept open, its media stayed in the SFU: a silent person in
+   * everyone's call. A live browser answers a control ping by itself, even
+   * with its page busy, so only a dead or frozen client misses two in a row.
+   * With `BATIMENTO_MS` at 30 s, the close comes 60 to 90 s after the last
+   * pong. The close drops the media (`#drop`), and the phone that wakes up
+   * reconnects and rebuilds the call (`Call.ligacaoVoltou`).
+   *
+   * A ping leaves through the same TCP socket as the data, behind what is
+   * already queued, so its pong can only come back after the client has
+   * received everything in front of it. A ping counts as missed only when it
+   * left with the outgoing queue empty (`bufferedAmount === 0`), and any frame
+   * from the client resets the count. See `scripts/e2e-ping-atras-da-fila.ts`.
+   */
+  static PINGS_SEM_PONG_MAXIMOS = 2
+
+  /**
+   * Missed pongs before a connection WITHOUT media is closed: 5 minutes with
+   * `BATIMENTO_MS` at 30 s. Such a connection holds no seat in anyone's call,
+   * so there is no hurry. The longer limit covers the nginx and kernel buffers
+   * that `bufferedAmount` does not see: a ping queued behind a few MB on a
+   * slow downlink is late, not missed.
+   */
+  static PINGS_SEM_PONG_SEM_MEDIA = 10
 
   /** The message for the `error` `versao-antiga`, in STE100. */
   static readonly FRASE_VERSAO_ANTIGA = "Há uma versão nova do Orwell. Recarrega a página, ou descarrega a versão nova."
@@ -353,6 +412,7 @@ export class Gateway {
       socket,
       id: randomUUID(),
       batimento: null,
+      pingsSemPong: 0,
       address: null,
       deviceKey: null,
       pending: null,
@@ -364,6 +424,7 @@ export class Gateway {
       commitDepoisDoEco: false,
       sinalEfemero: false,
       envioRecusado: false,
+      historicoRecusado: false,
       cofreCifrado: false,
     }
     this.#connections.add(connection)
@@ -371,14 +432,28 @@ export class Gateway {
 
     connection.batimento = setInterval(() => {
       if (socket.readyState !== socket.OPEN) return
+      const maximo = connection.sfu.size > 0 ? Gateway.PINGS_SEM_PONG_MAXIMOS : Gateway.PINGS_SEM_PONG_SEM_MEDIA
+      if (connection.pingsSemPong >= maximo) {
+        // `terminate`, not `close`: a closing handshake waits for an answer that will not come.
+        socket.terminate()
+        return
+      }
       try {
+        // Read before `ping()`, which adds the ping itself to the queue.
+        const filaVazia = socket.bufferedAmount === 0
         socket.ping()
+        if (filaVazia) connection.pingsSemPong++
       } catch {
         // Closing: the `close` that follows cleans up the timer.
       }
     }, Gateway.BATIMENTO_MS)
+    socket.on("pong", () => {
+      connection.pingsSemPong = 0
+    })
 
     socket.on("message", (raw: Buffer) => {
+      // Any frame proves the client is alive, even when its pong is late.
+      connection.pingsSemPong = 0
       // Oversized frames are dropped before parsing: a JSON parser is an
       // unbounded amount of work handed to an unauthenticated peer.
       if (raw.length > MAX_FRAME_BYTES) {
@@ -705,6 +780,7 @@ export class Gateway {
         connection.commitDepoisDoEco = frame.capabilities?.includes(Gateway.COMMIT_DEPOIS_DO_ECO) ?? false
         connection.sinalEfemero = frame.capabilities?.includes(CAPACIDADE_SINAL_EFEMERO) ?? false
         connection.envioRecusado = frame.capabilities?.includes(CAPACIDADE_ENVIO_RECUSADO) ?? false
+        connection.historicoRecusado = frame.capabilities?.includes(CAPACIDADE_HISTORICO_RECUSADO) ?? false
         connection.cofreCifrado = frame.capabilities?.includes(CAPACIDADE_COFRE_CIFRADO) ?? false
         this.#send(connection, {
           t: "hello.ok",
@@ -825,7 +901,15 @@ export class Gateway {
       case "channel.backfill": {
         // Thirty days of a stranger's ciphertext used to be one frame away.
         if (!this.#mayReach(connection, frame.channel)) return
-        if (!this.#dentroDoTecto("backfills", connection.address as string, Gateway.BACKFILLS_POR_MINUTO)) return
+        if (!this.#dentroDoTecto("backfills", connection.address as string, Gateway.BACKFILLS_POR_MINUTO)) {
+          // Said, not silent (12/11/2026): the client waited ten seconds for a page that never came.
+          // Only to a client that reads it: see `CAPACIDADE_HISTORICO_RECUSADO`.
+          if (!connection.historicoRecusado) return
+          const recentes = this.#tectos.get(`backfills|${connection.address as string}`) ?? []
+          const retryAfterMs = Math.min(60_000, Math.max(1, (recentes[0] ?? Date.now()) + 60_000 - Date.now()))
+          this.#send(connection, { t: "channel.backfill.page", channel: frame.channel, events: [], more: true, retryAfterMs })
+          return
+        }
         const events =
           frame.afterSeq !== undefined
             ? this.store.catchUp(frame.channel, frame.afterSeq, frame.limit, connection.address as string)
@@ -1200,6 +1284,30 @@ export class Gateway {
           })
           return
         }
+        /*
+          Only an ACTIVE device of the account changes its manifest (owner
+          decision of 16/11/2026). Since 1.3.16 the paired phone holds the account
+          key too, and the key alone must not be enough: a removed phone, or
+          anyone who copied the key, could certify a NEW device key (the server
+          lets a device outside the manifest log in: the phone before `pronto`)
+          and publish it, or revoke the others. So, once the account has a
+          manifest, a publication only comes from a connection whose device is in
+          that manifest and not revoked. The first manifest (an account that
+          never published one) stays open: there is no device to ask. The reason
+          is `not-yours`, which every client already reads: this connection does
+          not speak for the account's devices.
+        */
+        const atual = this.store.deviceManifestOf(quem)
+        if (atual !== null && !this.#aparelhoActivo(connection, atual)) {
+          this.#send(connection, {
+            t: "manifest.published",
+            address: quem,
+            version: frame.manifest.version,
+            ok: false,
+            reason: "not-yours",
+          })
+          return
+        }
         const resultado = this.store.putDeviceManifest(frame.manifest, frame.revoke)
         this.#send(connection, {
           t: "manifest.published",
@@ -1345,10 +1453,116 @@ export class Gateway {
         this.#cofre(connection, frame)
         return
 
+      case "push.key.get":
+      case "push.subscribe":
+      case "push.unsubscribe":
+        this.#tramaDoPush(connection, frame)
+        return
+
       case "ping":
         this.#send(connection, { t: "pong" })
         return
     }
+  }
+
+  // ---------------------------------------------------------------- web push
+
+  /** Subscriptions per account per minute. A client sends one per connect and per settings change. */
+  static readonly PUSH_SUBSCRICOES_POR_MINUTO = 30
+  /** One push per device per this many minutes: the notice always says the same thing. */
+  static readonly PUSH_JANELA_MINUTOS = 2
+  /** Pushes per device per day (UTC). */
+  static readonly PUSH_POR_DIA = 200
+  /** Pushes per minute for the whole server. */
+  static readonly PUSH_DO_SERVIDOR_POR_MINUTO = 600
+
+  /**
+   * The three `push.*` frames. Always answered, also with push off: the
+   * client never sends them without the capability, but an answer costs less
+   * than a client waiting on a timeout.
+   *
+   * The subscription is the CONNECTION's: its account and its device key. The
+   * client cannot name another account or device, and a login without a
+   * device chain cannot subscribe at all.
+   */
+  #tramaDoPush(connection: Connection, frame: Extract<ClientFrame, { t: "push.key.get" | "push.subscribe" | "push.unsubscribe" }>): void {
+    const quem = connection.address as string
+    if (frame.t === "push.key.get") {
+      this.#send(connection, { t: "push.key", publicKey: this.#push ? toBase64(this.#push.chavePublica) : null })
+      return
+    }
+    if (frame.t === "push.unsubscribe") {
+      if (connection.deviceKey) this.store.deletePushSubscription(quem, connection.deviceKey)
+      this.#send(connection, { t: "push.unsubscribed" })
+      return
+    }
+    const recusar = (reason: RazaoDeRecusaDoPush): void => this.#send(connection, { t: "push.subscribed", ok: false, reason })
+    if (!this.#push) return recusar("push-off")
+    if (connection.deviceKey === null) return recusar("no-device")
+    if (!this.#dentroDoTecto("push-subscricoes", quem, Gateway.PUSH_SUBSCRICOES_POR_MINUTO)) return recusar("rate-limited")
+    // Without this list any client could make the server POST to any URL.
+    if (!endpointPermitido(frame.endpoint, this.#push.servicos)) return recusar("endpoint-not-allowed")
+    const p256dh = fromBase64(frame.p256dh)
+    const auth = fromBase64(frame.auth)
+    try {
+      validarP256dh(p256dh)
+    } catch {
+      return recusar("bad-keys")
+    }
+    if (auth.length !== 16) return recusar("bad-keys")
+    this.store.putPushSubscription({
+      address: quem,
+      deviceKey: connection.deviceKey,
+      endpoint: frame.endpoint,
+      p256dh,
+      auth,
+      lingua: frame.lingua,
+      silenciados: frame.silenciados,
+      calarAteMinute: Math.ceil(frame.calarAte / 60_000),
+      expiresMinute: frame.expiresAt === undefined ? null : Math.floor(frame.expiresAt / 60_000),
+    })
+    this.#send(connection, { t: "push.subscribed", ok: true })
+  }
+
+  /**
+   * Wake the closed devices of the members of `canal`: one empty push each.
+   *
+   * Called after an `application` event is accepted, local (`#relay`) or
+   * federated (`Federation.receive`). Never for a handshake or a Welcome. The
+   * sender's own account is not woken (`remetente`; `null` from federation).
+   *
+   * Per DEVICE, not per account: a device with an open, authenticated socket
+   * gets the message over the socket, and the other devices of the same
+   * account get a push. Then, in order: the channel muted on that device, the
+   * pause or Busy, the 2-minute window, the daily cap, and the server cap. The
+   * counters live in the row, so a restart does not reopen them.
+   *
+   * @returns how many pushes were queued.
+   */
+  acordarAparelhos(canal: string, remetente: string | null): number {
+    const push = this.#push
+    if (!push) return 0
+    const linhas = this.store.pushSubscriptionsDoCanal(canal, remetente)
+    if (linhas.length === 0) return 0
+    const ligados = new Set<string>()
+    for (const outra of this.#connections) {
+      if (outra.address && outra.deviceKey) ligados.add(`${outra.address}|${toBase64(outra.deviceKey)}`)
+    }
+    const agora = currentMinute()
+    const dia = Math.floor(agora / 1440)
+    let acordados = 0
+    for (const linha of linhas) {
+      if (ligados.has(`${linha.address}|${toBase64(linha.deviceKey)}`)) continue
+      if (linha.silenciados.includes(canal)) continue
+      if (linha.calarAteMinute > agora) continue
+      if (linha.lastPushMinute > 0 && agora - linha.lastPushMinute < Gateway.PUSH_JANELA_MINUTOS) continue
+      if (linha.dia === dia && linha.pushesDia >= Gateway.PUSH_POR_DIA) continue
+      if (!this.#dentroDoTecto("push", "servidor", Gateway.PUSH_DO_SERVIDOR_POR_MINUTO)) break
+      this.store.marcarPush(linha.address, linha.deviceKey, agora, dia)
+      push.carteiro.enviar(linha)
+      acordados += 1
+    }
+    return acordados
   }
 
   // ---------------------------------------------------------- ephemeral signals
@@ -1506,14 +1720,17 @@ export class Gateway {
       - a sender that has spent less than an eighth this minute passes even
         with the channel full. A profile request to 200 members costs ~1.5 MB,
         so the guarantee is on what was spent before, not on the signal's size.
+      The sender is the ACCOUNT, not the connection (1.3.9, review of 1.3.8, R3):
+      per connection, an account with k tabs or devices took k exemptions a
+      minute, about k x (512 KiB + one signal) over the channel's cap.
     */
-    const chaveDoRemetente = `remetente|${frame.channel}|${connection.id}`
+    const chaveDoRemetente = `remetente|${frame.channel}|${connection.address as string}`
     const tectoDoRemetente = Math.floor(tectos.bytesPorCanalPorMinuto / 2)
     // A sender's first signal of the minute is not held to the half: one alone above it would never fit.
     const usadoPeloRemetente = this.#usadoNoBalde(chaveDoRemetente, agora)
     const esperaDoRemetente = custo === 0 || usadoPeloRemetente === 0 ? 0 : this.#esperaDoBalde(chaveDoRemetente, custo, tectoDoRemetente, agora)
     if (esperaDoRemetente > 0) {
-      recusar("sinal-rate-limited", `more than ${tectoDoRemetente} signal bytes out per minute from this connection in this channel`, esperaDoRemetente)
+      recusar("sinal-rate-limited", `more than ${tectoDoRemetente} signal bytes out per minute from this account in this channel`, esperaDoRemetente)
       return
     }
     const leve = usadoPeloRemetente < tectos.bytesPorCanalPorMinuto / 8
@@ -2103,7 +2320,7 @@ export class Gateway {
     // was removed is rejected.
     // See `Store.isDeviceRevoked`.
     if (chain && this.store.isDeviceRevoked(address, signingKey)) {
-      this.#fecharRevogado(connection)
+      this.#fecharRevogado(connection, address)
       return
     }
 
@@ -2938,6 +3155,9 @@ export class Gateway {
     */
     if (frame.recipient === undefined && !connection.channels.has(frame.channel)) this.#send(connection, eco)
 
+    // After the echo: a closed phone is woken only for a message the channel accepted.
+    if (frame.kind === "application" && frame.recipient === undefined) this.acordarAparelhos(frame.channel, connection.address)
+
     await this.#federation?.fanOut(frame.channel, {
       channel: frame.channel,
       kind: frame.kind,
@@ -2957,6 +3177,8 @@ export class Gateway {
   /** @returns how many connections received it. See `channel.rejoin.sent`. */
   broadcast(channel: string, message: ServerFrame, recipient?: string | undefined): number {
     let servidas = 0
+    // Serialised once for every recipient, and only if there is one (12/11/2026): 34 % less CPU on a large commit to 400 sockets.
+    let texto: string | null = null
     for (const connection of this.#connections) {
       if (!connection.address) continue
 
@@ -2967,7 +3189,8 @@ export class Gateway {
       }
 
       servidas += 1
-      this.#send(connection, message)
+      texto ??= JSON.stringify(message)
+      this.#enviarTexto(connection, texto)
     }
     return servidas
   }
@@ -3030,8 +3253,16 @@ export class Gateway {
    * removed from the account on another device). A 0.5.7 client handles any fatal code the same way,
    * so the new code does not break it.
    */
-  #fecharRevogado(connection: Connection): void {
-    this.#send(connection, { t: "error", code: "device-revoked", message: "this device was removed from the account", fatal: true })
+  #fecharRevogado(connection: Connection, address: string | null = connection.address): void {
+    // The manifest that removed it goes along (1.3.16): the client erases its vault only with this proof.
+    const manifest = address !== null ? this.store.deviceManifestOf(address) : null
+    this.#send(connection, {
+      t: "error",
+      code: "device-revoked",
+      message: "this device was removed from the account",
+      fatal: true,
+      ...(manifest !== null ? { manifest } : {}),
+    })
     connection.socket.close()
   }
 
@@ -3067,6 +3298,14 @@ export class Gateway {
   #fecharCopiaSubstituida(connection: Connection): void {
     this.#send(connection, { t: "error", code: "device-revoked", message: "this copy of the device was replaced by an imported one", fatal: true })
     connection.socket.close()
+  }
+
+  /** The connection's device is in this manifest of its account, and not revoked. */
+  #aparelhoActivo(connection: Connection, manifesto: DeviceManifestWire): boolean {
+    if (connection.deviceKey === null || connection.address === null) return false
+    const chave = toBase64(connection.deviceKey)
+    if (this.store.isDeviceRevoked(connection.address, chave)) return false
+    return manifesto.devices.some((device) => device.deviceKey === chave)
   }
 
   /**
@@ -3110,6 +3349,15 @@ export class Gateway {
 }
 
 export type { Connection, ServerName }
+
+/** What the gateway needs from Web Push. Built in `app.ts`. */
+export interface PushDoGateway {
+  carteiro: CarteiroDoPush
+  /** The VAPID public key, 65 bytes. */
+  chavePublica: Uint8Array
+  /** The push service hosts an endpoint may point at. */
+  servicos: readonly string[]
+}
 
 /** The key of a pending request: the channel length first, for the reason given in `chaveDeAmbito`. */
 function chaveDoPendente(canal: string, quem: string): string {

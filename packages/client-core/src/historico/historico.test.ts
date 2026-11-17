@@ -334,6 +334,49 @@ describe("o fio entre dois aparelhos", () => {
     }
   })
 
+  it('quem envia ao aparelho novo diz "Deixa este aparelho ligado", com o progresso, e o aviso fecha no fim', async () => {
+    const { a, b } = doisAparelhos()
+    encher(a.contents)
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => b.contents.historico?.plano === undefined && b.contents.historico?.inicial === undefined, "o histórico chega")
+      await ate(() => a.eventos.length > 0 && a.eventos.at(-1)?.envio === undefined, "o aviso do computador fecha")
+      const comEnvio = a.eventos.filter((e) => e.envio !== undefined).map((e) => e.envio!)
+      // 24 conversation entries and 1 post: the inventory total, from the first event on.
+      expect(comEnvio[0]?.mensagens).toEqual({ feitas: 0, total: 25 })
+      expect(comEnvio[0]?.fotografias).toBeNull()
+      // It moves up, never down, and reaches the total of messages before the photos are known.
+      const feitas = comEnvio.map((e) => e.mensagens.feitas)
+      expect(feitas).toEqual([...feitas].sort((x, y) => x - y))
+      const comFotos = comEnvio.filter((e) => e.fotografias !== null)
+      expect(comFotos[0]?.mensagens.feitas).toBe(25)
+      expect(comFotos[0]?.fotografias?.total).toBeGreaterThanOrEqual(1)
+      expect(comFotos.at(-1)?.fotografias?.feitas).toBeLessThanOrEqual(comFotos.at(-1)?.fotografias?.total ?? 0)
+      // The new device itself never shows it: it is receiving, not sending.
+      expect(b.eventos.some((e) => e.envio !== undefined)).toBe(false)
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  })
+
+  it("entre aparelhos já emparelhados (sem `ini`) não há aviso de envio", async () => {
+    const { a, b } = doisAparelhos()
+    encher(a.contents)
+    b.contents.history["!dm"] = [mensagem(1, "@a:x", "mensagem 1")]
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => entradasDoCanal(b.contents, "!dm").length > 1, "a reposição traz o que faltava")
+      expect(a.eventos.some((e) => e.envio !== undefined)).toBe(false)
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  })
+
   it("um relé que perde um sinal em cada sete: as partes que faltam pedem-se outra vez", async () => {
     const { a, b } = doisAparelhos((n) => n % 7 === 0)
     encher(a.contents)
@@ -396,7 +439,7 @@ describe("o fio entre dois aparelhos", () => {
 
 describe("o aviso nunca fica parado (12/11/2026)", () => {
   /*
-    The owner's case: "Getting the history: 402 of 420 messages" stood still
+    The reported case: "Getting the history: 402 of 420 messages" stood still
     for a long time. Two paths led there, both reproduced here: an entry the
     sibling cannot serialize sat in the middle of a channel and the page that
     carried it never went out (the request was asked again, forever); and the

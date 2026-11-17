@@ -1,5 +1,108 @@
 [
   {
+    "versao": "1.3.16",
+    "nome": "Carmelo",
+    "data": "2026-11-17",
+    "itens": [
+      {
+        "tipo": "nova",
+        "texto": "Reactions on messages, in channels and direct messages: hover a message and press React, or long-press on a phone. Chips under the message show each emoji with its count; tap one to add or remove yours. Reactions travel inside the encrypted message, and the server never sees the target or the emoji."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Room and role tags in the message box: # suggests the rooms you can see, @ suggests people, then roles, then @all. Mentioning a role or @all needs the \"mention everyone and roles\" permission, unless the role allows anyone to mention it. A role mention notifies its members like a direct mention, and a message that mentions you is highlighted."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Read-only rooms: a room can let only some roles write. Admins set it from the room menu (\"Who can write\") or when creating the room. Everyone else sees a line in place of the message box, and the other members' apps drop messages from people without the permission. When someone gives you a role, you get one notice, only for a recent assignment and only if your roles changed."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Screen sharing is now a role permission (transmitir). Without it, the button is greyed out with a hint. The person sharing sees a thumbnail with Stop instead of their own screen on stage; viewers see who is in the call over the shared screen. Voice rooms in the sidebar show mic off, sound off and muted-by-me marks."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Pinned messages stay pinned until someone unpins or deletes them, for people who join later, new devices and members who were away longer than the retention period. Pins keep file names and a small thumbnail of the first image. The server's event numbering no longer restarts at 0 when retention empties a channel."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Report a bug, in Settings > Help and diagnostics and on the error screen. The form shows exactly what is sent (app version, platform, browser, language, the last 20 error codes and connection state) and what is never sent. Contact details are only kept if you tick the box."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Save your account file: right after creating an account, a step asks you to download the account file (.enclave), locked with your password, and to confirm you kept it somewhere safe. On an iPhone, Share opens the share sheet (Save to Files). An account that already exists sees a one-time notice with the same button. An account kept in the system keychain asks for a password for the file first."
+      },
+      {
+        "tipo": "nova",
+        "texto": "The emoji picker has the full Unicode 15.0 list, generated from CLDR 42 data kept in the repo. The catalog loads on first open, out of the main bundle."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "The official Orwell channel is opt-in: registration asks with an unticked box, and you can join later from the join dialog. Leaving it works like any other channel, and the app no longer puts you back."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "The interface opens in English until you choose another language in Settings. The browser and system language no longer decide. ?lingua= in the address still works."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Opening a direct message with someone who is not your friend no longer notifies them, and an empty DM no longer shows in their list. The buzz has its own icon and button, only in DMs, and with reduced motion it still shakes, slower and shorter, instead of flashing blue."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "The \"edited\" mark sits on its own line under the message, with the edit time on hover or tap. A day separator appears before the first message of each local day. The unread bar only shows when the unread mark is above the view, and leaves once seen. On wide screens the history progress sits in the channel's top bar."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Large channels: with more than 50 members the member panel lists who is online and a \"+X people\" row that opens the full, windowed list. On joining the common room only the names of online members are requested; the rest are requested when needed."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Notifications show names by default and never the room identifier; with content hidden they say \"You have a new message\". Mentions and DMs notify and play a sound only when they arrive live, once per message, not again when history catches up."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Images and files on demand: the request goes to the author first, then only to members the server reports as online. A \"don't have it\" reply no longer ends the request, and when nobody online has the file the message says so."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Phone parity: a paired phone with the main device off asks channel members for the seats it lacks, and seating retries after 5 minutes instead of 6 hours. The profile bio fits on narrow screens."
+      },
+      {
+        "tipo": "fix",
+        "texto": "History catch-up: above the server's page cap the server now answers with retryAfterMs instead of silence, pages hold 200 events, and a long catch-up continues on the same connection. The server serializes each broadcast once for all connections."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Signal rate limits: the allowance for light senders in a busy channel is counted per account, not per connection. A nameless account that no relay answered for is asked again after 10 minutes instead of 24 hours."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Notifications when the app is closed (Web Push), in Settings › Notifications, under \"System notifications\". The server sends an empty, encrypted push to the devices that have no connection open, and the phone shows \"New message in Orwell\", with no name and no text. At most one per device every 2 minutes; muted channels, Busy and paused notifications are respected. On an iPhone it needs the app on the Home Screen (iOS 16.4 or later). Server operators: off unless ENCLAVE_PUSH=on, and the switch only shows on a server that turns it on."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Calls in the background: the lock screen and the system media controls show the room, with mute and hang up wired to the same actions as the call buttons. Safari keeps a play-and-record audio session during the call. A new option in Settings › Microphone and camera keeps the screen on during calls (off by default)."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Unlocking the phone in a call: the microphone is checked when the page comes back, and a muted or ended track is reopened at once instead of the watchdog giving up in the background. The connection is checked within 5 seconds, time without a connection no longer counts against rebuilding the call, and a call keeps the tab when the browser puts the page in its back/forward cache, so coming back no longer reloads it."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "On the iPhone's installed app, joining a call shows a notice: iOS turns off the microphone of installed web apps when the screen locks, and it comes back on unlock. To talk with the screen locked, use Safari."
+      },
+      {
+        "tipo": "fix",
+        "texto": "The server closes a connection that misses two control pings (60 to 90 seconds), so a phone that went to sleep leaves the call instead of staying in it as a silent participant."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Returning to a minimized window is lighter: while you read at the bottom, the conversation keeps a sliding window of lines instead of piling up every message that arrived while hidden; incoming messages render as a transition, so your first click draws first; the audio context starts after the first frame of the gesture; media blobs decrypt in a Worker (web) or a worker thread (desktop); and the batched vault write exports groups one at a time."
+      }
+    ]
+  },
+  {
     "versao": "1.3.15",
     "nome": "Carmelo",
     "data": "2026-11-16",

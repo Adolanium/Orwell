@@ -26,7 +26,7 @@ const AUTO_DELAY_MS = 700
  * that the feed already uses; see `fetchPreview.ts`.
  *
  * **A YouTube video enters on its own; other links wait for the tap.**
- * Owner request on August 19, 2026: *"YouTube video and link previews should
+ * The requirement: *"YouTube video and link previews should
  * preview automatically - when they enter chats or posts, they become
  * playable"*. The split is not laziness to generalize, it is what the cost
  * difference allows:

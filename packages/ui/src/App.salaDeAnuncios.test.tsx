@@ -21,7 +21,7 @@ const LAGAR = "!lagar:casa.pt"
 
 /**
  * The "announcements" room in the official channel shows what is new in each
- * version, and nothing else. Owner request on October 29, 2026: "include this
+ * version, and nothing else. The requirement: "include this
  * page in a text room in the Orwell channel". The page comes from the bundle
  * (`NotasDeVersao.tsx`).
  *

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react"
+import { createContext, useContext, useEffect, useRef, useState } from "react"
 import { BridgeContext } from "../App.js"
 import type { DesfechoDoAnexo, DesfechoDoTrazer, EnclaveBridge, IdDoAnexo } from "../bridge.js"
 import { descarregar, descarregarBytes } from "../lib/ficheiros.js"
@@ -16,14 +16,23 @@ import { MediaLazy } from "./MediaLazy.js"
  */
 export const AnexosDoItem = createContext<{ channel: string; alvo: string; lista: readonly MediaItem[] } | null>(null)
 
-type Motivo = Exclude<DesfechoDoAnexo, { ok: true }>["motivo"]
-type Estado = { fase: "parado" } | { fase: "a-pedir" } | { fase: "chegou"; item: MediaItem } | { fase: "falhou"; motivo: Motivo }
+type Falha = Exclude<DesfechoDoAnexo, { ok: true }>
+type Motivo = Falha["motivo"]
+type Estado =
+  | { fase: "parado" }
+  | { fase: "a-pedir" }
+  | { fase: "chegou"; item: MediaItem }
+  | { fase: "falhou"; motivo: Motivo; autorLigado?: boolean; autor?: string }
 
 /**
  * The message for a request that yielded no bytes. These are limits, not
  * errors, except one: `falhou` is a fault, and is reported with its code (515).
+ *
+ * "Nobody" has two phrases (12/11/2026): the sender is not connected, or
+ * nobody connected has it (the sender included). One phrase for both read as
+ * a lie when the sender was online.
  */
-export function fraseDoMotivo(motivo: Motivo, ficheiro: boolean): string {
+export function fraseDoMotivo(motivo: Motivo, ficheiro: boolean, autorLigado?: boolean): string {
   switch (motivo) {
     case "falhou":
       return translateError("the attachment request failed")
@@ -32,8 +41,29 @@ export function fraseDoMotivo(motivo: Motivo, ficheiro: boolean): string {
     case "sem-ligacao":
       return strings.sincronia.anexoSemLigacao
     default:
+      if (autorLigado === false) return ficheiro ? strings.sincronia.anexoFicheiroAutorDesligado : strings.sincronia.anexoAutorDesligado
       return ficheiro ? strings.sincronia.anexoFicheiroNinguem : strings.sincronia.anexoNinguem
   }
+}
+
+/** After the author connects, wait this long before asking: their device needs a moment to join the channel. */
+export const ESPERA_DEPOIS_DO_AUTOR_MS = 3_000
+/**
+ * Someone else connected: ask again at most this often. Each request is a
+ * signal copied to every connected member, and a screen can hold many images
+ * that nobody has: one retry each per presence event would spend the signal cap.
+ */
+export const INTERVALO_ENTRE_TENTATIVAS_MS = 120_000
+
+function estadoDaFalha(desfecho: Falha): Estado {
+  return desfecho.motivo === "ninguem"
+    ? {
+        fase: "falhou",
+        motivo: desfecho.motivo,
+        ...(desfecho.autorLigado !== undefined ? { autorLigado: desfecho.autorLigado } : {}),
+        ...(desfecho.autor !== undefined ? { autor: desfecho.autor } : {}),
+      }
+    : { fase: "falhou", motivo: desfecho.motivo }
 }
 
 /**
@@ -63,7 +93,10 @@ async function itemDaEntrada(bridge: EnclaveBridge, id: IdDoAnexo): Promise<Medi
  * item is reread from the history. If it cannot be reread, `anexo.pedir` gives
  * it.
  */
-export function usePedirAnexo(item: MediaItem): {
+export function usePedirAnexo(
+  item: MediaItem,
+  { voltarAPedir = false }: { voltarAPedir?: boolean } = {},
+): {
   pode: boolean
   /** The gesture is "Fetch" (the bridge has the media store), not the S5 "Ask". */
   trazer: boolean
@@ -79,15 +112,26 @@ export function usePedirAnexo(item: MediaItem): {
   const indice = doItem ? doItem.lista.indexOf(item) : -1
   const trazer = Boolean(bridge?.media)
   const pode = Boolean((bridge?.anexo || bridge?.media) && doItem && indice >= 0)
-  const pedir = async (): Promise<MediaItem | null> => {
+  /*
+    `calado`: an automatic retry. The phrase on screen stays while it runs, and
+    only an arrival changes it: the screen does not blink to "Asking..." and
+    back every time someone connects.
+  */
+  const pedir = async (calado = false): Promise<MediaItem | null> => {
     if (!bridge || !doItem || indice < 0) return null
-    setEstado({ fase: "a-pedir" })
+    if (!calado) setEstado({ fase: "a-pedir" })
     const id = { channel: doItem.channel, alvo: doItem.alvo, indice }
     if (bridge.media) {
       const trazido = await bridge.media.trazer(id).catch((): DesfechoDoTrazer => ({ ok: false, motivo: "ninguem" }))
       if (!trazido.ok) {
-        // "sem-irmao" and "ninguem" say the same (R24).
-        setEstado({ fase: "falhou", motivo: trazido.motivo === "sem-ligacao" ? "sem-ligacao" : "ninguem" })
+        // "sem-irmao" and "ninguem" say the same (R24). The author's state, when the members were asked.
+        const falha: Estado =
+          trazido.motivo === "sem-ligacao"
+            ? { fase: "falhou", motivo: "sem-ligacao" }
+            : trazido.motivo === "ninguem"
+              ? estadoDaFalha({ ok: false, motivo: "ninguem", ...(trazido.autorLigado !== undefined ? { autorLigado: trazido.autorLigado } : {}), ...(trazido.autor !== undefined ? { autor: trazido.autor } : {}) })
+              : { fase: "falhou", motivo: "ninguem" }
+        if (!calado || (falha.fase === "falhou" && falha.motivo === "ninguem")) setEstado(falha)
         return null
       }
       const relido = await itemDaEntrada(bridge, id)
@@ -97,28 +141,71 @@ export function usePedirAnexo(item: MediaItem): {
       }
     }
     if (!bridge.anexo) {
-      setEstado({ fase: "falhou", motivo: "ninguem" })
+      if (!calado) setEstado({ fase: "falhou", motivo: "ninguem" })
       return null
     }
     const desfecho = await bridge.anexo
       .pedir({ channel: doItem.channel, alvo: doItem.alvo, indice })
       .catch((): DesfechoDoAnexo => ({ ok: false, motivo: "falhou" }))
     if (!desfecho.ok) {
-      if (desfecho.motivo === "cancelado" || desfecho.motivo === "por-pedir") setEstado({ fase: "parado" })
-      else setEstado({ fase: "falhou", motivo: desfecho.motivo })
+      if (calado) {
+        if (desfecho.motivo === "ninguem") setEstado(estadoDaFalha(desfecho))
+      } else if (desfecho.motivo === "cancelado" || desfecho.motivo === "por-pedir") setEstado({ fase: "parado" })
+      else setEstado(estadoDaFalha(desfecho))
       return null
     }
     const chegou = desfecho.anexo as MediaItem
     setEstado({ fase: "chegou", item: chegou })
     return chegou
   }
+  const pedirRef = useRef(pedir)
+  pedirRef.current = pedir
+  useVoltarAPedir(voltarAPedir ? estado : { fase: "parado" }, pedirRef)
   const cancelar =
     bridge?.anexo?.cancelar && doItem && indice >= 0
       ? (): void => {
           void bridge.anexo?.cancelar?.({ channel: doItem.channel, alvo: doItem.alvo, indice }).catch(() => false)
         }
       : null
-  return { pode, trazer, estado, pedir, cancelar }
+  return { pode, trazer, estado, pedir: () => pedir(), cancelar }
+}
+
+/**
+ * Ask again by itself when someone connects (12/11/2026), while the request
+ * ended "nobody". The author connecting: in `ESPERA_DEPOIS_DO_AUTOR_MS`.
+ * Anyone else: at most once per `INTERVALO_ENTRE_TENTATIVAS_MS`. Only while
+ * the image is on screen (the effect ends with the component).
+ */
+function useVoltarAPedir(estado: Estado, pedirCalado: React.RefObject<(calado?: boolean) => Promise<unknown>>): void {
+  const bridge = useContext(BridgeContext)
+  const ninguem = estado.fase === "falhou" && estado.motivo === "ninguem"
+  const autor = estado.fase === "falhou" ? estado.autor : undefined
+  useEffect(() => {
+    const presenca = bridge?.on?.presence
+    if (!ninguem || !presenca) return
+    let ultima = Date.now()
+    let temporizador: ReturnType<typeof setTimeout> | null = null
+    const tentar = (): void => {
+      temporizador = null
+      ultima = Date.now()
+      void pedirCalado.current?.(true)
+    }
+    const largar = presenca((evento) => {
+      if (!evento.online) return
+      const espera =
+        evento.address === autor ? ESPERA_DEPOIS_DO_AUTOR_MS : Math.max(ESPERA_DEPOIS_DO_AUTOR_MS, ultima + INTERVALO_ENTRE_TENTATIVAS_MS - Date.now())
+      // The author's turn comes sooner: it replaces a later wait for someone else.
+      if (temporizador !== null) {
+        if (evento.address !== autor) return
+        clearTimeout(temporizador)
+      }
+      temporizador = setTimeout(tentar, espera)
+    })
+    return () => {
+      largar()
+      if (temporizador !== null) clearTimeout(temporizador)
+    }
+  }, [bridge, ninguem, autor, pedirCalado, estado])
 }
 
 /** The "Try again" button of a request that failed ("Fetch", with the media store). */
@@ -160,7 +247,7 @@ export function ImagemAPedido({
   className?: string
   onOpen?: ((item: MediaItem) => void) | undefined
 }): React.JSX.Element {
-  const { pode, trazer, estado, pedir, cancelar } = usePedirAnexo(item)
+  const { pode, trazer, estado, pedir, cancelar } = usePedirAnexo(item, { voltarAPedir: true })
   const pedirLabel = trazer ? strings.media.trazer : strings.sincronia.anexoPedir
   const aPedirLabel = trazer ? strings.media.aTrazer : strings.sincronia.anexoAPedir
   if (estado.fase === "chegou") {
@@ -187,7 +274,7 @@ export function ImagemAPedido({
   if (estado.fase === "falhou") {
     return (
       <span className={`${className} anexo-a-pedido anexo-falhou`}>
-        <span role="status">{trazer ? fraseDoTrazerAnexo(estado.motivo, false) : fraseDoMotivo(estado.motivo, false)}</span>
+        <span role="status">{trazer && estado.autorLigado === undefined ? fraseDoTrazerAnexo(estado.motivo, false) : fraseDoMotivo(estado.motivo, false, estado.autorLigado)}</span>
         <TentarOutraVez pedir={pedir} trazer={trazer} />
       </span>
     )
@@ -244,7 +331,7 @@ export function FicheiroAPedido({ item, nome }: { item: MediaItem; nome: string 
     return (
       <>
         <span className="file-meta anexo-falhou" role="status">
-          {trazer ? fraseDoTrazerAnexo(estado.motivo, true) : fraseDoMotivo(estado.motivo, true)}
+          {trazer && estado.autorLigado === undefined ? fraseDoTrazerAnexo(estado.motivo, true) : fraseDoMotivo(estado.motivo, true, estado.autorLigado)}
         </span>
         <TentarOutraVez pedir={pedirEGravar} trazer={trazer} />
       </>

@@ -3,7 +3,7 @@
  *
  *   node scripts/e2e-coluna-telemovel.mjs     (needs `npm run build` first)
  *
- * Owner report on 2/11/2026, after the first room fix: "rooms show up on the
+ * The bug, after the first room fix: "rooms show up on the
  * phone but are not visually visible.. the column disappears".
  *
  * The cause: when someone joins the common room and opens the drawer and taps

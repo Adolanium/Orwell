@@ -28,7 +28,7 @@ import { PRESENCA_VALIDA_MS } from "@enclave/client-core"
  * measures something else (how long an announcement heard before we enter is still
  * worth answering), and the heartbeat this comment promised did not exist.
  * The `#comecarAnuncio` in `call.ts` stops at the first pair, and on the SFU path it never
- * starts. Result, reported by the owner on August 18, 2026: the list of
+ * starts. Result: the list of
  * who is in each voice room emptied after forty-five
  * seconds with people still speaking, and nothing refilled it.
  *

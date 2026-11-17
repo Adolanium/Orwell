@@ -130,12 +130,16 @@ describe("CallPanel — o palco de quem partilha", () => {
     expect(palco()?.querySelector("video")).toHaveProperty("srcObject", ecra)
   })
 
-  it("o nosso ecrã vai a palco quando mais ninguém partilha, com o nome que se diz a nós", () => {
+  it("o nosso ecrã NUNCA vai a palco: uma miniatura diz que partilhamos, com Parar (12/11/2026)", () => {
     const meu = fluxoDeEcra("ecra-nosso")
     render(painel({ screenStream: meu }))
 
-    expect(screen.getByText(strings.call.screenSelf)).toBeTruthy()
-    expect(palco()?.querySelector("video")).toHaveProperty("srcObject", meu)
+    expect(palco()).toBeNull()
+    expect(screen.getByText(strings.call.aPartilhar)).toBeTruthy()
+    expect(document.querySelector(".call-minha-partilha video")).toHaveProperty("srcObject", meu)
+    expect(screen.getByRole("button", { name: strings.call.pararPartilha })).toBeTruthy()
+    // No full screen for whoever shares: that button lives on the stage only.
+    expect(document.querySelector(".call-minha-partilha [aria-label*='ecrã inteiro'], .call-minha-partilha .ecra-inteiro")).toBeNull()
   })
 
   it("com dois a partilhar, o palco é do OUTRO: o nosso já o temos à frente", () => {
@@ -354,16 +358,17 @@ describe("CallPanel — o botão de partilhar", () => {
     return painel({ call, screenStream: ecra, participants: [] })
   }
 
-  it("carregar põe o nosso ecrã em palco; carregar outra vez tira-o", async () => {
+  it("carregar mostra a miniatura da nossa partilha; carregar outra vez tira-a", async () => {
     render(<Arnes />)
     expect(palco()).toBeNull()
 
     fireEvent.click(botaoDeEcra()!)
     // Sharing is asynchronous: we wait for React to track the new state.
-    expect(await screen.findByText(strings.call.screenSelf)).toBeTruthy()
+    expect(await screen.findByText(strings.call.aPartilhar)).toBeTruthy()
+    expect(palco()).toBeNull()
 
     fireEvent.click(botaoDeEcra()!)
-    await vi.waitFor(() => expect(palco()).toBeNull())
+    await vi.waitFor(() => expect(screen.queryByText(strings.call.aPartilhar)).toBeNull())
   })
 
   it("o botão diz o que vai fazer, e muda quando o estado muda", async () => {
@@ -372,7 +377,7 @@ describe("CallPanel — o botão de partilhar", () => {
     expect(botaoDeEcra()?.getAttribute("aria-label")).toBe(strings.call.screenAria(false))
 
     fireEvent.click(botaoDeEcra()!)
-    await screen.findByText(strings.call.screenSelf)
+    await screen.findByText(strings.call.aPartilhar)
 
     expect(botaoDeEcra()?.getAttribute("data-tip")).toBe(strings.call.stopScreen)
     expect(botaoDeEcra()?.getAttribute("aria-label")).toBe(strings.call.screenAria(true))
@@ -502,11 +507,11 @@ describe("CallPanel — o botão de partilhar", () => {
     }
 
     render(<ArnesAPartilhar />)
-    expect(screen.getByText(strings.call.screenSelf)).toBeTruthy()
+    expect(screen.getByText(strings.call.aPartilhar)).toBeTruthy()
 
     fireEvent.click(botaoDeEcra()!)
 
-    await vi.waitFor(() => expect(palco()).toBeNull())
+    await vi.waitFor(() => expect(screen.queryByText(strings.call.aPartilhar)).toBeNull())
     expect(screen.getByText("pedidos ao anfitrião: 0")).toBeTruthy()
   })
 })
@@ -542,5 +547,15 @@ describe("o palco mostra o ecrã inteiro", () => {
     const css = estilos()
     expect(regra(css, ".call-palco video")).toContain("object-fit: contain")
     expect(regra(css, ".tile video")).toContain("object-fit: cover")
+  })
+})
+
+describe("CallPanel — Parar na miniatura (12/11/2026)", () => {
+  it("o Parar da miniatura pára a partilha no motor", () => {
+    const parar = vi.fn(async () => {})
+    const call = { ...motor(), stopScreenShare: parar } as unknown as EnclaveBridge["call"]
+    render(painel({ call, screenStream: fluxoDeEcra("meu") }))
+    fireEvent.click(screen.getByRole("button", { name: strings.call.pararPartilha }))
+    expect(parar).toHaveBeenCalledTimes(1)
   })
 })

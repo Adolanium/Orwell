@@ -95,8 +95,8 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const SERVIDOR_JS = join(RAIZ, "apps/server/dist/main.js")
 const DIST = process.env.ORWELL_DIST_ANTIGO ? resolve(process.env.ORWELL_DIST_ANTIGO) : ""
-const PORTA_DA_FRENTE = 8472
-const PORTA_DO_SERVIDOR = 8473
+const PORTA_DA_FRENTE = Number(process.env.E2E_PORTA_DA_FRENTE ?? 8472)
+const PORTA_DO_SERVIDOR = Number(process.env.E2E_PORTA_DO_SERVIDOR ?? 8473)
 const NOME = `localhost:${PORTA_DA_FRENTE}`
 const SALA_COMUM = `!orwell:${NOME}`
 const APP = `http://${NOME}/app/?lingua=pt`
@@ -398,6 +398,8 @@ async function contaNova(nome) {
   session.on("voice", (evento) => {
     void call.handleSignal(evento.channel, evento.from, evento.payload).catch(() => {})
   })
+  // Joining the common room is opt-in since 1.3.9: these accounts tick the box.
+  await session.escolherSalaComum(true)
   await session.connect()
   await session.updateProfile({ displayName: nome, donations: [] })
   return { nome, session, call, erros, address: identidade.address }
@@ -732,8 +734,15 @@ try {
 
   // The voice room by IDENTIFIER, read from the list of rooms published on the channel:
   // it's the same one old clients use, because it comes from the same `channel.meta`.
-  const salaDeVoz = diogo.session.roomsOf(SALA_COMUM).find((sala) => sala.kind === "voice")?.room ?? ""
-  check("e lê o identificador da sala de voz do canal", Boolean(salaDeVoz), salaDeVoz)
+  // Since 1.3.12 nobody republishes the rooms on connect: a newcomer gets them from the
+  // Welcome portrait or from anti-entropy, a few seconds after joining. Waited for, not read once.
+  let salaDeVoz = ""
+  const inicioDasSalas = Date.now()
+  for (let volta = 0; volta < 120 && !salaDeVoz; volta++) {
+    salaDeVoz = diogo.session.roomsOf(SALA_COMUM).find((sala) => sala.kind === "voice")?.room ?? ""
+    if (!salaDeVoz) await wait(500)
+  }
+  check("e lê o identificador da sala de voz do canal", Boolean(salaDeVoz), `${salaDeVoz} em ${Date.now() - inicioDasSalas} ms`)
 
   await diogo.call.join(SALA_COMUM, { room: salaDeVoz })
   check("a Carla passa a ver três pessoas na sala", await ateVerNaVoz(c, 3), `${await quantosNaVoz(c)}`)

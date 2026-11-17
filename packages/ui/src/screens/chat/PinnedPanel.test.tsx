@@ -64,3 +64,28 @@ describe("a folha das fixadas, quando não há nenhuma", () => {
     expect(screen.queryByText(strings.chat.pinnedEmptyCanPin)).toBeNull()
   })
 })
+
+/** The attachments of the copy (12/11/2026): a small image and the file names, never "(no text)". */
+describe("a folha das fixadas, com anexos", () => {
+  it("mostra a miniatura e o nome, e uma fixada só com foto não diz (sem texto)", () => {
+    const miniatura = "data:image/png;base64,iVBORw0KGgo="
+    render(
+      panel({
+        pins: [
+          {
+            ...fixada,
+            body: "",
+            attachments: [
+              { name: "cartaz.png", kind: "image", mediaType: "image/png", byteLength: 68, thumbnail: miniatura },
+              { name: "regras.pdf", kind: "document", mediaType: "application/pdf", byteLength: 900 },
+            ],
+          },
+        ],
+      }),
+    )
+    const imagem = screen.getByRole("img", { name: "cartaz.png" }) as HTMLImageElement
+    expect(imagem.src).toBe(miniatura)
+    expect(screen.getByText("regras.pdf")).toBeTruthy()
+    expect(screen.queryByText(strings.chat.pinnedNoText)).toBeNull()
+  })
+})

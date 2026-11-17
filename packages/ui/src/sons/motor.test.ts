@@ -484,6 +484,81 @@ describe("a preparação dos sons, ao primeiro gesto", () => {
   })
 })
 
+describe("o primeiro gesto não espera pelo contexto de áudio", () => {
+  /*
+    Creating the AudioContext costs ~70 ms in Chromium (the audio device opens),
+    and it ran inside the first click: the first click of the session answered
+    late. Where the engine allows it (Chromium and Firefox keep the page's
+    activation), the context is born in the next task. WebKit wants it inside
+    the gesture, and keeps it there.
+  */
+  it("com prepararDepois e sem quadros (página escondida), o gesto não cria o contexto; a tarefa seguinte cria", async () => {
+    const antes = globalThis.requestAnimationFrame
+    ;(globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame = undefined
+    try {
+      let contextos = 0
+      const saida = criarSaidaWebAudio({
+        prepararDepois: true,
+        criarContexto: () => {
+          contextos += 1
+          return { state: "running", resume: () => {} } as unknown as AudioContext
+        },
+        renderizar: async () => null,
+      })
+      saida.preparar()
+      expect(contextos).toBe(0)
+      await new Promise((r) => setTimeout(r, 0))
+      expect(contextos).toBe(1)
+    } finally {
+      globalThis.requestAnimationFrame = antes
+    }
+  })
+
+  it("com prepararDepois e um quadro por vir, o contexto nasce depois do quadro do gesto, não antes", async () => {
+    /*
+      The next task is not enough: a task queued by the click runs before the
+      click's frame, and the ~70 ms of the audio device held that frame back
+      (measured on the return from a minimized window). After the frame, then.
+    */
+    const quadros: FrameRequestCallback[] = []
+    const antes = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = (f: FrameRequestCallback) => quadros.push(f)
+    try {
+      let contextos = 0
+      const saida = criarSaidaWebAudio({
+        prepararDepois: true,
+        criarContexto: () => {
+          contextos += 1
+          return { state: "running", resume: () => {} } as unknown as AudioContext
+        },
+        renderizar: async () => null,
+      })
+      saida.preparar()
+      await new Promise((r) => setTimeout(r, 0))
+      expect(contextos).toBe(0)
+      for (const f of quadros.splice(0)) f(0)
+      expect(contextos).toBe(0)
+      await new Promise((r) => setTimeout(r, 0))
+      expect(contextos).toBe(1)
+    } finally {
+      globalThis.requestAnimationFrame = antes
+    }
+  })
+
+  it("sem prepararDepois, cria dentro do gesto, como antes", () => {
+    let contextos = 0
+    const saida = criarSaidaWebAudio({
+      criarContexto: () => {
+        contextos += 1
+        return { state: "running", resume: () => {} } as unknown as AudioContext
+      },
+      renderizar: async () => null,
+    })
+    saida.preparar()
+    expect(contextos).toBe(1)
+  })
+})
+
 describe("a pausa das Notificações (fase 4)", () => {
   it("cala a directa até à hora de fim, e a chamada toca na mesma", () => {
     const { motor, relogio, tocados } = montar({ estado: { pausaAte: 10_000 } })

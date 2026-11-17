@@ -30,7 +30,7 @@
  * ## Wide, and in whole pixels
  *
  * The first version had bars of 3 with a gap of 2, and at real size it read tight:
- * the owner asked for it "wider and more legible". Now they are bars of 4 with
+ * it needed to be "wider and more legible". Now they are bars of 4 with
  * a gap of 3, heights that go from 6 to 16 (the difference between neighbors
  * is never less than 4), and the cap dropped from five to four before the `+`,
  * which is what pays for the width. All coordinates are INTEGERS: at 1x and 2x

@@ -11,6 +11,7 @@ import {
   type ContaDeTeste,
   type ServidorDeTeste,
 } from "../../../apps/server/testes/cliente-de-teste.js"
+import { PassagemDaChaveDaConta } from "./chaveDaConta.js"
 import { lerCaixa } from "./denuncia.js"
 import { origemDoServidorDe } from "./relato.js"
 import { Session } from "./session.js"
@@ -72,7 +73,9 @@ beforeAll(async () => {
   ;[ana, bruno, carla] = (await contasDeTeste(servidor, ["Ana", "Bruno", "Carla"])) as [ContaDeTeste, ContaDeTeste, ContaDeTeste]
   abertas.push(ana, bruno, carla)
   canal = await canalComTodos(servidor, ana, [bruno, carla])
-  telemovel = await emparelharAparelho(ana)
+  // A phone paired before 1.3.16, and it stays without the account key: that is the case measured here.
+  PassagemDaChaveDaConta.ligada = false
+  telemovel = await emparelharAparelho(ana, "Ana (telemóvel)", { semChaveDaConta: true })
   abertas.push(telemovel)
   expect(telemovel.session.temChaveDeConta).toBe(false)
   await noCanalDaConta(ana, telemovel)
@@ -81,6 +84,7 @@ beforeAll(async () => {
 afterAll(async () => {
   desligarContas(abertas)
   Session.CAIXA_PRIMEIRA_MS = PRIMEIRA
+  PassagemDaChaveDaConta.ligada = true
   await servidor?.fechar()
 })
 

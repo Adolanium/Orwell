@@ -201,6 +201,9 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   // The core refuses before requesting an address that the server does not debut (4/11/2026).
   // The rule is `podeEstrearCanal` (@enclave/protocol); the channel goes in `cause`.
   "the server does not open this channel address": 366,
+  // Reactions (12/11/2026): the core refuses an emoji the schema would refuse. 380, not 367,
+  // so it does not collide with branches written at the same time.
+  "the reaction emoji is not valid": 380,
 
   "the call could not be set up on this server": 401,
   "the call has no send path": 402,
@@ -285,6 +288,10 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   // The permissions model (1.2, 3/11/2026). Block 450-459.
   "the everyone role is built in": 450,
   "you may not change the permissions of this room": 451,
+  // Read-only rooms (12/11/2026): the send this app refuses. See `Session.send`.
+  "you may not write in this room": 454,
+  // Screen sharing as a role power (12/11/2026). See `Call.startScreenShare`.
+  "you may not share your screen in this room": 455,
   // Voice moderation (2/11/2026). Block 460-469.
   "to leave the call, leave it": 460,
   // The microphone sensitivity (2/11/2026). Block 490-499.
@@ -374,6 +381,17 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   // The `status` "device-revoked" on the session, and the server's `error` with
   // the same code: this device was removed from the account on another device.
   "device-revoked": 748,
+  // "Report a bug" (12/11/2026). 760 and up, so a code taken in another branch since 748 does not collide.
+  "the bug report is not valid": 760,
+  "too many bug reports sent": 761,
+  "the server did not take the bug report": 762,
+  // Poll deadline and close.
+  "only the author or a moderator may close this poll": 780,
+  // Notifications when the app is closed (Web Push, `client-core/src/push.ts`). Block 790-799,
+  // away from 763-789 so a code taken in another branch does not collide.
+  "this server does not send notifications when the app is closed": 790,
+  "the browser refused the notification subscription": 791,
+  "the server refused the notification subscription": 792,
 }
 
 /**

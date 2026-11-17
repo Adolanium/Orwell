@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react"
+import { avisarDadoPorLido } from "./usePorLer.js"
 import type { ChatMessage } from "../types.js"
 import { dirigidaAMim } from "../lib/porAtender.js"
 import { marcarLido, useEstadoDaConta, type LastRead } from "../lib/estadoDaConta.js"
@@ -168,6 +169,8 @@ export function useUnreads(
     (channel: string) => {
       const next = markRead(espelho.current, channel, messages)
       if (next !== espelho.current) marcarLido(channel, next[channel]!)
+      // The open conversation drops its line and its "unread" bar too.
+      avisarDadoPorLido(channel)
     },
     [messages],
   )

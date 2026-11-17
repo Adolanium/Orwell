@@ -489,7 +489,7 @@ for (const [qual, nome, largura, altura] of [
 
 // ------------------------- the photo post expanded: who is the stage
 //
-// Two complaints from the owner, months apart, same place.
+// Two bugs, months apart, same place.
 //
 // First: in the profile, an expanded post didn't show the photo large; in the
 // feed it did. Fixed, the image became a button and the zoom sheet came into
@@ -568,7 +568,7 @@ for (const [qual, nome, largura, altura] of [
   )
 
   /**
-   * The owner's ruler: how much larger than the thumbnail you came from.
+   * The ruler: how much larger than the thumbnail you came from.
    *
    * Before this design the expanded photo measured 203px on a 1280 screen and
    * the grid thumbnail measured 203px too, opening the post didn't make the

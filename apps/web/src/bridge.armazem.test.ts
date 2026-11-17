@@ -256,4 +256,21 @@ describe("apagar a conta apaga os media", () => {
     await aberta.ponte.vault.destroy()
     expect(idb.apagadas).toContain("enclave-media")
   })
+
+  it("destruir o cofre com o retrato a meio da promoção não deixa uma rejeição por tratar", async () => {
+    // The background media job reads the vault after each await: a vault locked meanwhile must end it quietly.
+    const rejeicoes: unknown[] = []
+    const ouvir = (erro: unknown): void => void rejeicoes.push(erro)
+    process.on("unhandledRejection", ouvir)
+    try {
+      const aberta = await abrir()
+      await comRetrato(aberta)
+      await vi.waitFor(async () => expect((await new BrowserArmazemBackend().listar()).length).toBe(1))
+      await aberta.ponte.vault.destroy()
+      await new Promise((r) => setTimeout(r, 200))
+      expect(rejeicoes.map(String)).toEqual([])
+    } finally {
+      process.off("unhandledRejection", ouvir)
+    }
+  })
 })

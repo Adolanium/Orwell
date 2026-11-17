@@ -1,5 +1,5 @@
 /**
- * Two changes the owner requested on 2 November 2026, live.
+ * Two changes, live.
  *
  *   node scripts/e2e-volume-youtube.mjs      (needs `npm run build` first)
  *

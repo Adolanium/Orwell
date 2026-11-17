@@ -7,6 +7,7 @@ import "@enclave/ui/styles.css"
 import { createBrowserBridge, ouvirBloqueios, type PonteDoBrowser } from "./bridge.js"
 import { armazenamentoDoSeparador, lerAmigoDeArranque, lerConviteDeArranque, lerEmparelhamentoDeArranque } from "./convite-arranque.js"
 import { capacidadesDoBrowser, criarPosse, type EstadoDaPosse } from "./posse-do-separador.js"
+import { aoEsconderAPagina, aoMostrarAPagina } from "./pagina-escondida.js"
 import { DB_NAME, type MotivoDaPerda } from "./vault-backend.js"
 import { versaoMudou, watchForNewVersion } from "./version-watch.js"
 
@@ -22,9 +23,6 @@ const conviteDeArranque = lerConviteDeArranque({
   storage: armazenamentoDoSeparador(),
   base: import.meta.env.BASE_URL,
 })
-// The bundle has loaded and runs: the first startup mark (see `marcasDeArranque.ts`).
-// After the invite on purpose: the secret in the fragment is cleared before anything else.
-marcarArranque("bundle")
 // And the pairing link, by the same path and for the same reason: a secret
 // in the fragment, read and cleared before anything else.
 const emparelhamentoDeArranque = lerEmparelhamentoDeArranque({
@@ -40,6 +38,10 @@ const amigoDeArranque = lerAmigoDeArranque({
   storage: armazenamentoDoSeparador(),
   base: import.meta.env.BASE_URL,
 })
+
+// The bundle has loaded and runs: the first startup mark (see `marcasDeArranque.ts`).
+// After the three startup links, which are read and cleared before anything else.
+marcarArranque("bundle")
 
 const root = document.getElementById("root")
 if (!root) throw new Error("missing #root")
@@ -197,6 +199,7 @@ function desenharAplicacao(ponte: PonteDoBrowser): void {
         startupInvite={conviteDeArranque}
         startupPairing={emparelhamentoDeArranque}
         startupFriend={amigoDeArranque}
+        lotePorQuadro
       />
     </StrictMode>,
   )
@@ -281,8 +284,10 @@ posse.aoMudar(desenhar)
   the `pageshow` below reloads.
 */
 window.addEventListener("pagehide", (evento) => {
-  if (evento.persisted) void posse.largar()
-  else posse.fechar()
+  // With a call open the ownership stays: see `pagina-escondida.ts`.
+  const decisao = aoEsconderAPagina({ persisted: evento.persisted, emChamada: bridge?.emChamada() ?? false })
+  if (decisao === "largar") void posse.largar()
+  else if (decisao === "fechar") posse.fechar()
 })
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return
@@ -300,10 +305,10 @@ document.addEventListener("visibilitychange", () => {
 /*
   A page that comes back from the navigation cache (back button) comes back with the
   ownership from before, which by then may belong to another tab. Reloading asks
-  the question again, from the start.
+  the question again, from the start. Not with a call open: see `aoMostrarAPagina`.
 */
 window.addEventListener("pageshow", (evento) => {
-  if (evento.persisted) window.location.reload()
+  if (aoMostrarAPagina({ persisted: evento.persisted, emChamada: bridge?.emChamada() ?? false }) === "recarregar") window.location.reload()
 })
 
 watchForNewVersion(bloquearPorVersao)

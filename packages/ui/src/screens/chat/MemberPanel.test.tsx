@@ -250,7 +250,7 @@ describe("MemberPanel — papéis", () => {
 /**
  * The list sorted by role, and by who is online.
  *
- * Owner request on September 10, 2026: "the users on the right should be
+ * The requirement: "the users on the right should be
  * organized by role. Online/offline, like discord". The list used to come out
  * by address order, which is a random string that decided who appears first.
  *
@@ -527,10 +527,10 @@ describe("MemberPanel — o anel de presença", () => {
   })
 })
 
-/** "I don't want ids exposed" (owner order, October 27, 2026). */
+/** The requirement: "I don't want ids exposed". */
 describe("MemberPanel — o id não se lê", () => {
   it('sem papel não há linha por baixo do nome, e o id não se copia por botão ao lado (vai pelo menu "⋯")', () => {
-    // Owner, October 28, 2026: "I don't want the copy id symbol next to the user, it's already in the … menu".
+    // The requirement: "I don't want the copy id symbol next to the user, it's already in the … menu".
     const { container } = render(panel({ members: ["@garbicis-xapsensis:orwell.pt"], nameFor: () => "Ana" }))
     expect(container.textContent).not.toContain("garbicis")
     expect(container.querySelector(".member-sub")).toBeNull()
@@ -554,7 +554,7 @@ describe("MemberPanel — o id não se lê", () => {
 
 /**
  * The personal message, when it doesn't fit, scrolls as a footer (the `Andante`),
- * instead of cutting with ellipsis (owner, October 28, 2026). jsdom doesn't measure
+ * instead of cutting with ellipsis. jsdom doesn't measure
  * widths: without them it's a still copy; with widths faked not to fit, the tape
  * takes two copies and moves.
  */
@@ -586,5 +586,42 @@ describe("MemberPanel — a mensagem pessoal que não cabe", () => {
       largo.mockRestore()
       estreito.mockRestore()
     }
+  })
+})
+
+/**
+ * A big channel shows only who is online (12/11/2026). The common room
+ * has 409 members: drawing all of them, and asking for their names, on every
+ * login was work for people nobody was looking at.
+ */
+describe("MemberPanel — canal grande", () => {
+  const membros = Array.from({ length: 120 }, (_, i) => `@m${String(i).padStart(3, "0")}:s`)
+  const ligados = new Set(membros.slice(0, 5))
+  const presenceFor = (address: string): "active" | "idle" => (ligados.has(address) ? "active" : "idle")
+
+  it("mostra só quem está ligado, e uma linha com quantos faltam", () => {
+    render(panel({ members: membros, presenceFor }))
+    expect(document.querySelectorAll(".member-row")).toHaveLength(5)
+    expect(screen.getByRole("button", { name: strings.members.maisPessoas(115) })).toBeTruthy()
+  })
+
+  it("a linha abre a lista inteira em janela, e pede os nomes só das linhas que se vêem", async () => {
+    const user = userEvent.setup()
+    const pedirPerfis = vi.fn()
+    render(panel({ members: membros, presenceFor, pedirPerfis }))
+    await user.click(screen.getByRole("button", { name: strings.members.maisPessoas(115) }))
+    const linhas = document.querySelectorAll(".member-janela .member-row").length
+    expect(linhas).toBeGreaterThan(0)
+    expect(linhas).toBeLessThan(40)
+    const pedidas = pedirPerfis.mock.calls.flatMap(([contas]) => contas as string[])
+    expect(pedidas.length).toBe(linhas)
+    expect(pedidas.every((conta) => !ligados.has(conta))).toBe(true)
+    expect(screen.getByRole("button", { name: strings.members.esconderMaisPessoas })).toBeTruthy()
+  })
+
+  it("um canal pequeno continua a mostrar toda a gente, ligada ou não", () => {
+    render(panel({ members: membros.slice(0, 20), presenceFor }))
+    expect(document.querySelectorAll(".member-row")).toHaveLength(20)
+    expect(screen.queryByRole("button", { name: strings.members.maisPessoas(15) })).toBeNull()
   })
 })

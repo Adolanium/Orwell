@@ -19,7 +19,8 @@ import { caladoPelaPausa } from "./acontecimentos.js"
  * 2. **The main switch and the type switch.**
  * 3. **Never for own actions.** My message, my join. Exceptions are
  *    responses to a gesture, which do not arrive marked `deMim`: the mute
- *    sounds and the sent message sound (`enviada`, played by `useOutbox`).
+ *    sounds. Sending a message plays nothing (16/11/2026): it is an event of
+ *    my own account, like the same message arriving from my other devices.
  * 4. **"Busy" and "Invisible" silence everything**, except the two ringtones
  *    (incoming call and outgoing call), only if the person allowed it
  *    (`chamadaComOcupado`). "Mute all" silences the outgoing call ringtone (`CALADOS_AO_ENSURDECER`): it is
@@ -176,7 +177,6 @@ export const RAJADA_MS: Record<TipoDeSom, number> = {
   "sala-afk": 2000,
   // Each send is a gesture and each one plays. The 150 ms only stops two sends
   // confirming at the same moment.
-  enviada: 150,
   // The outgoing ring repeats on its own clock (`periodo`), not from here.
   "a-chamar": 2000,
   "voz-perdida": 2000,
@@ -244,7 +244,6 @@ export const VIBRACAO: Record<TipoDeSom, readonly number[]> = {
   // A subtle warning: the moved person is not at the keyboard, and the pocket is not the place for it.
   "sala-afk": [],
   // The sender has the phone in hand and the screen in front: the sound plays.
-  enviada: [],
   // The caller has the phone in hand, waiting.
   "a-chamar": [],
   // The call dropped and the person might not be looking: this is the only one that vibrates.
@@ -505,6 +504,16 @@ export function criarMotor(opcoes: OpcoesDoMotor): Motor {
 /* -------------------------------------------------------- actual playback */
 
 export interface OpcoesDaSaida {
+  /**
+   * `preparar` creates the context after the gesture's frame, not inside the
+   * gesture: opening the audio device costs ~70 ms in Chromium, and it made the
+   * first click of the session answer late. Not in the next task either: a task
+   * queued by the click runs before the click's frame. Only where the engine
+   * keeps the page's activation for later (Chromium, Firefox). WebKit wants the
+   * context born inside the gesture: there it stays off. A hidden page has no
+   * frames: there it is the next task.
+   */
+  prepararDepois?: boolean
   criarContexto?: () => AudioContext | null
   renderizar?: (tipo: TipoDeSom) => Promise<AudioBuffer | null>
   agora?: () => number
@@ -631,7 +640,11 @@ export function criarSaidaWebAudio(opcoes: OpcoesDaSaida = {}): Saida {
         made 28 contexts on the first gesture, ~60 MB of physical footprint
         (13/11/2026).
       */
-      garantir()
+      if (!opcoes.prepararDepois) garantir()
+      else if (typeof requestAnimationFrame === "function" && globalThis.document?.visibilityState !== "hidden") {
+        // After the gesture's frame: a task queued here would run before it and hold it back.
+        requestAnimationFrame(() => setTimeout(garantir, 0))
+      } else setTimeout(garantir, 0)
     },
   }
 }
@@ -652,7 +665,17 @@ export function estadoDoAparelho(): EstadoDoSom {
 }
 
 /** The application engine. Tests build their own with `criarMotor`. */
-export const motor: Motor = criarMotor({ saida: criarSaidaWebAudio(), lerEstado: estadoDoAparelho })
+/**
+ * WebKit is the engine that wants the audio context born inside the gesture,
+ * and it is the one that still names `webkitAudioContext`. Everywhere else the
+ * context can wait for the next task. See `OpcoesDaSaida.prepararDepois`.
+ */
+const contextoSoNoGesto = typeof globalThis !== "undefined" && "webkitAudioContext" in globalThis
+
+export const motor: Motor = criarMotor({
+  saida: criarSaidaWebAudio({ prepararDepois: !contextoSoNoGesto }),
+  lerEstado: estadoDoAparelho,
+})
 
 /**
  * "Update available" (phase 4): the sound when the app notifies of a new version.

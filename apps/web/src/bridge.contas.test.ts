@@ -33,6 +33,9 @@ vi.mock("@enclave/client-core", () => ({
       feito.push("esquecer-grupos")
     }
     async prepareAccountDeletion(): Promise<void> {}
+    async cancelarPush(): Promise<void> {
+      feito.push("cancelar-push-no-servidor")
+    }
   },
   Vault: class {
     unlocked = true
@@ -58,6 +61,12 @@ vi.mock("@enclave/client-core", () => ({
   },
 }))
 vi.mock("@enclave/crypto", () => ({ kindOf: () => "application" }))
+vi.mock("./push.js", async (original) => ({
+  ...(await original<typeof import("./push.js")>()),
+  cancelarNoBrowser: async () => {
+    feito.push("cancelar-push-no-browser")
+  },
+}))
 // The media store is born with the bridge; like the vault, without IndexedDB here.
 vi.mock("./armazem-backend.js", () => ({ BrowserArmazemBackend: class {} }))
 vi.mock("./vault-backend.js", () => ({
@@ -130,7 +139,11 @@ describe("a ponte do browser e as contas do aparelho", () => {
 
     // Delete the main one: it leaves the list, the active one becomes the new one.
     const naPrincipal = createBrowserBridge()
+    feito.length = 0
     await naPrincipal.vault.destroy()
+    // The browser subscription is shared by the accounts of this origin: the one that stays keeps it.
+    expect(feito).toContain("cancelar-push-no-servidor")
+    expect(feito).not.toContain("cancelar-push-no-browser")
     const depois = JSON.parse(localStorage.getItem(LISTA_DE_CONTAS) ?? "{}") as { activa: string; contas: { id: string }[] }
     expect(depois.activa).toBe(nova)
     expect(depois.contas.map((c) => c.id)).toEqual([nova])

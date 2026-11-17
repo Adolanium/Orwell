@@ -134,7 +134,7 @@ nsis:
   include: installer.nsh
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  # The installer artwork: direction B ("Banners"), chosen by owner Nov 3, 2026,
+  # The installer artwork: direction B ("Banners"),
   # same as the boot screen. 24-bit BMP in the dimensions NSIS wants (164×314
   # sidebar, 150×57 header), in `recursos/`. The uninstaller sidebar is the same:
   # whoever uninstalls is leaving the same house. See `src/main/ecra-de-arranque.test.ts`.
@@ -143,6 +143,6 @@ nsis:
   installerHeader: installerHeader.bmp
 
 linux:
-  # Not a target today, and it's documented: owner said "right now we're PC only",
+  # Not a target today, and it's documented: "right now we're PC only",
   # and an AppImage to build is better than one to test.
   target: []

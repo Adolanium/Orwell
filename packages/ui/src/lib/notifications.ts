@@ -1,4 +1,5 @@
 import { strings } from "../strings.js"
+import { shortName } from "./format.js"
 
 /**
  * The in-app notification log, as pure data and pure rules.
@@ -28,6 +29,7 @@ export interface AppNotification {
     | "missed-call"
     | "report-copy"
     | "report-decision"
+    | "role-given"
   at: number
   /** The person behind it, when there is one. */
   actor?: string | undefined
@@ -35,6 +37,8 @@ export interface AppNotification {
   channel?: string | undefined
   /** Only in `report-decision`. */
   decisao?: "suspensa" | "sem-accao" | undefined
+  /** Only in `role-given`: the roles just given, with name and colour as they were then (12/11/2026). */
+  cargos?: { nome: string; cor?: string | undefined }[] | undefined
   read: boolean
 }
 
@@ -56,7 +60,7 @@ function pessoaDoPedido(entry: AppNotification): string | null {
 }
 
 /**
- * A friend request per person, and this is what the owner saw.
+ * A friend request per person, and this is the bug that was seen.
  *
  * The notification key has the TIMESTAMP (`freq:<canal>:<sentAt>`, in
  * `App.tsx`), and deduplication here is only by `id`: two requests from the same
@@ -285,8 +289,8 @@ export interface SystemNoticeContext {
  * with focus, and that channel open in it. A window visible behind the browser
  * does not count.
  *
- * The window in front used to silence EVERYTHING, and stopped silencing (request
- * of the owner and community, November 2, 2026, point 6). Someone reading a
+ * The window in front used to silence EVERYTHING, and stopped silencing (a
+ * community request, point 6). Someone reading a
  * conversation does not see the message that arrives in another: the bell swings
  * in a corner, and that does not reach. Now the system alert also leaves with
  * the window in front, except for the conversation that is open. Inside the app
@@ -297,6 +301,12 @@ export interface SystemNoticeContext {
  * invite of mine already joined, and nothing is lost if I know an hour later,  * it is noted next to the type declaration, and it is the same reason why it
  * does not become a balloon inside the app.
  */
+/*
+  A locked vault silences everything here, and that stays true for notices with
+  content. The Web Push notice ("New message in Orwell", shown by the Service
+  Worker with the app closed) has no content: it is a knock on the door, not a
+  message, so it does not pass through this verdict.
+*/
 export function systemNoticeVerdictOf(
   entry: AppNotification,
   context: SystemNoticeContext,
@@ -336,8 +346,8 @@ export interface SystemNotice {
    * The alert closes by itself after this time, in milliseconds. Without it,
    * it stays for as long as the operating system decides.
    *
-   * The alert of a friend online is 2 s (`AVISO_DO_AMIGO_MS`): order of the
-   * owner on November 2, 2026, "2 seconds max, must not be the user who closes
+   * The alert of a friend online is 2 s (`AVISO_DO_AMIGO_MS`): the
+   * requirement is "2 seconds max, must not be the user who closes
    * it". An alert of presence reads at a glance; stuck on screen is noise.
    */
   expiraEmMs?: number | undefined
@@ -391,8 +401,8 @@ export function registerSystemNoticeHost(next: SystemNoticeHost | null): void {
  * Then the browser permission doesn't matter: the renderer's `Notification` is
  * deliberately refused (`apps/client/src/main/permissoes.ts`), and notices
  * come from the main process. Reading the browser permission in the desktop app
- * said "blocked by browser" and locked the toggle (owner report,
- * 2 November 2026).
+ * said "blocked by browser" and locked the toggle (the
+ * bug this fixes).
  */
 export function temAnfitriaoDeAvisos(): boolean {
   return host !== null
@@ -619,16 +629,23 @@ export function listenForSystemNoticeClicks(): void {
   if (workers) listenTo(workers)
 }
 
-/** The sentence a notification shows, resolved with live names. */
+/**
+ * The sentence a notification shows, resolved with live names.
+ *
+ * `labelFor` may answer `null`: the room's name is not known yet (12/11/2026).
+ * Then the sentence goes without it, and never with the channel identifier in
+ * its place: in an alert outside the app, `!abc…` reads as broken encryption.
+ */
 export function notificationTextOf(
   entry: AppNotification,
   nameFor: (address: string) => string,
-  labelFor: (channel: string) => string,
+  labelFor: (channel: string) => string | null,
 ): string {
   const who = entry.actor ? nameFor(entry.actor) : ""
+  const sala = entry.channel ? labelFor(entry.channel) : null
   switch (entry.kind) {
     case "room-added":
-      return strings.notifCenter.roomAdded(entry.channel ? labelFor(entry.channel) : "?")
+      return sala ? strings.notifCenter.roomAdded(sala) : strings.notifCenter.roomAddedSemNome
     case "dm-new":
       return strings.notifCenter.dmNew(who)
     case "friend-request":
@@ -641,9 +658,9 @@ export function notificationTextOf(
     case "dm-message":
       return strings.notifCenter.dmMessage(who)
     case "channel-join":
-      return strings.notifCenter.joinedByInvite(who, entry.channel ? labelFor(entry.channel) : "?")
+      return strings.notifCenter.joinedByInvite(who, sala ?? "?")
     case "mention":
-      return strings.notifCenter.mention(who, entry.channel ? labelFor(entry.channel) : "?")
+      return sala ? strings.notifCenter.mention(who, sala) : strings.notifCenter.mentionSemSala(who)
     case "missed-call":
       return strings.notifCenter.chamadaPerdida(who)
     case "report-copy":
@@ -652,5 +669,46 @@ export function notificationTextOf(
       return entry.decisao
         ? `${strings.notifications.reportDecision(entry.decisao)} ${strings.notifications.reportDecisionVias}`
         : strings.notifications.reportDecisionVias
+    case "role-given":
+      return textoDoCargoAtribuido(entry.cargos ?? [], sala ?? "?")
   }
+}
+
+/**
+ * "You now have the role X in Y." (12/11/2026), in pieces, so the bell can paint
+ * each role name in its colour. One notice for several roles given at once.
+ */
+export function partesDoCargoAtribuido(
+  cargos: readonly { nome: string }[],
+  comunidade: string,
+): { antes: string; nomes: string[]; ligacoes: string[]; depois: string } {
+  const t = strings.notifCenter.cargoAtribuido
+  const nomes = cargos.map((cargo) => cargo.nome)
+  const ligacoes = nomes.map((_, i) => (i === nomes.length - 1 ? "" : i === nomes.length - 2 ? t.e : ", "))
+  return { antes: nomes.length > 1 ? t.varios : t.um, nomes, ligacoes, depois: t.em(comunidade) }
+}
+
+export function textoDoCargoAtribuido(cargos: readonly { nome: string }[], comunidade: string): string {
+  const { antes, nomes, ligacoes, depois } = partesDoCargoAtribuido(cargos, comunidade)
+  return antes + nomes.map((nome, i) => nome + ligacoes[i]).join("") + depois
+}
+
+/**
+ * The name a notice may show for a channel (16/11/2026): the decrypted one, or
+ * the last one known on this device, or `null`. Never the identifier, short or
+ * whole: `labelFor` falls back to it while the name is not decrypted (a reload
+ * before `space.meta`, a direct whose peer arrives later), and outside the app
+ * `!q7x…` reads as broken encryption. `conhecidos` is memory only.
+ */
+export function rotuloParaAviso(canal: string, rotuloAgora: string, conhecidos: Map<string, string>): string | null {
+  if (rotuloAgora && rotuloAgora !== canal && rotuloAgora !== shortName(canal)) {
+    conhecidos.set(canal, rotuloAgora)
+    return rotuloAgora
+  }
+  return conhecidos.get(canal) ?? null
+}
+
+/** A room's name for a notice: the declared one, or `null`. Never the room's identifier. */
+export function salaParaAviso(_room: string, declarada: { room: string; name?: string } | undefined): string | null {
+  return declarada?.name ? declarada.name : null
 }

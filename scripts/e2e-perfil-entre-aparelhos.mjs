@@ -3,7 +3,7 @@
  *
  *   node scripts/e2e-perfil-entre-aparelhos.mjs          (needs `npm run build` first)
  *
- * Owner report (27/10/2026): "I log into the app: I do not have the same
+ * The bug: "I log into the app: I do not have the same
  * profile picture I had in the browser".
  *
  * What is proved, by the buttons someone presses: Ana creates an account on

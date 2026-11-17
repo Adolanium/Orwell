@@ -9,7 +9,7 @@ afterEach(cleanup)
 /**
  * An old republish never overwrites what the vault already knows (3/11/2026, Orwell channel).
  *
- * Owner report: "text channel info disappears intermittently, it is happening in general".
+ * The bug: "text channel info disappears intermittently, it is happening in general".
  * Each entry to the common channel makes whoever is there republish the rooms and
  * categories to who just joined (`republishRooms`, `#revezarSalas`), with the
  * ORIGINAL timestamp of each. Who publishes them may have a stale vault (lost epochs on

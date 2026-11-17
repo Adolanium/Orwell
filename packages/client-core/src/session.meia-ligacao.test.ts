@@ -371,6 +371,41 @@ describe("a volta ao primeiro plano (retomar)", () => {
     expect(FakeSocket.todos.length).toBe(antes)
   }, 60_000)
 
+  /*
+    The phone unlocked in the middle of a call (screen-locked study, M2). The
+    call keeps the socket (no forced reconnect), but a dead socket used to take
+    the full 15 s check to show, and only then did the media start rebuilding.
+    After a long silent absence the server answers a `ping` at once: 5 s is enough.
+  */
+  it("com uma chamada, depois de uma ausência longa e muda num telemóvel: o socket morto cai em 5 s, não em 15 s", async () => {
+    Session.AUSENCIA_QUE_RELIGA_MS = 300
+    const session = await sessaoLigada()
+    await session.sfuEntrarNoAmbito(GERAL, "voz")
+    const morto = FakeSocket.last!
+    morto.mudo = true
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    const partiu = Date.now()
+    expect(session.retomar({ escondidaMs: 400, suspende: true })).toBe("verificar")
+    expect(morto.sent.at(-1)?.t).toBe("ping")
+    await esperar(() => FakeSocket.last !== morto && session.connection === "online", 20_000)
+    const demorou = Date.now() - partiu
+    expect(Session.PRAZO_DA_VERIFICACAO_NA_CHAMADA_MS).toBe(5_000)
+    expect(demorou).toBeGreaterThanOrEqual(4_900)
+    expect(demorou).toBeLessThan(7_000)
+  }, 60_000)
+
+  it("com uma chamada e o socket vivo, a volta rápida não religa", async () => {
+    Session.AUSENCIA_QUE_RELIGA_MS = 300
+    const session = await sessaoLigada()
+    await session.sfuEntrarNoAmbito(GERAL, "voz")
+    const antes = FakeSocket.todos.length
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(session.retomar({ escondidaMs: 400, suspende: true })).toBe("verificar")
+    await new Promise((resolve) => setTimeout(resolve, 6_000))
+    expect(FakeSocket.todos.length).toBe(antes)
+    expect(session.connection).toBe("online")
+  }, 60_000)
+
   it("sem ligação: liga já", async () => {
     const session = await sessaoLigada()
     const morto = FakeSocket.last!

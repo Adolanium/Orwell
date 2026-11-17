@@ -28,6 +28,16 @@ afterEach(cleanup)
 beforeEach(() => localStorage.clear())
 
 describe("readPrefs / writePrefs", () => {
+  it("nomes e texto nas notificações: ligado por omissão, e o falso antigo não escolhido passa a ligado uma vez", () => {
+    // 12/11/2026: notices said "a friend is online" and showed channel identifiers.
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ notifyPreview: false, chosen: true }))
+    expect(readPrefs().notifyPreview).toBe(true)
+    // A choice made after the change is kept.
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ notifyPreview: false, conteudoDosAvisosEscolhido: true, chosen: true }))
+    expect(readPrefs().notifyPreview).toBe(false)
+    localStorage.removeItem(PREFS_KEY)
+  })
+
   it("sem nada guardado devolve os defaults", () => {
     expect(readPrefs()).toEqual(DEFAULT_PREFS)
   })
@@ -40,6 +50,7 @@ describe("readPrefs / writePrefs", () => {
       notifications: false,
       avisosDaAppRevistos: false,
       notifyPreview: false,
+      conteudoDosAvisosEscolhido: true,
       sounds: false,
       soundVolume: 30,
       outputVolume: 1.5,
@@ -61,6 +72,7 @@ describe("readPrefs / writePrefs", () => {
       bloqueioAutomatico: 60 as const,
       pausaAte: 1_900_000_000_000,
       entrarSilenciado: true,
+      ecraLigadoNaChamada: true,
       // On by default: what we prove is that a chosen `false` sticks.
       avisarAmigosOnline: false,
       avisarAmigosNaVoz: false,
@@ -74,6 +86,7 @@ describe("readPrefs / writePrefs", () => {
       opacidadeDaOverlay: 0.35,
       sensibilidadeAutomatica: false,
       limiarDoMicrofone: -37,
+      pushFechada: true,
     }
     writePrefs(chosen)
     expect(localStorage.getItem(PREFS_KEY)).toBeTruthy()
@@ -99,6 +112,14 @@ describe("readPrefs / writePrefs", () => {
     expect(readPrefs()).toMatchObject({ avisarAmigosNaVoz: true, avisarAmigosNoEcra: true })
     localStorage.setItem(PREFS_KEY, JSON.stringify({ avisarAmigosNaComunidade: false }))
     expect(readPrefs().avisarAmigosNaComunidade).toBe(false)
+  })
+
+  it("o ecrã ligado durante as chamadas vem desligado; só um true guardado o liga", () => {
+    expect(DEFAULT_PREFS.ecraLigadoNaChamada).toBe(false)
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ ecraLigadoNaChamada: "sim" }))
+    expect(readPrefs().ecraLigadoNaChamada).toBe(false)
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ ecraLigadoNaChamada: true }))
+    expect(readPrefs().ecraLigadoNaChamada).toBe(true)
   })
 
   it("notificações ligadas e sons a 100 % por omissão (2/11/2026)", () => {
@@ -285,6 +306,7 @@ describe("applyPrefs", () => {
       density: "compacta",
       notifications: false,
       notifyPreview: false,
+      conteudoDosAvisosEscolhido: true,
       sounds: true,
       soundVolume: 50,
       outputVolume: 1,

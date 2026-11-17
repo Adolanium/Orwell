@@ -9,7 +9,7 @@ import { engagementOf, NO_ENGAGEMENT } from "./engagement.js"
 import { PostBody } from "./PostBody.js"
 import { PostEngagement } from "./PostEngagement.js"
 import { usePostActions } from "./usePostActions.js"
-import { apurar, votacaoDe, votosDe } from "../../lib/votacoes.js"
+import { apurar, fechosDe, votacaoDe, votosDe } from "../../lib/votacoes.js"
 
 /**
  * A post opened outside the feed: what it says, and what it received.
@@ -101,8 +101,9 @@ export function PostDetail({
   const apuramentos = useMemo(() => {
     const votacao = votacaoDe(post.payload)
     if (!votacao || !post.payload.id) return new Map<string, ReturnType<typeof apurar>>()
-    const escolhas = votosDe(messages).get(post.payload.id)
-    return new Map([[post.payload.id, apurar(escolhas, votacao.options.length, me)]])
+    const fechos = fechosDe(messages)
+    const escolhas = votosDe(messages, fechos).get(post.payload.id)
+    return new Map([[post.payload.id, apurar(escolhas, votacao.options.length, me, fechos.get(post.payload.id) ?? null)]])
   }, [messages, post.payload, me])
   const { vote, comment, deleteComment, votar } = usePostActions(engagement, apuramentos)
 

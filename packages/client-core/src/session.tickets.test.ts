@@ -331,3 +331,39 @@ describe("a sala de tickets chega a quem entra depois", () => {
     expect(republicada).toMatchObject({ name: "Apoio", kind: "text", layout: "tickets" })
   })
 })
+
+/**
+ * The polls room travels exactly like the ticket room: a `layout` string inside the room's own
+ * signed `channel.meta`. No new payload and no new `t`: a client that does not know "polls" keeps the room as
+ * a text room, because `layout` is read as an opaque string and an unknown one means "the conversation".
+ */
+describe("a sala de votações é uma disposição, e viaja como as outras", () => {
+  it("dá a volta: publicada, lida e republicada para quem entra depois", async () => {
+    const channel = moradaDeTeste("votacoes")
+    const { session, vault } = await sessaoCom(channel)
+    await fundadoPor(vault, channel, session.identity.address)
+    await session.upsertRoom(channel, { room: SALA, name: "Votações", kind: "text", layout: "polls" })
+    expect(session.roomsOf(channel).find((sala) => sala.room === SALA)).toMatchObject({
+      name: "Votações",
+      kind: "text",
+      layout: "polls",
+    })
+
+    const ditas: Record<string, unknown>[] = []
+    session.on("message", (evento) => {
+      if (evento.payload.t === "channel.meta") ditas.push(evento.payload as unknown as Record<string, unknown>)
+    })
+    await session.republishRooms(channel)
+    expect(ditas.find((payload) => payload["room"] === SALA)).toMatchObject({ kind: "text", layout: "polls" })
+  })
+
+  it("um cliente antigo só conhece `text` e `voice`: a sala chega-lhe como sala de texto", async () => {
+    // The old client's reading, written out: `kind` decides the type and `layout` is a free string it ignores.
+    const channel = moradaDeTeste("votacoes")
+    const { session, vault } = await sessaoCom(channel)
+    await fundadoPor(vault, channel, session.identity.address)
+    await session.upsertRoom(channel, { room: SALA, name: "Votações", kind: "text", layout: "polls" })
+    const sala = session.roomsOf(channel).find((entrada) => entrada.room === SALA)
+    expect(sala?.kind).toBe("text")
+  })
+})

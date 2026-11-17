@@ -8,7 +8,7 @@ import { Vault, type VaultBackend } from "./vault.js"
 /**
  * Leave a channel and delete the account without staying in it.
  *
- * **The bug, reported by the owner:** "I deleted an account and it's still visible
+ * **The bug:** "I deleted an account and it's still visible
  * in the channel". `Vault.destroy()` locks the vault and clears local storage, and
  * nothing more, it sends no commit, notifies no channel, advances no epoch.
  * The sheet stayed in the MLS tree of each channel: the person remained in the

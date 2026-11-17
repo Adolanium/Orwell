@@ -14,7 +14,8 @@ import {
   type FiltroDoSino,
   type GrupoDoDia,
 } from "../../lib/linhaDoTempo.js"
-import { notificationTextOf, type AppNotification } from "../../lib/notifications.js"
+import { notificationTextOf, partesDoCargoAtribuido, type AppNotification } from "../../lib/notifications.js"
+import { hexDaCor, tintaDoPapel } from "../../lib/roleColours.js"
 import { chaveDaOferta, type OfertaDeSucessao } from "../../lib/sucessoes.js"
 import { PedidoCard } from "../chat/PedidoCard.js"
 import { linguaActual, strings } from "../../strings.js"
@@ -23,7 +24,7 @@ import { linguaActual, strings } from "../../strings.js"
  * The bell: what happened while you were not looking, each entry a door to the
  * thing itself.
  *
- * Since 3 November 2026 (mockup picked by the owner) it is a window at center,
+ * Now (the chosen mockup) it is a window at center,
  * and on mobile a sheet full width: the title, the close, the filters as pills,
  * and the list as a timeline, by days, with one icon per type. Before it was a
  * menu anchored to the rail.
@@ -266,7 +267,9 @@ export function NotificationPanel({
                               </span>
                             )}
                           </span>
-                          <span className="notif-text">{texto}</span>
+                          <span className="notif-text">
+                            {entry.kind === "role-given" ? <TextoDoCargo entry={entry} labelFor={labelFor} /> : texto}
+                          </span>
                           <time dateTime={new Date(entry.at).toISOString()} title={formatStamp(entry.at)}>
                             {horaDe(entry.at)}
                           </time>
@@ -332,6 +335,26 @@ function horaDe(at: number): string {
 }
 
 /** One icon per type: at sign, person, phone, envelope, and the chat bubble. */
+/** "You now have the role X in Y.", each role name in its colour (12/11/2026). */
+function TextoDoCargo({ entry, labelFor }: { entry: AppNotification; labelFor: (channel: string) => string }): React.JSX.Element {
+  const cargos = entry.cargos ?? []
+  const { antes, nomes, ligacoes, depois } = partesDoCargoAtribuido(cargos, entry.channel ? labelFor(entry.channel) : "?")
+  return (
+    <>
+      {antes}
+      {nomes.map((nome, i) => (
+        <span key={`${nome}-${i}`}>
+          <strong className="notif-cargo" style={tintaDoPapel(hexDaCor(cargos[i]?.cor))}>
+            {nome}
+          </strong>
+          {ligacoes[i]}
+        </span>
+      ))}
+      {depois}
+    </>
+  )
+}
+
 function IconeDoTipo({ kind }: { kind: AppNotification["kind"] }): React.JSX.Element {
   switch (kind) {
     case "mention":
@@ -350,5 +373,7 @@ function IconeDoTipo({ kind }: { kind: AppNotification["kind"] }): React.JSX.Ele
     case "dm-new":
     case "dm-message":
       return <ChatIcon size={22} />
+    case "role-given":
+      return <PersonIcon size={22} />
   }
 }

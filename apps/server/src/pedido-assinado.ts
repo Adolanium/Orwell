@@ -9,6 +9,7 @@ import {
   verifyDeviceChain,
   type ParsedAddress,
   type RotaAssinada,
+  type RotaDosBugs,
 } from "@enclave/protocol"
 import type { Store } from "./store.js"
 
@@ -95,7 +96,7 @@ export class NoncesVistos {
 
 export function verificarPedidoAssinado(
   corpo: unknown,
-  rota: RotaAssinada,
+  rota: RotaAssinada | RotaDosBugs,
   deps: {
     store: Store
     serverName: string

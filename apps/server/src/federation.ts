@@ -207,6 +207,8 @@ export class Federation {
       },
       result.body.recipient,
     )
+    // A federated message wakes the local closed devices too; the sender is on another server.
+    if (stored.kind === "application" && result.body.recipient === undefined) this.gateway.acordarAparelhos(result.body.channel, null)
 
     return { ok: true }
   }
@@ -370,5 +372,6 @@ export class Federation {
     this.store.expireEvents(this.config.retentionDays)
     this.store.expireInvites()
     this.store.expireChannelClaims()
+    this.store.sweepPush()
   }
 }

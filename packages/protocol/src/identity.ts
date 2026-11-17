@@ -35,14 +35,14 @@ export interface Identity {
   /**
    * The PRIVATE account key, when this device has it.
    *
-   * Optional since pairing: a paired device receives the address, the account
-   * public key and its device key's certificate, and **never this**. With
-   * what it receives it logs into the server (the chain-based login only sends
-   * the public key), publishes KeyPackages, signs leaves, reads and writes.
-   * What it cannot do is sign manifests, certificates and revocations: that
-   * is exactly what we want, because it is what makes revocation possible (a
-   * device without the private key cannot put itself back into the manifest). See
-   * `identityFromDeviceCert` and `temChaveDeConta`.
+   * Optional since pairing: a device paired before 1.3.16 received the
+   * address, the account public key and its device key's certificate, and not
+   * this. With what it receives it logs into the server (the chain-based login
+   * only sends the public key), publishes KeyPackages, signs leaves, reads and
+   * writes. Since 1.3.16 the device that has this key passes it to the paired
+   * one (the fix for "Erro 609"), and removing a device is
+   * the server refusing it (`aparelhosRevogados`), not the absence of the key.
+   * See `identityFromDeviceCert`, `temChaveDeConta` and `privadaDaConta`.
    */
   readonly signingPrivateKey?: Uint8Array
   /** DEVICE key. Signs MLS leaves and the login challenge. */
@@ -72,6 +72,25 @@ export type AccountIdentity = Identity & { readonly signingPrivateKey: Uint8Arra
  */
 export function temChaveDeConta(identity: Identity): identity is AccountIdentity {
   return identity.signingPrivateKey !== undefined
+}
+
+/**
+ * Is `privada` the private half of the account key `accountKey`?
+ *
+ * The phone receives the account private key from the device that has it
+ * (pairing, and the account channel for phones paired before 1.3.16). It writes
+ * nothing before this says yes: a key that does not close with the address would
+ * sign manifests and certificates that every server and member rejects.
+ * Never throws.
+ */
+export function privadaDaConta(privada: Uint8Array, accountKey: Uint8Array): boolean {
+  if (privada.length !== 32 || accountKey.length !== 32) return false
+  try {
+    const publica = ed25519.getPublicKey(privada)
+    return publica.every((byte, i) => byte === accountKey[i])
+  } catch {
+    return false
+  }
 }
 
 export function generateIdentity(server: ServerName): AccountIdentity {

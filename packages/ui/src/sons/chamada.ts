@@ -4,7 +4,7 @@ import type { TipoDeSom } from "./familia.js"
 
 /**
  * The call moments that Discord marks with sound and Orwell did not mark
- * (owner request, November 3, 2026): the call dropping, the connection failing,
+ * before: the call dropping, the connection failing,
  * being moved, and broadcasting (starting, ending, who sees it).
  *
  * Pure functions and watchers with no clock of their own, like those in `lib/sounds.ts`: the

@@ -3,7 +3,7 @@ import { strings } from "../../strings.js"
 
 /**
  * An entry that is a slider and not a button: a person's volume in the call
- * (owner request on 2 November 2026, "I want a volume bar").
+ * (requirement: "I want a volume bar").
  *
  * The values are the slider values, already in the unit shown (percent): whoever
  * builds the entry converts to what it stores. See `itensDaPessoaNaChamada`.
@@ -30,6 +30,11 @@ export interface MenuItem {
   onSelect: () => void
   destructive?: boolean
   separatorBefore?: boolean
+  /**
+   * A drawn icon before the label (12/11/2026, first for the nudge). Hidden from
+   * screen readers: the label already names the entry.
+   */
+  icon?: React.ReactNode
   /**
    * A banner above this entry, naming the block it opens.
    *
@@ -145,7 +150,7 @@ function Entradas({
             </button>
           ) : (
             <button
-              className={item.destructive ? "destructive" : ""}
+              className={[item.destructive ? "destructive" : "", item.icon ? "menu-com-icone" : ""].filter(Boolean).join(" ")}
               role="menuitem"
               onPointerEnter={(evento) => {
                 if (evento.pointerType === "mouse") fechar?.()
@@ -155,6 +160,11 @@ function Entradas({
                 item.onSelect()
               }}
             >
+              {item.icon && (
+                <span className="menu-icone" aria-hidden="true">
+                  {item.icon}
+                </span>
+              )}
               {item.label}
             </button>
           )}

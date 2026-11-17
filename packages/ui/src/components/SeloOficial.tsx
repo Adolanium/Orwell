@@ -6,7 +6,7 @@ import { strings } from "../strings.js"
  * It was the word "official", and the comment that was here defended it: the
  * blue checkmark on other networks says "this identity was confirmed by
  * someone", and here nobody confirmed anything. The argument stays true. What
- * changed was who decides. The owner asked for the symbol, and the defense
+ * changed is the form: a symbol, not a word, and the defense
  * against misunderstanding is not the word: it is the `title`, which still says
  * in full where the official status comes from and what it is not.
  *

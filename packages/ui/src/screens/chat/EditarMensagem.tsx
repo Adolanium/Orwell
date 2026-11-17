@@ -12,7 +12,7 @@ import { strings } from "../../strings.js"
  * written, and restoring it later if the fix is cancelled is extra state for
  * something done once a day.
  *
- * No time window, by owner decision on August 12, 2026, and with the edited
+ * No time window, by design, and with the edited
  * mark always visible in the conversation. The two go together: what you gain
  * from fixing a typo cannot be paid for with a conversation that changes under
  * someone who has already read it without noticing.

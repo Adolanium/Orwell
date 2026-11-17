@@ -11,8 +11,8 @@ afterEach(cleanup)
 vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
 
 /**
- * The halo around the avatar (board A3, "Halo", chosen by the owner on October
- * 21, 2026).
+ * The halo around the avatar (board A3, "Halo", the design picked from the
+ * boards).
  *
  * Pin down the drawing by state (muted, speaking, mic off, camera on) and the
  * cost rule: the halo is one layer painted once, and per frame only its
@@ -104,7 +104,7 @@ describe("CallChip — o custo do halo por quadro", () => {
   })
 
   /*
-    * Owner rule for Windows with effects off: with reduced motion nothing stops,
+    * The rule for Windows with effects off: with reduced motion nothing stops,
     * it goes slower. Here was `transition: none`, and the halo jumped step by step.
     * The universal rule in `base.css` puts transitions at 0 s with `!important`,
     * and only another `!important` gets past it.

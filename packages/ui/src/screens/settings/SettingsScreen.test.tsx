@@ -115,7 +115,11 @@ describe("Configurações — uma secção de cada vez", () => {
   it('a Conta tem a língua e "Bloquear agora"', () => {
     renderSettings()
     expect(screen.getByRole("heading", { name: strings.settings.language })).toBeTruthy()
-    expect(screen.getByRole("button", { name: strings.settings.languageAuto })).toBeTruthy()
+    // No "Automatic" since 1.3.9: nothing follows the system. Without a choice
+    // the pill lit is the language on screen (here the base, as no startup ran).
+    expect(screen.queryByRole("button", { name: "Automática" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Português" }).getAttribute("aria-pressed")).toBe("true")
+    expect(screen.getByRole("button", { name: "English" }).getAttribute("aria-pressed")).toBe("false")
     expect(screen.getByRole("button", { name: strings.settings.lockNow })).toBeTruthy()
   })
 
@@ -123,7 +127,7 @@ describe("Configurações — uma secção de cada vez", () => {
     renderSettings({ seccao: "aparelhos" })
     const este = screen.getByRole("heading", { name: strings.settings.device }).closest("section")!
     expect(within(este).queryByText(strings.settings.zonaDePerigo)).toBeNull()
-    // Owner request (October 27, 2026): own card, highlighted title, full button.
+    // Own card, highlighted title, full button.
     // The delete button is the only one on the card.
     const perigo = screen.getByRole("heading", { name: strings.settings.zonaDePerigo }).closest("section")!
     expect(perigo.classList.contains("zona-de-perigo")).toBe(true)

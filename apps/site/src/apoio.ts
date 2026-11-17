@@ -15,13 +15,13 @@
  * the text and button, with no error.
  *
  * The fill animates when the bar enters the screen. With reduced motion it animates
- * more slowly and does not stop (owner's rule; see `estilo.css`).
+ * more slowly and does not stop (the rule; see `estilo.css`).
  */
 
 export const ENDERECO_DO_APOIO = "/_enclave/apoiar.json"
 
 /**
- * SWITCHED OFF since November 9, 2026, to be confirmed by the owner.
+ * SWITCHED OFF since November 9, 2026, until further notice.
  *
  * The page moved to ask for donations only through Ko-fi, and GoFundMe left the
  * top banner and the "Support" section. This meter reads the GoFundMe campaign:

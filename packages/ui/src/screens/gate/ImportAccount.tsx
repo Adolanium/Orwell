@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { marcarFicheiroTratado } from "../../lib/ficheiroDaConta.js"
 import { TextoDeErro } from "../../components/TextoDeErro.js"
 import { useBridge } from "../../App.js"
 import type { FicheiroDeContaEscolhido } from "../../bridge.js"
@@ -126,6 +127,8 @@ export function ImportAccount({
       await bridge.vault.unlock(frase)
       const identity = await bridge.identity.load()
       await bridge.session.connect()
+      // The account came in from its file: the notice about saving the file is not owed here.
+      void marcarFicheiroTratado(identity.address)
       onDone(identity.address)
     })().catch((caught: Error) => {
       setError(traduzirErro(caught))

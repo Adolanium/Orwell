@@ -1,5 +1,5 @@
 /**
- * The AFK room timer (owner request on 2/11/2026).
+ * The AFK room timer.
  *
  * "Users move by default to the AFK room if they are in a muted room for
  * 15 minutes." The move is done by the client itself, not the server: the

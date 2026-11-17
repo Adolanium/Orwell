@@ -3,7 +3,7 @@
  *
  *   npm run build && node scripts/e2e-sons-ligar.mjs
  *
- * Report from the owner in 1.3.0: "Sounds are not activating. All of them. I hear nothing.
+ * The bug in 1.3.0: "Sounds are not activating. All of them. I hear nothing.
  * Just private messages." In Settings › Notifications, turning on the main
  * "Sounds" toggle plays immediately ("Private message"); turning on each type played
  * nothing. In 1.3.0 this script gives 0/27; with the fix, 27/27.

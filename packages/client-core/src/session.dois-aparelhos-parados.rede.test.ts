@@ -16,7 +16,7 @@ import {
  *
  *   ORWELL_MEDIR_PARADO_MIN=12 npx vitest run --root packages/client-core src/session.dois-aparelhos-parados.rede.test.ts
  *
- * Owner report on 1.3.13: "every 5 minutes or so the app does not respond",
+ * The bug in 1.3.13: "every 5 minutes or so the app does not respond",
  * with no traffic. Skipped unless `ORWELL_MEDIR_PARADO_MIN` is set: it runs with
  * the real clocks for that many minutes. Logs, per device, every vault write
  * (when, and the stack that asked for it) and the worst timer lateness per minute.

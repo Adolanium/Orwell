@@ -1,4 +1,5 @@
 export * from "./autoria.js"
+export * from "./bugs.js"
 export * from "./canonical.js"
 export * from "./denuncia.js"
 export * from "./estado.js"

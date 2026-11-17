@@ -74,7 +74,7 @@ import { ed25519 } from "@noble/curves/ed25519.js"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const SERVIDOR_JS = join(RAIZ, "apps/server/dist/main.js")
-const PORTA = 8474
+const PORTA = Number(process.env.E2E_PORTA ?? 8474)
 const NOME = `localhost:${PORTA}`
 
 const results = []

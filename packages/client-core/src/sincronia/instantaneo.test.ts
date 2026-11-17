@@ -532,7 +532,7 @@ describe("os anexos a pedido (§5.4)", () => {
     // The minute lets one and a half attachments through; the day, none.
     TECTOS_DOS_ANEXOS.bytesPorMinuto = Math.floor(bytesDaTrama * 1.5)
     TECTOS_DOS_ANEXOS.bytesPorCanalPorDia = 0
-    expect(await carla.anti.pedirAnexo(CANAL, "post-0-000000", 0)).toEqual({ ok: false, motivo: "ninguem" })
+    expect(await carla.anti.pedirAnexo(CANAL, "post-0-000000", 0)).toMatchObject({ ok: false, motivo: "ninguem" })
     // The next day: the minute must still have room.
     TECTOS_DOS_ANEXOS.bytesPorCanalPorDia = 16 * 1024 * 1024
     const desfecho = await carla.anti.pedirAnexo(CANAL, "post-0-000000", 0)

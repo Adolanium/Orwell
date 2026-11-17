@@ -83,6 +83,9 @@ describe("degrausDe — a partição das responsabilidades", () => {
       "gerirsalas",
       "desligar",
       "mencionartodos",
+      "transmitir",
+      // 12/11/2026: anyone may mention this role.
+      "mencionavel",
     ])
     expect(degrausDe(POWERS).semVolta).toEqual(["eliminar", "banir"])
   })
@@ -161,9 +164,15 @@ describe("gruposDePermissoes", () => {
     expect(grupos[0]?.poderes).toEqual([...CRYPTOGRAPHIC_POWERS])
   })
 
+  it('transmitir (partilhar o ecrã) cai em "Voz", ao lado de mover e desligar', () => {
+    const voz = gruposDePermissoes(PODERES_CUMPRIDOS).find((cada) => cada.grupo === "voz")
+    expect(voz?.poderes).toEqual(["mover", "desligar", "transmitir"])
+  })
+
   it('moderar (fase 3) e mencionartodos (@all) caem em "Mensagens", ao lado de fixar e atender', () => {
     const mensagens = gruposDePermissoes(POWERS).find((cada) => cada.grupo === "mensagens")
-    expect(mensagens?.poderes).toEqual(["fixar", "atender", "moderar", "mencionartodos"])
+    // `mencionavel` (12/11/2026) sits next to `mencionartodos`.
+    expect(mensagens?.poderes).toEqual(["fixar", "atender", "moderar", "mencionartodos", "mencionavel"])
   })
 
   it('uma responsabilidade que esta versão não sabe arrumar cai em "outras", e não desaparece', () => {

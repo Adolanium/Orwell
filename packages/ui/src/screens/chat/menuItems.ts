@@ -83,6 +83,8 @@ export function itensDoCanal(ctx: {
     /** Opens the single invite sheet, for this channel. See `ConvidarSheet`. */
     convidar: () => void
     propriedades: () => void
+    /** Opens the polls page of this channel. Absent when the host has no polls (the entry does not appear). */
+    votacoes?: (() => void) | undefined
     novaSala: () => void
     novaCategoria: () => void
     sair: () => void
@@ -103,6 +105,8 @@ export function itensDoCanal(ctx: {
   if (ctx.porLer) itens.push({ label: strings.menu.markRead, onSelect: ctx.accoes.marcarLido })
   // Next to "mark as read": these are the two gestures on what the channel says.
   if (ctx.silencio) itens.push(itemDoSilencio(ctx.silencio))
+  // The polls of this community, in one page. A view, so it sits with the gestures on what the channel says.
+  if (ctx.accoes.votacoes) itens.push({ label: strings.paginaVotacoes.menu, onSelect: ctx.accoes.votacoes })
 
   /*
     An entry just for inviting. There were two ("Invite someone" and "Add to
@@ -152,6 +156,12 @@ export function itensDaSala(ctx: {
     abrir: () => void
     renomear: () => void
     fechar: () => void
+    /**
+     * Who writes in this room (read-only rooms, 12/11/2026). Absent for a voice
+     * room, a ticket room, a host without the permissions model, and whoever
+     * cannot change this room's overrides: the entry does not appear.
+     */
+    quemEscreve?: (() => void) | undefined
   }
 }): MenuItem[] {
   // In a voice room, open means join the call: that is what clicking it does, and
@@ -169,6 +179,7 @@ export function itensDaSala(ctx: {
   if (!ctx.podeOrganizar) return itens
 
   itens.push({ label: strings.menu.renameRoom, separatorBefore: true, onSelect: ctx.accoes.renomear })
+  if (ctx.accoes.quemEscreve) itens.push({ label: strings.soLeitura.menu, onSelect: ctx.accoes.quemEscreve })
   itens.push({ label: strings.menu.closeRoom, separatorBefore: true, destructive: true, onSelect: ctx.accoes.fechar })
   return itens
 }
@@ -294,9 +305,9 @@ export function itensDaPessoaEmVoz(ctx: {
 /**
  * The volume slider in the call menu, as a percentage.
  *
- * It was a series of fixed levels (50, 100, 150, 200 %) until the owner asked at 2 de
- * November 2026: "instead of switching between sound 25, 50, 100, 150, 200, I want a
- * volume slider". From 5 em 5 d steps are audible without forcing you to hit an exact
+ * It was a series of fixed levels (50, 100, 150, 200 %) until this requirement:
+ * "instead of switching between sound 25, 50, 100, 150, 200, I want a
+ * volume slider". Steps of 5 are audible without forcing you to hit an exact
  * point. The cap is `useVolumes` (`VOLUME_MAX`, 2 = 200 %).
  */
 export const BARRA_DO_VOLUME = { min: 0, max: Math.round(VOLUME_MAX * 100), passo: 5, normal: Math.round(VOLUME_NORMAL * 100) } as const

@@ -137,6 +137,8 @@ async function conta(nome) {
   await vault.create("frase-de-teste-do-no")
   const session = new Session(vault)
   const id = await session.createIdentity(NOME)
+  // The common room is opt-in since 12/11/2026: these accounts tick the box.
+  await session.escolherSalaComum(true)
   await session.connect()
   await session.updateProfile({ displayName: nome, donations: [] })
   const c = { nome, session, address: id.address }

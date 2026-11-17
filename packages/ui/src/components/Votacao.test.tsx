@@ -125,3 +125,30 @@ describe("o cartão de uma votação", () => {
     expect(screen.getByText(strings.votacao.total(1))).toBeTruthy()
   })
 })
+
+describe("o prazo no cartão", () => {
+  it("com o prazo no futuro, diz quando fecha e deixa votar; passado o prazo, lê-se e não se vota", () => {
+    const aVotar = vi.fn()
+    const futuro = Date.now() + 3_600_000
+    const { rerender } = render(
+      <Votacao
+        votacao={VOTACAO}
+        apuramento={{ ...apurar(new Map(), 3, null), fechoEm: futuro }}
+        nameFor={nameFor}
+        onVote={aVotar}
+      />,
+    )
+    expect(screen.getByText(/^Fecha a /)).toBeTruthy()
+    expect(screen.getAllByRole("button").length).toBe(3)
+    rerender(
+      <Votacao
+        votacao={VOTACAO}
+        apuramento={{ ...apurar(new Map(), 3, null), fechoEm: Date.now() - 1000 }}
+        nameFor={nameFor}
+        onVote={aVotar}
+      />,
+    )
+    expect(screen.getByText(/^Fechou a /)).toBeTruthy()
+    expect(screen.queryAllByRole("button").length).toBe(0)
+  })
+})

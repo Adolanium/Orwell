@@ -216,7 +216,7 @@ describe("ChannelSidebar com a lista povoada", () => {
 /**
  * Navigate to a category menu.
  *
- * The owner noticed it: a category was created and then left alone. The menu
+ * The bug: a category was created and then left alone. The menu
  * was not hidden-it did not exist. The gesture mirrors channels, because that
  * is what users try first.
  */
@@ -710,8 +710,8 @@ describe("ChannelSidebar — símbolos", () => {
    *
    * Here was anchored the `<bdi>` that straightened the `@` in `direction: rtl`
    * where the address would cut the head instead of the tail. All that work
-   * served to show better something that should not be there, and by order of
-   * the owner it is gone: what you read on the second line of the card is how
+   * served to show better something that should not be there, and so
+   * it is gone: what you read on the second line of the card is how
    * it appears.
    *
    * What remains to anchor is what the address still has to do without showing.
@@ -887,12 +887,12 @@ describe("ChannelSidebar — o microfone e o som na faixa da conta", () => {
     expect(botoes).toHaveLength(2)
     // Icons and never borrowed characters: one `svg` in each.
     expect(botoes.every((botao) => botao.querySelector("svg"))).toBe(true)
-    // No text inside the button, per owner request. The text it held was not lost-it moved to the accessible name and the help tooltip, and the two tests below lock it in place.
+    // No text inside the button. The text it held was not lost-it moved to the accessible name and the help tooltip, and the two tests below lock it in place.
     expect(botoes.every((botao) => (botao.textContent ?? "").trim() === "")).toBe(true)
   })
 
   it("o painel: a identidade primeiro, a fila dos quatro botões a seguir", () => {
-    // Panel P1, chosen by the owner on October 28, 2026 (before that, the banner matched Discord's on October 27). The microphone and volume stay in the queue, not on their own line above identity.
+    // Panel P1, the chosen design (before that, the banner matched Discord's). The microphone and volume stay in the queue, not on their own line above identity.
     const { container } = render(comAudio({ onNotifications: noop, onAbrirDefinicoes: noop }))
     const faixa = container.querySelector(".me-faixa.painel")
     expect(faixa?.firstElementChild?.classList.contains("me-identity")).toBe(true)
@@ -1212,7 +1212,7 @@ describe("ChannelSidebar — quem está em chamada, desenhado", () => {
 /**
  * Who is in the call, before the channel opens.
  *
- * Owner report from October 5, 2026: **some people do not see who is in the room before they enter.** The count was already on this line; the names only existed inside the OPEN channel (`voicePresence`, which is from the active channel), so knowing WHO is in a call meant opening it first.
+ * The bug: **some people do not see who is in the room before they enter.** The count was already on this line; the names only existed inside the OPEN channel (`voicePresence`, which is from the active channel), so knowing WHO is in a call meant opening it first.
  *
  * They go to the voices label, which at the same time is the `title` and accessible name of the icon: what you see on hover and what you hear are the same information.
  */
@@ -1347,7 +1347,7 @@ describe("ChannelSidebar: à espera, quando chegou outro canal", () => {
 })
 
 /**
- * No presence ring on voice room faces (owner order, October 27, 2026, evening): the room already says they are in a call, and in a short list the ring was noise. The ring stays on the member panel and in the cards.
+ * No presence ring on voice room faces: the room already says they are in a call, and in a short list the ring was noise. The ring stays on the member panel and in the cards.
  */
 describe("ChannelSidebar — as caras das salas de voz não levam anel", () => {
   it("nenhuma cara da sala tem anel nem pulsa, com ou sem estado de fora", () => {
@@ -1361,7 +1361,7 @@ describe("ChannelSidebar — as caras das salas de voz não levam anel", () => {
 })
 
 /**
- * The unread count in each room (owner request from October 27, 2026). Each room shows its own on the right; the collapsed category and collapsed channel show the sum of the rooms they hide.
+ * The unread count in each room. Each room shows its own on the right; the collapsed category and collapsed channel show the sum of the rooms they hide.
  */
 describe("ChannelSidebar — o número por ler em cada sala", () => {
   const porLer: Record<string, number> = { r1: 2, r3: 5 }
@@ -1456,23 +1456,62 @@ describe("ChannelSidebar — o sinal de transmissão nas salas de voz", () => {
   })
 })
 
-describe('ChannelSidebar: "Entrar no canal Orwell" (3/11/2026)', () => {
-  it("sem canal comum por entrar, não há botão", () => {
-    render(sidebar({}))
+describe("ChannelSidebar: o canal oficial já não se junta pela coluna (12/11/2026)", () => {
+  it('ao lado de "Entrar com um link" não há botão do canal oficial', () => {
+    render(sidebar({ rooms: [], active: null }))
+    expect(screen.getByRole("button", { name: strings.sidebar.joinWithLink })).toBeTruthy()
     expect(screen.queryByRole("button", { name: strings.sidebar.entrarNoCanalOficial })).toBeNull()
   })
+})
 
-  it('aparece ao lado de "Entrar com um link", também com a lista vazia, e entra ao clicar', async () => {
-    const onEntrar = vi.fn()
-    render(sidebar({ rooms: [], active: null, canalOficialPorEntrar: { aEntrar: false, onEntrar } }))
-    expect(screen.getByRole("button", { name: strings.sidebar.joinWithLink })).toBeTruthy()
-    await userEvent.setup().click(screen.getByRole("button", { name: strings.sidebar.entrarNoCanalOficial }))
-    expect(onEntrar).toHaveBeenCalledTimes(1)
+describe("ChannelSidebar — as marcas da chamada nas salas de voz (12/11/2026)", () => {
+  it("calado, sem som e silenciado por mim, com nome para o leitor de ecrã e dica", () => {
+    localStorage.setItem("enclave.volumes", JSON.stringify([["@cid:s", 0]]))
+    render(
+      povoada({
+        voicePresence: (room) =>
+          room === "v1"
+            ? [
+                { address: "@ana:s", name: "Ana Rita", calado: true },
+                { address: "@bru:s", name: "Bruno", semSom: true },
+                { address: "@cid:s", name: "Cidália" },
+              ]
+            : [],
+      }),
+    )
+    const calada = screen.getByRole("img", { name: strings.call.micOffOf("Ana Rita") })
+    expect(calada.getAttribute("title")).toBe(strings.call.micOffOf("Ana Rita"))
+    expect(screen.getByRole("img", { name: strings.call.soundOffOf("Bruno") })).toBeTruthy()
+    expect(screen.getByRole("img", { name: strings.call.silencedByYouOf("Cidália") })).toBeTruthy()
+    expect(document.querySelectorAll(".room-voice-members .voice-member-marca")).toHaveLength(3)
+    localStorage.removeItem("enclave.volumes")
+  })
+})
+
+
+describe("a entrada «Votações» da barra da comunidade", () => {
+  it("é a primeira linha da árvore de salas, visível sem clique direito, e abre a página do canal", async () => {
+    const onVotacoes = vi.fn()
+    const { container } = render(povoada({ onVotacoes }))
+    const botao = screen.getByRole("button", { name: new RegExp(strings.paginaVotacoes.menu) })
+    expect(container.querySelector(".room-tree .room")).toBe(botao)
+    expect(botao.querySelector("svg")).toBeTruthy()
+    await userEvent.click(botao)
+    expect(onVotacoes).toHaveBeenCalledWith("!geral:s")
   })
 
-  it("a entrar, diz que está a entrar e não deixa carregar outra vez", () => {
-    render(sidebar({ canalOficialPorEntrar: { aEntrar: true, onEntrar: noop } }))
-    const botao = screen.getByRole("button", { name: strings.sidebar.aEntrarNoCanalOficial }) as HTMLButtonElement
-    expect(botao.disabled).toBe(true)
+  it("um canal só com a sala por omissão, aberto, também a mostra", () => {
+    render(
+      povoada({
+        onVotacoes: vi.fn(),
+        roomGroups: [{ category: "", rooms: [sala({ room: "", name: "geral", position: -1 })] }],
+      }),
+    )
+    expect(screen.getByRole("button", { name: new RegExp(strings.paginaVotacoes.menu) })).toBeTruthy()
+  })
+
+  it("sem o anfitrião a saber abrir votações, a linha não aparece", () => {
+    render(povoada())
+    expect(screen.queryByRole("button", { name: new RegExp(strings.paginaVotacoes.menu) })).toBeNull()
   })
 })

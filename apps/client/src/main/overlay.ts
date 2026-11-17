@@ -1,7 +1,7 @@
 /**
  * The game overlay, for decisions that don't need Electron.
  *
- * Owner request on November 2, 2026: proposal 4 from
+ * Proposal 4 from
  * `~/Downloads/Orwell-overlays-jogo/` ("the 4 with transparency, draggable").
  * A translucent pill above the game, with the voice room name and the
  * faces of who is there; the ring lights up when someone talks; a short

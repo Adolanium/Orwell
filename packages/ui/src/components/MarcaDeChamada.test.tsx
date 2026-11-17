@@ -108,7 +108,7 @@ describe("marca de chamada: calado por ela não é silenciado por nós", () => {
     expect(ids).toHaveLength(3)
     expect(new Set(ids).size).toBe(3)
     for (const id of ids) expect(id).toMatch(/^[a-zA-Z][a-zA-Z0-9-]*$/)
-    // Full on the home grid (owner's choice, October 28, 2026): what is stroke
+    // Full on the home grid: what is stroke
     // outside the mask is the 1.7 line of the rail icons.
     const tracos = [...container.querySelectorAll("path")].filter((p) => !p.closest("mask") && p.getAttribute("stroke") === "currentColor")
     expect(tracos.length).toBeGreaterThan(0)
@@ -190,7 +190,7 @@ describe("silenciado por nós: aparece onde o calado aparece", () => {
 })
 
 /**
- * The broadcast signal for voice rooms (owner request October 27, 2026, 23:55):
+ * The broadcast signal for voice rooms:
  * screen, music, or both, with a phrase for each fact.
  */
 describe("marca de transmissão", () => {

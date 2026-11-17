@@ -5,7 +5,7 @@ const ANA = "@ana:casa.pt"
 const BRUNO = "@bruno:casa.pt"
 
 /**
- * MSN-style notifications (requested by the owner and community, 2 November 2026, item 6):
+ * MSN-style notifications (item 6):
  * when a friend comes online, send a notification. Once per friend every 30 minutes, and
  * nothing for friends who were already there when the person starts up.
  */

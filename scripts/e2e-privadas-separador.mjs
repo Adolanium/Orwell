@@ -6,7 +6,7 @@
  *
  * Needs `npm run build` first.
  *
- * The owner's report (2/11/2026): "there are users whose private messages are in the
+ * The bug: "there are users whose private messages are in the
  * 'communities' tab instead of 'friends'". Only the device with the account key
  * can infer a direct message; the paired one waits for the main one's sync data. With the main
  * one closed, a new direct message appeared in "Communities" on the paired device.

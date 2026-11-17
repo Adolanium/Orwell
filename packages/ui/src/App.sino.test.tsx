@@ -283,7 +283,7 @@ describe("o sino e a amizade aceite", () => {
     expect(screen.queryByRole("dialog")).toBeNull()
     // The page is Ana's: the full id is in the copy button, not in the text.
     // Without a profile, the name is the address word ("Ana"), not "No name" any
-    // more (owner order on November 4, 2026).
+    // more ("No name" does not distinguish anyone).
     expect(pagina.textContent).not.toContain(ANA)
     expect(within(pagina).getByRole("button", { name: strings.copiarId.de("Ana") })).toBeTruthy()
   })

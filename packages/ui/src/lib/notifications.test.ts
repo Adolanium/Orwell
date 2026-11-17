@@ -86,6 +86,16 @@ describe("notificationTextOf", () => {
     ).toBe(strings.notifCenter.roomAdded("geral"))
   })
 
+  it("sem o nome da sala, a frase vai sem ela, e nunca com o identificador (12/11/2026)", () => {
+    const semNome = (): string | null => null
+    const mencao = notificationTextOf(entry("6", { kind: "mention", channel: "!x7k2q9:s" }), nameFor, semNome)
+    expect(mencao).toBe(strings.notifCenter.mentionSemSala("Ana"))
+    expect(mencao).not.toContain("x7k2q9")
+    expect(notificationTextOf(entry("7", { kind: "room-added", channel: "!x7k2q9:s" }), nameFor, semNome)).toBe(
+      strings.notifCenter.roomAddedSemNome,
+    )
+  })
+
   it("a decisão sobre uma denúncia diz a decisão e as vias de reparação, e mais nada", () => {
     const decisao = (d: "suspensa" | "sem-accao"): string =>
       notificationTextOf({ id: "d", kind: "report-decision", at: 1, decisao: d, read: false }, nameFor, labelFor)

@@ -319,7 +319,7 @@ describe("ProfileScreen — a publicação aberta traz gostos e comentários", (
 /**
  * The photo publication opens with the photo on stage, not the text.
  *
- * Two complaints from the owner, months apart, at the same place.
+ * Two bugs, months apart, at the same place.
  *
  * The first: in the profile, tapping a publication gave no way to see the photo large;
  * in the feed it did. The image was there, the `<img>` drew and measured 203px, and
@@ -503,7 +503,7 @@ describe("ProfileScreen — a fotografia é que manda na publicação aberta", (
   })
 })
 
-/** "I don't want ids exposed" (owner order, October 27, 2026). */
+/** The requirement: "I don't want ids exposed". */
 describe("ProfileScreen — o id não se lê", () => {
   it("o endereço sai do texto; copia-se pelo botão ao lado do nome", async () => {
     const user = userEvent.setup()

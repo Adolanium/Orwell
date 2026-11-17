@@ -28,21 +28,34 @@ import { playSound } from "../lib/sounds.js"
  * else: no `window.focus()`, no `element.focus()`, nothing to bring the app to
  * the front. Someone typing in another window keeps typing in another window,  * and that is what separates a nudge from a hijack.
  *
- * **Movement is optional; the message is not.** With `prefers-reduced-motion`
- * on the buzz still arrives, and CSS swaps the shake for a highlight. Shaking
- * a screen is literally what that preference exists to stop, and some people
- * get real motion sickness from it.
+ * **With reduced motion it still shakes, slower and smaller (12/11/2026).** Up
+ * to 1.3.7 CSS swapped the shake for a blue highlight, and on a
+ * Windows, which runs with reduced motion, the nudge became "the window turns
+ * blue". The house rule is that nothing stops, it moves slower: the calm
+ * shake in `screens.css` takes twice the time at half the distance, and the
+ * class stays on for all of it (`SHAKE_CALMO_MS`).
  *
  * **Silences with the rest.** The sound goes through the common engine, which
  * already respects the mute button, volume, and "Busy". Someone working can
- * mute the noise without losing the message, the highlight and its message
- * still arrive. A buzz that ignored "Busy" would be the only voice in the app
+ * mute the noise without losing the message: the shake still
+ * arrives. A buzz that ignored "Busy" would be the only voice in the app
  * with the right to break an explicit choice by the user, and there is nothing
  * in it to justify that privilege.
  */
 
 /** How long the shake shows on screen. A jolt, not an earthquake. */
 const SHAKE_MS = 820
+/** The calm shake, with reduced motion: twice as long. Keep in step with `screens.css`. */
+const SHAKE_CALMO_MS = 1640
+
+/** Read at the moment of each nudge: the preference can change while the app is open. */
+function duracaoDoAbanao(): number {
+  const reduzido =
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  return reduzido ? SHAKE_CALMO_MS : SHAKE_MS
+}
 
 export interface Buzz {
   /** Send the nudge. No effect while the cooldown is running. */
@@ -83,6 +96,9 @@ export function useBuzz(bridge: EnclaveBridge, channel: string | null): Buzz {
       // as an unread message, the usual way; what it does not do is shake the screen
       // of someone reading something else.
       if (event.channel !== canalRef.current) return
+      // Only in a direct conversation. The core already drops a nudge sent to a
+      // group channel; this is the second wall, in the piece that shakes.
+      if (!isDirect(event.channel)) return
       // An old tap is not felt. Defense against a replay that slipped past the
       // session cut, cheap, and the cost of not having it was the screen shaking
       // by itself when opening the app.
@@ -98,7 +114,7 @@ export function useBuzz(bridge: EnclaveBridge, channel: string | null): Buzz {
   // give two jolts, not one cut short.
   useEffect(() => {
     if (!shaking) return
-    const fim = setTimeout(() => setShaking(false), SHAKE_MS)
+    const fim = setTimeout(() => setShaking(false), duracaoDoAbanao())
     return () => clearTimeout(fim)
   }, [shaking])
 

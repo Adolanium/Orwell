@@ -9,7 +9,7 @@ import type { AvisoDeAmigo } from "../hooks/useAvisosDeAmigos.js"
 import { strings } from "../strings.js"
 
 /**
- * The card in the MSN style (mockup chosen by the owner on November 3, 2026): 2 s
+ * The card in the MSN style (the chosen mockup): 2 s
  * lifespan, paused with the cursor, at most 3 showing, and the rest in a "+N".
  */
 

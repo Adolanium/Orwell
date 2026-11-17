@@ -1643,7 +1643,7 @@ describe("os fluxos que chegam, por pessoa", () => {
 /**
  * A screen consumes only if we request it, and stops being received if we say so.
  *
- * Owner request on 5 October 2026, after a call with others: *when someone shares
+ * The requirement, from a call with others: *when someone shares
  * the screen, others should enter the stream only if they want to.* It was automatic, any new
  * producer consumed without checking the source, and receivers paid 2.5 Mbps
  * imposed with nowhere to decline: no simulcast or layers, so no small screen version to request.
@@ -2285,7 +2285,7 @@ describe("o som do ecrã", () => {
 })
 
 /**
- * The person whose key arrives after consumption starts (owner report, November 3, 2026).
+ * The person whose key arrives after consumption starts.
  *
  * Her consumption assembles before this device has her sheet in the channel tree.
  * Before this, the receiver had no decryption, the server opened the tap, the
@@ -2338,8 +2338,8 @@ describe("o fluxo de quem ainda não tem chave", () => {
 /**
  * A failed cipher tries again (4/11/2026).
  *
- * Owner: "I stopped hearing a user. Looks like Orwell stopped capturing my mic. I left and came
- * back and it fixed." And the order: "If the cipher fails, it has to try again." Until 1.3.0
+ * The bug: "I stopped hearing a user. Looks like Orwell stopped capturing my mic. I left and came
+ * back and it fixed." And the requirement: "If the cipher fails, it has to try again." Until 1.3.0
  * the first sender cipher failure was final: the microphone made the entry fail with 448, and
  * other sources fell. Now each source repeats setup with growing waits, wakes up earlier when
  * the epoch changes, and only gives up at the cap. At no point does a producer come up without
@@ -2559,7 +2559,7 @@ describe("trocar a faixa do microfone", () => {
 })
 
 /**
- * Send that never connects (owner report 4/11/2026, 14:14 to 14:16 UTC).
+ * Send that never connects (seen in a 1.3.0 log).
  *
  * Room, another room and room again in ~3 s: "sound passes but does not reach the
  * other user", and the log has no sender line. The case did not reproduce live on

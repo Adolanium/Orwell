@@ -91,7 +91,7 @@ export function CallDock({
   /**
    * The latency, for the side card to say "42 ms" instead of "Connected".
    *
-   * Owner request October 27, 2026: the number says you are connected and how well,
+   * The number says you are connected and how well,
    * more than the word said. With no measurement (`null`) the word stays. The
    * floating dock does not show it: it is small and already has the waveform.
    */
@@ -273,7 +273,7 @@ export function CallDock({
   /**
    * The call box, on the middle floor of the control panel (wide screen).
    *
-   * Since October 28, 2026 (owner's P1 design) the call and account are
+   * Since the P1 design the call and account are
    * one piece, the panel at the bottom of the column (`CartaoDaConta`). This box
    * is the middle floor: the dot, the ping and the count on top, "Channel · Room"
    * on the bottom. The whole box is the button to go back to the call. Hang up
@@ -299,7 +299,7 @@ export function CallDock({
           <span className="call-dock-lines">
             <span className="call-dock-state">
               <span className="call-dock-ponto" aria-hidden="true" />
-              {/* The ping in place of "Connected" (owner, October 27, 2026). In its own
+              {/* The ping in place of "Connected". In its own
                   element, so it can break into two lines: bare text in a flex
                   does not shrink, and was cut in the middle of the word. */}
               <span className="call-dock-texto">

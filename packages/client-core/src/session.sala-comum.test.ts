@@ -107,11 +107,14 @@ async function sessaoLigada(
   sala: string | undefined,
   extra: Reply = () => undefined,
   ficha: FichaDoCanal = { tipo: "sala" },
+  querSala = true,
 ): Promise<Session> {
   const vault = new Vault(new MemoryBackend())
   await vault.create("frase-passe")
   const session = new Session(vault)
   await session.createIdentity("localhost:8448")
+  // Joining is opt-in since 12/11/2026: these tests are about someone who ticked the box.
+  if (querSala) await session.escolherSalaComum(true)
   // The slot of the announced channel, before it is born (the first slot).
   if (sala) darFicha(vault.contents, sala, ficha)
   const base = respostaBase(sala)
@@ -231,6 +234,7 @@ describe("entrar na sala comum", () => {
     await vault.create("frase-passe")
     const session = new Session(vault)
     await session.createIdentity("localhost:8448")
+    await session.escolherSalaComum(true)
     const base = respostaBase(SALA)
     FakeSocket.reply = (frame) =>
       base(frame) ??
@@ -265,6 +269,7 @@ describe("o cartão de uso único não se gasta em vão", () => {
     await vault.create("frase-passe")
     const session = new Session(vault)
     await session.createIdentity("localhost:8448")
+    await session.escolherSalaComum(true)
 
     /*
       A vault with no key packages. It is not a lab hypothesis: handshake
@@ -299,7 +304,7 @@ describe("o cartão de uso único não se gasta em vão", () => {
 })
 
 /**
- * The choice of account (owner request, 3/11/2026): at signup, each person
+ * The choice of account: at signup, each person
  * decides if they enter the common channel. With no choice, one enters, as
  * before: this is the case for all accounts that already exist.
  */
@@ -346,9 +351,9 @@ describe("a sala comum é uma escolha da conta", () => {
     return { session, vault }
   }
 
-  it("sem escolha feita, a conta quer a sala (as contas que já existem)", async () => {
+  it("sem escolha feita, a conta não quer a sala (a adesão é voluntária)", async () => {
     const { session } = await sessaoAntesDeLigar()
-    expect(session.querSalaComum()).toBe(true)
+    expect(session.querSalaComum()).toBe(false)
   })
 
   it("quem disse que não, não pede lugar, nem ao ligar, nem pela insistência, nem ao voltar a ligar", async () => {
@@ -386,10 +391,24 @@ describe("a sala comum é uma escolha da conta", () => {
     expect(vault.contents.preferencias?.["sala-comum"]?.valor).toBe("fora")
   })
 
-  it("sem escolha, a conta entra como antes", async () => {
-    const session = await sessaoLigada(SALA, deOutro)
-    expect(enviados("channel.claim").length).toBeGreaterThan(0)
-    expect(enviados("channel.rejoin.request").length).toBeGreaterThan(0)
+  it("sem escolha, a conta não entra sozinha", async () => {
+    const session = await sessaoLigada(SALA, deOutro, { tipo: "sala" }, false)
+    expect(enviados("channel.claim")).toHaveLength(0)
+    expect(enviados("channel.rejoin.request")).toHaveLength(0)
+    expect(session.channels).not.toContain(SALA)
+    session.disconnect()
+  }, 60_000)
+
+  it("quem já está na sala, sem escolha escrita, fica lá e passa a ter o sim escrito", async () => {
+    // An account from before the opt-in: in the room, no mark.
+    const session = await sessaoLigada(SALA, comEco(nossa))
+    expect(session.channels).toContain(SALA)
+    delete session.vault.contents.preferencias?.["sala-comum"]
+    expect(session.querSalaComum()).toBe(false)
+    await session.ensureCommonRoom()
+    await settle()
+    expect(session.querSalaComum()).toBe(true)
+    expect(session.channels).toContain(SALA)
     session.disconnect()
   }, 60_000)
 

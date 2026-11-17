@@ -1,7 +1,7 @@
 /**
  * A link to a drawer opens the drawer.
  *
- * Owner request on 3 November 2026: the mobile section became `<details id="telemovel">`,
+ * The mobile section became `<details id="telemovel">`,
  * and the link "On mobile, no store" in the hero must go there AND open it. The browser
  * goes there on its own, but does not open a `<details>` that is itself the target:
  * it only opens those with the target INSIDE.

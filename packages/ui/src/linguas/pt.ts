@@ -119,6 +119,18 @@ export const pt = {
     trazer: "Trazer",
     aTrazer: "A trazer...",
     ninguemTem: "Nenhum aparelho da conta nem membro ligado tem a imagem. Tenta mais tarde.",
+    // Copy and save what a message carries: one short verb per button; the numbered forms say which picture.
+    copiarImagem: "Copiar imagem",
+    copiarImagemN: (numero: number): string => `Copiar imagem ${numero}`,
+    descarregar: "Descarregar",
+    descarregarN: (numero: number): string => `Descarregar imagem ${numero}`,
+    descarregarFicheiro: (nome: string): string => `Descarregar ${nome}`,
+    copiarLigacao: "Copiar link da mensagem",
+    imagemCopiada: "Imagem copiada.",
+    imagemSemSuporte: "Este browser não copia imagens.",
+    imagemRecusada: "O browser não deixou copiar a imagem.",
+    ligacaoCopiada: "Link copiado.",
+    semBytes: "Esta imagem já não está neste aparelho.",
   },
 
   connection: {
@@ -148,6 +160,32 @@ export const pt = {
     separadorParado: "Este separador já não liga ao servidor. Fecha os outros separadores ou recarrega.",
     /** Why attachments stop without a connection, when the composer does not. */
     anexosOffline: "Imagens e ficheiros só com ligação.",
+  },
+
+  /**
+   * The account file (.enclave), right after the account is created, and the
+   * one-time notice for accounts that already exist (16/11/2026). There is no
+   * email and no phone number: this file is the only way back in.
+   */
+  ficheiroDaConta: {
+    titulo: "Guarda o ficheiro da conta",
+    texto:
+      "O Orwell não tem email nem número de telefone. Por isso, não te podemos enviar um link para repor a conta. A tua conta está neste aparelho. Se perderes o aparelho, ou se apagares os dados do browser, só voltas a entrar com este ficheiro. O ficheiro tem a chave da tua conta, fechada com a tua palavra-passe. Sem a tua palavra-passe, ninguém pode usar o ficheiro, nem nós. Guarda o ficheiro fora deste aparelho: numa pen USB, num gestor de palavras-passe ou noutro computador em que confias.",
+    descarregar: "Descarregar o ficheiro da conta",
+    /** The share sheet (iPhone: "Guardar em Ficheiros"). */
+    partilhar: "Partilhar",
+    aDescarregar: "A preparar o ficheiro…",
+    guardei: "Guardei o ficheiro num sítio seguro.",
+    continuar: "Continuar",
+    nota: 'Perdeste o aparelho? No ecrã de entrada, escolhe "Importar conta". Escolhe este ficheiro e escreve a tua palavra-passe.',
+    /** Only for a vault the system keychain guards: the keychain does not travel. */
+    fraseLabel: "Palavra-passe para o ficheiro",
+    fraseNota: "Esta conta não tem palavra-passe. Escolhe uma só para o ficheiro, com 8 caracteres ou mais.",
+    aviso: "Ainda não guardaste o ficheiro da conta",
+    fechar: "Fechar",
+    guardado: "Ficheiro da conta descarregado.",
+    /** The file name. Only letters a browser accepts everywhere. */
+    nomeDoFicheiro: "conta.enclave",
   },
 
   /**
@@ -252,8 +290,8 @@ export const pt = {
      * screen reader users: repeating "Nome" under "Como queres mostrar o teu
      * nome?" is noise for whoever sees it.
      *
-     * The interview tone is on purpose: the owner reaffirmed it on 27 October
-     * 2026, when it was proposed to swap the questions for plain titles.
+     * The interview tone is on purpose: it was kept when a swap of the
+     * questions for plain titles was proposed.
      *
      * Informal TU address, like the rest of the application. The request came
      * written in the formal você ("Como quer mostrar o seu nome?"), but this
@@ -360,8 +398,7 @@ export const pt = {
       the rail that says "comunidade": it talks about the people who are there,
       not about the encrypted group. See `terminologia.test.ts`.
     */
-    canalOficial: "Entrar no canal Orwell, a comunidade de todos os users",
-    canalOficialNota: "Lá estão as Release notes, a ajuda e outras pessoas. Podes entrar ou sair mais tarde.",
+    canalOficial: "Entrar no canal oficial do Orwell.",
     revogadoSemFrase: "Esta conta não tem palavra-passe neste aparelho. Para usar o Orwell aqui outra vez, começa de novo.",
     comecarDeNovo: "Começar de novo",
     open: "Entrar",
@@ -437,8 +474,14 @@ export const pt = {
       to device when both are connected.
     */
     doneBody: "Este aparelho já recebe as mensagens novas. As conversas antigas chegam do outro aparelho enquanto os dois estiverem ligados.",
-    doneGuestNote: "Acrescenta ou tira aparelhos no aparelho principal da conta.",
-    doneHostBody: "O aparelho novo recebe as mensagens a partir de agora. As anteriores ficam nos outros aparelhos.",
+    doneGuestNote: "Podes gerir os aparelhos a partir de qualquer um dos teus aparelhos.",
+    /*
+      Until 12/11/2026 it said the earlier messages stay on the other devices,
+      which stopped being true with history between devices (29/10/2026). The
+      old conversations go from this device to the new one, and only while
+      this one is on: the host is told to keep it on.
+    */
+    doneHostBody: "O aparelho novo já recebe as mensagens. As conversas antigas passam daqui para ele. Deixa este aparelho ligado até o histórico chegar.",
     doneAction: "Entrar",
     hostTitle: "Acrescentar aparelho",
     hostLead:
@@ -570,9 +613,13 @@ export const pt = {
     newRoom: "Nova sala",
     editProfile: "Editar perfil",
     joinWithLink: "Entrar com um link",
-    /** Whoever is not in the common channel joins through here (3/11/2026). See `escolherSalaComum`. */
-    entrarNoCanalOficial: "Entrar no canal Orwell",
-    aEntrarNoCanalOficial: "A entrar no canal Orwell…",
+    /**
+     * Whoever is not in the common channel joins through here: a button in the
+     * "Join with a link" dialog (12/11/2026; it lived in the communities column
+     * from 3/11). See `escolherSalaComum`.
+     */
+    entrarNoCanalOficial: "Entrar no canal oficial do Orwell",
+    aEntrarNoCanalOficial: "A entrar no canal oficial do Orwell…",
     noRoomsBefore: "Ainda não tens canais. Cria um com o ",
     noRoomsAfter: " ao lado.",
     addFriend: "Adicionar amigo",
@@ -589,7 +636,7 @@ export const pt = {
     /**
      * The count, and who they are.
      *
-     * Owner's report on 5 October 2026: some people cannot see who is in the
+     * The bug: some people cannot see who is in the
      * room before joining. The count was already on the channel line; the names
      * only existed under the OPEN channel, so seeing who is in a call meant
      * opening the channel first. This puts them where the count already is,
@@ -768,7 +815,7 @@ export const pt = {
       if (nomes.length === 1) return `${nomes[0] ?? ""} está a escrever…`
       if (nomes.length === 2) return `${nomes[0] ?? ""} e ${nomes[1] ?? ""} estão a escrever…`
       if (nomes.length === 3) return `${nomes[0] ?? ""}, ${nomes[1] ?? ""} e ${nomes[2] ?? ""} estão a escrever…`
-      // More than three (owner, 12/11/2026): no names and no count.
+      // More than three: no names and no count.
       return "Várias pessoas estão a escrever…"
     },
 
@@ -845,6 +892,9 @@ export const pt = {
     moreActions: "Anexar ou abanar",
     /** The edited marker, next to the text. Short: the time goes in the tooltip. */
     editedMark: "(editada)",
+    /** The mark on its own line under the message (12/11/2026), and with the time. */
+    editada: "editada",
+    editadaAs: (hora: string): string => `editada às ${hora}`,
     messageEdit: "Editar",
     messageEditLabel: "O que querias ter dito",
     messageEditSave: "Guardar",
@@ -899,7 +949,7 @@ export const pt = {
      */
     pinnedTitle: "Fixadas nesta sala",
     pinnedToggle: "Ver o que está fixado nesta sala",
-    pinnedNote: "Uma mensagem fixada continua visível depois de sair do histórico.",
+    pinnedNote: "Uma mensagem fixada fica visível até alguém a desafixar ou a apagar.",
     /*
       Two sentences for the same emptiness, because they are two different people.
 
@@ -1088,6 +1138,9 @@ export const pt = {
     groupOnline: "Online",
     groupOffline: "Offline",
     groupHeading: (titulo: string, n: number): string => `${titulo} · ${n}`,
+    // A big channel shows only who is online (12/11/2026). This line opens the rest.
+    maisPessoas: (n: number): string => (n === 1 ? "+1 pessoa neste servidor" : `+${n} pessoas neste servidor`),
+    esconderMaisPessoas: "Esconder quem não está ligado",
     loading: "A carregar…",
     empty: "Ainda ninguém aqui.",
     inviteSomeone: "Convidar…",
@@ -1218,12 +1271,14 @@ export const pt = {
       escrever: "escrever",
       anexar: "anexar ficheiros",
       reagir: "reagir",
-      mencionartodos: "mencionar todos",
+      mencionartodos: "mencionar todos e cargos",
+      mencionavel: "todos podem mencionar este cargo",
       ligar: "entrar na voz",
       falar: "falar",
       video: "ligar o vídeo",
       ecra: "partilhar o ecrã",
       musica: "pôr música",
+      transmitir: "partilhar o ecrã",
       silenciarvoz: "calar na voz",
       ensurdecer: "ensurdecer",
       desligar: "desligar da chamada",
@@ -1311,8 +1366,8 @@ export const pt = {
   /**
    * The roles editor with three tabs, the way Discord lays out a role.
    *
-   * A new block, and not new keys in `roles`, on 27 October 2026: the owner's
-   * request was «reorganiza o menu, tal e qual como no Discord», and the old
+   * A new block, and not new keys in `roles`, because the
+   * requirement was «reorganiza o menu, tal e qual como no Discord», and the old
    * editor's text still serves the list cards and the profile.
    *
    * One sentence per responsibility, in STE100: the verb, the object, and the
@@ -1420,11 +1475,14 @@ export const pt = {
       escrever: "Escrever mensagens nas salas.",
       anexar: "Anexar ficheiros às mensagens.",
       reagir: "Reagir às mensagens.",
-      mencionartodos: "Escrever @all para mencionar toda a gente do canal. Numa sala silenciada, @all não avisa.",
+      mencionartodos:
+        "Escrever @all para mencionar toda a gente do canal, e mencionar qualquer cargo. Numa sala silenciada, @all não avisa.",
+      mencionavel: "Qualquer pessoa pode escrever @ e o nome deste cargo para avisar quem o tem.",
       ligar: "Entrar nas salas de voz.",
       falar: "Falar numa sala de voz.",
       video: "Ligar a câmara numa sala de voz.",
       ecra: "Partilhar o ecrã numa sala de voz.",
+      transmitir: "Partilhar o ecrã numa sala de voz. Quem administra tem-na sempre. O cargo de toda a gente não a tem por omissão.",
       musica: "Pôr música numa sala de voz.",
       silenciarvoz: "Calar o microfone de outra pessoa na voz.",
       ensurdecer: "Tirar o som a outra pessoa na voz.",
@@ -1461,6 +1519,11 @@ export const pt = {
   },
 
   call: {
+    /**
+     * The screen button for whoever lacks `transmitir` (12/11/2026): grey, and this
+     * sentence on hover, on keyboard focus and on tap. It says what to do, not only no.
+     */
+    semTransmitir: "Neste canal, só alguns cargos podem partilhar o ecrã. Pede a um administrador do canal que te dê esta permissão.",
     waiting: "à espera que alguém entre",
     people: (n: number): string => `${n} ${n === 1 ? "pessoa" : "pessoas"}`,
     micOn: "Ligar microfone",
@@ -1515,6 +1578,13 @@ export const pt = {
     screenOf: (name: string): string => `Ecrã de ${name}`,
     /** Our own screen on the stage. Nobody says "ecrã de Eu". */
     screenSelf: "O teu ecrã",
+    /** Our own share, in place of the stage (12/11/2026). */
+    aPartilhar: "Estás a partilhar o ecrã",
+    /** Who is in the call, over the shared screen (12/11/2026). */
+    presentesNoPalco: "Quem está na chamada",
+    presenteCalado: "Microfone desligado",
+    presenteSemSom: "Som desligado",
+    pararPartilha: "Parar",
     /**
      * The screen audio of whoever is sharing, on the stage: its own volume,
      * separate from that person's voice volume (it is music or system sound,
@@ -1563,8 +1633,8 @@ export const pt = {
     screenViewers: (n: number): string =>
       n === 0 ? "Ninguém a ver" : n === 1 ? "1 a ver" : `${n} a ver`,
     /**
-     * The card of whoever shares the screen («A com a C», chosen by the owner
-     * on 2 November 2026): the seal, and the invitation that appears on hover.
+     * The card of whoever shares the screen (the chosen design, «A com a C»):
+     * the seal, and the invitation that appears on hover.
      * Upper case in the text, not only in the CSS, so the screen reader says
      * the same as what is seen.
      */
@@ -1681,6 +1751,8 @@ export const pt = {
      * because whoever did it a week ago no longer remembers.
      */
     silencedByYouOf: (name: string): string => `Silenciaste ${name}: tens o volume desta pessoa a zero`,
+    /** Sound off (deafened), next to the name in a voice room (12/11/2026). */
+    soundOffOf: (name: string): string => `${name} tem o som desligado`,
     volumeOf: (label: string): string => `Volume de ${label}`,
     /* The person's menu on the call card (phase 3): the call block. */
     menuSection: "Nesta chamada",
@@ -2120,7 +2192,7 @@ export const pt = {
       nothing, and the conversation comes back by itself when a message
       arrives. The toast says so and brings the way back, for whoever closed
       the wrong one. Up to 0.9 there was also a fixed note at the end of the
-      list saying the same; the owner asked on 27 October 2026 for it to be
+      list saying the same; now it is
       only the notice, at the moment of closing.
     */
     directClosed: "Conversa fechada. Nada foi apagado. Volta quando chegar mensagem.",
@@ -2263,6 +2335,17 @@ export const pt = {
         ? "1 mensagem antiga não chegou: o aparelho principal não a conseguiu enviar."
         : `${perdidas} mensagens antigas não chegaram: o aparelho principal não as conseguiu enviar.`,
     historicoFechar: "Fechar o aviso do histórico",
+    /**
+     * On the device that sends the history to a freshly paired one.
+     * Approved text. The photo count appears after the messages:
+     * the new device asks for the media list at the end.
+     */
+    envioTitulo: "Deixa este aparelho ligado",
+    envioCorpo: "O telemóvel está a receber o histórico das mensagens a partir deste aparelho. Não feches o Orwell aqui até acabar.",
+    envioProgresso: (m: number, mTotal: number, f: number, fTotal: number | null): string =>
+      fTotal === null
+        ? `Enviado: ${m} de ${mTotal} mensagens`
+        : `Enviado: ${m} de ${mTotal} mensagens · ${f} de ${fTotal} fotografias`,
     /** One part of the bar: how much of one type has arrived. */
     parte: (nome: string, recebidos: number, esperados: number): string => `${nome}: ${recebidos} de ${esperados}`,
     tipos: {
@@ -2293,8 +2376,10 @@ export const pt = {
     /** An attachment of which this device only has the name. */
     anexoPedir: "Pedir aos outros membros",
     anexoAPedir: "A pedir…",
-    anexoNinguem: "Nenhum membro com esta imagem está ligado agora. Tenta mais tarde.",
-    anexoFicheiroNinguem: "Nenhum membro com este ficheiro está ligado agora. Tenta mais tarde.",
+    anexoNinguem: "Nenhum utilizador online tem esta imagem. Ela aparece quando um utilizador que a tem ficar online.",
+    anexoFicheiroNinguem: "Nenhum utilizador online tem este ficheiro. Tenta outra vez quando um utilizador que o tem ficar online.",
+    anexoAutorDesligado: "O utilizador que enviou esta imagem não está online. Ela aparece quando um utilizador que a tem ficar online.",
+    anexoFicheiroAutorDesligado: "Quem enviou este ficheiro não está ligado. Tenta outra vez quando alguém que o tem se ligar.",
     anexoRecusado: "O que chegou não é o original. Não se mostra.",
     anexoSemLigacao: "Sem ligação ao servidor. Tenta outra vez.",
     anexoTentarOutraVez: "Tentar outra vez",
@@ -2361,8 +2446,18 @@ export const pt = {
     friendAccept: (name: string): string => `${name} aceitou o teu pedido`,
     dmMessage: (name: string): string => `Mensagem nova de ${name}`,
     joinedByInvite: (name: string, room: string): string => `${name} entrou em #${room} pelo teu link`,
+    /** A role given to me (12/11/2026). In pieces: the bell paints each role name in its colour. */
+    cargoAtribuido: {
+      um: "Tens agora o cargo ",
+      varios: "Tens agora os cargos ",
+      e: " e ",
+      em: (comunidade: string): string => ` em ${comunidade}.`,
+    },
     /** Names the room: a mention with no place forces looking for it by hand. */
     mention: (name: string, room: string): string => `${name} mencionou-te em #${room}`,
+    /** The same, when the room name is not known yet: never the identifier in its place. */
+    mentionSemSala: (name: string): string => `${name} mencionou-te`,
+    roomAddedSemNome: "Foste adicionado a um canal",
     /**
      * What is left of a request after it is resolved.
      *
@@ -2516,8 +2611,7 @@ export const pt = {
      */
     /**
      * «Canal · Sala», in the order of whoever is looking: first where, then the
-     * room. It was «canal / sala»; the owner asked for the dot on 27 October
-     * 2026, and the same line serves the side card, which scrolls it when it
+     * room. It was «canal / sala»; now it is the dot, and the same line serves the side card, which scrolls it when it
      * does not fit (see `Andante`).
      */
     ondeComSala: (canal: string, sala: string): string => `${canal} · ${sala}`,
@@ -2550,7 +2644,7 @@ export const pt = {
 
   /**
    * The player in the «Partilhar áudio» sheet, redone in the style of Winamp
-   * and Windows Media Player (owner, 27 October 2026): the display, the
+   * and Windows Media Player: the display, the
    * transport, the playlist and the other sources in a footer.
    */
   leitorDeMusica: {
@@ -2728,7 +2822,7 @@ export const pt = {
       ouvirMeNota: "Usa auscultadores. Com altifalantes faz eco.",
       indisponivel: "Esta versão da app não trata a voz.",
     },
-    /* Microphone sensitivity, Discord style (owner, 2 November 2026). */
+    /* Microphone sensitivity, Discord style. */
     sensibilidade: {
       titulo: "Sensibilidade do microfone",
       automatica: "Automática",
@@ -2741,8 +2835,8 @@ export const pt = {
       carregarParaFalar: 'Com o atalho "Falar enquanto carregas", a linha também vale enquanto carregas na tecla.',
     },
     /*
-      Keyboard shortcuts for the voice controls, chosen by each person (owner's
-      request on 19 October 2026). The defaults are Discord's, which the hand
+      Keyboard shortcuts for the voice controls, chosen by each person.
+      The defaults are Discord's, which the hand
       already knows; «falar» has no key until the person gives it one.
     */
     atalhos: "Atalhos de teclado",
@@ -2833,17 +2927,14 @@ export const pt = {
     /*
       The interface language, and only the interface's.
 
-      "Automática" is a stored choice and not the absence of one: without it,
-      whoever chose Portuguese on a Portuguese system was stuck with Portuguese
-      forever, and changing the system language stopped having any effect
-      without anyone understanding why.
+      No "Automática" since 1.3.9: the app opens in English until the person
+      chooses, and the system language does not count.
 
       Language names stay each in its own language ("English" and not
       "Inglês") because whoever opens the application in a language they cannot
       read has to be able to find theirs without reading the one on screen.
     */
     language: "Língua",
-    languageAuto: "Automática",
     /**
      * What this option does NOT do, said where it is.
      *
@@ -2865,7 +2956,14 @@ export const pt = {
     notifSystem: "Notificações do sistema",
     notifBlocked: "Bloqueadas pelo browser. Para as usares, permite notificações nas definições do site.",
     notifUnsupported: "Aqui as notificações não funcionam.",
-    notifPreview: "Mostrar o conteúdo",
+    notifPreview: "Mostrar nomes e texto nas notificações",
+    /* Web Push: the device is woken with the app closed. The notice says only
+       `pushCorpo`, and the Service Worker holds the same text (`pwa.test.ts`). */
+    pushFechada: "Avisos com a app fechada",
+    pushFechadaNota: "O aviso não tem nome nem texto. Para o ler, abre a app.",
+    pushIosNota: "Para ter avisos com a app fechada, põe o Orwell no ecrã principal.",
+    pushCorpo: "Nova mensagem no Orwell",
+    pushSalaNota: "Silenciar uma sala não cala este aviso. Só um canal inteiro o cala.",
     avisosDeAmigos: "Avisos de amigos",
     avisarAmigosOnline: "Quando um amigo fica online",
     avisarAmigosNaVoz: "Quando um amigo entra numa sala de voz",
@@ -2916,8 +3014,8 @@ export const pt = {
     revoke: "Revogar",
     revokeTitle: "Revogar este aparelho?",
     revokeBody:
-      "O aparelho sai da conta e de todos os canais. Revogar corta a leitura a partir da época seguinte. O que o aparelho já tinha, continua a ter.",
-    revokeHonest: "Revogar corta a leitura a partir da época seguinte. O que o aparelho já tinha, continua a ter.",
+      "O aparelho sai da conta e de todos os canais. Revogar corta a leitura a partir da época seguinte. O aparelho fica com o que já tinha até se voltar a ligar. Nessa altura sai da conta e apaga os dados.",
+    revokeHonest: "Revogar corta a leitura a partir da época seguinte. O aparelho fica com o que já tinha até se voltar a ligar. Nessa altura sai da conta e apaga os dados.",
     revoking: "A revogar o aparelho…",
     revoked: "O aparelho foi revogado.",
     revokePending: "a revogar",
@@ -2967,7 +3065,7 @@ export const pt = {
     codigoAberto: "O Orwell é código aberto, com a licença AGPL-3.0.",
     codigoFonte: "Código-fonte",
     /*
-      «Terminar sessão» and not «Bloquear agora» (owner, 27 October 2026): it
+      «Terminar sessão» and not «Bloquear agora»: it
       is the gesture everyone knows from other apps. What it does is close the
       vault on this device; the account stays, and comes back with the
       passphrase. The line below says so, because «terminar sessão» in other
@@ -3056,7 +3154,6 @@ export const pt = {
       "tudo-ligado": "Ligar tudo (microfone e som)",
       "amigo-online": "Um amigo fica online",
       "sala-afk": "Passar para a sala AFK",
-      enviada: "Som ao enviar mensagens",
       "a-chamar": "Chamada a sair, à espera que atendam",
       "voz-perdida": "A ligação à chamada cai",
       movido: "Um moderador muda-te de sala",
@@ -3080,6 +3177,8 @@ export const pt = {
       decisao === "suspensa" ? "A tua denúncia foi analisada: conta suspensa." : "A tua denúncia foi analisada: sem acção.",
     reportDecisionVias: "Se discordas, escreve para orwell.eu@proton.me, podes recorrer aos tribunais, ou reclamar à ANACOM.",
     newMessage: (room: string): string => `Nova mensagem em ${room}`,
+    // With "Mostrar nomes e texto" off, or a room whose name is not known yet: no identifier, ever (12/11/2026).
+    novaMensagem: "Tens uma mensagem nova",
     // With "Mostrar o conteúdo" off and no conversation to name: a
     // friend request spelled out would carry the requester's name out of
     // the application, which is what the preference was turned off to avoid.
@@ -3102,6 +3201,10 @@ export const pt = {
        the rail (see `terminologia.test.ts`). */
     amigoNaComunidade: (nome: string, canal: string): string => `${nome} entrou no canal ${canal}`,
     amigoNaComunidadeDiscreto: "Um amigo entrou num canal",
+    /** The room or channel name is not decrypted yet: the person, never the identifier (16/11/2026). */
+    amigoNaVozSemSala: (nome: string): string => `${nome} entrou numa sala de voz`,
+    amigoNoEcraSemSala: (nome: string): string => `${nome} começou a partilhar o ecrã`,
+    amigoNaComunidadeSemNome: (nome: string): string => `${nome} entrou num dos teus canais`,
     juntarMe: "Juntar-me",
     ver: "Ver",
     abrir: "Abrir",
@@ -3258,6 +3361,9 @@ export const pt = {
     kindText: "Texto",
     kindVoice: "Voz",
     kindTickets: "Tickets",
+    kindPolls: "Votações",
+    /* A polls room is a text room underneath: an older version shows it as a conversation. */
+    pollsNote: "Aqui só há votações, sem conversa. Quem pode escrever na sala cria votações.",
     /* Said where it is chosen, because that is where the choice goes wrong. A
        tickets room is a text room underneath: whoever uses an older version
        sees it as a conversation, and loses nothing of what was said there. */
@@ -3269,6 +3375,34 @@ export const pt = {
     created: "Sala criada.",
     afkLabel: "Sala AFK",
     afkNote: "Quem estiver silenciado numa sala de voz vem para aqui sozinho. Só há uma sala AFK por canal.",
+  },
+
+  /**
+   * Read-only rooms (12/11/2026): everyone reads, only some roles write.
+   *
+   * `note` is the same frankness as `newRoom.note` and `categoryProperties.note`:
+   * this is a rule of the apps, not of the cipher. Everyone in the channel has
+   * the keys, and an altered app can still send. What it sends does not show in
+   * the honest apps. It goes ABOVE the choice, for the reason written there.
+   *
+   * `semEscrita` takes the place of the writing bar, in the molde of
+   * `people.escritaSemAmizade`: a sentence, not a disabled box.
+   */
+  soLeitura: {
+    menu: "Quem escreve",
+    title: "Quem escreve nesta sala",
+    lead: "Todos os membros do canal lêem esta sala. Escolhe quem escreve.",
+    note: "Esta regra é das apps, não da cifra. Uma app alterada pode enviar mensagens. As apps dos outros membros não as mostram.",
+    label: "Só leitura",
+    rolesLabel: "Cargos que escrevem",
+    adminNote: "Quem administra o canal escreve sempre.",
+    noRoles: "Este canal ainda não tem cargos. Só quem administra escreve.",
+    open: "Todos os membros escrevem nesta sala.",
+    closed: "Só quem administra e os cargos escolhidos escrevem. Os outros membros lêem e reagem.",
+    semEscrita: "Só alguns cargos podem escrever nesta sala.",
+    save: "Guardar",
+    saving: "A guardar…",
+    saved: (sala: string): string => `Guardado quem escreve em ${sala}.`,
   },
 
   /**
@@ -3721,6 +3855,7 @@ export const pt = {
     /* Moving is not asking (2/11/2026, «como no Discord»): the person moves at once. */
     sent: (nome: string, sala: string): string => `Moveste ${nome} para ${sala}.`,
     moved: (quem: string, sala: string): string => `${quem} moveu-te para ${sala}.`,
+    outraSala: "outra sala de voz",
   },
 
   emoji: {
@@ -3802,6 +3937,52 @@ export const pt = {
   },
 
   /*
+    The polls room: a room that holds polls and no conversation. The polls
+    are still encrypted messages of the room, the same protocol; only the screen changes.
+  */
+  salaDeVotacoes: {
+    nova: "Nova votação",
+    semAbertas: "Não há votações abertas.",
+    semFechadas: "Não há votações fechadas.",
+    separadores: "Estado das votações",
+    abertas: "Abertas",
+    fechadas: "Fechadas",
+    deQuem: (nome: string, quando: string): string => `${nome}, ${quando}`,
+    soLeitura: "Nesta sala só se vota. Quem tem o cargo certo cria votações.",
+    escolherTitulo: "Votações",
+    escolher: "Escolhe uma sala de votações.",
+    criarSala: "Criar sala de votações",
+    semSalas: "Ainda não há votações neste canal.",
+    semSalasLead: "Quem organiza o canal pode criar uma sala de votações.",
+    voltar: "Voltar à conversa",
+  },
+
+  /*
+    The polls page of a community. "Closed" means the room of the
+    poll is closed: a poll itself has no deadline (see `Poll` in the protocol),
+    and the page says so instead of inventing one.
+  */
+  paginaVotacoes: {
+    menu: "Votações",
+    titulo: "Votações",
+    abertas: "Abertas",
+    fechadas: "Fechadas",
+    separadores: "Estado das votações",
+    filtroDeSala: "Sala",
+    todasAsSalas: "Todas as salas",
+    semAbertas: "Não há votações abertas.",
+    semFechadas: "Não há votações fechadas.",
+    semPrazo: "Sem prazo. Fica aberta.",
+    fechouEm: (quando: string): string => `Fechou a ${quando}.`,
+    fechaEm: (quando: string): string => `Fecha a ${quando}.`,
+    naSala: (sala: string): string => `Na sala ${sala}`,
+    deQuem: (nome: string, quando: string): string => `${nome}, ${quando}`,
+    verMensagem: "Ver a mensagem",
+    verMensagemDe: (pergunta: string): string => `Ver a mensagem da votação: ${pergunta}`,
+    voltar: "Voltar à conversa",
+  },
+
+  /*
     Polls, in the conversation and in the feed.
 
     The sentence that must not be missing is that votes are visible, and it
@@ -3844,7 +4025,7 @@ export const pt = {
       at different instants on each screen, accepting on one device the vote
       another refused, and without a server there is nobody to break the tie.
     */
-    nota: "Todos vêem os votos. A votação fica aberta, sem prazo.",
+    nota: "Todos vêem os votos. Tu defines o prazo, e no fim a votação fecha sozinha.",
 
     /* On the card, to whoever is about to vote. Short, because it is always on screen. */
     votosVisiveis: "os votos são visíveis",
@@ -3882,6 +4063,25 @@ export const pt = {
     /* The poll written out in full, which is what travels in the message body
        so a client that cannot draw it can still read it. */
     linhaDeOpcao: (numero: number, texto: string): string => `${numero}. ${texto}`,
+    /* The deadline, as part of the written-out poll: an old client that cannot draw
+       the card still reads when it ends. */
+    linhaDoPrazo: (quando: string): string => `A votação fecha a ${quando}.`,
+    /* The deadline set by who creates the poll. */
+    prazoLabel: "Prazo",
+    prazoSem: "Sem prazo",
+    prazoDuracao: "Duração",
+    prazoData: "Data e hora",
+    duracaoLabel: "Quanto tempo fica aberta",
+    unidadeHoras: "horas",
+    unidadeDias: "dias",
+    dataLabel: "Fecha em",
+    prazoPassado: "Escolhe um momento que ainda não passou.",
+    prazoLongo: (dias: number): string => `O prazo não pode passar de ${dias} dias.`,
+    fechaEm: (quando: string): string => `Fecha a ${quando}`,
+    fechouEm: (quando: string): string => `Fechou a ${quando}`,
+    fechada: "Votação fechada",
+    fechar: "Fechar votação",
+    fecharFeito: "A votação ficou fechada.",
   },
   /**
    * «Como funciona»: six ideas, one card per idea (phase 6, layer 2).
@@ -3896,8 +4096,34 @@ export const pt = {
    * The drawings' labels also live here: an SVG in Portuguese on the English
    * screen is a drawing that cannot be read.
    */
+  /*
+    "Comunicar um erro" (12/11/2026): the form, the exact list of what goes, and the confirmation.
+    The list is the promise: what is written here is what leaves the device, and nothing else.
+  */
+  comunicarErro: {
+    botao: "Comunicar um erro",
+    titulo: "Comunicar um erro",
+    descricao: "O que aconteceu?",
+    descricaoAjuda: "Diz o que fizeste e o que viste. Não escrevas palavras-passe.",
+    detalhes: "Juntar detalhes técnicos",
+    oQueVai: "Vai isto, e só isto:",
+    versao: (v: string): string => `Versão da app: ${v}`,
+    plataforma: (p: string): string => `Tipo: ${p === "electron" ? "app de computador" : p === "pwa" ? "app instalada (PWA)" : "web"}`,
+    sistema: (s: string, b: string): string => `Sistema e browser: ${s}, ${b}`,
+    lingua: (l: string): string => `Língua: ${l}`,
+    erros: (n: number): string => (n === 0 ? "Códigos de erro: nenhum" : `Códigos de erro (últimos ${n}):`),
+    ligacao: (l: string): string => `Ligação: ${l}`,
+    sincronia: (s: string): string => `Sincronia: ${s}`,
+    nuncaVai: "Nunca vai: o texto das mensagens, os nomes dos canais, os endereços de outras pessoas, as chaves, o conteúdo do cofre.",
+    contacto: "Podem contactar-me",
+    contactoAjuda: "Com isto marcado, vai também o teu endereço, para te podermos responder.",
+    enviar: "Enviar",
+    aEnviar: "A enviar…",
+    enviado: "Recebemos o relato. Obrigado. Lemos todos os relatos.",
+    fechar: "Fechar",
+  },
   comoFunciona: {
-    /* «Como funciona o Orwell» (owner, 28 October 2026); the registration link stays «Como funciona». */
+    /* «Como funciona o Orwell»; the registration link stays «Como funciona». */
     titulo: "Como funciona o Orwell",
     /** The link in the gate's footer. */
     link: "Como funciona",
@@ -3993,10 +4219,10 @@ export const pt = {
       /** Comes after `umaContaChega`: the card's two sentences. */
       resumo: "Cada aparelho tem a sua chave, e a chave da conta assina-a.",
       mais: [
-        "O aparelho principal tem a chave da conta. Só ele exporta a conta, acrescenta aparelhos e revoga aparelhos.",
+        "Todos os aparelhos activos da conta têm a chave da conta. Qualquer um deles acrescenta e revoga aparelhos. Um aparelho removido não o pode fazer.",
         "Para acrescentar um aparelho, emparelha-o. O segredo passa de um ecrã para uma câmara, por QR ou link, e nunca pelo servidor. Os dois ecrãs mostram seis palavras. Se forem iguais, ninguém se meteu no meio.",
         "Importar o ficheiro noutra máquina não acrescenta um aparelho. Muda a conta de sítio. Para ter dois aparelhos, emparelha. Não cries outra conta.",
-        "Revogar um aparelho corta a leitura a partir da época seguinte. O que o aparelho já tinha, continua a ter.",
+        "Revogar um aparelho corta a leitura a partir da época seguinte. O aparelho fica com o que já tinha até se voltar a ligar. Nessa altura sai da conta e apaga os dados.",
       ],
       desenho: "A chave da conta, no aparelho principal, assina as chaves dos outros aparelhos. Emparelhar passa pelo servidor num cofre temporário que o servidor não abre. Os dois aparelhos comparam seis palavras.",
       principal: "aparelho principal",
@@ -4153,7 +4379,7 @@ export const pt = {
   definicoesNovas: {
     /** The Account card with «Terminar sessão» and «Bloquear sozinho». */
     sessao: "Sessão",
-    /* «Expirar sessão», and not «Bloquear sozinho» (owner, 28 October 2026). */
+    /* «Expirar sessão», and not «Bloquear sozinho». */
     bloquearSozinho: "Expirar sessão",
     bloquearSozinhoNota: "Se não usares o Orwell durante este tempo, a sessão termina neste aparelho. Para voltar, entras com a palavra-passe. Durante uma chamada, a sessão não termina.",
     /** The «Bloquear sozinho» pills, in the order of `TEMPOS_DE_BLOQUEIO`. */
@@ -4169,6 +4395,9 @@ export const pt = {
     retomar: "Retomar",
     /** Microphone and camera: every call entry starts with the microphone muted. */
     entrarSilenciado: "Entrar nas chamadas com o microfone silenciado",
+    /** Microphone and camera: a screen wake lock while a call is open. */
+    ecraLigadoNaChamada: "Manter o ecrã ligado durante as chamadas",
+    ecraLigadoNaChamadaNota: "Só com o Orwell à frente. Usa mais bateria.",
     /** The Camera card: the device, the mirror and the preview. */
     camaraAparelho: "Aparelho",
     camaraDoSistema: "Predefinida do sistema",
@@ -4261,6 +4490,33 @@ export const pt = {
     apagada: "A mensagem original foi apagada.",
     ausente: "A mensagem original não está neste aparelho.",
     porCarregar: "Carregar a mensagem original",
+  },
+  /** Roles and rooms tagged in a message (12/11/2026). See `lib/etiquetas.ts`. */
+  etiquetas: {
+    /** Next to a role in the `@` list. */
+    cargo: "cargo",
+    /** A room tag the reader cannot see, or that no longer exists. */
+    salaPrivada: "sala privada",
+    /** Label of a room chip: where it goes. */
+    irParaSala: (nome: string) => `Abrir a sala ${nome}`,
+  },
+  /** Reactions to chat messages (12/11/2026). */
+  reaccoes: {
+    /** The hover button, the menu entry and the picker title. */
+    reagir: "Reagir",
+    /** The "+" at the end of the chips. */
+    outra: "Juntar outra reacção",
+    /** Hover text of a chip: who reacted. */
+    quem: (nomes: readonly string[], emoji: string) =>
+      nomes.length === 1
+        ? `${nomes[0]} reagiu com ${emoji}`
+        : nomes.length <= 3
+          ? `${Array.from(nomes).slice(0, -1).join(", ")} e ${nomes[nomes.length - 1]} reagiram com ${emoji}`
+          : `${Array.from(nomes).slice(0, 3).join(", ")} e mais ${nomes.length - 3} reagiram com ${emoji}`,
+    /** Label of a chip for the screen reader. */
+    rotulo: (emoji: string, n: number, minha: boolean) =>
+      `${emoji}: ${n} ${n === 1 ? "reacção" : "reacções"}${minha ? ", incluindo a tua. Toca para retirar." : ". Toca para juntar a tua."}`,
+    falhou: "A reacção não saiu. Tenta outra vez.",
   },
   /**
    * The broadcast sign next to the face of whoever, in a voice room, shares
@@ -4410,7 +4666,7 @@ export const pt = {
     boaFeConfirmada: "confirmada.",
     mostrarEnderecos: "Mostrar endereços",
     enderecosNota: "Os endereços também vão na denúncia.",
-    // The step indicator (design chosen by the owner, 4/11/2026).
+    // The step indicator (the chosen design).
     passosRotulo: "Passos da denúncia",
     passos: { motivo: "Motivo", rever: "Rever", enviar: "Enviar" },
     passoFeito: "feito",
@@ -4423,6 +4679,16 @@ export const pt = {
     enviar: "Enviar denúncia",
     aEnviar: "A enviar…",
     enviada: "Denúncia enviada.",
+  },
+
+  /*
+    A call with the screen locked. On the installed app of the iPhone, iOS
+    turns off the microphone when the screen locks (WebKit bug 239602). Shown
+    on joining a call, on that platform only, until there is a native app.
+  */
+  chamadaEcraBloqueado: {
+    avisoPwaIphone:
+      "No iPhone, a app instalada desliga o microfone quando bloqueias o ecrã. Os outros deixam de te ouvir. Quando desbloqueias, o microfone volta. Para falar com o ecrã bloqueado, abre o Orwell no Safari.",
   },
 
   /*
@@ -4494,6 +4760,13 @@ export const errosPt: Record<string, FraseDeErro> = {
   // Reports: the refusal, the cap and the signed request's clock.
   "the server did not take the report": "O servidor não aceitou a denúncia. Tenta outra vez mais tarde.",
   "too many reports sent": "Enviaste demasiadas denúncias. Tenta outra vez mais tarde.",
+  // "Comunicar um erro": the form, the daily cap and the refusal.
+  "the bug report is not valid": "Falta a descrição, ou é longa demais. Corrige e envia outra vez.",
+  "too many bug reports sent": "Já enviaste 5 relatos de erro hoje. Tenta outra vez amanhã.",
+  "the server did not take the bug report": "O servidor não aceitou o relato de erro. Tenta outra vez mais tarde.",
+  "this server does not send notifications when the app is closed": "Este servidor não envia avisos com a app fechada.",
+  "the browser refused the notification subscription": "O browser recusou os avisos com a app fechada. Vê as permissões do site.",
+  "the server refused the notification subscription": "O servidor recusou os avisos para este aparelho. Tenta outra vez mais tarde.",
   "the device clock is off": "O relógio deste aparelho está errado. Acerta a hora e tenta outra vez.",
   "could not read the report inbox": "O servidor mandou uma resposta que não conseguimos ler. Tenta outra vez mais tarde.",
   // The account suspension (reports, §8): the notice and the review request.
@@ -4566,6 +4839,8 @@ export const errosPt: Record<string, FraseDeErro> = {
   "to leave the call, leave it": 'Para saíres da chamada, usa "Sair da chamada".',
   "the everyone role is built in": 'O cargo "Toda a gente" vem com o canal. Não se apaga nem se dá a ninguém.',
   "you may not change the permissions of this room": "Não podes mudar as permissões deste lugar.",
+  "you may not write in this room": "Não podes escrever nesta sala. Só alguns cargos escrevem aqui.",
+  "you may not share your screen in this room": "Neste canal, só alguns cargos podem partilhar o ecrã. Pede a um administrador do canal que te dê esta permissão.",
   "you may not move people in this channel": "O teu papel não te deixa mover pessoas neste canal.",
   "you already administer this channel": "Já administras este canal.",
   "this channel already has an administrator": "Este canal já tem quem o administre.",
@@ -4594,6 +4869,9 @@ export const errosPt: Record<string, FraseDeErro> = {
   "you may not delete this channel": "O teu papel não te deixa eliminar este canal.",
   "only the author or a moderator may delete this message":
     "Só quem escreveu a mensagem, ou quem modera o canal, a pode eliminar.",
+  "only the author or a moderator may close this poll":
+    "Só quem criou a votação, ou quem modera o canal, a pode fechar.",
+  "the reaction emoji is not valid": "Esta reacção não é válida. Escolhe outro emoji.",
   "only a closed ticket can be deleted": "Só se elimina um ticket fechado. Fecha-o primeiro.",
   "you may not moderate in this channel": "O teu cargo não te deixa moderar este canal.",
   "the nickname is too long": (detalhe) => {

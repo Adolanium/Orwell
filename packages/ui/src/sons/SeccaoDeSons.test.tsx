@@ -52,7 +52,7 @@ describe("Configurações › Notificações › Sons", () => {
   })
 
   it("ligar um tipo toca esse som, como ligar os sons toca a directa; desligar fica calado", async () => {
-    // Owner report (4/11/2026): "Sounds are not turning on. All of them. I hear
+    // The bug: "Sounds are not turning on. All of them. I hear
     // nothing. Only private messages." Turning on sounds played right away; turning
     // on one type played nothing, and it looked like it hadn't turned on.
     const user = userEvent.setup()
@@ -76,21 +76,15 @@ describe("Configurações › Notificações › Sons", () => {
     expect(lerPreferenciasDeSom().chamadaComOcupado).toBe(false)
   })
 
-  it('"Som ao enviar mensagens" vem ligado, e desliga-se como os outros', async () => {
-    const user = userEvent.setup()
+  it("não há som ao enviar mensagens, nem interruptor para ele (16/11/2026)", () => {
     montar()
-    const caixa = screen.getByLabelText("Som ao enviar mensagens") as HTMLInputElement
-    expect(caixa.checked).toBe(true)
-    await user.click(caixa)
-    expect(lerPreferenciasDeSom().porTipo.enviada).toBe(false)
+    expect(screen.queryByLabelText("Som ao enviar mensagens")).toBeNull()
   })
 
-  it("quem já tinha escolhas guardadas, de antes deste som, recebe-o ligado", () => {
-    const antigas = { ...lerPreferenciasDeSom().porTipo, mencao: false } as Record<string, boolean>
-    delete antigas.enviada
+  it("quem tinha guardado o som de enviar lê as outras escolhas como estavam", () => {
+    const antigas = { ...lerPreferenciasDeSom().porTipo, mencao: false, enviada: true } as Record<string, boolean>
     localStorage.setItem("enclave.sons", JSON.stringify({ porTipo: antigas, vibrar: false }))
     const lidas = lerPreferenciasDeSom()
-    expect(lidas.porTipo.enviada).toBe(true)
     expect(lidas.porTipo.mencao).toBe(false)
     expect(lidas.vibrar).toBe(false)
   })

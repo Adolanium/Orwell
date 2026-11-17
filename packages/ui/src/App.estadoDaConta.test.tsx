@@ -197,6 +197,87 @@ describe("um aparelho revogado volta ao portão", () => {
   })
 })
 
+describe("um aparelho removido, com a prova (1.3.16)", () => {
+  it("sai da conta e apaga o cofre: tranca, apaga, e fica no registo com a frase", async () => {
+    const statusRef: { current: ((status: unknown) => void) | null } = { current: null }
+    const ordem: string[] = []
+    const lock = vi.fn(async () => {
+      ordem.push("lock")
+      return { ok: true }
+    })
+    const destroy = vi.fn(async () => {
+      ordem.push("destroy")
+      return { ok: true }
+    })
+    const bridge = ponte({ statusRef, lock, destroy })
+    render(<App bridge={bridge} />)
+    await screen.findByRole("button", { name: strings.rail.chat })
+    act(() => {
+      statusRef.current?.({
+        detail: "este aparelho foi tirado da conta noutro aparelho",
+        level: "error",
+        code: "device-revoked",
+        route: "toast",
+        removido: true,
+      })
+    })
+    await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1))
+    expect(ordem).toEqual(["lock", "destroy"])
+    // The phrase stays, above the sign-up gate: this device no longer has the account.
+    const frase = "Este aparelho foi tirado da conta noutro aparelho."
+    await waitFor(() => expect(document.querySelector(".gate-convite")?.textContent).toContain(frase))
+    expect(screen.queryByRole("button", { name: strings.rail.chat })).toBeNull()
+  })
+
+  it("com um canal aberto, o ecrã não pede nada à sessão depois de trancar (16/11/2026)", async () => {
+    const statusRef: { current: ((status: unknown) => void) | null } = { current: null }
+    let trancado = false
+    const lock = vi.fn(async () => {
+      trancado = true
+      return { ok: true }
+    })
+    const bridge = ponte({ statusRef, lock })
+    // Like the real session: with the vault locked, there is no identity to ask.
+    bridge.channels.mayEdit = () => {
+      if (trancado) throw new Error("no identity loaded")
+      return false
+    }
+    render(<App bridge={bridge} />)
+    await screen.findByRole("button", { name: strings.rail.chat })
+    await act(async () => {
+      screen.getByRole("button", { name: strings.rail.chat }).click()
+      await Promise.resolve()
+    })
+    const linha = document.querySelector<HTMLElement>(".channel-name")
+    await act(async () => {
+      linha?.click()
+      await Promise.resolve()
+    })
+    act(() => {
+      statusRef.current?.({ detail: "x", level: "error", code: "device-revoked", route: "toast", removido: true })
+    })
+    const frase = "Este aparelho foi tirado da conta noutro aparelho."
+    await waitFor(() => expect(document.querySelector(".gate-convite")?.textContent).toContain(frase))
+  })
+
+  it("sem a prova (cópia substituída, servidor antigo): só tranca, não apaga", async () => {
+    const statusRef: { current: ((status: unknown) => void) | null } = { current: null }
+    const lock = vi.fn(async () => ({ ok: true }))
+    const destroy = vi.fn(async () => ({ ok: true }))
+    const bridge = ponte({ statusRef, lock, destroy })
+    render(<App bridge={bridge} />)
+    await screen.findByRole("button", { name: strings.rail.chat })
+    act(() => {
+      statusRef.current?.({ detail: "x", level: "error", code: "device-revoked", route: "toast" })
+    })
+    await waitFor(() => expect(lock).toHaveBeenCalled())
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(destroy).not.toHaveBeenCalled()
+  })
+})
+
 describe("um aparelho revogado no arranque a frio", () => {
   /*
     The core order: the status comes out first, only then `connect()` rejects.

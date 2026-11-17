@@ -72,7 +72,7 @@ export function PostBody({
       {votacao && (
         <Votacao
           votacao={votacao}
-          apuramento={apuramento ?? { porOpcao: votacao.options.map(() => []), total: 0, minha: null }}
+          apuramento={apuramento ?? { porOpcao: votacao.options.map(() => []), total: 0, minha: null, fechoEm: votacao.closesAt ?? null }}
           nameFor={nameFor ?? nomeEmFalta}
           {...(onVotar ? { onVote: onVotar } : {})}
         />

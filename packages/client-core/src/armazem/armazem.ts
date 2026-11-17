@@ -273,6 +273,13 @@ export class ArmazemDeMedia {
     return [...(this.#inventario?.keys() ?? [])]
   }
 
+  /**
+   * Decrypts a blob off this thread (a Worker in the web app, a worker thread on
+   * the desktop). Null decrypts here. A 1 MB photo costs ~150 ms on a slow
+   * laptop, and it ran right when a channel opened.
+   */
+  decifrador: ((blob: Uint8Array, k: Uint8Array, n: Uint8Array, sha: string, classe: RefDeMedia["c"]) => Promise<Uint8Array>) | null = null
+
   /** Decrypts the blob and touches its last use. Null if absent. Throws "media blob is damaged". */
   async obter(sha: string, ref: RefDeMedia): Promise<Uint8Array | null> {
     const inventario = this.#inventario
@@ -287,12 +294,20 @@ export class ArmazemDeMedia {
     }
     let bytes: Uint8Array
     try {
-      bytes = decifrarBlob(blob, fromBase64(ref.k), fromBase64(ref.n), sha, ref.c)
+      const k = fromBase64(ref.k)
+      const n = fromBase64(ref.n)
+      // A decrypter that fails (a Worker that stopped) says nothing about the blob: open it here
+      // before calling it damaged, because a damaged blob is deleted from disk.
+      bytes = this.decifrador
+        ? await this.decifrador(blob, k, n, sha, ref.c).catch(() => decifrarBlob(blob, k, n, sha, ref.c))
+        : decifrarBlob(blob, k, n, sha, ref.c)
     } catch {
       // A key or a nonce that is not even base64 is also a blob that does not open.
       this.#largarEstragado(sha, inventario, entrada, blob)
       throw new Error("media blob is damaged")
     }
+    // Locked while the bytes were on their way: they belong to nobody now.
+    if (this.#inventario !== inventario) return null
     const agora = this.#agora()
     entrada.ultimoUso = agora
     // The last use on disk is a hint for the LRU: losing it breaks nothing.

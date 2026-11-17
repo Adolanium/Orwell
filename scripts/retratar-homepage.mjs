@@ -1,7 +1,7 @@
 /**
  * Screenshots of the homepage, taken from the real app.
  *
- * The owner requested, on 12 August 2026: crops that demonstrate features,
+ * The requirement: crops that demonstrate features,
  * without lengthy explanation. A full-screen screenshot reduced to 600px shows
  * nothing: what you see is a gray window. So each crop shows ONE thing only,
  * captured by the element, not the screen.

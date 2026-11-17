@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef, useState } from "react"
 /**
  * A line that scrolls when it does not fit, like a news ticker.
  *
- * Requested by the owner on October 27, 2026 for the "Channel · Room" line on
+ * Made for the "Channel · Room" line on
  * the side card: the column is 244 px wide, and "MagnusLab · Friday meeting
  * room" does not fit. Cutting with ellipsis hid the room, which is what
  * matters. Now the text slides left, continuously, with a second copy behind

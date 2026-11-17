@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sonda: chamada com o ecrã bloqueado</title>
+<!--
+  A self-contained probe for a real phone. It answers one question with numbers:
+  while the screen is locked or the page is in the background, does a voice call
+  keep capturing, sending, receiving and playing?
+
+  No server. Two RTCPeerConnections in this page talk to each other (loopback):
+    A sends the microphone and a quiet tone;
+    B receives both, measures the microphone level, and plays only the tone.
+  Every second a tick records: timer gap, visibility, microphone track state,
+  AudioContext state, bytes sent, received microphone level, and whether the
+  tone element is playing. Every 10 s a fetch measures the network.
+
+  Needs a secure context (https or localhost). The timeline survives a reload
+  (localStorage) and can be copied as text.
+-->
+<style>
+  :root { color-scheme: light dark; --bg: #fff; --fg: #111; --mut: #666; --ok: #0a7d32; --mal: #b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --mut: #999; --ok: #5bd685; --mal: #ff8a80; } }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, sans-serif; margin: 0; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  p { margin: 4px 0; color: var(--mut); }
+  label { display: block; margin: 6px 0; }
+  button { font: inherit; padding: 10px 14px; margin: 4px 4px 4px 0; }
+  #resumo { font-weight: 600; margin: 8px 0; }
+  pre { font: 12px/1.35 ui-monospace, monospace; white-space: pre-wrap; word-break: break-all; max-height: 55vh; overflow: auto; border: 1px solid var(--mut); padding: 8px; }
+  .ok { color: var(--ok); } .mal { color: var(--mal); }
+</style>
+</head>
+<body>
+<h1>Sonda: chamada com o ecrã bloqueado</h1>
+<p>1. Escolhe as opções. 2. Carrega em Começar. 3. Bloqueia o ecrã e fala. 4. Desbloqueia e lê o resumo.</p>
+<label><input type="checkbox" id="optSessao" checked> Media Session (estado de chamada)</label>
+<label><input type="checkbox" id="optAudioSession" checked> navigator.audioSession = "play-and-record" (só Safari)</label>
+<label><input type="checkbox" id="optCadeia" checked> Microfone passa por um AudioContext (como no Orwell)</label>
+<label><input type="checkbox" id="optWakeLock"> Wake lock do ecrã (impede o bloqueio automático)</label>
+<button id="comecar">Começar</button>
+<button id="parar">Parar</button>
+<button id="copiar">Copiar registo</button>
+<button id="limpar">Limpar</button>
+<div id="resumo"></div>
+<pre id="registo"></pre>
+<audio id="tom" playsinline></audio>
+<script>
+"use strict"
+const CHAVE = "sonda-ecra-bloqueado"
+const $ = (id) => document.getElementById(id)
+const linhas = (() => { try { return JSON.parse(localStorage.getItem(CHAVE) || "[]") } catch { return [] } })()
+const t0 = Date.now()
+const modo = matchMedia("(display-mode: standalone)").matches ? "PWA" : "browser"
+
+function registar(texto) {
+  const linha = `${new Date().toISOString().slice(11, 19)} ${texto}`
+  linhas.push(linha)
+  if (linhas.length > 4000) linhas.splice(0, linhas.length - 4000)
+  try { localStorage.setItem(CHAVE, JSON.stringify(linhas)) } catch {}
+  $("registo").textContent = linhas.slice(-300).join("\n")
+}
+
+let estado = null
+
+async function comecar() {
+  if (estado) return
+  registar(`inicio · ${modo} · ${navigator.userAgent}`)
+  if ($("optAudioSession").checked && navigator.audioSession) {
+    try { navigator.audioSession.type = "play-and-record"; registar("audioSession=play-and-record") } catch (e) { registar(`audioSession falhou: ${e}`) }
+  }
+  const bruto = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false })
+  const faixaCrua = bruto.getAudioTracks()[0]
+  for (const ev of ["mute", "unmute", "ended"]) faixaCrua.addEventListener(ev, () => registar(`microfone ${ev}`))
+
+  const ctx = new AudioContext()
+  ctx.addEventListener("statechange", () => {
+    registar(`contexto ${ctx.state}`)
+    if (ctx.state !== "running" && ctx.state !== "closed") ctx.resume().catch(() => {})
+  })
+  await ctx.resume().catch(() => {})
+
+  // What A sends as voice: raw, or through the context (Orwell's voice chain shape).
+  let faixaVoz = faixaCrua
+  if ($("optCadeia").checked) {
+    const destino = ctx.createMediaStreamDestination()
+    ctx.createMediaStreamSource(bruto).connect(destino)
+    faixaVoz = destino.stream.getAudioTracks()[0]
+  }
+  // A quiet tone, so B has something to play: "is the call still heard?"
+  const osc = ctx.createOscillator()
+  const ganho = ctx.createGain()
+  ganho.gain.value = 0.03
+  osc.frequency.value = 440
+  const destinoTom = ctx.createMediaStreamDestination()
+  osc.connect(ganho).connect(destinoTom)
+  osc.start()
+
+  const a = new RTCPeerConnection()
+  const b = new RTCPeerConnection()
+  for (const [nome, pc] of [["A", a], ["B", b]]) pc.addEventListener("connectionstatechange", () => registar(`pc ${nome} ${pc.connectionState}`))
+  const remetenteVoz = a.addTrack(faixaVoz, new MediaStream([faixaVoz]))
+  a.addTrack(destinoTom.stream.getAudioTracks()[0], destinoTom.stream)
+  const recebidas = []
+  b.ontrack = (e) => {
+    recebidas.push(e.track)
+    // The second track is the tone: it is the only one played.
+    if (recebidas.length === 2) {
+      $("tom").srcObject = new MediaStream([e.track])
+      $("tom").play().then(() => registar("tom a tocar")).catch((err) => registar(`tom nao tocou: ${err}`))
+    }
+  }
+  // No trickle: each side waits for its candidates, so none arrives before the remote description.
+  const reunidos = (pc) => pc.iceGatheringState === "complete" ? Promise.resolve() : new Promise((ok) => {
+    pc.addEventListener("icegatheringstatechange", () => pc.iceGatheringState === "complete" && ok())
+    setTimeout(ok, 3000)
+  })
+  await a.setLocalDescription(await a.createOffer())
+  await reunidos(a)
+  await b.setRemoteDescription(a.localDescription)
+  await b.setLocalDescription(await b.createAnswer())
+  await reunidos(b)
+  await a.setRemoteDescription(b.localDescription)
+  for (const ev of ["pause", "playing", "suspend", "stalled"]) $("tom").addEventListener(ev, () => registar(`elemento ${ev}`))
+
+  if ($("optSessao").checked && navigator.mediaSession) {
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: "Chamada em curso", artist: "Sonda" })
+      navigator.mediaSession.playbackState = "playing"
+      for (const accao of ["togglemicrophone", "hangup", "play", "pause"]) {
+        try { navigator.mediaSession.setActionHandler(accao, () => registar(`mediaSession accao ${accao}`)) } catch { registar(`mediaSession sem ${accao}`) }
+      }
+      // A promise in Safari, undefined in Chrome.
+      if (navigator.mediaSession.setMicrophoneActive) await Promise.resolve(navigator.mediaSession.setMicrophoneActive(true)).catch((e) => registar(`setMicrophoneActive: ${e}`))
+      registar("mediaSession pronta")
+    } catch (e) { registar(`mediaSession falhou: ${e}`) }
+  }
+
+  let bloqueio = null
+  const pedirBloqueio = async () => {
+    if (!$("optWakeLock").checked || !navigator.wakeLock || document.visibilityState !== "visible") return
+    try { bloqueio = await navigator.wakeLock.request("screen"); registar("wake lock activo"); bloqueio.addEventListener("release", () => registar("wake lock largado")) } catch (e) { registar(`wake lock recusado: ${e}`) }
+  }
+  await pedirBloqueio()
+
+  let ultimoTique = Date.now()
+  let bytesAntes = 0
+  let ultimaRede = 0
+  const tique = async () => {
+    const agora = Date.now()
+    const salto = agora - ultimoTique
+    ultimoTique = agora
+    let enviados = 0, nivel = null
+    try {
+      for (const r of (await remetenteVoz.getStats()).values()) if (r.type === "outbound-rtp") enviados = r.bytesSent
+      for (const r of (await b.getStats()).values()) {
+        // The voice is the first m-line. By `mid`, because Safari before 27 did not match `trackIdentifier` to the track id.
+        if (r.type === "inbound-rtp" && r.kind === "audio" && (r.mid === "0" || r.trackIdentifier === recebidas[0]?.id)) nivel = r.audioLevel
+      }
+    } catch {}
+    const delta = enviados - bytesAntes
+    bytesAntes = enviados
+    const campos = [
+      `+${Math.round((agora - t0) / 1000)}s`,
+      `salto=${salto}ms`,
+      document.visibilityState,
+      `mic=${faixaCrua.readyState}${faixaCrua.muted ? "/calado" : ""}`,
+      `ctx=${ctx.state}`,
+      `env=${delta}B`,
+      `nivelRecebido=${nivel === null || nivel === undefined ? "?" : nivel.toFixed(3)}`,
+      `tom=${$("tom").paused ? "parado" : "toca"}`,
+    ]
+    registar(campos.join(" "))
+    resumir()
+    if (agora - ultimaRede >= 10_000) {
+      ultimaRede = agora
+      const partiu = performance.now()
+      fetch(location.href, { cache: "no-store", method: "HEAD" })
+        .then(() => registar(`rede ok ${Math.round(performance.now() - partiu)}ms`))
+        .catch((e) => registar(`rede falhou: ${e}`))
+    }
+  }
+  const relogio = setInterval(tique, 1000)
+
+  const aoVer = () => {
+    registar(`visibilidade ${document.visibilityState}`)
+    if (document.visibilityState === "visible") { pedirBloqueio(); resumir() }
+  }
+  document.addEventListener("visibilitychange", aoVer)
+  for (const ev of ["pagehide", "pageshow", "freeze", "resume", "focus", "blur"]) {
+    (ev === "freeze" || ev === "resume" ? document : window).addEventListener(ev, () => registar(`evento ${ev}`))
+  }
+  estado = { a, b, bruto, ctx, relogio, osc }
+  resumir()
+}
+
+// The summary: the longest timer gap, seconds hidden, seconds hidden with bytes
+// going out, seconds hidden with a received level above silence.
+function resumir() {
+  let maiorSalto = 0, escondido = 0, aEnviar = 0, comVoz = 0, comTom = 0
+  for (const l of linhas) {
+    const m = l.match(/salto=(\d+)ms (\w+) .*env=(-?\d+)B nivelRecebido=([\d.?]+) tom=(\w+)/)
+    if (!m) continue
+    maiorSalto = Math.max(maiorSalto, Number(m[1]))
+    if (m[2] !== "hidden") continue
+    escondido++
+    if (Number(m[3]) > 0) aEnviar++
+    if (m[4] !== "?" && Number(m[4]) > 0.01) comVoz++
+    if (m[5] === "toca") comTom++
+  }
+  const cls = (bom) => (bom ? "ok" : "mal")
+  $("resumo").innerHTML =
+    `Escondida: ${escondido} tiques · ` +
+    `<span class="${cls(aEnviar >= escondido * 0.9)}">a enviar: ${aEnviar}</span> · ` +
+    `<span class="${cls(comVoz > 0)}">voz recebida: ${comVoz}</span> · ` +
+    `<span class="${cls(comTom >= escondido * 0.9)}">tom a tocar: ${comTom}</span> · ` +
+    `<span class="${cls(maiorSalto < 5000)}">maior salto do relógio: ${maiorSalto} ms</span>`
+}
+
+function parar() {
+  if (!estado) return
+  clearInterval(estado.relogio)
+  estado.osc.stop()
+  estado.a.close(); estado.b.close()
+  for (const t of estado.bruto.getTracks()) t.stop()
+  estado.ctx.close()
+  estado = null
+  if (navigator.mediaSession) navigator.mediaSession.playbackState = "none"
+  registar("parado")
+  resumir()
+}
+
+$("comecar").onclick = () => comecar().catch((e) => registar(`falhou: ${e}`))
+$("parar").onclick = parar
+$("copiar").onclick = () => navigator.clipboard.writeText(linhas.join("\n")).then(() => registar("copiado"), (e) => registar(`copiar falhou: ${e}`))
+$("limpar").onclick = () => { linhas.length = 0; try { localStorage.removeItem(CHAVE) } catch {}; $("registo").textContent = ""; $("resumo").textContent = "" }
+$("registo").textContent = linhas.slice(-300).join("\n")
+resumir()
+</script>
+</body>
+</html>

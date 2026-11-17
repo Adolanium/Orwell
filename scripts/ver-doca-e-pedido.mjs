@@ -1,5 +1,5 @@
 /**
- * The two interface pieces requested by the owner, seen live.
+ * The two interface pieces, seen live.
  *
  *   1. **THE CALL DOCK** says, top to bottom, the state ("In call"), the place
  *      (channel name / room name) and has a way to disconnect. It does NOT say

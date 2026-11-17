@@ -118,3 +118,84 @@ describe("a gravação adiada do cofre", () => {
     expect(await ancoraNoDisco(disco, "!c")).toBe(5)
   })
 })
+
+/*
+  Fluidity: the JSON of every batched write runs on the thread that
+  draws. When it is slow (a big vault on a slow laptop), the window grows so the
+  JSON never takes more than a twentieth of the time: 20 times the last JSON,
+  between 1 s and 5 s. What it batches is only what the server gives back, so a
+  wider window loses nothing on a crash (see `updateEmBreve`).
+*/
+describe("a janela da gravação adiada cresce quando o JSON do cofre é lento", () => {
+  it("um JSON de ~100 ms dá uma janela de ~2 s; um rápido fica em 1 s", async () => {
+    const disco = new Disco()
+    const cofre = new Vault(disco)
+    await cofre.create(null)
+    // A slow field: its JSON takes ~100 ms, like a big vault on a slow laptop.
+    const lento = {
+      toJSON() {
+        const fim = performance.now() + 100
+        while (performance.now() < fim) {
+          // busy
+        }
+        return 1
+      },
+    }
+    ;(cofre.contents as unknown as Record<string, unknown>)["lento"] = lento
+    await cofre.update(() => {})
+    const antes = disco.escritas
+    // Only the timers: the slow JSON measures itself with the real clock.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    void cofre.updateEmBreve((c) => void (c.lastSeq["!c"] = 1))
+    await vi.advanceTimersByTimeAsync(Vault.JANELA_DA_GRAVACAO_MS)
+    expect(disco.escritas).toBe(antes)
+    // Up to the widest window: a loaded machine makes the ~100 ms JSON slower, and the window with it.
+    await vi.advanceTimersByTimeAsync(Vault.JANELA_MAXIMA_DA_GRAVACAO_MS)
+    expect(disco.escritas).toBe(antes + 1)
+    vi.useRealTimers()
+
+    // Fast again: back to 1 s.
+    delete (cofre.contents as unknown as Record<string, unknown>)["lento"]
+    await cofre.update(() => {})
+    const depois = disco.escritas
+    // Only the timers: the slow JSON measures itself with the real clock.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    void cofre.updateEmBreve((c) => void (c.lastSeq["!c"] = 2))
+    await vi.advanceTimersByTimeAsync(Vault.JANELA_DA_GRAVACAO_MS)
+    expect(disco.escritas).toBe(depois + 1)
+  })
+})
+
+
+/*
+  Return from a minimized window: the deferred write that fires on
+  its timer first awaits `antesDaGravacaoAdiada` (the session exports its groups
+  there, one at a time, yielding to the interface), and only then takes its
+  snapshot. A write asked for at once never waits for it.
+*/
+describe("antes da gravação adiada", () => {
+  it("o relógio espera pelo preparo antes de gravar; uma gravação já não espera", async () => {
+    const disco = new Disco()
+    const cofre = new Vault(disco)
+    await cofre.create(null)
+    let soltar!: () => void
+    let preparos = 0
+    cofre.antesDaGravacaoAdiada = () => {
+      preparos++
+      return new Promise<void>((r) => (soltar = r))
+    }
+    const antes = disco.escritas
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    void cofre.updateEmBreve((c) => void (c.lastSeq["!c"] = 1))
+    await vi.advanceTimersByTimeAsync(Vault.JANELA_DA_GRAVACAO_MS)
+    expect(preparos).toBe(1)
+    expect(disco.escritas).toBe(antes)
+    soltar()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(disco.escritas).toBe(antes + 1)
+    vi.useRealTimers()
+    await cofre.update((c) => void (c.lastSeq["!c"] = 2))
+    expect(preparos).toBe(1)
+    expect(disco.escritas).toBe(antes + 2)
+  })
+})

@@ -805,7 +805,7 @@ describe("o livro só se grava com o eco do servidor", () => {
  * **Phase 1d: loops leave the core by an event, and one crossed with the arrival
  * order reversed gives "friends".**
  *
- * The owner's report (10/27/2026): two requests in the same second, and the bell
+ * The bug: two requests in the same second, and the bell
  * showing "accepted" and "pending" at the same time. The cause was the second
  * fold, the one on screen messages. The interface started reading ties from here
  * (`friendTies` and the `friendships` event); what is measured is that the event

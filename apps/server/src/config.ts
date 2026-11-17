@@ -1,4 +1,5 @@
 import { ed25519 } from "@noble/curves/ed25519.js"
+import { p256 } from "@noble/curves/nist.js"
 import {
   COFRE_BALDE_BYTES,
   COFRE_ENTRADA_MAX_BYTES,
@@ -13,6 +14,7 @@ import { dirname, join } from "node:path"
 import { DENUNCIAS_DIAS } from "./denuncia.js"
 import { ORCAMENTO_DE_VIDEO_MBPS, RESERVA_DA_VOZ_MBPS } from "./orcamento-de-saida.js"
 import { ORCAMENTO_DE_VIDEO_REDUZIDO_MBPS, QUOTA_MENSAL_TB } from "./quota-mensal.js"
+import type { TransporteDoPush } from "./push.js"
 
 /** Is this the channel the server announces as common? One question, one place. */
 export function ehSalaComum(config: Pick<ServerConfig, "commonRoom">, channel: string): boolean {
@@ -159,11 +161,57 @@ export interface ServerConfig {
    * against who was online. Optional for the same reason as `sinal`.
    */
   denunciaAtrasoHoras?: [number, number]
+  /**
+   * Web Push (`ENCLAVE_PUSH`): off unless `on`. Absent here means off, which is
+   * what a test that builds its own config gets. See `push.ts`.
+   */
+  push?: ConfiguracaoDoPush | undefined
   /*
     There is no opaque-addresses switch (`ENCLAVE_SO_MORADAS_OPACAS`, slice 4): in
     1.0 "Arca" is the only mode (slice 6a). An old `.env` that still has it
     changes nothing, because no one reads it anymore.
   */
+}
+
+export interface ConfiguracaoDoPush {
+  /**
+   * The VAPID `sub` claim (`ENCLAVE_PUSH_CONTACTO`): a `mailto:` or `https:`
+   * contact the push service can use to reach the operator. Empty means
+   * `https://<server name>`.
+   */
+  contacto: string
+  /**
+   * The push service hosts an endpoint may point at (`ENCLAVE_PUSH_SERVICOS`
+   * adds to the known four). `*.x` matches any subdomain of `x`. Without this
+   * list, any client could make the server POST to any URL.
+   */
+  servicos: string[]
+  /** Replaces the HTTPS POST. For tests only: production never sets it. */
+  transporte?: TransporteDoPush
+}
+
+/** The push services of Chrome, Safari, Firefox and Edge. */
+export const SERVICOS_DE_PUSH = ["fcm.googleapis.com", "web.push.apple.com", "updates.push.services.mozilla.com", "*.notify.windows.com"]
+
+function readPush(env: NodeJS.ProcessEnv): ConfiguracaoDoPush | undefined {
+  // Off unless the operator writes `on`: the push goes through Apple, Google, Mozilla or Microsoft.
+  const ligado = (env.ENCLAVE_PUSH ?? "").trim().toLowerCase()
+  if (ligado === "" || ligado === "off") return undefined
+  if (ligado !== "on") throw new Error(`ENCLAVE_PUSH must be on or off, got ${JSON.stringify(env.ENCLAVE_PUSH)}`)
+  const contacto = (env.ENCLAVE_PUSH_CONTACTO ?? "").trim()
+  if (contacto !== "" && !/^(mailto:\S+@\S+|https:\/\/\S+)$/.test(contacto)) {
+    throw new Error(`ENCLAVE_PUSH_CONTACTO must be a mailto: or https: contact, got ${JSON.stringify(env.ENCLAVE_PUSH_CONTACTO)}`)
+  }
+  const extra = (env.ENCLAVE_PUSH_SERVICOS ?? "")
+    .split(",")
+    .map((nome) => nome.trim().toLowerCase())
+    .filter(Boolean)
+  for (const nome of extra) {
+    if (!/^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(nome)) {
+      throw new Error(`ENCLAVE_PUSH_SERVICOS must list host names like push.example.org, got ${JSON.stringify(nome)}`)
+    }
+  }
+  return { contacto, servicos: [...SERVICOS_DE_PUSH, ...extra] }
 }
 
 /** A version `x.y.z` parsed into three numbers, or `null` if it is not one. */
@@ -249,6 +297,12 @@ export interface TectosDoSinal {
    * production channels (20/10) all at cap at once give about 15 Mbit/s, well
    * below the VPS link. A signal that alone costs more than this gets rejected
    * with `sinal-too-large`, because waiting will not fix it.
+   *
+   * Not a hard ceiling since 12/11/2026: an account that has spent less than
+   * an eighth of this in the minute passes even with the channel full (so a
+   * newcomer's profile request is not drowned by typing). Counted per account,
+   * so the overshoot is at most one eighth plus one signal per account that
+   * sends in the minute. See `#sinal` in `gateway.ts`.
    */
   bytesPorCanalPorMinuto: number
   /**
@@ -533,6 +587,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     campanhaGofundme: (env.ENCLAVE_CAMPANHA_GOFUNDME ?? "").trim(),
     denunciasDias: readDenunciasDias(env.ENCLAVE_DENUNCIAS_DIAS),
     denunciaAtrasoHoras: readDenunciaAtrasoHoras(env.ENCLAVE_DENUNCIA_ATRASO_HORAS),
+    push: readPush(env),
   }
 }
 
@@ -564,4 +619,33 @@ export function loadOrCreateServerKey(dataDir: string): ServerKeypair {
   const keyId = `ed25519:${toBase64(crypto.getRandomValues(new Uint8Array(6)))}`
   writeFileSync(path, JSON.stringify({ keyId, privateKey: toBase64(privateKey) }, null, 2), { mode: 0o600 })
   return { keyId, privateKey, publicKey: ed25519.getPublicKey(privateKey) }
+}
+
+export interface ChaveVapid {
+  privateKey: Uint8Array
+  /** Uncompressed P-256 point, 65 bytes: what the browser gets as `applicationServerKey`. */
+  publicKey: Uint8Array
+}
+
+/**
+ * The server's VAPID key (RFC 8292), in `push.key.json` next to `server.key.json`.
+ *
+ * It signs the token that tells a push service which server is sending; it
+ * cannot read anything. Losing it is not fatal: a new key is made on the next
+ * start, and each browser notices the key changed and subscribes again the next
+ * time the app opens. Until then, pushes to old subscriptions are refused.
+ */
+export function loadOrCreatePushKey(dataDir: string): ChaveVapid {
+  const path = join(dataDir, "push.key.json")
+  mkdirSync(dirname(path), { recursive: true })
+
+  if (existsSync(path)) {
+    const stored = JSON.parse(readFileSync(path, "utf8")) as { privateKey: string }
+    const privateKey = fromBase64(stored.privateKey)
+    return { privateKey, publicKey: p256.getPublicKey(privateKey, false) }
+  }
+
+  const privateKey = p256.utils.randomSecretKey()
+  writeFileSync(path, JSON.stringify({ privateKey: toBase64(privateKey) }, null, 2), { mode: 0o600 })
+  return { privateKey, publicKey: p256.getPublicKey(privateKey, false) }
 }

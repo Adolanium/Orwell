@@ -5,7 +5,7 @@
  * is a new line in `SONS`, and inherits everything else: the voice, the filter,
  * the room. That's what makes them a family.
  *
- * **The voice.** A marimba (3/11/2026, owner request: more inspired by MSN,
+ * **The voice.** A marimba (more inspired by MSN,
  * without copying any Microsoft sound). Each note is a struck bar: the
  * fundamental, which decays slowly, and two mistuned partials from the bar
  * (3.93× and 9.2×), which decay fast and give the wood tone. A 3 ms noise click
@@ -55,7 +55,6 @@ export type TipoDeSom =
   | "tudo-ligado"
   | "amigo-online"
   | "sala-afk"
-  | "enviada"
   | "a-chamar"
   | "voz-perdida"
   | "movido"
@@ -85,7 +84,6 @@ export const TIPOS_DE_SOM: readonly TipoDeSom[] = [
   "tudo-ligado",
   "amigo-online",
   "sala-afk",
-  "enviada",
   "a-chamar",
   "voz-perdida",
   "movido",
@@ -160,7 +158,7 @@ function tres(a: Nota, b: Nota, c: Nota, passo = 0.08, ultima = 0.18): NotaDoSom
 /**
  * A touch figure: A5 → F#5 → A5 → D6, for 140 em 140 ms. Each note
  * rings beneath the ones that follow (450 ms), like a marimba with no dampening
- * (3/11/2026, owner request: inspired by MSN).
+ * (inspired by MSN).
  */
 function figuraDoToque(inicio: number): NotaDoSom[] {
   return (["A5", "F#5", "A5", "D6"] as const).map((nota, i) => ({
@@ -189,8 +187,8 @@ function figuraDaCotovelada(): NotaDoSom[] {
 export const SONS: Record<TipoDeSom, DescricaoDeSom> = {
   /**
    * Direct message: E6 → B5, a "ding-dong" falling in the top of the scale.
-   * The sound you hear most. E6 keeps playing under B5 (3/11/2026,
-   * owner request: more inspired by MSN). Before it was F#5 → A5, rising.
+   * The sound you hear most. E6 keeps playing under B5
+   * (more inspired by MSN). Before it was F#5 → A5, rising.
    */
   directa: {
     notas: [
@@ -206,7 +204,7 @@ export const SONS: Record<TipoDeSom, DescricaoDeSom> = {
    * Direct message has two notes and falls; mention has three and rises higher,
    * so they don't mix eyes closed. From `accept` (F#5 → A5 → D6, short notes)
    * it differs in register, a third higher, and notes that don't mute
-   * (3/11/2026, owner request: more inspired by MSN). Before it was
+   * (more inspired by MSN). Before it was
    * A5 → D6 → D6.
    */
   mencao: {
@@ -219,8 +217,8 @@ export const SONS: Record<TipoDeSom, DescricaoDeSom> = {
   },
 
   /**
-   * A new message in a channel room (owner request, 3 November
-   * 2026): D5 → E5, a small step rising, low and short. The most discreet
+   * A new message in a channel room:
+   * D5 → E5, a small step rising, low and short. The most discreet
    * of message sounds: it says "the conversation moved", not "this is for you".
    * It stays below direct message and mention, and far from the high register of
    * `sent` (B5 → D6). Rising is "arrived".
@@ -235,7 +233,7 @@ export const SONS: Record<TipoDeSom, DescricaoDeSom> = {
 
   /**
    * Incoming call: A5 → F#5 → A5 → D6, two figures with 1,1 s between
-   * them, for 3 em 3 s (3/11/2026, owner request: inspired by MSN).
+   * them, for 3 em 3 s (inspired by MSN).
    * Used to be A5 e F#5 alternados.
    *
    * The only sound longer than 400 ms, and the clearest. Must be heard with the
@@ -254,7 +252,7 @@ export const SONS: Record<TipoDeSom, DescricaoDeSom> = {
 
   /**
    * Nudge: a D4 grave and, on top, D5 e A4 alternados for 45 em 45 ms,
-   * ten taps (3/11/2026, owner request: inspired by MSN). 655 ms: the
+   * ten taps (inspired by MSN). 655 ms: the
    * third exception to duration. Used to be three descending taps,
    * B5 → A5 → F#5.
    *
@@ -282,13 +280,13 @@ export const SONS: Record<TipoDeSom, DescricaoDeSom> = {
   publicacao: { notas: [{ nota: "B5", em: 0, dur: 0.12, ganho: 1 }], presenca: 0.35 },
 
   /**
-   * Update available (owner request, 27 October 2026): B4 → E5
+   * Update available: B4 → E5
    * → A5 em fourths, and the A again, longer. Ends on A: awaits an
    * action (refresh, download). Plays once per notification, so can be
    * clearer than the publish sound without fatigue.
    *
    * Used to be the D arpeggio rising (A4 → D5 → F#5 → A5, for 70 em 70 ms). The
-   * new `amigo-online` (3/11/2026, owner request: inspired by MSN) is
+   * new `amigo-online` (inspired by MSN) is
    * the same arpeggio a fourth higher, at the same tempo, and both passed by
    * each other. The fourths and repeated A give it a different contour and rhythm.
    */
@@ -327,7 +325,7 @@ export const SONS: Record<TipoDeSom, DescricaoDeSom> = {
   /**
    * A friend came online (checkpoint 6, 2 November 2026): D5 → F#5 → A5 →
    * D6, the D arpeggio rising an octave, for 70 em 70 ms, and each note keeps
-   * ringing (3/11/2026, owner request: inspired by MSN). Rising means
+   * ringing (inspired by MSN). Rising means
    * "arrived", and ends on D: no action needed. Low, at the level of someone entering the
    * voice room. Used to be E5 → B5.
    */
@@ -350,15 +348,14 @@ export const SONS: Record<TipoDeSom, DescricaoDeSom> = {
   "sala-afk": { notas: duas("B5", "E5", 0.12, 0.2, 0.1), presenca: 0.4 },
 
   /**
-   * My message sent (owner request, 3 November 2026): B5 → D6,
+   * My message sent: B5 → D6,
    * a light touch rising, 150 ms. Rising is "gone", and ends on D: it's done.
    * Answers a gesture, like the mute ones, but plays many more times:
    * that's why it's the shortest in the family and sits just above post.
    */
-  enviada: { notas: duas("B5", "D6", 0.05, 0.11, 0.04), presenca: 0.38 },
 
   /*
-    Parity of moments with Discord (owner request, 3 November 2026).
+    Parity of moments with Discord.
     Seven moments that Discord marks with sound and Orwell didn't. The
     parity is in MOMENTS: the figures are from this family, with the voice and
     scale as always, and none copy or imitate Discord sounds.

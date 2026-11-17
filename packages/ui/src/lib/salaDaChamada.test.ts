@@ -52,7 +52,7 @@ describe("salaDaChamadaDe", () => {
  * already decided to enter a call and any room beats the channel. This answers
  * "take me to the room", and with two calls running there is no "the room":
  * picking one would be picking for the reader. Reading the line of any channel in
- * the sidebar (owner report, October 5, 2026, about not seeing who is in the room
+ * the sidebar (the bug: not seeing who is in the room
  * before entering).
  */
 describe("salaUnicaDaChamadaDe", () => {

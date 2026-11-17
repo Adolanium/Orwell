@@ -99,6 +99,17 @@ export function TicketRoomIcon(props: MarcaProps): React.JSX.Element {
   )
 }
 
+/** A polls room: three bars of different length, the shape of a result. */
+export function PollRoomIcon(props: MarcaProps): React.JSX.Element {
+  return (
+    <Marca {...props}>
+      <path d="M5 7.5h8" />
+      <path d="M5 12h14" />
+      <path d="M5 16.5h6" />
+    </Marca>
+  )
+}
+
 /**
  * The icon for a room, decided in one place.
  *
@@ -119,6 +130,7 @@ export function RoomGlyph({
 }: MarcaProps & { kind: "text" | "voice"; layout?: string | undefined }): React.JSX.Element {
   if (kind === "voice") return <VoiceRoomIcon size={size} />
   if (layout === "tickets") return <TicketRoomIcon size={size} />
+  if (layout === "polls") return <PollRoomIcon size={size} />
   return <TextRoomIcon size={size} />
 }
 
@@ -150,7 +162,7 @@ export function ChevronIcon({ size = 12, color }: MarcaProps): React.JSX.Element
 }
 
 /**
- * A crossed bell: muted notifications (owner request, 27 October 2026). Same
+ * A crossed bell: muted notifications. Same
  * family as the others: 24 grid, 1.7 stroke, rounded ends. The line crosses
  * the bell corner to corner, like the muted microphone in a call, to read as
  * "off" not as another bell.

@@ -10,7 +10,7 @@ import { aberturaDesmontou, aberturaMontou, origemDaAbertura } from "./abertura-
  *
  * Opening and connecting takes one to two seconds on a normal device. Until
  * 21 October 2026 the splash said "This is taking a while" and showed a button
- * at eight seconds. The owner said to remove the phrase: the opening screen
+ * at eight seconds. The phrase is gone: the opening screen
  * does not apologize. Only a discreet link remains, and only after thirty
  * seconds, for an opening truly stuck (a promise that never responds).
  *

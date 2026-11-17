@@ -2,13 +2,14 @@ import { memo, useEffect, useRef, useState } from "react"
 import type { Activity, ChannelRoom, ConnectionState, Profile } from "../../bridge.js"
 import type { View } from "../../types.js"
 import { Button } from "../../components/Button.js"
-import { GripIcon, LockIcon, PersonAddIcon, PlusIcon } from "../../icons.js"
+import { GripIcon, LockIcon, PersonAddIcon, PlusIcon, VotacoesIcon } from "../../icons.js"
 import { strings } from "../../strings.js"
 import { seccoes, type Seccao } from "../settings/seccoes.js"
 import { Avatar } from "../../components/Avatar.js"
 import { ChevronIcon, RoomGlyph } from "../../components/SidebarIcons.js"
 import { MarcaDeSilencio } from "../../components/MarcaDeSilencio.js"
-import { MarcaDeTransmissao, type Transmissao } from "../../components/MarcaDeChamada.js"
+import { MarcaDeChamada, MarcaDeTransmissao, type Transmissao } from "../../components/MarcaDeChamada.js"
+import { useVolumes } from "../../hooks/useVolumes.js"
 import { chaveDoSilencio } from "../../lib/silenciados.js"
 import { RoomIcon } from "../../components/RoomIcon.js"
 import { SeloOficial } from "../../components/SeloOficial.js"
@@ -90,9 +91,13 @@ export interface PresenteNaVoz {
   profile?: Profile | undefined
   presence?: "active" | "away" | "busy" | "idle" | undefined
   /**
-   * What this person is transmitting: screen, audio, or both. Takes the transmission indicator next to their face (owner request from October 27, 2026, 23:55). Absent means not transmitting, or not knowing: today you only know in the room we are in (the call participants). In other rooms the `transmite` field is missing from the presence update, which is from the core.
+   * What this person is transmitting: screen, audio, or both. Takes the transmission indicator next to their face. Absent means not transmitting, or not knowing: today you only know in the room we are in (the call participants). In other rooms the `transmite` field is missing from the presence update, which is from the core.
    */
   transmite?: Transmissao | undefined
+  /** Microphone off, as far as this device knows (12/11/2026). Absent means not known. */
+  calado?: boolean | undefined
+  /** Sound off (deafened). Known only for ourselves: the wire does not carry it. */
+  semSom?: boolean | undefined
 }
 
 /**
@@ -167,6 +172,8 @@ function RoomRow({
    * data from where it came from.
    */
   const jaEstaCa = arrasto?.tipo === "pessoa" && presentes.some((quem) => quem.address === arrasto.id)
+  // Who we muted on this device: zero volume, the same record as the call cards.
+  const { volumeDe } = useVolumes()
   // Two different things drop here, and the line responds to each in its own way:
   // a person joins the room (only if it's a voice room), a room reorganizes
   // before this one. See `Arrasto`.
@@ -275,7 +282,7 @@ function RoomRow({
             />
           )}
           {/* The number to be read, on the right, like the ones for private
-              conversations in Friends (owner request from 27 October 2026). */}
+              conversations in Friends. */}
           {porLer > 0 && (
             <span className="badge room-unread" aria-label={strings.sidebar.unreadCount(porLer)}>
               {porLer > 99 ? "99+" : porLer}
@@ -310,13 +317,19 @@ function RoomRow({
             const temMenu = onPersonMenu !== undefined
             const cara = (
               <>
-                {/* No presence ring in rooms: the owner doesn't want it in the community
-                    column (27 October 2026). Being in a voice room means being
+                {/* No presence ring in rooms: it does not belong in the community
+                    column. Being in a voice room means being
                     in a call by definition, and the room already says that; the
                     ring was extra noise in a short list. */}
                 <Avatar profile={quem.profile} fallback={quem.name[0] ?? "?"} />
                 <span className="voice-member-name">{quem.name}</span>
                 {quem.transmite && <MarcaDeTransmissao transmite={quem.transmite} />}
+                {/* The call marks, live (12/11/2026): the same ones as the member list. */}
+                {quem.calado && <MarcaDeChamada tipo="calado" nome={quem.name} className="voice-member-marca" size={13} />}
+                {quem.semSom && <MarcaDeChamada tipo="semSom" nome={quem.name} className="voice-member-marca" size={13} />}
+                {quem.address !== me && volumeDe(quem.address) === 0 && (
+                  <MarcaDeChamada tipo="silenciado" nome={quem.name} className="voice-member-marca" size={13} />
+                )}
                 {/**
                  * The drag handle, for users who can drag.
                  *
@@ -391,7 +404,6 @@ function ChannelSidebarInteira({
   view,
   rooms,
   aEsperaDeEntrada = [],
-  canalOficialPorEntrar,
   labelFor,
   iconFor,
   oficialFor,
@@ -411,6 +423,7 @@ function ChannelSidebarInteira({
   onReopenRoom,
   onRemoveRoom,
   onNewRoom,
+  onVotacoes,
   presenceForChannel,
   presenceHint,
   active,
@@ -472,13 +485,6 @@ function ChannelSidebarInteira({
    * gray, at the end of the list, with the name the link or invite said.
    */
   aEsperaDeEntrada?: { canal: string; nome: string; nota?: string; onCancelar: () => void }[] | undefined
-  /**
-   * The "Join the Orwell channel" button, for those not in the default channel
-   * (by choice at signup, or because they left). Missing: the server does not
-   * announce a default channel, the account is already there, or the host cannot
-   * join.
-   */
-  canalOficialPorEntrar?: { aEntrar: boolean; onEntrar: () => void } | undefined
   /** Display name for a channel: the other person for a DM, else its slug. */
   labelFor: (channel: string) => string
   /** Published icon for the channel, if any. See `space.meta`. */
@@ -589,6 +595,8 @@ function ChannelSidebarInteira({
   onReopenRoom?: ((room: string) => void) | undefined
   /** Only those who manage the channel see what organizes the rooms. */
   onNewRoom?: (() => void) | undefined
+  /** Open the polls page of this channel. Always the first row of the room tree, so it is found without a right click. */
+  onVotacoes?: ((channel: string) => void) | undefined
   /** The other person's presence, for DM rows; null for rooms. */
   presenceForChannel?: ((channel: string) => "active" | "away" | "busy" | "idle" | null) | undefined
   presenceHint?: string | undefined
@@ -599,7 +607,7 @@ function ChannelSidebarInteira({
    * The name of whoever is in a call, so the channel line can say it.
    *
    * `ringing` brings addresses, and an address does not answer the question
-   * "who is in the room?", which was the owner's report on 5 October 2026.
+   * "who is in the room?", which was the reported bug.
    * Missing leaves the line with the count, which is what it always said.
    */
   nameFor?: ((address: string) => string) | undefined
@@ -725,6 +733,20 @@ function ChannelSidebarInteira({
     }
   }, [open])
 
+  /** The polls row of a channel: first row under it, with an icon, found without a right click. */
+  const linhaDeVotacoes = (channel: string): React.JSX.Element | null =>
+    onVotacoes ? (
+      <div className="room-row">
+        <button className="room room-votacoes" onClick={() => onVotacoes(channel)}>
+          <span className="room-glyph" aria-hidden="true">
+            <VotacoesIcon size={13} />
+          </span>
+          <span className="room-votacoes-nome">{strings.paginaVotacoes.menu}</span>
+        </button>
+      </div>
+    ) : null
+
+
   return (
     <aside
       ref={aside}
@@ -833,8 +855,8 @@ function ChannelSidebarInteira({
 
                 The count was already on this line; the names only existed under
                 the OPEN channel, so knowing who is in a call meant opening the
-                channel first, and that was the owner's report on October 5,
-                2026. They go into the voices label, which is both the `title`
+                channel first, and that was the reported bug.
+                They go into the voices label, which is both the `title`
                 and the accessible name of the icon (see `components/Vozes.tsx`):
                 what you see on hover and what you hear are the same information.
 
@@ -1024,8 +1046,13 @@ function ChannelSidebarInteira({
                     )}
                   </div>
 
+                  {/* A channel with only the default room has no tree; its polls row still shows, for the open channel. */}
+                  {!temArvore && channel === active && onVotacoes && (
+                    <div className="room-tree">{linhaDeVotacoes(channel)}</div>
+                  )}
                   {temArvore && arvoreAberta && (
                     <div className="room-tree">
+                      {linhaDeVotacoes(channel)}
                       {grupos.map((grupo) => {
                         const categoriaAberta = !isCollapsed(chave.categoria(channel, grupo.category))
                         /*
@@ -1327,16 +1354,6 @@ function ChannelSidebarInteira({
           <Button variant="ghost" className="wide join-link" onClick={() => onPrompt("link")}>
             {strings.sidebar.joinWithLink}
           </Button>
-          {canalOficialPorEntrar && (
-            <Button
-              variant="ghost"
-              className="wide join-link"
-              disabled={canalOficialPorEntrar.aEntrar}
-              onClick={canalOficialPorEntrar.onEntrar}
-            >
-              {canalOficialPorEntrar.aEntrar ? strings.sidebar.aEntrarNoCanalOficial : strings.sidebar.entrarNoCanalOficial}
-            </Button>
-          )}
           {rooms.length === 0 && aEsperaDeEntrada.length === 0 && (
             <p className="sidebar-note">
               {strings.sidebar.noRoomsBefore}

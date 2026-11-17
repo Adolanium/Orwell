@@ -13,7 +13,7 @@ import {
 /**
  * Rooms reach newcomers without an admin online.
  *
- * Reported by the owner on 2/11/2026 (1.0.6): "users on mobile are not seeing the
+ * The bug in 1.0.6: "users on mobile are not seeing the
  * community rooms". Whoever joins a channel cannot decrypt the `channel.meta` of each
  * room: it was encrypted in an earlier epoch (forward secrecy). Two paths give them the
  * rooms: republishing by whoever arranges the channel (`republishRooms`, only with `renomear`)

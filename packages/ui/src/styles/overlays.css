@@ -37,6 +37,18 @@
   color: var(--danger);
 }
 
+/* An entry with a drawn icon before the label (the nudge, 12/11/2026). */
+.context-menu button.menu-com-icone {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.menu-icone {
+  display: inline-flex;
+  flex: none;
+}
+
 .context-menu hr {
   border: none;
   border-top: 1px solid var(--line);

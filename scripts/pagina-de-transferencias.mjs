@@ -171,7 +171,7 @@ const TEXTOS = {
 
 /** The "EN · PT" selector, same as the other pages: the page language gets
  *  `aria-current`, the other gets its `lang`. Footer only, like all pages
- *  since 3 November 2026 (owner request). */
+ *  now. */
 function selector(lingua, rotulo) {
   const en =
     lingua === "en"
@@ -191,9 +191,8 @@ function selector(lingua, rotulo) {
 /**
  * The whole page, in one language.
  *
- * In the "02 Editorial" direction of the front page since 3 November 2026
- * (owner request: the downloads page had a different style from the rest of
- * the site). Same header, same typeface, thin lines and nothing in cards: the
+ * In the "02 Editorial" direction of the front page (before this, the
+ * downloads page had a different style from the rest of the site). Same header, same typeface, thin lines and nothing in cards: the
  * `<body class="editorial">` triggers the rules in `src/estilo.css`.
  *
  * @param {"en" | "pt"} lingua
@@ -214,7 +213,7 @@ export function paginaDeTransferencias(lingua, { versao, versaoCurta, nomeDaVers
 
   /*
     One button per installer, and below it the version, size, filename and
-    checksum (owner request on 3 November 2026).
+    checksum.
     
     The button is a wide line, with the OS and the arrow, like the questions on
     the front page: large, and no box. The text says the OS ("Download for Windows"),

@@ -4,7 +4,7 @@
  * On the desktop app it copies through the main process (`clipboard:write`, the
  * Electron `clipboard`), not through Chromium's `navigator.clipboard`. Chromium's
  * depends on a permission and the window's focus, and in the app failed with
- * "could not copy" on all Copy buttons (owner report on October 28, 2026, when
+ * "could not copy" on all Copy buttons (seen when
  * copying the "Add device" link). In the browser it stays with `navigator.clipboard`,
  * which is what exists.
  *

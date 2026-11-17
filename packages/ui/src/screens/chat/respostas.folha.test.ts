@@ -2,7 +2,7 @@
  * The reply sheet: the quote on a single line, and the highlight of the original
  * that keeps fading with reduced motion, slower.
  *
- * The second point is house rules (the owner's Windows has animation effects off):
+ * The second point is house rules (Windows with animation effects off, reduced motion):
  * an animation that stops reads as a glitch. The search highlight stopped, with
  * `animation: none`, and disappeared all at once. Now it fades slower, overriding
  * the universal rule from `base.css`.

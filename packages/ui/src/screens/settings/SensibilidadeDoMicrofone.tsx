@@ -5,7 +5,7 @@ import { LIMIAR_MAXIMO, LIMIAR_MINIMO } from "../../hooks/usePrefs.js"
 import { strings, traduzirErro } from "../../strings.js"
 
 /**
- * Settings › Voice › "Microphone Sensitivity" (owner, November 2, 2026:
+ * Settings › Voice › "Microphone Sensitivity" (the requirement:
  * "we need an option with audio threshold"). This is Discord's "Input
  * Sensitivity".
  *

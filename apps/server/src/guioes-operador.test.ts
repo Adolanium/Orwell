@@ -81,7 +81,7 @@ function basePovoada(): void {
     INSERT INTO subscriptions VALUES ('${CANAL}', '@a:orwell.pt');
     INSERT INTO key_packages (address, package) VALUES ('@a:orwell.pt', x'01');
     INSERT INTO channel_claims VALUES ('${CANAL}', '@a:orwell.pt', 0);
-    INSERT INTO channel_activity VALUES ('${CANAL}');
+    INSERT INTO channel_activity (channel) VALUES ('${CANAL}');
     INSERT INTO channel_epochs VALUES ('${CANAL}', 17);
     INSERT INTO group_infos VALUES ('${CANAL}', x'01', 0);
     INSERT INTO cofres (escopo, chave, versao, conteudo, at_minute) VALUES ('canal:${CANAL}', 'AAAAAAAAAAAAAAAAAAAAAA', 1, x'01', 0);

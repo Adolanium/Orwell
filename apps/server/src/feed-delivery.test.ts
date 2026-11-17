@@ -231,7 +231,7 @@ describe("entrega do feed entre duas contas", () => {
   /**
    * Deleting deletes for readers, and is not undone.
    *
-   * Reported by the owner in production: *"when I delete them it only deletes
+   * The bug in production: *"when I delete them it only deletes
    * for the author, it does not delete for the others"*. It is here in full, with
    * the real server, because the two halves of the fault live in different places
    * and either one alone gives green: the request has to ARRIVE, and the wall

@@ -7,7 +7,6 @@ import {
   lerPreferencia,
   linguaActual,
   LINGUA_BASE,
-  linguasDoSistemaDoArranque,
   type Lingua,
   type PreferenciaDeLingua,
 } from "../strings.js"
@@ -58,11 +57,9 @@ function aoMudarEscolha(ouvinte: () => void): () => void {
 /**
  * This person's choice, and the action to change it.
  *
- * Returns the PREFERENCE not just the language: they are different things, and
- * the difference shows on the screen. Someone who picked "automatic" on an
- * English system sees the interface in English, but what's marked in settings
- * is "automatic", because that's what's picked, and because changing the
- * system language has to keep changing the app.
+ * Returns the PREFERENCE and the language: "auto" (no choice, from before
+ * 1.3.9 or from a sibling device) shows English, and settings light the
+ * language on screen.
  */
 export function usePreferenciaDeLingua(): {
   preferencia: PreferenciaDeLingua
@@ -90,7 +87,7 @@ export function usePreferenciaDeLingua(): {
  */
 export function aplicarEscolhaDeLingua(proxima: PreferenciaDeLingua): void {
   guardarPreferencia(proxima)
-  definirLingua(proxima === "auto" ? escolherLingua({ doSistema: linguasDoSistemaDoArranque() ?? doNavegador() }) : proxima)
+  definirLingua(escolherLingua({ guardada: proxima }))
   for (const ouvinte of [...ouvintesDaEscolha]) ouvinte()
 }
 
@@ -102,12 +99,6 @@ export function aoEscolherLingua(ouvinte: (preferencia: PreferenciaDeLingua) => 
   return () => {
     ouvintesDoGesto.delete(ouvinte)
   }
-}
-
-function doNavegador(): readonly string[] {
-  if (typeof navigator === "undefined") return []
-  const lista = navigator.languages
-  return Array.isArray(lista) && lista.length > 0 ? lista : [navigator.language]
 }
 
 function oAutomatico(): PreferenciaDeLingua {

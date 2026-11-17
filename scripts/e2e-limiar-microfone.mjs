@@ -1,5 +1,5 @@
 /**
- * "Microphone sensitivity" live (owner, 2/11/2026): the manual slider silences the
+ * "Microphone sensitivity" live: the manual slider silences the
  * microphone below it, and the OTHER side measures it.
  *
  * ```

@@ -64,8 +64,8 @@ export function itensDoMicrofone({
 }
 
 /*
-  The "My account" entry left both audio menus, by owner decision on August 19,
-  2026.
+  The "My account" entry left both audio menus, as a design
+  decision.
 
   The reason is about tidiness, not code: these menus open from the microphone
   and the sound, and what you look for in them is sound. You reach the account

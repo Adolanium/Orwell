@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Modal } from "./Modal.js"
-import { CATEGORIES, findEmoji, searchEmoji, type Emoji } from "./emoji.js"
+import { EMOJI_CATEGORY_TABS } from "./emoji-categorias.js"
+import type { Emoji } from "./emoji.js"
 import { useEmojiRecents } from "../hooks/usePrefs.js"
 import { strings } from "../strings.js"
 
@@ -14,6 +15,20 @@ import { strings } from "../strings.js"
  * in `.emoji-grid`.
  */
 const COLUMNS = 8
+
+type Catalog = typeof import("./emoji.js")
+
+let loaded: Catalog | undefined
+let loading: Promise<Catalog> | undefined
+
+/**
+ * Loads the emoji catalog once. It is a separate chunk (~36 KB gzip) so that
+ * app start does not pay for it; the first opening of the picker does.
+ */
+export function loadEmojiCatalog(): Promise<Catalog> {
+  loading ??= import("./emoji.js").then((module) => (loaded = module))
+  return loading
+}
 
 /** The recent separator only appears when there are recent items. */
 const RECENTS_ID = "recentes"
@@ -38,25 +53,40 @@ export function EmojiPicker({
   onClose: () => void
 }): React.JSX.Element {
   const { recents, remember } = useEmojiRecents()
+  const [catalog, setCatalog] = useState<Catalog | undefined>(loaded)
   const [query, setQuery] = useState("")
-  const [category, setCategory] = useState<string>(() => (recents.length > 0 ? RECENTS_ID : (CATEGORIES[0]?.id ?? "")))
+  const [category, setCategory] = useState<string>(() =>
+    recents.length > 0 ? RECENTS_ID : (EMOJI_CATEGORY_TABS[0]?.id ?? ""),
+  )
   const [cursor, setCursor] = useState(0)
   const [hint, setHint] = useState<string | null>(null)
   const grid = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (catalog) return
+    let alive = true
+    void loadEmojiCatalog().then((module) => {
+      if (alive) setCatalog(module)
+    })
+    return () => {
+      alive = false
+    }
+  }, [catalog])
 
   const searching = query.trim().length > 0
 
   // A recent emoji no longer known to the catalog still appears: it is better to
   // show it with its own glyph by name than make it disappear from someone's list
-  // because of an edit in this repository.
+  // because of an edit in this repository. Until the catalog arrives, every
+  // recent shows by its glyph.
   const recentList: Emoji[] = recents.map(
-    (char) => findEmoji(char) ?? { char, name: char, haystack: "" },
+    (char) => catalog?.findEmoji(char) ?? { char, name: char, haystack: "" },
   )
 
-  const current = CATEGORIES.find((entry) => entry.id === category)
+  const current = catalog?.CATEGORIES.find((entry) => entry.id === category)
 
   const shown: Emoji[] = searching
-    ? searchEmoji(query)
+    ? (catalog?.searchEmoji(query) ?? [])
     : category === RECENTS_ID
       ? recentList
       : (current?.emojis ?? [])
@@ -65,9 +95,7 @@ export function EmojiPicker({
     ? strings.emoji.results
     : category === RECENTS_ID
       ? strings.emoji.recents
-      : current
-        ? strings.emoji.categorias[current.id]
-        : strings.emoji.title
+      : strings.emoji.categorias[category as keyof typeof strings.emoji.categorias] ?? strings.emoji.title
 
   // Switching lists puts the cursor at the start. Without this, Tab would enter
   // the grid at a button that no longer exists, and focus would fall to the page body.
@@ -137,7 +165,7 @@ export function EmojiPicker({
             🕐
           </button>
         )}
-        {CATEGORIES.map((entry) => (
+        {EMOJI_CATEGORY_TABS.map((entry) => (
           <button
             key={entry.id}
             type="button"
@@ -202,7 +230,7 @@ export function EmojiPicker({
             {emoji.char}
           </button>
         ))}
-        {shown.length === 0 && <p className="emoji-empty">{strings.emoji.noResults}</p>}
+        {catalog && shown.length === 0 && <p className="emoji-empty">{strings.emoji.noResults}</p>}
       </div>
 
       <footer className="emoji-foot">

@@ -1,7 +1,7 @@
 /**
  * Join and leave a call, many times, with real accounts.
  *
- * It exists because of an owner report on August 10: joined a call, went fine;
+ * It exists because of a bug report: joined a call, went fine;
  * joined a SECOND time and stopped seeing one of the people, while a third kept
  * seeing both. Asymmetric, which is the signature of stale state on one side only.
  *
@@ -24,7 +24,7 @@
  * accounts and joins and leaves calls dozens of times. Against production that is
  * noise on top of people actually talking, and fills the database with disposable
  * accounts. On August 6 a load run against production deleted the founding record
- * that the owner had just published. Point it at production when he asks, with
+ * that had just been published. Point it at production only on purpose, with
  * `--url=https://orwell.pt`, never by default.
  *
  * WHAT THIS MEASURES: after leaving and rejoining, whether each pair gets back a

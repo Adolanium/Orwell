@@ -15,7 +15,7 @@ function chaveDeConta(identity: Identity): Uint8Array {
  * before, created two MLS groups with the same name (in 0.9, `!dm-a.b`; in
  * 1.0, the opaque address from the two accounts' DH, which both sides also compute identically).
  * Each side wrote to its own group and the other did not read it. In the interface
- * this produced the owner's report: "Friends (1)" and a pending request at the same time.
+ * this produced the bug: "Friends (1)" and a pending request at the same time.
  *
  * These tests use accounts and a real server. The proof is always the same:
  * at the end both sides are in the SAME group (the same epoch and the same leaves)

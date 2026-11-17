@@ -13,6 +13,8 @@ import {
   CAPACIDADE_APARELHOS,
   CAPACIDADE_BUNDLE,
   CAPACIDADE_EMPARELHAMENTO,
+  CAPACIDADE_BUGS,
+  CAPACIDADE_HISTORICO_RECUSADO,
   CAPACIDADE_SFU,
   PROTOCOL_VERSION,
   signDeviceManifest,
@@ -160,11 +162,15 @@ afterAll(async () => {
   rmSync(dataDir, { recursive: true, force: true })
 })
 
-async function login(client: TestClient, identity: ReturnType<typeof generateIdentity>): Promise<ServerFrame> {
+async function login(
+  client: TestClient,
+  identity: ReturnType<typeof generateIdentity>,
+  extra: readonly string[] = [],
+): Promise<ServerFrame> {
   // A current client. Without `commit-after-echo` the server does not save or
   // deliver the Welcomes for this connection, and the tests for directed invites,
   // which is what we measure here, would have nothing to measure.
-  client.send({ t: "hello", version: PROTOCOL_VERSION, capabilities: ["commit-after-echo"] })
+  client.send({ t: "hello", version: PROTOCOL_VERSION, capabilities: ["commit-after-echo", ...extra] })
   await client.nextOf("hello.ok")
   client.address = identity.address
   client.send({ t: "auth.begin", address: identity.address, signingKey: toBase64(identity.signingPublicKey) })
@@ -774,6 +780,8 @@ describe("presença", () => {
     client.send({ t: "hello", version: PROTOCOL_VERSION })
     const hello = await client.nextOf("hello.ok")
     expect(hello.capabilities).toContain("presence")
+    // "Report a bug" (12/11/2026): the button only shows where this is announced.
+    expect(hello.capabilities).toContain(CAPACIDADE_BUGS)
     client.close()
   })
 })
@@ -1543,10 +1551,10 @@ describe("os tectos por conta", () => {
    * measured: the `pong` comes after seventy requests, so the server processed
    * them all and chose not to answer ten.
    */
-  it("pedir histórico pára no tecto", async () => {
+  it("pedir histórico pára no tecto, e a recusa é dita a quem a sabe ler", async () => {
     const client = await TestClient.connect(gatewayUrl)
     const identity = generateIdentity(HOME)
-    expect((await login(client, identity)).t).toBe("auth.ok")
+    expect((await login(client, identity, [CAPACIDADE_HISTORICO_RECUSADO])).t).toBe("auth.ok")
     const channel = moradaDeSala(HOME)
     client.send({ t: "channel.subscribe", channels: [channel] })
     await client.sync()
@@ -1555,10 +1563,33 @@ describe("os tectos por conta", () => {
     for (let i = 0; i < pedidos; i++) client.send({ t: "channel.backfill", channel, limit: 1 })
     const respostas = await escoarAteAoPong(client, pedidos + 20)
 
-    expect(respostas.filter((frame) => frame.t === "channel.backfill.page")).toHaveLength(
-      Gateway.BACKFILLS_POR_MINUTO,
-    )
+    const paginas = respostas.filter((frame) => frame.t === "channel.backfill.page")
+    // Above the cap the answer is a refusal, said (12/11/2026): an empty page with
+    // `retryAfterMs`. It used to be silence, and the client waited 10 s for nothing.
+    const recusas = paginas.filter((frame) => frame.retryAfterMs !== undefined)
+    expect(paginas.length - recusas.length).toBe(Gateway.BACKFILLS_POR_MINUTO)
+    expect(recusas).toHaveLength(10)
+    for (const recusa of recusas) {
+      expect(recusa.events).toEqual([])
+      expect(recusa.retryAfterMs).toBeGreaterThan(0)
+      expect(recusa.retryAfterMs).toBeLessThanOrEqual(60_000)
+    }
 
+    client.close()
+  }, 30_000)
+
+  it("um cliente que não sabe ler a recusa do histórico continua a receber silêncio", async () => {
+    // An older client reads an empty page as "no event there": see `CAPACIDADE_HISTORICO_RECUSADO`.
+    const client = await TestClient.connect(gatewayUrl)
+    const identity = generateIdentity(HOME)
+    expect((await login(client, identity)).t).toBe("auth.ok")
+    const channel = moradaDeSala(HOME)
+    client.send({ t: "channel.subscribe", channels: [channel] })
+    await client.sync()
+    const pedidos = Gateway.BACKFILLS_POR_MINUTO + 10
+    for (let i = 0; i < pedidos; i++) client.send({ t: "channel.backfill", channel, limit: 1 })
+    const respostas = await escoarAteAoPong(client, pedidos + 20)
+    expect(respostas.filter((frame) => frame.t === "channel.backfill.page")).toHaveLength(Gateway.BACKFILLS_POR_MINUTO)
     client.close()
   }, 30_000)
 
@@ -1902,7 +1933,22 @@ describe("gateway: o manifesto de aparelhos", () => {
   it("republicar a mesma versão é recusado com stale-version, e a guardada fica", async () => {
     const ana = await TestClient.connect(gatewayUrl)
     const identity = generateIdentity(HOME)
-    expect((await login(ana, identity)).t).toBe("auth.ok")
+    // With the chain: since 1.3.16 only a device in the manifest changes it (a
+    // login with the account key alone has no device), and the second publish
+    // must reach the version check.
+    ana.send({ t: "hello", version: PROTOCOL_VERSION, capabilities: ["commit-after-echo"] })
+    await ana.nextOf("hello.ok")
+    ana.address = identity.address
+    ana.send({
+      t: "auth.begin",
+      address: identity.address,
+      signingKey: toBase64(identity.deviceSigningPublicKey),
+      accountKey: toBase64(identity.signingPublicKey),
+      deviceCert: toBase64(identity.credential.signature),
+    })
+    const desafio = await ana.nextOf("auth.challenge")
+    ana.send({ t: "auth.finish", signature: toBase64(signWithDevice(identity, fromBase64(desafio.nonce))) })
+    expect((await ana.nextOf("auth.ok")).t).toBe("auth.ok")
 
     const v1 = manifestoDe(identity, 1)
     ana.send({ t: "manifest.publish", manifest: v1 })
@@ -2579,6 +2625,95 @@ describe("batimento do websocket", () => {
         })
       })
       expect(ping).toBe(true)
+    } finally {
+      Gateway.BATIMENTO_MS = anterior
+      socket.close()
+    }
+  })
+
+  /*
+    A phone whose page the system suspended (screen locked) answers nothing,
+    and its TCP connection can stay up for many minutes. A connection without
+    media in the SFU is closed after `PINGS_SEM_PONG_SEM_MEDIA` unanswered
+    pings; one with media after two (`scripts/e2e-ligacao-muda-sai-da-chamada.ts`).
+    The longer limit covers the nginx and kernel buffers the server cannot see:
+    a ping queued behind them is late, not unanswered.
+  */
+  it("uma ligação sem media que não responde aos pings é fechada ao fim do limite sem media", async () => {
+    const anterior = Gateway.BATIMENTO_MS
+    Gateway.BATIMENTO_MS = 40
+    // `autoPong: false`: the suspended page, whose socket answers nothing.
+    const socket = new WebSocket(gatewayUrl, { autoPong: false })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once("open", () => resolve())
+        socket.once("error", reject)
+      })
+      let pings = 0
+      socket.on("ping", () => pings++)
+      const fechou = await new Promise<boolean>((resolve) => {
+        const prazo = setTimeout(() => resolve(false), 2000)
+        socket.once("close", () => {
+          clearTimeout(prazo)
+          resolve(true)
+        })
+      })
+      expect(fechou).toBe(true)
+      expect(Gateway.PINGS_SEM_PONG_SEM_MEDIA).toBeGreaterThan(Gateway.PINGS_SEM_PONG_MAXIMOS)
+      expect(pings).toBe(Gateway.PINGS_SEM_PONG_SEM_MEDIA)
+    } finally {
+      Gateway.BATIMENTO_MS = anterior
+      socket.terminate()
+    }
+  })
+
+  /*
+    Any frame from the client proves it is alive. A pong can arrive late when
+    the uplink is busy (a large upload queued in front of it), but the frames
+    of that upload are already arriving.
+  */
+  it("uma ligação que não responde aos pings mas envia tramas nunca é fechada", async () => {
+    const anterior = Gateway.BATIMENTO_MS
+    Gateway.BATIMENTO_MS = 40
+    const socket = new WebSocket(gatewayUrl, { autoPong: false })
+    let relogio: ReturnType<typeof setInterval> | null = null
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once("open", () => resolve())
+        socket.once("error", reject)
+      })
+      let pings = 0
+      socket.on("ping", () => pings++)
+      let fechou = false
+      socket.once("close", () => (fechou = true))
+      relogio = setInterval(() => socket.send(JSON.stringify({ t: "ping" })), 30)
+      // Well past `PINGS_SEM_PONG_SEM_MEDIA` beats.
+      await new Promise((resolve) => setTimeout(resolve, (Gateway.PINGS_SEM_PONG_SEM_MEDIA + 5) * 40))
+      expect(pings).toBeGreaterThan(Gateway.PINGS_SEM_PONG_SEM_MEDIA)
+      expect(fechou).toBe(false)
+      expect(socket.readyState).toBe(WebSocket.OPEN)
+    } finally {
+      if (relogio) clearInterval(relogio)
+      Gateway.BATIMENTO_MS = anterior
+      socket.terminate()
+    }
+  })
+
+  it("uma ligação que responde aos pings nunca é fechada", async () => {
+    const anterior = Gateway.BATIMENTO_MS
+    Gateway.BATIMENTO_MS = 40
+    const socket = new WebSocket(gatewayUrl)
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once("open", () => resolve())
+        socket.once("error", reject)
+      })
+      let fechou = false
+      socket.once("close", () => (fechou = true))
+      // Twenty-five beats.
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      expect(fechou).toBe(false)
+      expect(socket.readyState).toBe(WebSocket.OPEN)
     } finally {
       Gateway.BATIMENTO_MS = anterior
       socket.close()

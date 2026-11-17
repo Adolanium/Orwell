@@ -392,6 +392,42 @@ describe("channel.sinal", () => {
     expect((await carla.cliente.proximaDe("channel.sinal")).sinal).toBe("D".repeat(100))
   })
 
+  it("a isenção de quem gastou pouco conta por conta, não por ligação (revisão do 1.3.8, R3)", async () => {
+    // Per connection, an account with k tabs or devices took k exemptions a
+    // minute, over the channel's cap. Per account, the second connection of the
+    // same account has already spent what the first spent.
+    config.sinal = { bytesPorCanalPorMinuto: 700 }
+    const ana = guardar(await entrar(NOVO))
+    const bruno = guardar(await entrar(NOVO))
+    const carla = guardar(await entrar(NOVO))
+    const dora = guardar(await entrar(NOVO))
+    const canal = canalNovo()
+    await sentar(ana.cliente, [bruno, carla, dora], canal)
+    const outraAna = guardar(await entrar(NOVO, ana.identidade))
+    outraAna.cliente.enviar({ t: "channel.subscribe", channels: [canal] })
+    await outraAna.cliente.sincronizar()
+    for (const c of [ana, bruno, carla, dora, outraAna]) {
+      await c.cliente.sincronizar()
+      c.cliente.pendentes()
+    }
+
+    // 40 chars to the 4 other connections cost 160 each. Bruno, Carla and Dora fill the channel's minute.
+    const sinal = "A".repeat(40)
+    for (const [quem, vezes] of [[bruno, 2], [carla, 2], [dora, 1]] as const) {
+      for (let i = 0; i < vezes; i++) quem.cliente.enviar({ t: "channel.sinal", channel: canal, sinal })
+      await quem.cliente.sincronizar()
+      expect(quem.cliente.pendentes().filter((f) => f.t === "channel.sinal.rejected")).toStrictEqual([])
+    }
+    // Ana's first signal of the minute passes on the exemption, with the channel full.
+    ana.cliente.enviar({ t: "channel.sinal", channel: canal, sinal })
+    await ana.cliente.sincronizar()
+    expect(ana.cliente.pendentes().filter((f) => f.t === "channel.sinal.rejected")).toStrictEqual([])
+    // Her other connection does not get a second exemption.
+    outraAna.cliente.enviar({ t: "channel.sinal", channel: canal, sinal, ref: "outra" })
+    const recusa = await outraAna.cliente.proximaDe("channel.sinal.rejected")
+    expect(recusa).toMatchObject({ code: "sinal-channel-busy", ref: "outra" })
+  })
+
   it("não fecha à primeira; fecha com sinal-abuse quem insiste depois das recusas", async () => {
     config.sinal = { recusasAteFechar: 3 }
     const intruso = guardar(await entrar(NOVO))

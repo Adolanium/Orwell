@@ -4,7 +4,7 @@ import { CHAVE_LOCAL, MARCA_NA_CONTA, calarSalaComumUmaVez } from "./salaComumCa
 
 /**
  * The common channel comes with sound off, via the mute that already exists
- * (owner decision, November 3, 2026). Once only: whoever turns it back on keeps
+ * on this device. Once only: whoever turns it back on keeps
  * it on.
  */
 

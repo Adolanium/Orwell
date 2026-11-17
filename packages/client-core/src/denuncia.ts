@@ -17,6 +17,7 @@ import {
   type Motivo,
   type PedidoAssinado,
   type RotaAssinada,
+  type RotaDosBugs,
 } from "@enclave/protocol"
 import type { DenunciaPreparada } from "./denuncia-construir.js"
 
@@ -27,7 +28,7 @@ import type { DenunciaPreparada } from "./denuncia-construir.js"
  * the chain that links it to the account. The server verifies in
  * `apps/server/src/pedido-assinado.ts`.
  */
-export function assinarPedido(identidade: Identity, rota: RotaAssinada, corpo: unknown, agora = Date.now()): PedidoAssinado {
+export function assinarPedido(identidade: Identity, rota: RotaAssinada | RotaDosBugs, corpo: unknown, agora = Date.now()): PedidoAssinado {
   const nonce = toBase64(crypto.getRandomValues(new Uint8Array(16)))
   const semAssinatura = {
     endereco: identidade.address,

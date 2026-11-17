@@ -2,7 +2,7 @@
  * The marquee (`Andante`): only what does not fit scrolls, and it scrolls even
  * with reduced motion.
  *
- * The second point came from a report by the owner on October 28, 2026: "the
+ * The second point came from a bug report: "the
  * marquee is not looping where it does not fit". The sheet would stop the
  * marquee with `prefers-reduced-motion`, which Windows with animations off
  * turns on by itself, and the text stayed cut off forever.

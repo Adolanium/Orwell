@@ -4,9 +4,11 @@ import { MarcaDeChamada } from "../../components/MarcaDeChamada.js"
 import { obterContextoDeAudio } from "../../lib/contextoDeAudio.js"
 import { strings } from "../../strings.js"
 import { NomeDePessoa } from "../../components/NomeDePessoa.js"
+import type { Profile } from "../../bridge.js"
 
 /**
- * A participant's video, or their initial when the camera is off.
+ * A participant's video, or, with the camera off, their profile photo, or the
+ * initial of their name when they have no photo (16/11/2026).
  *
  * The stream is attached imperatively because `srcObject` is not a serialisable
  * attribute — React cannot set it from JSX.
@@ -23,6 +25,7 @@ export function VideoTile({
   estado,
   volume = 1,
   proprio = false,
+  profile,
 }: {
   stream: MediaStream | null
   /**
@@ -57,6 +60,8 @@ export function VideoTile({
    */
   mostrarVoz?: boolean
   label: string
+  /** The decrypted profile, from the same directory as the rest of the app: the photo with the camera off. */
+  profile?: Profile | undefined
   /** The account, for the name derived from the address to come out discreet (`NomeDePessoa`). */
   endereco?: string | undefined
   connected: boolean
@@ -192,7 +197,12 @@ export function VideoTile({
         muted={muted || amplificado}
         className={[hasVideo ? "" : "audio-only", proprio ? "video-proprio" : ""].filter(Boolean).join(" ")}
       />
-      {!hasVideo && <span className="tile-initial">{label[0]?.toUpperCase() ?? "?"}</span>}
+      {!hasVideo &&
+        (profile?.avatarDataUrl ? (
+          <img className="tile-cara" src={profile.avatarDataUrl} alt="" />
+        ) : (
+          <span className="tile-initial">{(profile?.displayName?.trim()?.[0] ?? label[0])?.toUpperCase() ?? "?"}</span>
+        ))}
       <footer className="tile-label">
         {/* Next to the name, before it: this is what you search for in a grid of
             faces when nobody answers. An `role="img"` with an accessible name

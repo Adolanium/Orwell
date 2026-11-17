@@ -39,6 +39,11 @@ export interface SessionStatus {
   aviso?: AvisoDeSuspensao | undefined
   /** Only in `denuncia-decidida`: the decision on a report that this account made. */
   decisao?: "suspensa" | "sem-accao" | undefined
+  /**
+   * Only in `device-revoked` (1.3.16): the core checked the signed manifest that
+   * removed this device. The app signs out and erases this device's vault.
+   */
+  removido?: true | undefined
 }
 
 export interface RoutingContext {

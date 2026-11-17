@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useEstavel } from "../../hooks/useEstavel.js"
 import { copiarTexto } from "../../lib/copiar.js"
-import type { Participant } from "@enclave/client-core"
+import type { FichaDeReaccao, Participant } from "@enclave/client-core"
+import { EmojiPicker } from "../../components/EmojiPicker.js"
+import { useEcraLargo } from "../../hooks/useEcraLargo.js"
+import type { Etiquetas } from "../../components/RichText.js"
+import type { MentionCandidate } from "../../lib/mentions.js"
 import { useBridge } from "../../App.js"
 import type { ConnectionState, PinnedMessage, Profile } from "../../bridge.js"
 import type { ChatMessage, MessageExtras } from "../../types.js"
@@ -15,7 +20,7 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { useToast } from "../../components/Toast.js"
 import { CameraIcon, MicIcon, PeopleIcon, PinIcon, SearchIcon } from "../../icons.js"
 import type { CargoDoMembro } from "../../lib/agruparMembros.js"
-import { connectionLabel, isDirect } from "../../lib/format.js"
+import { connectionLabel, isDirect, serverOf } from "../../lib/format.js"
 import { strings, traduzirErro } from "../../strings.js"
 import { RoomIcon } from "../../components/RoomIcon.js"
 import { SeloOficial } from "../../components/SeloOficial.js"
@@ -33,13 +38,16 @@ import { MemberPanel } from "./MemberPanel.js"
 import { PinnedPanel } from "./PinnedPanel.js"
 import { ProcuraPanel } from "./ProcuraPanel.js"
 import { Timeline } from "./Timeline.js"
-import type { Apuramento } from "../../lib/votacoes.js"
+import { itensDeMedia, temMedia } from "./menuDeMedia.js"
+import { ligacaoDaMensagem } from "../../lib/ligacaoDaMensagem.js"
+import { votacaoDe, type Apuramento } from "../../lib/votacoes.js"
 import type { EstadoDaProcura } from "../../hooks/useProcura.js"
 import type { Achado } from "../../lib/procura.js"
 import { BarraDeSincronia } from "../../components/BarraDeSincronia.js"
-import { BarraDoHistorico, useHistoricoDosIrmaos } from "../../components/BarraDoHistorico.js"
+import { AvisoDoEnvio, BarraDoHistorico, useHistoricoDosIrmaos } from "../../components/BarraDoHistorico.js"
 import { useSincronia } from "../../hooks/useSincronia.js"
 import { podeResponder, type Citacao, type RespostaPendente } from "../../lib/respostas.js"
+import { miniaturaParaFixar } from "../../lib/miniaturaFixada.js"
 
 /** What the shell answers for each line. See `Timeline`. */
 export type ChatScreenPedidoDe = (
@@ -67,6 +75,7 @@ export interface ChatScreenPedidoDeAmizade {
 export function ChatScreen({
   active,
   callChannel,
+  semTransmitir = false,
   setCallChannel,
   setCallRoom,
   ringing,
@@ -128,9 +137,12 @@ export function ChatScreen({
   onPedidoResposta,
   apuramentos,
   onVotar,
+  reaccoes,
+  onReagir,
+  etiquetas,
   onVotacao,
   pedidoDeAmizade = null,
-  escritaTrancada = null,
+  escritaTrancada: escritaTrancadaDoAnfitriao = null,
   directaBloqueada = false,
   onResponderAmizade,
   onPedirAmizade,
@@ -195,6 +207,8 @@ export function ChatScreen({
    */
   presentesNaSala?: readonly string[] | undefined
   callChannel: string | null
+  /** This account lacks `transmitir` in the call's room (12/11/2026). See `CallPanel`. */
+  semTransmitir?: boolean | undefined
   setCallChannel: (channel: string | null) => void
   /** The room we are in. Without this the shell assumes we are in the default room,
    *  and our face does not show up where we actually are. */
@@ -358,6 +372,17 @@ export function ChatScreen({
   apuramentos?: Map<string, Apuramento> | undefined
   /** Vote for an option in a poll on this conversation. */
   onVotar?: ((message: ChatMessage, opcao: number) => void) | undefined
+  /** The reaction chips of this channel, by message id. From the shell, like `apuramentos`. */
+  reaccoes?: ReadonlyMap<string, readonly FichaDeReaccao[]> | undefined
+  /** Press or release an emoji on a message. Absent (old host): no React button. */
+  onReagir?: ((message: ChatMessage, emoji: string) => void) | undefined
+  /**
+   * Roles and rooms as tags (12/11/2026): what `@` and `#` suggest in the box, and
+   * how the chips read in the conversation. See `lib/etiquetas.ts`.
+   */
+  etiquetas?:
+    | (Omit<Etiquetas, "mencoes"> & { cargos: readonly MentionCandidate[]; salas: readonly MentionCandidate[] })
+    | undefined
   /** Open the sheet to create a poll. Absent means absent: no entry. */
   onVotacao?: (() => void) | undefined
   /**
@@ -441,11 +466,22 @@ export function ChatScreen({
   destacada?: string | null | undefined
 }): React.JSX.Element {
   const bridge = useBridge()
+  /*
+    The member list is memoized and holds 400 people in a big channel: its
+    handlers keep one identity, so a live message does not draw it again.
+    They are called on a click, never while drawing.
+  */
+  const fecharMembros = useEstavel(() => setMembersOpen(false))
+  const convidarPeloLink = useEstavel(() => onConvidar("link"))
+  const abrirPerfilDoMembro = useEstavel((quem: string) => onOpenProfile(quem))
+  const menuDoMembro = useEstavel((quem: string, at: { x: number; y: number }) => onUserMenu(quem, at))
   /* The sync state of the open channel (S5): the "Receiving the channel…" bar
      and the marker of the place in the conversation. */
   const sincronia = useSincronia(active)
   // The history coming from a sibling device (1.0 "Arca"): the bar above the conversation.
   const historicoDosIrmaos = useHistoricoDosIrmaos()
+  /** The same breakpoint the layout uses for the sidebar column. */
+  const ecraLargo = useEcraLargo()
   const toast = useToast()
   const confirmar = useConfirmar()
   /** On narrow screens the member column becomes a slide-in panel; this is it,
@@ -545,6 +581,26 @@ export function ChatScreen({
   /** The names, not the addresses: an indicator with `@ana:servidor` does not read well. */
   const typistNames = useMemo(() => typists.map(nameFor), [typists, nameFor])
 
+  /*
+    The names this screen is about to show and does not have (12/11/2026): the
+    authors of the last messages of the open channel, and who they mention. In
+    the common room the login no longer asks for everyone, only for who is
+    online; the rest is asked for here, when it is needed. The session asks only
+    in the common room, once per account, under the request cap.
+  */
+  const pedirPerfis = bridge.channels.pedirPerfis
+  useEffect(() => {
+    if (!active || !pedirPerfis) return
+    const faltam = new Set<string>()
+    for (const mensagem of messages.slice(-NOMES_A_PEDIR_DAS_ULTIMAS)) {
+      if (mensagem.channel !== active) continue
+      for (const conta of [mensagem.sender, ...(mensagem.payload.mentions ?? [])]) {
+        if (conta && conta !== address && !directory.get(conta)?.displayName) faltam.add(conta)
+      }
+    }
+    if (faltam.size > 0) void pedirPerfis(active, [...faltam]).catch(() => undefined)
+  }, [active, messages, directory, address, pedirPerfis])
+
   /**
    * Who can be mentioned in this conversation: the people in THIS channel.
    *
@@ -568,6 +624,24 @@ export function ChatScreen({
    */
   const podeMencionarTodos =
     active !== null && !isDirect(active) && (bridge.channels.mayMentionAll?.(active, activeRoom) ?? false)
+
+  /**
+   * The writing bar of a read-only room (12/11/2026): a sentence in its place,
+   * in the same molde as a direct conversation without friendship. Reactions
+   * stay. Absent on the bridge (an older host) means "writes", as before.
+   *
+   * Read on each render, like `podeMencionarTodos`: a change of the room or of
+   * someone's roles re-renders this screen, and the bar follows without reload.
+   */
+  const escritaDaSala =
+    active !== null &&
+    !isDirect(active) &&
+    address !== null &&
+    bridge.channels.permissoes !== undefined &&
+    !bridge.channels.permissoes.em(active, address, { sala: activeRoom }).includes("escrever")
+      ? strings.soLeitura.semEscrita
+      : null
+  const escritaTrancada = escritaTrancadaDoAnfitriao ?? escritaDaSala
 
   /**
    * The nudge, MSN style. Only in direct conversations. The guard lives inside
@@ -611,15 +685,50 @@ export function ChatScreen({
     not appear.
     */
   const responderAqui = !notasDeVersao && !escritaTrancada && !salaAfkAberta ? onResponder : undefined
+  /*
+    React where a reply is possible, for the same reasons: release notes, a locked
+    conversation and the AFK room take nothing new. A message without `id`
+    (a friend request) is not something said.
+  */
+  const podeReagir = (message: ChatMessage): boolean =>
+    onReagir !== undefined &&
+    responderAqui !== undefined &&
+    message.payload.id !== undefined &&
+    message.payload.moderada !== true
+  /** The message whose reaction picker is open, or nothing. One picker for the whole conversation. */
+  const [aReagir, setAReagir] = useState<ChatMessage | null>(null)
+  /** The link to a message of this channel, for "Copy message link". `null` with no account or no id. */
+  const ligacaoDe = (message: ChatMessage): string | null =>
+    address !== null && message.payload.id !== undefined
+      ? ligacaoDaMensagem(serverOf(address), address, {
+          channel: message.channel,
+          room: (message.payload as { room?: string }).room ?? "",
+          id: message.payload.id,
+        })
+      : null
+  /**
+   * Can this account close this poll now? Its author or a moderator, while it is open.
+   * The real judgement is in the core and in the reader (`fechosDe`); this only avoids offering it.
+   */
+  const podeFecharVotacao = (message: ChatMessage): boolean => {
+    const id = message.payload.id
+    if (!id || !bridge.channels.editMessage || !votacaoDe(message.payload) || message.payload.moderada === true) return false
+    const fecho = apuramentos?.get(id)?.fechoEm ?? null
+    if (fecho !== null && fecho <= Date.now()) return false
+    return message.sender === address || podeModerar
+  }
   const temMenu = (message: ChatMessage): boolean =>
     // Deleted by moderation: no text left, nothing to do to it.
     message.payload.moderada !== true &&
     ((message.payload.body ?? "") !== "" ||
+      temMedia(message, bridge.media?.bytes) ||
+      podeFecharVotacao(message) ||
       (responderAqui !== undefined && podeResponder(message)) ||
       (podeFixar && message.payload.id !== undefined) ||
       (message.sender === address && (bridge.channels.editMessage || bridge.channels.deleteMessage) !== undefined) ||
       (podeModerar && message.payload.id !== undefined && bridge.channels.deleteMessage !== undefined) ||
-      podeDenunciar(message))
+      podeDenunciar(message) ||
+      podeReagir(message))
 
   /**
    * The shake lives in the conversation frame, not in the whole window.
@@ -650,6 +759,8 @@ export function ChatScreen({
             />
             <h1>{labelFor(active)}</h1>
             {oficial && <SeloOficial />}
+            {/* Wide screen: the history progress lives here, beside the name. */}
+            {ecraLargo && <BarraDoHistorico estado={historicoDosIrmaos} noTopo />}
             {/* The lock and "Open" left the header
                 (0.8.0). That the shared channel is open is said in the people
                 list (`members.openChannel`). The `margin-left: auto` that they
@@ -771,8 +882,8 @@ export function ChatScreen({
             {/* The nudge was here, between video and invite. It moved to the composer
                 bar, next to emojis: it is a gesture you give to the other
                 person, not a window you open. */}
-            {/* "Invite…" was also here, until October 26, 2026. It left at the owner's
-                request: it was the same button the members panel has in the
+            {/* "Invite…" was also here, until October 26, 2026. It left because
+                it was the same button the members panel has in the
                 footer, in primary, and two equal doors side by side do not
                 speak to each other. Whoever invites does so through the members
                 panel or the channel menu (`menu.invite`). In a direct
@@ -833,6 +944,7 @@ export function ChatScreen({
           participants={participants}
           localStream={localStream}
           screenStream={screenStream}
+          semTransmitir={semTransmitir}
           selfLabel={profile.displayName || strings.call.selfFallback}
           selfProfile={profile}
           nameFor={nameFor}
@@ -899,7 +1011,7 @@ export function ChatScreen({
       )}
 
       {active && salaAfkAberta ? (
-        /* The AFK room takes no text (the owner, 2/11/2026): no conversation, no
+        /* The AFK room takes no text: no conversation, no
            input box, no files, no reactions. */
         <div className="sala-afk-vazia" role="status">
           {strings.salaAfk.semVozNemTexto}
@@ -911,7 +1023,8 @@ export function ChatScreen({
               only opened on ours and the action had nowhere to go. What each entry
               offers is filtered in the menu below: edit and delete stay only on what is ours. */}
           <BarraDeSincronia estado={sincronia.estado} />
-          <BarraDoHistorico estado={historicoDosIrmaos} />
+          <AvisoDoEnvio estado={historicoDosIrmaos} />
+          {!ecraLargo && <BarraDoHistorico estado={historicoDosIrmaos} />}
           {notasDeVersao ? (
             <NotasDeVersao />
           ) : (
@@ -943,6 +1056,10 @@ export function ChatScreen({
             onPedidoResposta={onPedidoResposta}
             apuramentos={apuramentos}
             {...(onVotar ? { onVotar } : {})}
+            reaccoes={reaccoes}
+            etiquetas={etiquetas}
+            {...(onReagir ? { onReagir } : {})}
+            {...(onReagir && responderAqui ? { onPedirReaccao: setAReagir } : {})}
             /*
               The message menu always exists: "Copy text" is for everyone and the
               first entry. The "⋯" that appears on hover opens the same
@@ -953,6 +1070,7 @@ export function ChatScreen({
             }}
             temMenu={temMenu}
             podeMenuAlheio
+            ligacaoDe={ligacaoDe}
             fixadas={idsFixados}
             destacada={destacada}
             {...(responderAqui ? { onResponder: responderAqui } : {})}
@@ -963,7 +1081,7 @@ export function ChatScreen({
           <MemberPanel
             channel={active}
             open={membersOpen}
-            onClose={() => setMembersOpen(false)}
+            onClose={fecharMembros}
             members={members}
             state={membersState}
             onRetry={onRetryMembers}
@@ -972,7 +1090,7 @@ export function ChatScreen({
             nameFor={nameFor}
             /* The member footer opens on the link: the door that was always there,
                and the address is visible in the header. */
-            onInvite={() => onConvidar("link")}
+            onInvite={convidarPeloLink}
             // Absent means "cannot": an old host cannot answer
             // this question, and promising the door to someone about to refuse it is worse
             // than not showing it. See `podeConvidar` in MemberPanel.
@@ -980,13 +1098,14 @@ export function ChatScreen({
             /* The list answers "who can read this", and in the common channel the
                answer is not just the names there. See `MemberPanel`. */
             oficial={oficial}
-            onOpenProfile={onOpenProfile}
-            onUserMenu={onUserMenu}
+            onOpenProfile={abrirPerfilDoMembro}
+            onUserMenu={menuDoMembro}
             presenceFor={presenceFor}
             presenceHint={presenceHint}
             emChamada={emChamada}
             roleFor={roleFor}
             apelidoDe={apelidoDe}
+            pedirPerfis={active && pedirPerfis ? (contas) => void pedirPerfis(active, contas).catch(() => undefined) : undefined}
           />
           {notasDeVersao ? (
             /* Read-only, with the reason in place of the box. See `novidades`
@@ -1030,6 +1149,8 @@ export function ChatScreen({
             onTyping={noteTyping}
             mentionable={mencionaveis}
             podeMencionarTodos={podeMencionarTodos}
+            cargos={etiquetas?.cargos}
+            salas={etiquetas?.salas}
             directory={directory}
             presenceFor={presenceFor}
             emChamada={emChamada}
@@ -1095,6 +1216,36 @@ export function ChatScreen({
                   },
                 ]
               : []),
+            /* Copy image, download and message link, right under the text copy. */
+            ...itensDeMedia({
+              message: menuDaMensagem.message,
+              ligacao: ligacaoDe(menuDaMensagem.message),
+              aviso: toast,
+              haItensAntes: (menuDaMensagem.message.payload.body ?? "") !== "",
+              ler: bridge.media?.bytes,
+            }),
+            /* Close the poll before its deadline: who created it, or whoever moderates. A poll
+               that is already closed has no entry: nothing left to do to it. */
+            ...(podeFecharVotacao(menuDaMensagem.message)
+              ? [
+                  {
+                    label: strings.votacao.fechar,
+                    onSelect: () => {
+                      const alvo = menuDaMensagem.message.payload.id
+                      if (!alvo) return
+                      void bridge.channels
+                        .editMessage?.(active, alvo, menuDaMensagem.message.payload.body ?? "", { closePoll: true })
+                        .then(() => toast(strings.votacao.fecharFeito))
+                        .catch((error: Error) => toast(traduzirErro(error), "error"))
+                    },
+                  },
+                ]
+              : []),
+            /* React, first after copy: on a phone the long press opens this menu,
+               and it is the way to the picker without a hover button. */
+            ...(podeReagir(menuDaMensagem.message)
+              ? [{ label: strings.reaccoes.reagir, onSelect: () => setAReagir(menuDaMensagem.message) }]
+              : []),
             /* Reply, right after copy: the other everyday
                gesture, and the phone menu (long press) is this one. */
             ...(responderAqui && podeResponder(menuDaMensagem.message)
@@ -1111,14 +1262,21 @@ export function ChatScreen({
                       const alvo = menuDaMensagem.message.payload.id
                       if (!alvo) return
                       const fixada = pins.some((entrada) => entrada.id === alvo)
+                      const mensagem = menuDaMensagem.message
+                      // The attachments go with the copy, without their bytes, and a small
+                      // image of the first picture: whoever joins later sees what was shown.
                       const feito = fixada
                         ? bridge.channels.unpin?.(active, activeRoom, alvo)
-                        : bridge.channels.pin?.(active, activeRoom, {
-                            id: alvo,
-                            sender: menuDaMensagem.message.sender,
-                            body: menuDaMensagem.message.payload.body ?? "",
-                            sentAt: menuDaMensagem.message.payload.sentAt ?? Date.now(),
-                          })
+                        : miniaturaParaFixar(mensagem.payload.attachments).then((thumbnail) =>
+                            bridge.channels.pin?.(active, activeRoom, {
+                              id: alvo,
+                              sender: mensagem.sender,
+                              body: mensagem.payload.body ?? "",
+                              sentAt: mensagem.payload.sentAt ?? Date.now(),
+                              ...(mensagem.payload.attachments?.length ? { attachments: mensagem.payload.attachments } : {}),
+                              ...(thumbnail ? { thumbnail } : {}),
+                            }),
+                          )
                       void feito
                         ?.then(() => toast(fixada ? strings.chat.pinnedUndone : strings.chat.pinnedDone, "info"))
                         .catch((error: Error) => toast(traduzirErro(error), "error"))
@@ -1211,6 +1369,19 @@ export function ChatScreen({
         />
       )}
 
+      {/* The reaction picker: the same emoji picker as the input box. Picking an
+          emoji already pressed by me releases it, like tapping the chip. */}
+      {aReagir && onReagir && (
+        <EmojiPicker
+          onPick={(emoji) => {
+            const message = aReagir
+            setAReagir(null)
+            onReagir(message, emoji)
+          }}
+          onClose={() => setAReagir(null)}
+        />
+      )}
+
       {aDenunciar && active && (
         <DenunciarSheet
           alvo={{ canal: active, pessoa: aDenunciar.sender, mensagem: { id: aDenunciar.id } }}
@@ -1246,3 +1417,6 @@ export function ChatScreen({
     </main>
   )
 }
+
+/** How many of the last messages of the open channel have their authors' names asked for. */
+const NOMES_A_PEDIR_DAS_ULTIMAS = 100

@@ -7,8 +7,8 @@ import { Call, type CallBridge, type MediaKeyMaterial } from "./call.js"
  *
  * There was a `GainNode` and nothing else. Gain up to 2× with nothing after it
  * is a signal that goes over the limit and is cut hard: what you hear on the
- * other side is not a louder voice, it is a torn voice, reported by the owner
- * on September 13, 2026 as "noise that sounds like extreme friction but is not".
+ * other side is not a louder voice, it is a torn voice, heard as "noise that
+ * sounds like extreme friction but is not".
  * Our own chain produces it, and the limiter removes it.
  *
  * What these tests establish:

@@ -1,9 +1,10 @@
 /**
- * All 27 sounds, each from the real engine, in Chromium for real (4/11/2026).
+ * All the sounds (27 on 4/11/2026, 26 since the send sound left on 16/11/2026),
+ * each from the real engine, in Chromium for real.
  *
  *   node scripts/e2e-sons-27.mjs
  *
- * Report from the owner in 1.3.0: "Sounds are not activating. All of them. I hear nothing.
+ * The bug in 1.3.0: "Sounds are not activating. All of them. I hear nothing.
  * Just private messages." This script proves the end-to-end sound engine, with no
  * server: the `packages/ui/src/sons/motor.ts` bundled by esbuild, with
  * Chromium's real `OfflineAudioContext` and `AudioContext`.
@@ -12,7 +13,7 @@
  * the channel and without the seven parity ones, `enclave.prefs` with `chosen`). After
  * a click (the gesture), each type plays through the app's path: `tocar`,
  * `tocarChamada` or `chamar`, with all the rules applied. An analyzer hooked to the
- * output measures the peak that actually comes out. It passes when all 27
+ * output measures the peak that actually comes out. It passes when all 26
  * reach the speaker with a peak above 0.01 and no invalid values.
  *
  * It also measures the first round with the main thread busy (a 600 ms task
@@ -51,7 +52,7 @@ const SONS_DA_111 = {
   porTipo: {
     directa: true, mencao: true, pedido: true, aceite: true, chamada: true, entrou: true, saiu: true, ligado: true,
     cotovelada: true, ticket: true, publicacao: true, actualizacao: true, "mic-silenciado": true, "mic-ligado": true,
-    "tudo-silenciado": true, "tudo-ligado": true, "amigo-online": true, "sala-afk": true, enviada: true,
+    "tudo-silenciado": true, "tudo-ligado": true, "amigo-online": true, "sala-afk": true,
   },
   vibrar: true,
   chamadaComOcupado: true,
@@ -112,7 +113,7 @@ try {
       } else {
         await new Promise((r) => setTimeout(r, 300))
       }
-      const TIPOS = ["directa", "mencao", "canal", "pedido", "aceite", "chamada", "entrou", "saiu", "ligado", "cotovelada", "ticket", "publicacao", "actualizacao", "mic-silenciado", "mic-ligado", "tudo-silenciado", "tudo-ligado", "amigo-online", "sala-afk", "enviada", "a-chamar", "voz-perdida", "movido", "transmissao-iniciada", "transmissao-terminada", "espectador-entrou", "espectador-saiu"]
+      const TIPOS = ["directa", "mencao", "canal", "pedido", "aceite", "chamada", "entrou", "saiu", "ligado", "cotovelada", "ticket", "publicacao", "actualizacao", "mic-silenciado", "mic-ligado", "tudo-silenciado", "tudo-ligado", "amigo-online", "sala-afk", "a-chamar", "voz-perdida", "movido", "transmissao-iniciada", "transmissao-terminada", "espectador-entrou", "espectador-saiu"]
       const linhas = []
       for (const tipo of TIPOS) {
         window.__pico = 0
@@ -148,5 +149,5 @@ try {
 } finally {
   await browser.close()
 }
-console.log(falhas === 0 ? "\n27/27 tocaram com o fio livre" : `\n${falhas} falhas`)
+console.log(falhas === 0 ? "\n26/26 tocaram com o fio livre" : `\n${falhas} falhas`)
 process.exit(falhas === 0 ? 0 : 1)

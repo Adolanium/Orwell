@@ -176,6 +176,12 @@ contextBridge.exposeInMainWorld("enclaveHost", {
   relato: {
     enviar: (pedido: { texto: string; versao: string }) => ipcRenderer.invoke("relato:enviar", { texto: pedido.texto }),
   },
+  /** "Report a bug": only the body crosses; the server comes from the main process. */
+  bugs: {
+    plataforma: "electron",
+    suportado: () => ipcRenderer.invoke("bug:suportado"),
+    enviar: (corpo: unknown) => ipcRenderer.invoke("bug:enviar", corpo),
+  },
   /** Reports: the target, prepared report, and choice cross over; the server and version come from the main process. */
   denuncias: {
     preparar: (alvo: unknown) => ipcRenderer.invoke("denuncia:preparar", alvo),
@@ -274,6 +280,8 @@ contextBridge.exposeInMainWorld("enclaveHost", {
       ipcRenderer.invoke(CANAIS_DE_CANAL.mudarApelido, channel, subject, nick),
     mayMove: (channel: string) => ler(LEITURAS_DE_CANAL.podeMover, channel),
     mayMentionAll: (channel: string, room: string) => ler(LEITURAS_DE_CANAL.podeMencionarTodos, channel, room),
+    mayTransmit: (channel: string, room: string, address?: string) =>
+      ler(LEITURAS_DE_CANAL.podeTransmitir, channel, room, ...(address === undefined ? [] : [address])),
     mayInvite: (channel: string) => ler(LEITURAS_DE_CANAL.podeConvidar, channel),
     moveVoice: (channel: string, address: string, room: string) =>
       ipcRenderer.invoke(CANAIS_DE_CANAL.moverVoz, channel, address, room),
@@ -306,10 +314,12 @@ contextBridge.exposeInMainWorld("enclaveHost", {
       ipcRenderer.invoke(CANAIS_DE_CANAL.eliminarTicket, channel, room, ticket),
 
     // Edit and delete what was said. Delete is a request, not a direct erase.
-    editMessage: (channel: string, target: string, body: string) =>
-      ipcRenderer.invoke(CANAIS_DE_CANAL.emendarMensagem, channel, target, body),
+    editMessage: (channel: string, target: string, body: string, opcoes?: { closePoll?: true }) =>
+      ipcRenderer.invoke(CANAIS_DE_CANAL.emendarMensagem, channel, target, body, opcoes),
     deleteMessage: (channel: string, target: string) =>
       ipcRenderer.invoke(CANAIS_DE_CANAL.apagarMensagem, channel, target),
+    react: (channel: string, target: string, emoji: string, remove?: boolean) =>
+      ipcRenderer.invoke(CANAIS_DE_CANAL.reagir, channel, target, emoji, remove),
 
     /* --------------------------------------------------------------- */
 
@@ -331,6 +341,7 @@ this channel.
     send: (channel: string, body: string, room?: string, extras?: unknown) =>
       ipcRenderer.invoke("channel:send", channel, body, room, extras),
     typing: (channel: string, room?: string) => ipcRenderer.invoke("channel:typing", channel, room),
+    pedirPerfis: (channel: string, contas: string[]) => ipcRenderer.invoke("channel:pedir-perfis", channel, contas),
     buzz: (channel: string) => ipcRenderer.invoke("channel:buzz", channel),
     members: (channel: string) => ipcRenderer.invoke("channel:members", channel),
     history: (channel: string) => ipcRenderer.invoke("channel:history", channel),
@@ -463,17 +474,6 @@ this channel.
     som: () => ipcRenderer.invoke("ecra:som"),
     /** The Settings panel where permission is granted. macOS only. */
     abrirDefinicoes: () => ipcRenderer.invoke("ecra:abrirDefinicoes"),
-  },
-  /**
-   * The operating system languages, so the UI can choose its own.
-   *
-   * Intentionally synchronous: read once at startup, before the screen exists.
-   * See `main/index.ts`. Does not go through the `{ ok, valor }` envelope of
-   * channel reads because there is no wrong answer, an empty list reads as "I
-   * don't know", and the caller falls back to `navigator`.
-   */
-  lingua: {
-    doSistema: (): unknown => ipcRenderer.sendSync("lingua:sistema"),
   },
   on: {
     message: (handler: (payload: unknown) => void) => subscribe("event:message", handler),

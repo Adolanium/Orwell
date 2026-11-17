@@ -107,6 +107,9 @@ describe("o vídeo de uma publicação, entre duas sessões", () => {
     expect(await resumoDoVideo(recebidos!)).toBe(sha)
     expect(recebidos!.length).toBe(bytes.length)
 
+    // The post and the last part of the video travel apart: under load the
+    // video can be whole a moment before the post is in the history.
+    await ate(() => publicacoes(bruno!, feed).length > 0, "a publicação no histórico do Bruno", 30_000)
     const [publicacao] = publicacoes(bruno!, feed)
     expect(publicacao?.["id"]).toBe(id)
     const anexo = (publicacao?.["media"] as Record<string, unknown>[])[0]

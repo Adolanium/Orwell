@@ -20,7 +20,7 @@ import type { ServerConfig } from "./config.js"
 /**
  * The common room, server side.
  *
- * The project owner decided on exactly one opening: any account on this
+ * The design allows exactly one opening: any account on this
  * server can REQUEST to be admitted to the common room. This file exists
  * to pin down the gap between that and "any account can do everything in that
  * room", which is what the first version of the opening granted, because request and

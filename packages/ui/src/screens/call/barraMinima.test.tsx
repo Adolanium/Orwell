@@ -12,7 +12,7 @@ afterEach(cleanup)
 vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
 
 /**
- * The "Minimal" control bar (board H4, chosen by the owner on October 21, 2026):
+ * The "Minimal" control bar (board H4, the chosen design):
  * icons without background, fixed order, and the off state told by a strike
  * through the icon and a color that still reads.
  *

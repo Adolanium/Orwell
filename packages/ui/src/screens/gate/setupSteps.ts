@@ -8,7 +8,7 @@
  */
 
 /**
- * The first screen of Setup (phase 8.1, owner decision on 27 October 2026).
+ * The first screen of Setup (phase 8.1).
  *
  * "Do you already use Orwell on another device?", before any account question.
  * Creating an account was the main path and pairing sat in a button below

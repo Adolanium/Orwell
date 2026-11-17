@@ -3,7 +3,7 @@ import { cleanup, render } from "@testing-library/react"
 import { CallChip } from "./CallChip.js"
 
 /**
- * The visualizer at the bottom of the broadcaster's card (owner, October 27, 2026).
+ * The visualizer at the bottom of the broadcaster's card.
  * jsdom does not render or have sound: measured when the canvas exists. Rendering
  * and fps are measured in the browser, in `scripts/medir-chamada-23h.mjs`.
  */
@@ -34,7 +34,7 @@ describe("CallChip — o visualizador de quem transmite", () => {
 
   it("com movimento reduzido as manchas desenham na mesma, mais suaves", () => {
     // Until October 28, 2026 it held a fixed gradient, and on Windows with animations
-    // disabled the owner saw the DJ's card frozen.
+    // disabled the DJ's card looked frozen.
     vi.stubGlobal("matchMedia", (consulta: string) => ({
       matches: consulta.includes("reduce"),
       media: consulta,

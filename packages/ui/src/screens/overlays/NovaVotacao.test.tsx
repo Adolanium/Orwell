@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { strings } from "../../strings.js"
-import { NovaVotacao } from "./NovaVotacao.js"
+import { fechoPedido, NovaVotacao } from "./NovaVotacao.js"
 
 afterEach(cleanup)
 
@@ -64,7 +64,34 @@ describe("criar uma votação", () => {
     await user.click(screen.getByRole("button", { name: strings.votacao.acrescentar }))
     await user.click(botaoCriar())
 
-    expect(onSubmit).toHaveBeenCalledWith({ question: "Qual é o melhor dia?", options: ["Segunda", "Terça"] })
+    // Sem mexer no prazo, vai o de um dia: quem cria decide, e o ponto de partida é este.
+    const enviada = onSubmit.mock.calls[0]?.[0] as { question: string; options: string[]; closesAt?: number }
+    expect(enviada).toMatchObject({ question: "Qual é o melhor dia?", options: ["Segunda", "Terça"] })
+    expect(enviada.closesAt).toBeGreaterThan(Date.now() + 86_000_000)
+    expect(enviada.closesAt).toBeLessThan(Date.now() + 86_500_000)
+  })
+
+  it("«Sem prazo» envia a votação sem fecho nenhum", async () => {
+    const user = userEvent.setup()
+    const onSubmit = abrir()
+    await user.type(campo(strings.votacao.perguntaLabel), "Pergunta")
+    await user.type(campo(strings.votacao.opcaoLabel(1)), "A")
+    await user.type(campo(strings.votacao.opcaoLabel(2)), "B")
+    await user.click(screen.getByRole("radio", { name: strings.votacao.prazoSem }))
+    await user.click(botaoCriar())
+    expect(onSubmit).toHaveBeenCalledWith({ question: "Pergunta", options: ["A", "B"] })
+  })
+
+  it("a data e hora passada não deixa criar, e diz porquê", async () => {
+    const user = userEvent.setup()
+    abrir()
+    await user.type(campo(strings.votacao.perguntaLabel), "Pergunta")
+    await user.type(campo(strings.votacao.opcaoLabel(1)), "A")
+    await user.type(campo(strings.votacao.opcaoLabel(2)), "B")
+    await user.click(screen.getByRole("radio", { name: strings.votacao.prazoData }))
+    await user.type(campo(strings.votacao.dataLabel), "2020-01-01T10:00")
+    expect(screen.getByText(strings.votacao.prazoPassado)).toBeTruthy()
+    expect(botaoCriar().disabled).toBe(true)
   })
 
   it("acrescentar dá mais uma opção", async () => {
@@ -95,5 +122,27 @@ describe("criar uma votação", () => {
     }
     expect(screen.queryByRole("button", { name: strings.votacao.acrescentar })).toBeNull()
     expect(screen.getByText(strings.votacao.opcoesCheias(10))).toBeTruthy()
+  })
+})
+
+describe("fechoPedido", () => {
+  const AGORA = Date.UTC(2026, 10, 16, 12, 0, 0)
+  it("duração em horas e em dias", () => {
+    expect(fechoPedido("duracao", "3", "h", "", AGORA)).toEqual({ ok: true, em: AGORA + 3 * 3_600_000 })
+    expect(fechoPedido("duracao", "2", "d", "", AGORA)).toEqual({ ok: true, em: AGORA + 2 * 86_400_000 })
+  })
+  it("recusa zero, passado, vazio e mais de 30 dias", () => {
+    expect(fechoPedido("duracao", "0", "h", "", AGORA)).toEqual({ ok: false, motivo: "passado" })
+    expect(fechoPedido("duracao", "", "h", "", AGORA)).toEqual({ ok: false, motivo: "vazio" })
+    expect(fechoPedido("duracao", "31", "d", "", AGORA)).toEqual({ ok: false, motivo: "longo" })
+    expect(fechoPedido("data", "", "d", "", AGORA)).toEqual({ ok: false, motivo: "vazio" })
+    expect(fechoPedido("data", "", "d", "2020-01-01T10:00", AGORA)).toEqual({ ok: false, motivo: "passado" })
+  })
+  it("data e hora no futuro, lida na zona deste aparelho", () => {
+    const quando = fechoPedido("data", "", "d", "2026-11-20T18:30", AGORA)
+    expect(quando).toEqual({ ok: true, em: new Date("2026-11-20T18:30").getTime() })
+  })
+  it("sem prazo não tem fecho", () => {
+    expect(fechoPedido("sem", "", "d", "", AGORA)).toEqual({ ok: true, em: null })
   })
 })

@@ -6,7 +6,7 @@ Orwell is a place for communities to talk: text rooms, voice and video calls,
 direct messages and a wall for each account. Everything is end-to-end
 encrypted, so the server that carries your messages cannot read them. It runs
 at [orwell.pt](https://orwell.pt), in the browser and as a desktop app for
-Windows and macOS, with a Linux version on the way. The current version is 1.3.3 "Carmelo". I build it on my
+Windows and macOS, with a Linux version on the way. The current version is 1.3.16 "Carmelo". I build it on my
 own, and I have put hundreds of hours into it so far.
 
 <p align="center">
@@ -19,6 +19,17 @@ own, and I have put hundreds of hours into it so far.
   <img src="docs/assets/orwell-chat.jpg" alt="The Orwell desktop app: a book club community with rooms on the left and a conversation in the middle"><br>
   <sub><i>A community in the desktop app: rooms on the left, the conversation in the middle.</i></sub>
 </p>
+
+## How Orwell is built
+
+Orwell is built with AI coding agents. I direct the work, decide what goes in,
+and test every release on real devices. I do not read every line.
+
+Every change ships with tests: more than 8,000 automated tests, plus
+end-to-end runs in three browsers and against older clients.
+
+There has been no paid independent security audit yet. Volunteer reviews are
+credited under [Thanks](#thanks).
 
 ## Why I made it
 

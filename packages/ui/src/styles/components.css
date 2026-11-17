@@ -245,8 +245,8 @@
 
 /* With a photo, the accent background goes away. Behind the round crop it
    peeked at the edge, under the antialiasing of the image, like a jagged light
-   line: on a 1x screen (1920×1080) you saw it on all avatars. Owner request on
-   October 27, 2026. The background stays only for the initial. */
+   line: on a 1x screen (1920×1080) you saw it on all avatars.
+   The background stays only for the initial. */
 .avatar:has(img),
 .message-avatar:has(img),
 .avatar-preview:has(img) {
@@ -717,7 +717,7 @@ select:focus {
 /* ------------------------------------------------ friend cards (MSN style) */
 
 /*
-  "Ana is online", MSN-style (design chosen by the owner on November 3, 2026).
+  "Ana is online", MSN-style (the chosen design).
   Below the banners, in the same corner (`.toast-stack`): avatar with green ring,
   text in bold, "just now" in gray, cyan button, and a thin line that empties
   over 2 s of card lifetime (`--vida-do-aviso`).
@@ -1200,6 +1200,28 @@ button.tag-pill:active,
   This works for any button in this situation, not just arrows: that is why it
   is a variant, not a rule written into them.
   */
+/*
+  A long tip (the grey screen button, 12/11/2026): it wraps instead of running
+  off the bar, and a tap opens it (`dica-aberta`), because a phone has no hover.
+*/
+[data-tip][data-tip-longa]::after {
+  white-space: normal;
+  width: max-content;
+  max-width: min(17rem, 72vw);
+  text-align: center;
+}
+
+.dica-aberta::after,
+.dica-aberta::before {
+  opacity: 1;
+  transition-delay: 0ms;
+}
+
+.call-btn.bloqueado {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 [data-tip][data-tip-side="end"]::after {
   left: auto;
   right: 0;
@@ -1417,7 +1439,7 @@ button.tag-pill:active,
 /* ------------------------------------------------------ presence ring */
 
 /*
-  The presence ring (owner request October 27, 2026): 2 px around each avatar,
+  The presence ring: 2 px around each avatar,
   in the color of the state. It is a `box-shadow`, not a `border`: it takes no
   space, and no list shifts when it appears.
 
@@ -1472,7 +1494,7 @@ button.tag-pill:active,
 }
 
 /* With less motion the ring keeps pulsing, at twice the duration, growing half
-   as much and starting fainter. The owner's rule is that nothing stops, it just
+   as much and starting fainter. The rule is that nothing stops, it just
    moves slower. Up to 1.3.7 the pulse was removed (`content: none`). The ring is
    also thicker, so the call reads even between two pulses. The `!important` is
    against the universal rule in `base.css`. */
@@ -1642,7 +1664,7 @@ button.tag-pill:active,
 /* ------------------------------------------------------------ selo oficial */
 
 /* A seal cut out with a checkmark, in the user's chosen color: see
-   `SeloOficial.tsx`. It was text until the owner asked for the symbol; the
+   `SeloOficial.tsx`. It was text before it became the symbol; the
    explanation text carried is now in the `title`, and stays required.
 
    The color is `--accent` and it is the only place where it appears as a MARK.
@@ -2229,4 +2251,118 @@ span.mention {
   color: var(--text-dim);
   text-decoration: none;
   cursor: default;
+}
+
+/* A role name in the bell, in the role's colour (12/11/2026). See `tintaDoPapel`. */
+.notif-cargo {
+  color: var(--role-tint, var(--accent));
+  font-weight: 600;
+}
+
+/* Our own screen share: a thumbnail with the sentence and "Stop", never the stage (12/11/2026). */
+.call-minha-partilha {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-2) auto;
+  padding: var(--space-2) var(--space-3);
+  max-width: min(26rem, 100%);
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.call-minha-partilha-video {
+  width: 96px;
+  aspect-ratio: 16 / 9;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--radius-sm, 6px);
+  background: #000;
+}
+
+.call-minha-partilha-texto {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-sm);
+}
+
+.call-minha-partilha-parar {
+  flex: none;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/*
+  Who is in the call, over the shared screen (12/11/2026, Discord parity): names
+  only, small, stacked in the top-left corner, clear of the controls below.
+  The voice level (`--voz`, from `useNivelDeVoz`) lights the speaker by the background.
+  It fades out when the pointer stops (`.parado`), and fades back on movement.
+*/
+.call-palco-presentes {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  max-width: 40%;
+  max-height: 60%;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 200ms var(--ease);
+}
+
+.call-palco.parado .call-palco-presentes {
+  opacity: 0;
+}
+
+.call-presentes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.call-presente {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  max-width: 100%;
+  padding: 1px 6px;
+  border-radius: 4px;
+  /* The speaker lights by the background, from the voice level: colour, no layout. */
+  background: color-mix(in srgb, var(--accent) calc(var(--voz, 0) * 60%), rgb(0 0 0 / 0.55));
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgb(255 255 255 / 0.9);
+  font-weight: 500;
+}
+
+.call-presente-nome {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Reduced motion: it still appears and disappears, more slowly (house rule). */
+@media (prefers-reduced-motion: reduce) {
+  .call-palco .call-palco-presentes {
+    transition-duration: 900ms !important;
+  }
+}
+
+/* The call marks next to a name in a voice room (12/11/2026). */
+.voice-member-marca {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-muted, currentColor);
 }

@@ -102,3 +102,27 @@ describe("o sino que avisa", () => {
     expect(result.current).toBe(false)
   })
 })
+
+describe("o sino com movimento reduzido", () => {
+  it("a classe fica o dobro do tempo, o que dura o balanço calmo no CSS", () => {
+    const original = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia
+    try {
+      const { result, rerender } = renderHook(({ porLer }) => useSinoAvisa(porLer, false), {
+        initialProps: { porLer: 0 },
+      })
+      rerender({ porLer: 1 })
+      avancar(SINO_AVISO_MS + 10)
+      expect(result.current).toBe(true)
+      avancar(SINO_AVISO_MS)
+      expect(result.current).toBe(false)
+    } finally {
+      window.matchMedia = original
+    }
+  })
+})

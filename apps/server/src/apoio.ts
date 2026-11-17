@@ -5,7 +5,7 @@ import { dirname } from "node:path"
  * The meter for the "Support" section of the site: how much the GoFundMe
  * campaign has raised.
  *
- * Owner request, 3 November 2026. The rule that never breaks: a visitor to
+ * The rule that never breaks: a visitor to
  * orwell.pt never sends a request to GoFundMe. This server fetches the value
  * every 15 minutes, and the site only reads the small JSON it serves at
  * `/_enclave/apoiar.json`, on the same origin. The page still sets no cookies,
@@ -18,7 +18,7 @@ import { dirname } from "node:path"
  * `userDefinedGoalAmount` and `donationCount`. Read on 3 November 2026; the
  * fixture, with no donor data, is in `apps/server/testes/gofundme-campanha.html`.
  *
- * **The two goals.** The owner wants the bar measured against 2 200 € and, once
+ * **The two goals.** The bar is measured against 2 200 € and, once
  * that goal is passed, against 10 000 €. The first goal is `PRIMEIRA_META`,
  * fixed here, not the page's `goalAmount`: this campaign has GoFundMe "smart
  * goals" turned on, and the `goalAmount` (set by the system, `source: "SYSTEM"`)

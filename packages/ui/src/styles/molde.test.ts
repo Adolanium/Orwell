@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 /**
  * The common template of stylesheets, read from the stylesheet.
  
- * The owner's report (0.7.2): "the invite menu is broken". Four general rules were the source of what showed up in the sheets, and jsdom doesn't apply CSS: this is where we lock down what fixes them. The real measurement (stuck blocks, horizontal scroll, the field with the keyboard open) is in `scripts/retratar-midnight.mjs`.
+ * The bug (0.7.2): "the invite menu is broken". Four general rules were the source of what showed up in the sheets, and jsdom doesn't apply CSS: this is where we lock down what fixes them. The real measurement (stuck blocks, horizontal scroll, the field with the keyboard open) is in `scripts/retratar-midnight.mjs`.
  */
 const ler = (relativo: string): string =>
   readFileSync(fileURLToPath(new URL(relativo, import.meta.url)), "utf8").replace(/\/\*[\s\S]*?\*\//g, "")

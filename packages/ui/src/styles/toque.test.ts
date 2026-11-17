@@ -143,7 +143,7 @@ describe("o teclado virtual não tapa a barra de escrita", () => {
 })
 
 /*
-  The volume bar in the call menu (owner request on November 2, 2026).
+  The volume bar in the call menu.
   With a finger, the cursor and the button that resets to 100% must have 44 px
   of usable height, and horizontal drag must not scroll the page.
 */

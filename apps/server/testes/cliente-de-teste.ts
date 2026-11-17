@@ -4,6 +4,7 @@ import {
   parseServerName,
   PROTOCOL_VERSION,
   sign,
+  signWithDevice,
   toBase64,
   type ClientFrame,
   type Identity,
@@ -77,6 +78,34 @@ export class Cliente {
     cliente.enviar({ t: "auth.begin", address: identidade.address, signingKey: toBase64(identidade.signingPublicKey) })
     const desafio = await cliente.proximoDe("auth.challenge")
     cliente.enviar({ t: "auth.finish", signature: toBase64(sign(identidade, fromBase64(desafio.nonce))) })
+    await cliente.proximoDe("auth.ok")
+    await cliente.ateAoPong()
+    return cliente
+  }
+
+  /**
+   * Connect and authenticate WITH the device chain (`accountKey` and
+   * `deviceCert` in `auth.begin`), the way every app has logged in since
+   * August 2026: the connection then has a device key.
+   */
+  static async ligarComCadeia(url: string, identidade: Identity): Promise<Cliente> {
+    const socket = new WebSocket(url)
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", () => resolve())
+      socket.once("error", reject)
+    })
+    const cliente = new Cliente(socket)
+    cliente.enviar({ t: "hello", version: PROTOCOL_VERSION, capabilities: [COMMIT_DEPOIS_DO_ECO] })
+    await cliente.proximoDe("hello.ok")
+    cliente.enviar({
+      t: "auth.begin",
+      address: identidade.address,
+      signingKey: toBase64(identidade.deviceSigningPublicKey),
+      accountKey: toBase64(identidade.signingPublicKey),
+      deviceCert: toBase64(identidade.credential.signature),
+    })
+    const desafio = await cliente.proximoDe("auth.challenge")
+    cliente.enviar({ t: "auth.finish", signature: toBase64(signWithDevice(identidade, fromBase64(desafio.nonce))) })
     await cliente.proximoDe("auth.ok")
     await cliente.ateAoPong()
     return cliente
@@ -254,7 +283,11 @@ export interface ContaDeTeste {
  * gets the gateway address from it. The caller disconnects them with
  * `desligarContas` at the end.
  */
-export async function contasDeTeste(servidor: ServidorDeTeste, nomes: readonly string[]): Promise<ContaDeTeste[]> {
+export async function contasDeTeste(
+  servidor: ServidorDeTeste,
+  nomes: readonly string[],
+  opcoes: { salaComum?: boolean } = {},
+): Promise<ContaDeTeste[]> {
   const contas: ContaDeTeste[] = []
   for (const nome of nomes) {
     const backend = new CofreEmMemoria()
@@ -267,6 +300,9 @@ export async function contasDeTeste(servidor: ServidorDeTeste, nomes: readonly s
     session.on("status", (evento) => {
       if (evento.code) avisos.push(evento.code)
     })
+    // Joining the common room is opt-in since 12/11/2026. These accounts tick the
+    // box by default, as every account did before; `salaComum: false` leaves it.
+    if (opcoes.salaComum !== false) await session.escolherSalaComum(true)
     await session.connect()
     await session.updateProfile({ displayName: nome, donations: [] })
     contas.push({ nome, session, vault, backend, armazem, address: identidade.address, avisos })
@@ -350,8 +386,19 @@ function esperarFaseDoPar(session: Session, fase: string, prazoMs = 20_000): Pro
   })
 }
 
-/** Pairs a new device with `conta`, and returns it connected. The caller disconnects it. */
-export async function emparelharAparelho(conta: ContaDeTeste, nome = `${conta.nome} (telemóvel)`): Promise<ContaDeTeste> {
+/**
+ * Pairs a new device with `conta`, and returns it connected. The caller disconnects it.
+ *
+ * Since 1.3.16 the phone receives the account private key. `semChaveDaConta`
+ * removes it from the phone's vault before the identity loads: the phone paired
+ * before 1.3.16, which gets the key later through the account channel unless
+ * the test turns that off (`PassagemDaChaveDaConta.ligada`).
+ */
+export async function emparelharAparelho(
+  conta: ContaDeTeste,
+  nome = `${conta.nome} (telemóvel)`,
+  opcoes: { semChaveDaConta?: boolean } = {},
+): Promise<ContaDeTeste> {
   const backend = new CofreEmMemoria()
   const vault = new Vault(backend)
   await vault.create("frase-do-telemovel")
@@ -371,6 +418,11 @@ export async function emparelharAparelho(conta: ContaDeTeste, nome = `${conta.no
   await session.confirmarSas()
   await conta.session.confirmarSas()
   await certificado
+  if (opcoes.semChaveDaConta) {
+    await vault.update((contents) => {
+      contents.signingPrivateKey = ""
+    })
+  }
   const identidade = session.loadIdentity()
   await session.connect()
   session.concluirEmparelhamento()

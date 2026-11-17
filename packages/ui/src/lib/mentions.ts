@@ -46,6 +46,17 @@ export const MENTIONS_MAX = 64
 export interface MentionCandidate {
   address: string
   name: string
+  /**
+   * A role or a room, not a person (12/11/2026, `lib/etiquetas.ts`). Absent: a
+   * person, or `@all`.
+   */
+  tipo?: "cargo" | "sala" | undefined
+  /** The role's colour, as a hex, for the list. */
+  cor?: string | undefined
+  /** What the shown name becomes in the body at send. Absent: the address. */
+  corpo?: string | undefined
+  /** What goes into `mentions`. Absent: the address. `null`: nothing (a room notifies nobody). */
+  mencao?: string | null | undefined
 }
 
 /** A mention chosen: what shows in the box, and who it really is. */
@@ -53,6 +64,10 @@ export interface MentionPick {
   /** The inserted text, @ included, `@Ana`. */
   token: string
   address: string
+  /** See `MentionCandidate.corpo`. */
+  corpo?: string | undefined
+  /** See `MentionCandidate.mencao`. */
+  mencao?: string | null | undefined
 }
 
 /**
@@ -81,7 +96,7 @@ export function mencaoEmCurso(texto: string, cursor: number): { inicio: number; 
 }
 
 /** No accents and lowercase: "Inês" must show up to someone typing "ines". */
-function dobrar(texto: string): string {
+export function dobrar(texto: string): string {
   return texto
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
@@ -194,7 +209,8 @@ export function inserirMencao(
   cursor: number,
   candidato: MentionCandidate,
 ): { texto: string; cursor: number; pick: MentionPick } {
-  const token = `@${candidato.name}`
+  // A room is written with `#`, everything else with `@`.
+  const token = `${candidato.tipo === "sala" ? "#" : "@"}${candidato.name}`
   const antes = texto.slice(0, inicio)
   const depois = texto.slice(cursor)
   // Just one space: if there was one after already, typing another left two.
@@ -203,7 +219,12 @@ export function inserirMencao(
   return {
     texto: novo,
     cursor: inicio + token.length + separador.length,
-    pick: { token, address: candidato.address },
+    pick: {
+      token,
+      address: candidato.address,
+      ...(candidato.corpo !== undefined ? { corpo: candidato.corpo } : {}),
+      ...(candidato.mencao !== undefined ? { mencao: candidato.mencao } : {}),
+    },
   }
 }
 
@@ -225,8 +246,9 @@ export function aplicarMencoes(corpo: string, picks: readonly MentionPick[]): { 
 
   for (const pick of porTamanho) {
     if (!resultado.includes(pick.token)) continue
-    resultado = resultado.split(pick.token).join(pick.address)
-    if (!enderecos.includes(pick.address)) enderecos.push(pick.address)
+    resultado = resultado.split(pick.token).join(pick.corpo ?? pick.address)
+    const mencao = pick.mencao === undefined ? pick.address : pick.mencao
+    if (mencao !== null && !enderecos.includes(mencao)) enderecos.push(mencao)
   }
 
   return { corpo: resultado, mentions: enderecos.slice(0, MENTIONS_MAX) }

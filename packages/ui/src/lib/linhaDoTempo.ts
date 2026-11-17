@@ -2,7 +2,7 @@ import type { AppNotification } from "./notifications.js"
 import type { OfertaDeSucessao } from "./sucessoes.js"
 
 /**
- * The bell as a timeline (design chosen by the owner on November 3, 2026):
+ * The bell as a timeline (the chosen design):
  * filters in pills and groups by day. Rules only, no screen.
  */
 
@@ -34,6 +34,8 @@ const FILTRO_DO_TIPO: Record<AppNotification["kind"], Exclude<FiltroDoSino, "tud
   "report-copy": null,
   // The decision on a report I made: also only in "All".
   "report-decision": null,
+  // A role given to me: only in "All", it is none of the other four (12/11/2026).
+  "role-given": null,
 }
 
 export function filtroDoTipo(kind: AppNotification["kind"]): Exclude<FiltroDoSino, "tudo"> | null {

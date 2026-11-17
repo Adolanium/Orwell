@@ -1,8 +1,9 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest"
 import { moradaDeSala } from "@enclave/protocol"
 // The harness server, for real, on an ephemeral port. The sessions are from this
 // package (`./session.js`): this task's code is what gets measured.
 import { ate, CofreEmMemoria, levantarServidor, type ServidorDeTeste } from "../../../apps/server/testes/cliente-de-teste.js"
+import { PassagemDaChaveDaConta } from "./chaveDaConta.js"
 import { lerCaixa } from "./denuncia.js"
 import { origemDoServidorDe } from "./relato.js"
 import { Session } from "./session.js"
@@ -75,8 +76,12 @@ function esperarFase(session: Session, fase: string, prazoMs = 20_000): Promise<
   })
 }
 
-/** A device paired with `principal`, without the account key. Like the harness one, with a session from this package. */
-async function emparelhar(principal: Conta): Promise<Session> {
+/**
+ * A device paired with `principal`. Like the harness one, with a session from this
+ * package. Since 1.3.16 pairing passes the account key; `semChaveDaConta` takes it
+ * out again: a phone paired before 1.3.16.
+ */
+async function emparelhar(principal: Conta, opcoes: { semChaveDaConta?: boolean } = {}): Promise<Session> {
   const vault = new Vault(new CofreEmMemoria())
   await vault.create("frase-do-telemovel")
   const session = new Session(vault)
@@ -91,6 +96,11 @@ async function emparelhar(principal: Conta): Promise<Session> {
   await session.confirmarSas()
   await principal.session.confirmarSas()
   await certificado
+  if (opcoes.semChaveDaConta) {
+    await vault.update((contents) => {
+      contents.signingPrivateKey = ""
+    })
+  }
   session.loadIdentity()
   await session.connect()
   session.concluirEmparelhamento()
@@ -260,7 +270,12 @@ describe("a caixa de denúncias do fundador, com sessões a sério", () => {
   }, 30_000)
 
   it("no aparelho emparelhado sem chave de conta, a cópia fica por abrir: conta-se, e chega pela conta depois de o principal a abrir", async () => {
-    const telemovel = await emparelhar(ana)
+    // A phone paired before 1.3.16, and it stays without the key for the whole test.
+    PassagemDaChaveDaConta.ligada = false
+    onTestFinished(() => {
+      PassagemDaChaveDaConta.ligada = true
+    })
+    const telemovel = await emparelhar(ana, { semChaveDaConta: true })
     expect(telemovel.identity.signingPrivateKey).toBeUndefined()
     const antes = ana.session.denunciasDe(canal).length
     const temANova = (): boolean =>

@@ -16,9 +16,20 @@ import type { TipoDeSom } from "./familia.js"
  *
  * Any message in a group room does not enter the bell: what matters
  * is what was directed at me, and in a thirty-person room the mention is what
- * says "this is for you". But it makes its own sound, discreet, since November 3,
- * 2026 (owner request): the `channel`. See `somDoCanal`.
+ * says "this is for you". But it makes its own sound, discreet:
+ * the `channel`. See `somDoCanal`.
  */
+
+/**
+ * Whether an event was written by this account (16/11/2026), from any of its
+ * devices: this one, another tab, the phone, an echo or a copy that came by
+ * sync. By the ACCOUNT address, never the device: no sound and no notice plays
+ * for one. Unknown account (`null`): nothing is known to be mine, and the
+ * callers stay silent on their own.
+ */
+export function daPropriaConta(autor: string | null | undefined, conta: string | null): boolean {
+  return conta !== null && autor !== null && autor !== undefined && autor === conta
+}
 
 /** The sound of a bell entry, or `null`. */
 export function somDaNotificacao(kind: AppNotification["kind"]): TipoDeSom | null {
@@ -26,10 +37,12 @@ export function somDaNotificacao(kind: AppNotification["kind"]): TipoDeSom | nul
     case "dm-message":
     case "dm-new":
       return "directa"
+    // The mention has its own sound, and only the mention uses it (12/11/2026): it is the one that calls me by name.
     case "mention":
-    // Being added to a room is the room calling for me: the same family as a mention.
-    case "room-added":
       return "mencao"
+    // Being added to a channel is news about the channel, not someone calling me: the channel sound.
+    case "room-added":
+      return "canal"
     case "friend-request":
       return "pedido"
     case "friend-accept":
@@ -47,6 +60,9 @@ export function somDaNotificacao(kind: AppNotification["kind"]): TipoDeSom | nul
     // The verdict on a report I filed: goes in the bell, no sound, like the copy.
     case "report-decision":
       return null
+    // A role given to me (12/11/2026): the channel calling for me, the mention family.
+    case "role-given":
+      return "mencao"
   }
 }
 
@@ -74,8 +90,8 @@ export function salaDaMensagem(mensagem: MensagemParaSom): string {
 }
 
 /**
- * The sound of a new message in a channel room (owner request, November 3,
- * 2026), or `null`.
+ * The sound of a new message in a channel room,
+ * or `null`.
  *
  * Plays when a message arrives live from someone else in a group room.
  * Does not play:
@@ -97,7 +113,7 @@ export function salaDaMensagem(mensagem: MensagemParaSom): string {
 export function somDoCanal(mensagem: MensagemParaSom, eu: string, silenciados: readonly string[] = []): TipoDeSom | null {
   const { payload } = mensagem
   if (mensagem.aoVivo !== true) return null
-  if (mensagem.sender === eu) return null
+  if (daPropriaConta(mensagem.sender, eu)) return null
   if (payload.t !== "message") return null
   if (isDirect(mensagem.channel) || isFeed(mensagem.channel)) return null
   if (mencionaMe(Array.isArray(payload.mentions) ? (payload.mentions as string[]) : undefined, eu)) return null
@@ -127,7 +143,7 @@ export function somDaMensagem(
   quemDoTicket: QuemDoTicket,
   silenciados: readonly string[] = [],
 ): TipoDeSom | null {
-  if (mensagem.sender === eu) return null
+  if (daPropriaConta(mensagem.sender, eu)) return null
   const { payload } = mensagem
   // In a muted place the ticket and post do not play. The mention does not go through here:
   // it plays via the bell, and there the mute lets it through.

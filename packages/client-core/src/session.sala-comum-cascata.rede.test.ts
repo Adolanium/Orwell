@@ -61,7 +61,7 @@ describe("sala comum: o custo de uma entrada", () => {
   it("quem já lá está não republica o perfil a cada entrada, e quem entra fica a saber os nomes", async () => {
     const MEMBROS = 8
     const nomes = Array.from({ length: MEMBROS }, (_, i) => `Membro${i + 1}`)
-    const membros = await contasDeTeste(servidor, nomes)
+    const membros = await contasDeTeste(servidor, nomes, { salaComum: true })
     abertas.push(...membros)
     const sala = servidor.sala
     for (const membro of membros) {
@@ -72,7 +72,7 @@ describe("sala comum: o custo de uma entrada", () => {
     await new Promise((resolve) => setTimeout(resolve, 8_000))
 
     const envios = membros.map((membro) => contarEnvios(membro, sala))
-    const [novo] = await contasDeTeste(servidor, ["Novata"])
+    const [novo] = await contasDeTeste(servidor, ["Novata"], { salaComum: true })
     abertas.push(novo!)
     await ate(() => novo!.session.channels.includes(sala), "a Novata entra na sala comum", 30_000)
     await ate(() => membros.every((membro) => membro.session.membersOf(sala).length === MEMBROS + 1), "todos vêem a Novata", 30_000)
@@ -100,7 +100,7 @@ describe("sala comum: o custo de uma entrada", () => {
 
   it("depois de uma entrada, só quem entrou publica o cartão da sala, e quem vem a seguir entra com ele", async () => {
     const MEMBROS = 6
-    const membros = await contasDeTeste(servidor, Array.from({ length: MEMBROS }, (_, i) => `Membro${i + 1}`))
+    const membros = await contasDeTeste(servidor, Array.from({ length: MEMBROS }, (_, i) => `Membro${i + 1}`), { salaComum: true })
     abertas.push(...membros)
     const sala = servidor.sala
     for (const membro of membros) await ate(() => membro.session.channels.includes(sala), `${membro.nome} está na sala comum`, 30_000)
@@ -114,7 +114,7 @@ describe("sala comum: o custo de uma entrada", () => {
       if (channel === sala) cartoes += 1
       return original(channel, info)
     }
-    const [novo] = await contasDeTeste(servidor, ["Novata"])
+    const [novo] = await contasDeTeste(servidor, ["Novata"], { salaComum: true })
     abertas.push(novo!)
     await ate(() => membros.every((membro) => membro.session.membersOf(sala).length === MEMBROS + 1), "todos vêem a Novata", 30_000)
     // Past `CARTAO_ATRASO_MS` on every member, with room to spare.
@@ -123,7 +123,7 @@ describe("sala comum: o custo de uma entrada", () => {
     expect(cartoes).toBe(1)
 
     // And the card left is good: the next account enters by it.
-    const [outra] = await contasDeTeste(servidor, ["Outra"])
+    const [outra] = await contasDeTeste(servidor, ["Outra"], { salaComum: true })
     abertas.push(outra!)
     await ate(() => outra!.session.channels.includes(sala), "a Outra entra na sala comum", 30_000)
     await ate(() => membros.every((membro) => membro.session.membersOf(sala).length === MEMBROS + 2), "todos vêem a Outra", 30_000)
@@ -133,22 +133,32 @@ describe("sala comum: o custo de uma entrada", () => {
     // The `pp` request carries at most `PERFIS_POR_PEDIDO` (100) accounts. With
     // the growth cascade gone, the next request only left on the ten-minute
     // pass: 300 people "Sem nome" in a room of 409.
+    //
+    // Since 1.3.9 the login request asks only for those online; the names of the
+    // others are asked for when someone needs them (`pedirPerfisDe`: the full
+    // member list, a message on screen). Here all 104 are offline, so the full
+    // list asks for them, and the second hundred goes a minute later.
     const MEMBROS = Number(process.env["MEMBROS_DO_TESTE"] ?? 104)
-    const [ana] = await contasDeTeste(servidor, ["Ana"])
+    const [ana] = await contasDeTeste(servidor, ["Ana"], { salaComum: true })
     abertas.push(ana!)
     const sala = servidor.sala
     await ate(() => ana!.session.channels.includes(sala), "a Ana está na sala comum", 30_000)
     const membros: ContaDeTeste[] = []
     for (let i = 0; i < MEMBROS; i++) {
-      const [membro] = await contasDeTeste(servidor, [`Membro${String(i).padStart(3, "0")}`])
+      const [membro] = await contasDeTeste(servidor, [`Membro${String(i).padStart(3, "0")}`], { salaComum: true })
       await ate(() => membro!.session.channels.includes(sala), `${membro!.nome} entra`, 60_000)
       await ate(() => ana!.vault.contents.directory[membro!.address]?.payload["displayName"] === membro!.nome, `a Ana sabe o nome de ${membro!.nome}`, 60_000)
       membro!.session.disconnect()
       membros.push(membro!)
     }
-    const [novo] = await contasDeTeste(servidor, ["Novata"])
+    const [novo] = await contasDeTeste(servidor, ["Novata"], { salaComum: true })
     abertas.push(novo!)
     await ate(() => novo!.session.channels.includes(sala), "a Novata entra", 60_000)
+    await ate(() => novo!.session.membersOf(sala).length >= MEMBROS + 2, "a Novata vê os membros todos", 60_000)
+    // Ana, the only one online to answer, must already count the Novata as a
+    // member: a request from a leaf she does not know yet is dropped.
+    await ate(() => ana!.session.membersOf(sala).includes(novo!.address), "a Ana vê a Novata", 60_000)
+    novo!.session.pedirPerfisDe(sala, membros.map((m) => m.address))
     const comNome = (): number => membros.filter((m) => novo!.vault.contents.directory[m.address]?.payload["displayName"] === m.nome).length
     // One request, then the next a minute later: well inside three minutes.
     // The label is read once, before the wait: the count goes in the error, after it.
@@ -156,4 +166,26 @@ describe("sala comum: o custo de uma entrada", () => {
       throw new Error(`${erro.message} (sabe ${comNome()})`)
     })
   }, 900_000)
+
+  it("quem entra pede só os nomes de quem está ligado; os outros, quando alguém precisa deles", async () => {
+    const [ana, bruno, carla] = await contasDeTeste(servidor, ["Ana", "Bruno", "Carla"])
+    abertas.push(ana!, bruno!, carla!)
+    const sala = servidor.sala
+    for (const membro of [ana!, bruno!, carla!]) await ate(() => membro.session.channels.includes(sala), `${membro.nome} está na sala comum`, 30_000)
+    await ate(() => [ana!, bruno!].every((m) => m.vault.contents.directory[carla!.address]?.payload["displayName"] === "Carla"), "todos sabem o nome da Carla", 30_000)
+    carla!.session.disconnect()
+    await new Promise((resolve) => setTimeout(resolve, 3_000))
+
+    const [novo] = await contasDeTeste(servidor, ["Novata"])
+    abertas.push(novo!)
+    const nomeDe = (conta: ContaDeTeste): unknown => novo!.vault.contents.directory[conta.address]?.payload["displayName"]
+    await ate(() => nomeDe(ana!) === "Ana" && nomeDe(bruno!) === "Bruno", "a Novata sabe os nomes de quem está ligado", 40_000)
+    // Past the login request and its relay turns: Carla, offline, was not asked for.
+    await new Promise((resolve) => setTimeout(resolve, 15_000))
+    expect(nomeDe(carla!)).toBeUndefined()
+
+    // Someone needs her name now (the full list, a message on screen): it comes.
+    novo!.session.pedirPerfisDe(sala, [carla!.address])
+    await ate(() => nomeDe(carla!) === "Carla", "a Novata sabe o nome da Carla, a pedido", 90_000)
+  }, 240_000)
 })

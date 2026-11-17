@@ -230,7 +230,7 @@ describe("o som do sistema, onde o sistema o dá", () => {
 
 describe("a escolha do som do sistema", () => {
   /*
-    Owner request on 2/11/2026: "this doesn't need to be an option, audio is
+    The requirement: "this doesn't need to be an option, audio is
     transmitted by default too". No checkbox anymore: system audio goes
     whenever the system provides it.
   */

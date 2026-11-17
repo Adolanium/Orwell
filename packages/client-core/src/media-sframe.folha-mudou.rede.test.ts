@@ -13,9 +13,9 @@ import {
 import { CifraDeMedia } from "./media-sframe.js"
 
 /**
- * The person who switches sheets and goes silent (report from the owner, 3 November 2026).
+ * The person who switches sheets and goes silent.
  *
- * In the 22:31 log the owner joins the same voice room by SFU four times, and
+ * In the 22:31 log one client joins the same voice room by SFU four times, and
  * the same three people give `sfu-receiver-without-encryption` each time. In
  * the server database those three accounts received several Welcome in the
  * Orwell channel (the re-seat: remove the sheet and give another), and a

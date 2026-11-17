@@ -7,8 +7,8 @@
  * on **8452**, and only it defines `ENCLAVE_COMMON_ROOM`; there is no common room
  * against any other port.
  *
- * The cost was not theoretical. On 13 August 2026, hunting a call defect
- * reported by the owner, `churn-chamada.mjs` was pointed at 8448: the bots
+ * The cost was not theoretical. On 13 August 2026, hunting a call defect,
+ * `churn-chamada.mjs` was pointed at 8448: the bots
  * created accounts, joined the channel, then waited **three minutes each** for a
  * voice room that did not exist on that server. The conclusion almost drawn was
  * "the product is broken". The product was fine; the script was talking to the

@@ -117,8 +117,8 @@ describe("Unlock", () => {
 
   it('enquanto a chave se deriva, o botão diz "A abrir…" com um anel a girar', async () => {
     // Derivation takes up to seven seconds on a phone. Just the word, with
-    // nothing moving, read as an application stuck (owner, 26 October
-    // 2026). The ring is decoration: what the screen reader hears is the note.
+    // nothing moving, read as an application stuck.
+    // The ring is decoration: what the screen reader hears is the note.
     renderUnlock(
       bridgeWith({
         unlock: (secret) =>

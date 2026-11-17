@@ -22,16 +22,23 @@ import { FRASE } from "./ambiente.mjs"
 
 /**
  * `memorizar`: the "Remember session" checkbox (session memory F1). It comes
- * on on the screen, by the owner's choice; here it comes OFF by default, so
+ * on on the screen, by design; here it comes OFF by default, so
  * scripts written before it keep proving what they proved (a new tab asks for
  * the password). Whoever wants memory passes `memorizar: true`.
  */
 /**
- * `canalOficial`: the "Enter the Orwell channel" checkbox on the last step (3/11/2026).
- * It comes checked on screen; here it stays as the screen puts it, unless you
- * pass `true` or `false`.
+ * `canalOficial`: the "Join the official Orwell channel" checkbox on the last step.
+ * It comes UNCHECKED on screen since 12/11/2026 (opt-in). Here it is ticked by
+ * default, because the scripts written before that count on the account being in
+ * the common room; pass `false` to untick, or `null` to leave it as the screen
+ * puts it.
  */
-export async function criarConta(page, { nome, frase = FRASE, servidor, timeout = 60_000, memorizar = false, canalOficial } = {}) {
+/**
+ * `ficheiro`: the account-file step that comes right after creating (16/11/2026).
+ * By default this downloads the file, ticks the box and continues, so scripts
+ * written before it end where they always did. Pass `false` to stop on the step.
+ */
+export async function criarConta(page, { nome, frase = FRASE, servidor, timeout = 60_000, memorizar = false, canalOficial = true, ficheiro = true } = {}) {
   const campoNome = page.getByPlaceholder("Como queres aparecer")
   // Since phase 8.1 Setup can open with "Do you use Orwell on another device?".
   // A new account answers "No". We wait for whichever comes first: the question,
@@ -91,12 +98,31 @@ export async function criarConta(page, { nome, frase = FRASE, servidor, timeout 
     }
   }
 
-  if (canalOficial !== undefined) {
+  if (canalOficial !== null) {
     const caixaDoCanal = page.locator('input[name="canal-oficial"]')
     if (await caixaDoCanal.count()) await caixaDoCanal.setChecked(canalOficial)
   }
 
   await criar().click()
+  if (ficheiro) await passarOFicheiroDaConta(page, { timeout })
+}
+
+/**
+ * The account-file step: download, tick "Guardei o ficheiro num sítio seguro.",
+ * "Continuar". Returns the download, for whoever wants to look at the file.
+ */
+export async function passarOFicheiroDaConta(page, { timeout = 90_000 } = {}) {
+  const passo = page.getByRole("heading", { name: "Guarda o ficheiro da conta" })
+  // A build from before the step (the old web in `e2e-cliente-antigo`) opens the app straight away.
+  const app = page.getByRole("button", { name: "Configurações", exact: true }).first()
+  await passo.or(app).first().waitFor({ timeout })
+  if (!(await passo.count())) return null
+  const botao = page.getByRole("button", { name: "Descarregar o ficheiro da conta" })
+  await botao.and(page.locator(":enabled")).waitFor({ timeout })
+  const [descarga] = await Promise.all([page.waitForEvent("download", { timeout }), botao.click()])
+  await page.getByRole("checkbox", { name: "Guardei o ficheiro num sítio seguro." }).check()
+  await page.getByRole("button", { name: "Continuar", exact: true }).click()
+  return descarga
 }
 
 /**

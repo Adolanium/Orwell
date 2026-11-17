@@ -108,4 +108,15 @@ describe("escolher o que a sala é", () => {
     await userEvent.click(screen.getByRole("button", { name: strings.newRoom.kindTickets }))
     expect(screen.getByText(strings.newRoom.ticketsNote)).toBeTruthy()
   })
+
+  it("uma sala de votações sai como sala de texto, com a disposição «polls» ao lado", async () => {
+    const user = userEvent.setup()
+    const dito: Array<Record<string, unknown>> = []
+    render(<NewRoom onSubmit={async (n) => void dito.push(n)} onCancel={() => {}} />)
+    await user.type(screen.getByPlaceholderText(strings.newRoom.namePlaceholder), "Votações")
+    await user.click(screen.getByRole("button", { name: strings.newRoom.kindPolls }))
+    expect(screen.getByText(strings.newRoom.pollsNote)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: strings.newRoom.create }))
+    expect(dito[0]).toMatchObject({ name: "Votações", kind: "text", layout: "polls" })
+  })
 })

@@ -18,7 +18,7 @@ import { lerBandas, useAnalisador } from "../../hooks/useAnalisador.js"
  * plays AND the card is in view (`IntersectionObserver`, and the tab visible).
  * FPS with four cards are measured in `scripts/medir-chamada-23h.mjs`.
  *
- * To the rhythm (owner, October 28, 2026: "I need movement and color to the
+ * To the rhythm (the requirement: "I need movement and color to the
  * beat of the sound"): the blobs don't move at fixed speed, they move with the
  * energy of the sound, and each bass hit (`batida`: energy jumping above its
  * average) gives a push to the speed, swells the blobs and rotates the colors
@@ -28,9 +28,9 @@ import { lerBandas, useAnalisador } from "../../hooks/useAnalisador.js"
  *
  * With reduced motion the blobs still draw, slower and dimmer (`suave`): until
  * October 28, 2026 it was a fixed gradient, and on Windows with animations
- * disabled the owner saw the DJ card frozen ("the wmp style background on the
+ * disabled the DJ card looked frozen ("the wmp style background on the
  * dj card isn't working"). What the music does to the card is the signal that
- * the music is there; the owner preferred the blobs to a bar equalizer, same day.
+ * the music is there; the blobs were preferred to a bar equalizer.
  */
 export function Visualizador({ stream }: { stream: MediaStream | null }): React.JSX.Element {
   const caixa = useRef<HTMLSpanElement>(null)

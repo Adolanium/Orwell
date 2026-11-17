@@ -1,6 +1,5 @@
 /**
- * The accounts on this device ("Switch account", requested by the owner on
- * November 3, 2026).
+ * The accounts on this device ("Switch account").
  *
  * A device held ONE account: one vault, and its remembered session. To log out
  * of one account and into another without losing the first, the device can now

@@ -224,7 +224,7 @@ describe("uma chamada de voz a QUATRO, pelo gateway", () => {
     }
 
     // The first three set up the entire call: they join, bring up both
-    // transports, and put voice on the air. This is the state the owner described (three
+    // transports, and put voice on the air. This is the reported state (three
     // hearing each other) before the fourth arrives.
     const transportes = new Map<string, { envio: string; recepcao: string }>()
     const produtores = new Map<string, string>()

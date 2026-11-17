@@ -46,7 +46,7 @@ import { LinkDraft } from "./LinkDraft.js"
 import { PostBody } from "./PostBody.js"
 import { PostEngagement } from "./PostEngagement.js"
 import { NovaVotacao } from "../overlays/NovaVotacao.js"
-import { apurar, corpoDaVotacao, votacaoDe, votosDe, type Apuramento, type Votacao } from "../../lib/votacoes.js"
+import { apurar, corpoDaVotacao, fechosDe, votacaoDe, votosDe, type Apuramento, type Votacao } from "../../lib/votacoes.js"
 import { usePostActions } from "./usePostActions.js"
 import { NomeDePessoa } from "../../components/NomeDePessoa.js"
 
@@ -71,7 +71,7 @@ const FICHEIROS_MAX_POST = 4
 const IMAGENS_MAX_POST = 4
 
 /**
- * Polls are hidden, by owner decision from August 18, 2026.
+ * Polls are hidden, as a product decision.
  *
  * Hidden, not removed: the entire path stays live and tested. The `Poll` in
  * the protocol, the count, vote rebroadcast, the card. What is gone are the
@@ -241,13 +241,14 @@ export function Social({
    * vote, see `apurar`.
    */
   const apuramentos = useMemo(() => {
-    const escolhas = votosDe(messages)
+    const fechos = fechosDe(messages)
+    const escolhas = votosDe(messages, fechos)
     const porPublicacao = new Map<string, Apuramento>()
     for (const publicacao of feed) {
       const votacao = votacaoDe(publicacao.payload)
       const id = publicacao.payload.id
       if (!votacao || !id) continue
-      porPublicacao.set(id, apurar(escolhas.get(id), votacao.options.length, me))
+      porPublicacao.set(id, apurar(escolhas.get(id), votacao.options.length, me, fechos.get(id) ?? null))
     }
     return porPublicacao
   }, [messages, feed, me])

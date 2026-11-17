@@ -192,10 +192,13 @@ describe("juntar contas, de ponta a ponta", () => {
     )
     await ate(() => carla.session.membersOf(canal).map(String).includes(dora.address), "a Dora está nos membros do canal", 30_000)
 
-    // Ana's key no longer opens it: the disk holds Dora, without the account private key.
+    // Ana's key no longer opens it: the disk holds Dora, and since 1.3.16 with
+    // DORA's account private key (pairing passes it; Ana's is gone with her account).
     expect(await contaNoDisco(ana, "frase-passe-de-teste")).toBeNull()
     const depois = await contaNoDisco(ana, "frase-nova-da-dora")
-    expect(depois?.privada).toBe(false)
+    expect(depois?.privada).toBe(true)
+    expect(ana.session.temChaveDeConta).toBe(true)
+    expect(ana.vault.contents.signingPrivateKey).toBe(dora.vault.contents.signingPrivateKey)
     expect(depois?.chave).not.toBe(antes?.chave)
     expect(ana.session.identity.address).toBe(dora.address)
 

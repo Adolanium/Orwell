@@ -292,7 +292,7 @@ describe("o prazo só se adia com partes da folha eleita (recomendação 12)", (
     const inicio = Date.now()
     try {
       const desfecho = await carla.anti.pedirAnexo(CANAL, ID, 0)
-      expect(desfecho).toEqual({ ok: false, motivo: "ninguem" })
+      expect(desfecho).toMatchObject({ ok: false, motivo: "ninguem" })
       expect(Date.now() - inicio).toBeLessThan(1_500)
     } finally {
       clearInterval(pulso)

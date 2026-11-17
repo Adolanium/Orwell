@@ -10,7 +10,7 @@ const QUEDA_DO_PICO = 0.006
 /**
  * The spectrum display on the "Share audio" sheet: vertical bars in green and
  * cyan, each with its own peak that stays up for a moment and falls slowly.
- * It is the Winamp design, in skin colors (owner, 27 October 2026: "think
+ * It is the Winamp design, in skin colors (the brief: "think
  * Winamp and Windows Media Player. Nostalgia.").
  *
  * The bands are logarithmic, like hearing: the first bar is around 40 Hz and

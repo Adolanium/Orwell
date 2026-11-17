@@ -255,3 +255,40 @@ describe("um voto absurdo não leva a reacção com ele", () => {
     expect(comVoto(99)["vote"]).toBe(99)
   })
 })
+
+describe("o prazo e o fecho de uma votação", () => {
+  const comPrazo: Payload = {
+    ...(mensagemComVotacao as Extract<Payload, { t: "message" }>),
+    poll: { question: PERGUNTA, options: OPCOES, closesAt: 1_700_000_900_000 },
+  }
+  const fecho: Payload = {
+    t: "edit",
+    id: "edicao-fecho-1",
+    target: "mensagem-votacao-1",
+    editedAt: 1_700_000_800_000,
+    body: mensagemComVotacao.t === "message" ? mensagemComVotacao.body : "",
+    closePoll: true,
+  }
+
+  it("o prazo e o pedido de fecho atravessam o fio", () => {
+    expect(decodePayload(encodePayload(comPrazo))).toMatchObject({ poll: { closesAt: 1_700_000_900_000 } })
+    expect(decodePayload(encodePayload(fecho))).toMatchObject({ t: "edit", closePoll: true })
+  })
+
+  it("um prazo ilegível conta como sem prazo e não derruba a votação", () => {
+    const bruto = JSON.parse(new TextDecoder().decode(encodePayload(comPrazo)))
+    bruto.poll.closesAt = "amanhã"
+    const lido = decodePayload(new TextEncoder().encode(JSON.stringify(bruto))) as { poll?: { options: string[]; closesAt?: number } }
+    expect(lido.poll?.options).toEqual(OPCOES)
+    expect(lido.poll?.closesAt).toBeUndefined()
+  })
+
+  it("um cliente antigo lê a votação com prazo, sem o prazo, e o fecho como uma edição com o mesmo texto", () => {
+    const antigo = comoUmClienteAntigo(encodePayload(comPrazo))
+    expect(antigo.lido).toBe(true)
+    const Edicao = z.object({ t: z.literal("edit"), id: z.string(), target: z.string(), editedAt: z.number(), body: z.string() })
+    const lida = Edicao.safeParse(JSON.parse(new TextDecoder().decode(encodePayload(fecho))))
+    expect(lida.success).toBe(true)
+    expect(lida.success && lida.data.body).toBe(comPrazo.t === "message" ? comPrazo.body : "")
+  })
+})

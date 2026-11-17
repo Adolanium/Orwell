@@ -1,7 +1,7 @@
 /**
  * SOUND from screen share, end-to-end, in the product: mesh and SFU.
  *
- * The flaw, reported by the owner in 0.8.0: "screen shares are not transmitting
+ * The flaw in 0.8.0: "screen shares are not transmitting
  * audio". This measures the fix with the usual subject: the product. The
  * `apps/web` in `vite`, the homeserver (with and without media engine), two accounts
  * created on screen, an invite accepted on screen, voice room clicked, the share

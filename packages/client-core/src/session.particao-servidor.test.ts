@@ -60,6 +60,8 @@ async function conta(nome: string): Promise<Conta> {
     if (estado.code) codigos.push(estado.code)
   })
   const { address } = await session.createIdentity(`localhost:${porta}`)
+  // Joining the common room is opt-in since 12/11/2026: this account ticked the box.
+  await session.escolherSalaComum(true)
   await session.connect()
   return { nome, session, address, codigos }
 }

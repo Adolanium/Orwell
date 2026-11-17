@@ -8,7 +8,7 @@ import { ToastContext } from "../../components/Toast.js"
 import { strings, traduzirErro } from "../../strings.js"
 
 /**
- * "Switch account" (owner request on November 3, 2026).
+ * "Switch account".
  *
  * A device can have multiple accounts, each with its own vault and remembered
  * session. Switching closes the open account (without forgetting its session)

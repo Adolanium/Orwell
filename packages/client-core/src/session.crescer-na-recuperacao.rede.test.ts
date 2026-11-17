@@ -13,7 +13,7 @@ import {
 /**
  * Who joined while we were away, said once (11/3/2026).
  *
- * The owner's report: "login seems very slow". Measured in
+ * The bug: "login seems very slow". Measured in
  * `scripts/medir-login.mjs`: anyone who tidies a channel and comes back after N
  * joins said the entire cascade (profile, authority, rooms, roles, resend) N
  * times during recovery, and each send takes its turn in the group and writes

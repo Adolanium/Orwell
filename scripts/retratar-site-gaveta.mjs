@@ -4,7 +4,7 @@
  *   cd apps/site && npx vite build && cd ../..
  *   node scripts/retratar-site-gaveta.mjs
  *
- * Requested by the owner on 3 November 2026. Per language (en, pt) and width (1440,
+ * Per language (en, pt) and width (1440,
  * 390), on the landing page served by `vite preview` (port 8515):
  *
  *   - the banner moves, stops when mouse is over it or has focus, and with reduced

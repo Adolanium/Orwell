@@ -72,17 +72,34 @@ const VERSAO_DAS_IMPRESSOES = 1
   (`EXTENSAO_PERMISSOES`), so it receives live what the snapshot cannot prove to it.
   Proven in `payload.permissoes.test.ts`.
 */
+/*
+  `channel.meta` changed 12/11/2026 without bumping the version (permanent pins,
+  1.3.9): the room gained `pinnedProof` and each pin gained `attachments`, both
+  optional and with no default value. A room without them (every room that
+  exists today, and every text-only pin) signs the same in 1.3.7 and here. One
+  WITH them, relayed (not live) to a 1.3.7, does not verify there; live, MLS
+  authenticates the sender and authorship is not read. Proven in
+  `payload.fixadas.test.ts`.
+*/
+/*
+  `message`, `post` and `edit` changed without bumping the version (poll deadline and early
+  close, after 1.3.9): `Poll` gained `closesAt` and `edit` gained `closePoll`, both optional and
+  with no default value. A message, post or edit without them (every one that exists today)
+  signs the same in 1.3.9 and here. One WITH them, relayed (not live) to a 1.3.9, does not
+  verify there; live, MLS authenticates the sender and authorship is not read. Proven in
+  `payload.votacao.autoria.test.ts`.
+*/
 const IMPRESSOES: Record<string, string> = {
-  message: "e9a118722fe65056",
-  edit: "a0e49f49e674e700",
+  message: "c7fa31b65b1aeb29",
+  edit: "5ae46d1ab1677ffc",
   redact: "6d8d79dd33db05b9",
   reaction: "8e9e01afa380db2a",
   "space.meta": "8496af12b04aa1af",
-  "channel.meta": "904d159ce0c1bc53",
+  "channel.meta": "93ec854e7d93e4a3",
   "channel.category": "723d670c93969e71",
   "role.define": "802a74f1a7f15f2b",
   "role.assign": "349bc31e5a3e17b6",
-  post: "ad0427ac563c8f24",
+  post: "5e4df6a1613b8dd7",
   "post.comment": "d690361043385a6e",
   "post.reaction": "455fd49290b2a60a",
   "room.created": "0072be3f8a6078ca",

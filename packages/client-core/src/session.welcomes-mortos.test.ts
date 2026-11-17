@@ -320,7 +320,7 @@ describe("Welcomes mortos entregues de novo", () => {
     await reabrir()
     const escritasDeUmArranque = bento.disco.escritas
 
-    // The state the owner's phone was left in: marks emptied and saved, and the
+    // The state a real phone was left in: marks emptied and saved, and the
     // server still holding every Welcome.
     await bento.vault.update((contents) => {
       contents.deadWelcomes = []

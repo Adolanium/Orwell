@@ -243,7 +243,7 @@ describe("terminologia — um termo por coisa (STE100)", () => {
 
 describe("terminologia — mensagem privada", () => {
   /*
-   * Owner request from October 27, 2026: "direct message" becomes "private
+   * The rule: "direct message" becomes "private
    * message" in everything users see. The code still says `directa`/`dm`; only
    * the text changed, and this test holds the text in place.
    */

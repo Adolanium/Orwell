@@ -89,7 +89,7 @@ describe.each(VERSOES)("a página de transferências ($lingua)", (versao) => {
   })
 
   it('tem o selector "EN · PT" só no rodapé, a levar à outra língua', () => {
-    // Owner request on November 3, 2026, same as the other pages.
+    // Same as the other pages.
     expect(topo).not.toBe("")
     expect(topo).not.toContain('class="linguas"')
     expect(topo).not.toMatch(/hreflang=/)
@@ -160,7 +160,7 @@ describe.each(VERSOES)("a página de transferências ($lingua)", (versao) => {
   })
 
   it("cada instalador é um botão com o sistema no nome, e por baixo a versão, o tamanho e a soma", () => {
-    // Owner request on November 3, 2026. The button is the site's main focus.
+    // The button is the site's main focus.
     const instaladores = /<ul class="instaladores">([\s\S]*?)<\/ul>/.exec(html)?.[1] ?? ""
     const itens = [...instaladores.matchAll(/<li class="instalador instalador-(\w+)">([\s\S]*?)<\/li>/g)]
     expect(itens.map((m) => m[1])).toEqual(["macos", "windows"])

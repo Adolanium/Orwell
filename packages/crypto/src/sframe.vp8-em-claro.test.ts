@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { bytesEmClaroDoVp8, importSframeKey, readHeader, SframeReceiver, SframeSender } from "./sframe.js"
 
 /**
- * The pixelated screen share (owner's report, 2 November 2026).
+ * The pixelated screen share.
  *
  * The SFU (mediasoup) and Chrome's RTP unpacker decide if a packet starts a
  * keyframe by reading the FIRST byte of the VP8 frame: bit 0 at zero means keyframe

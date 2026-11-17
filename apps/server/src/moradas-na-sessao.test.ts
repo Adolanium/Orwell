@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import { eMoradaOpaca, friendsOfTies, moradaDeSala, moradaDirecta, temChaveDeConta, type Identity, type Payload } from "@enclave/protocol"
 import { DatabaseSync } from "node:sqlite"
+import { PassagemDaChaveDaConta } from "@enclave/client-core"
 import {
   ate,
   contasDeTeste,
@@ -26,6 +27,9 @@ const abertas: ContaDeTeste[] = []
 
 beforeAll(async () => {
   servidor = await levantarServidor()
+  // The phone here is one paired before 1.3.16, WITHOUT the account key, and it stays
+  // so: what is measured is what such a device knows from the vault alone.
+  PassagemDaChaveDaConta.ligada = false
 }, 30_000)
 
 afterEach(() => {
@@ -33,6 +37,7 @@ afterEach(() => {
 })
 
 afterAll(async () => {
+  PassagemDaChaveDaConta.ligada = true
   await servidor?.fechar()
 })
 
@@ -43,7 +48,7 @@ async function contas(...nomes: string[]): Promise<ContaDeTeste[]> {
 }
 
 async function telemovelDe(conta: ContaDeTeste): Promise<ContaDeTeste> {
-  const telemovel = await emparelharAparelho(conta)
+  const telemovel = await emparelharAparelho(conta, `${conta.nome} (telemóvel)`, { semChaveDaConta: true })
   abertas.push(telemovel)
   return telemovel
 }

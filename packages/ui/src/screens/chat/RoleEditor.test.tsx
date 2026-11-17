@@ -116,7 +116,7 @@ describe("RoleEditor — a lista de cargos", () => {
 })
 
 /**
- * The three tabs, the way Discord organizes a role (owner request, 27 October 2026).
+ * The three tabs, the way Discord organizes a role.
  * They replace the form that ran below the list.
  */
 describe("RoleEditor — os separadores do cargo aberto", () => {
@@ -288,7 +288,7 @@ describe("RoleEditor — a cor do cargo", () => {
 })
 
 /**
- * Permissions, broken down into toggles (owner request: "permissions must be broken down
+ * Permissions, broken down into toggles (requirement: "permissions must be broken down
  * so they can be assigned to roles").
  *
  * Groups are from Discord, with the cipher one at the top and its mark. The
@@ -396,7 +396,7 @@ describe("RoleEditor — as permissões", () => {
 })
 
 /**
- * Role names can change (2/11/2026, owner request: "the founder must be able
+ * Role names can change (requirement: "the founder must be able
  * to change the role name"): in place, in the list, and also the built-in role,
  * which was read-only until now.
  */
@@ -717,7 +717,7 @@ describe("RoleEditor — editar um cargo", () => {
 })
 
 /**
- * The order of roles in the editor (4/11/2026, owner request: "the
+ * The order of roles in the editor (requirement: "the
  * founder/admin must be able to reorder the roles as they are presented").
  * The gesture is the same as in the model section: `OrdemDosCargos`.
  */

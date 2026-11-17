@@ -314,7 +314,7 @@ describe("a ligação que volta manda refazer o caminho de media", () => {
   /**
    * And, on that same reconnect, the bridge asks who is in the voice rooms.
    *
-   * Report from the owner on October 5, 2026: there are people who don't see who
+   * The bug: there are people who don't see who
    * is in the room before they join. The list is made from the `voice.join`
    * events the device heard, and people who already left don't recover in the
    * snapshot; the server presence notice, which made everyone there reannounce

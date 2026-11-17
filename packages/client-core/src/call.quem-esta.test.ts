@@ -5,7 +5,7 @@ import { Call, ehPerguntaDePresenca, type CallBridge, type MediaKeyMaterial } fr
 /**
  * "Who is in the room?", and the answer.
  *
- * Report from the owner on October 5, 2026, after a call with other people:
+ * The bug, seen in a call with other people:
  * **some people do not see who is in the room before they join.** It is not a
  * design flaw, it is what the architecture gives: the list of who is in a
  * voice room is made from the `voice.join` that this device HEARD, and those

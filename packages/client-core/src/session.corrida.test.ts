@@ -434,8 +434,8 @@ async function canalComDois(): Promise<{
 /**
  * The message that goes missing when both apps are open and connected.
  *
- * Reported by the owner on 14 August 2026: she wrote, it appeared on her screen, and
- * on his it did not. No error, no warning, and with the event present on the
+ * The bug: one person wrote, it appeared on their screen, and
+ * on the other person's it did not. No error, no warning, and with the event present on the
  * server-which is what made this so hard to explain.
  *
  * There are two bugs, one on each side of the wire, and they are the same thing: read the

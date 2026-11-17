@@ -207,7 +207,7 @@
   }
 }
 
-/* With reduced motion it keeps settling, slower (owner rule: nothing stops).
+/* With reduced motion it keeps settling, slower (the rule: nothing stops).
    `!important` and a class over the universal rule in `base.css`, which sets
    all animations to 0.01 ms. */
 @media (prefers-reduced-motion: reduce) {

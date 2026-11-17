@@ -2,7 +2,7 @@
  * Who offered to whom, and who waited.
  *
  * `churn-chamada.mjs` says HOW MANY connections closed; this says WHY one did
- * not close. It exists from a report by the owner on August 12: three people on
+ * not close. It exists from a bug report: three people on
  * a call, two hear each other, the third stays "calling" forever. The churn
  * reproduced the number (4/6 at start, always the same shape: exactly the link
  * between two of them is missing), but a total does not say whose turn it was

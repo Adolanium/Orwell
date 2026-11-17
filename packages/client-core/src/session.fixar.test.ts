@@ -475,6 +475,61 @@ describe("fixar uma mensagem: quem NÃO tem a responsabilidade", () => {
     expect(nomeVisto(ana)).toBe("geral")
   })
 
+  it("e uma lista assinada (`pinnedProof`) adulterada por quem não fixa é ignorada", async () => {
+    // Bento has Ana's signed list in his vault, and passes it on with a different body
+    // and a newer stamp: the signature no longer covers it.
+    const { ana, bento } = await canalComDois()
+    await ana.session.pinMessage(CANAL, SALA, { id: "m-inscricoes-1", sender: ana.address, body: "As inscrições fecham na sexta.", sentAt: 1_700_000_000_000 })
+    await settle(80)
+    const original = bento.vault.contents.channelRooms[CANAL]?.[SALA]?.fixadas?.payload as Record<string, unknown> | undefined
+    expect(original?.["autoria"]).toBeDefined()
+    const adulterada = structuredClone(original!)
+    ;(adulterada["pinned"] as { body: string }[])[0]!.body = "Reunião cancelada."
+    adulterada["updatedAt"] = (adulterada["updatedAt"] as number) + 1
+
+    await bento.session.send(CANAL, {
+      t: "channel.meta",
+      room: SALA,
+      name: "geral",
+      category: "",
+      kind: "text",
+      position: -1,
+      closed: false,
+      removed: false,
+      pinnedProof: { s: -1, a: ana.address, p: adulterada },
+      updatedAt: Date.now() + 10_000,
+    })
+    await settle(80)
+    expect(fixadasVistas(ana).map((f) => f.body)).toEqual(["As inscrições fecham na sexta."])
+  })
+
+  it("e uma lista assinada antiga, repetida depois de desafixar, não volta a fixar", async () => {
+    const { ana, bento } = await canalComDois()
+    await ana.session.pinMessage(CANAL, SALA, { id: "m-inscricoes-1", sender: ana.address, body: "As inscrições fecham na sexta.", sentAt: 1_700_000_000_000 })
+    await settle(80)
+    const antiga = structuredClone(bento.vault.contents.channelRooms[CANAL]?.[SALA]?.fixadas?.payload as Record<string, unknown>)
+    await ana.session.unpinMessage(CANAL, SALA, "m-inscricoes-1")
+    await settle(80)
+    expect(fixadasVistas(ana)).toEqual([])
+
+    // Valid signature, valid author with `fixar`: only the stamp stops it.
+    await bento.session.send(CANAL, {
+      t: "channel.meta",
+      room: SALA,
+      name: "geral",
+      category: "",
+      kind: "text",
+      position: -1,
+      closed: false,
+      removed: false,
+      pinnedProof: { s: -1, a: ana.address, p: antiga },
+      updatedAt: Date.now() + 10_000,
+    })
+    await settle(80)
+    expect(fixadasVistas(ana)).toEqual([])
+    expect(fixadasVistas(bento)).toEqual([])
+  })
+
   it("quem tem `renomear` e não tem `fixar` muda o nome à sala sem desfixar nada", async () => {
     const { ana, bento } = await canalComDois()
 

@@ -157,6 +157,70 @@ describe("entrar nas chamadas com o microfone silenciado", () => {
   })
 })
 
+/*
+  A call with the screen locked:
+  what the app tells the system during a call, and the notice on the iPhone's
+  installed app.
+*/
+describe("a chamada com o ecrã bloqueado", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    Reflect.deleteProperty(navigator, "standalone")
+  })
+
+  it("na chamada, a Media Session diz o nome da sala e o botão do sistema cala o microfone", async () => {
+    const handlers = new Map<string, (() => void) | null>()
+    const sessao = {
+      metadata: null as unknown,
+      playbackState: "none",
+      setActionHandler: (accao: string, fazer: (() => void) | null) => handlers.set(accao, fazer),
+    }
+    Object.defineProperty(navigator, "mediaSession", { configurable: true, value: sessao })
+    vi.stubGlobal(
+      "MediaMetadata",
+      class {
+        constructor(readonly dados: { title: string }) {}
+      },
+    )
+    try {
+      render(<App bridge={ponte()} />)
+      await abrirCanal()
+      await abrirSala(/voz/i)
+      expect(sessao.playbackState).toBe("playing")
+      expect((sessao.metadata as { dados: { title: string } }).dados.title).toBe("voz")
+      setMuted.mockClear()
+      await act(async () => {
+        handlers.get("togglemicrophone")?.()
+        await Promise.resolve()
+      })
+      expect(readPrefs().micMuted).toBe(true)
+      expect(setMuted).toHaveBeenLastCalledWith(true)
+    } finally {
+      Reflect.deleteProperty(navigator, "mediaSession")
+    }
+  })
+
+  it("na app instalada do iPhone, entrar numa chamada diz que o microfone desliga com o ecrã bloqueado", async () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_4 like Mac OS X)")
+    Object.defineProperty(navigator, "standalone", { configurable: true, value: true })
+    render(<App bridge={ponte()} />)
+    await abrirCanal()
+    await abrirSala(/voz/i)
+    expect(await screen.findByText(strings.chamadaEcraBloqueado.avisoPwaIphone)).toBeTruthy()
+  })
+
+  it("no Safari do iPhone não há aviso", async () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_4 like Mac OS X)")
+    render(<App bridge={ponte()} />)
+    await abrirCanal()
+    await abrirSala(/voz/i)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+    expect(screen.queryByText(strings.chamadaEcraBloqueado.avisoPwaIphone)).toBeNull()
+  })
+})
+
 describe("Privacidade › Mostrar quando estou online", () => {
   it('desligado, a presença sai como invisível, com o estado "online" escolhido', async () => {
     guardar({ mostrarOnline: false })

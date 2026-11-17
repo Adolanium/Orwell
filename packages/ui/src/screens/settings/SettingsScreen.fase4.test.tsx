@@ -130,6 +130,18 @@ describe("Microfone e câmara › Entrar silenciado", () => {
   })
 })
 
+describe("Microfone e câmara › Ecrã ligado durante as chamadas", () => {
+  it("é um interruptor desligado de fábrica, com a nota da bateria, e ligá-lo fica guardado", async () => {
+    const user = userEvent.setup()
+    montar("media")
+    const interruptor = screen.getByRole("switch", { name: strings.definicoesNovas.ecraLigadoNaChamada })
+    expect(interruptor.getAttribute("aria-checked")).toBe("false")
+    expect(screen.getByText(strings.definicoesNovas.ecraLigadoNaChamadaNota)).toBeTruthy()
+    await user.click(interruptor)
+    expect(readPrefs().ecraLigadoNaChamada).toBe(true)
+  })
+})
+
 describe("Microfone e câmara › Câmara", () => {
   const paragens: string[] = []
   function comCamaras(etiquetas: string[]): void {

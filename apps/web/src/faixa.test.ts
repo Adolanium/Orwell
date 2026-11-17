@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * The new version pill (owner's choice B, 28 October 2026).
+ * The new version pill (option B).
  */
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { mostrarFaixa } from "./faixa.js"

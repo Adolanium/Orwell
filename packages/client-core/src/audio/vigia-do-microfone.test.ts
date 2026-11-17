@@ -7,7 +7,7 @@
  * worklet stopped. And the case that is NOT death: the main thread frozen.
  */
 import { describe, expect, it } from "vitest"
-import { VigiaDoMicrofone, type MorteDoMicrofone, type RelogioDaVigia, type SaudeDoMicrofone } from "./vigia-do-microfone.js"
+import { sistemaSuspendeCaptura, VigiaDoMicrofone, type MorteDoMicrofone, type RelogioDaVigia, type SaudeDoMicrofone } from "./vigia-do-microfone.js"
 
 class Relogio implements RelogioDaVigia {
   t = 0
@@ -42,7 +42,12 @@ class Relogio implements RelogioDaVigia {
   }
 }
 
-function montar(saude: { faixa: { readyState: string; muted: boolean }; contexto?: { state: string }; cadeia?: { ultimoBatimento: number; rebentou: boolean } }) {
+function montar(saude: {
+  faixa: { readyState: string; muted: boolean }
+  contexto?: { state: string }
+  cadeia?: { ultimoBatimento: number; rebentou: boolean }
+  escondida?: boolean
+}) {
   const relogio = new Relogio()
   const mortes: { morte: MorteDoMicrofone; detalhe: string }[] = []
   const vigia = new VigiaDoMicrofone(
@@ -148,5 +153,85 @@ describe("a vigia do microfone", () => {
     vigia.ligar()
     relogio.andar(10_000)
     expect(mortes).toHaveLength(1)
+  })
+
+  /*
+    The locked screen. iOS mutes the capture of an installed web app in the
+    background, and a phone call interrupts the context. Reopening the
+    microphone there fails, and four failures stopped the watchdog for good:
+    back on screen, the person was mute for the rest of the call.
+  */
+  describe("com a página escondida (ecrã bloqueado)", () => {
+    it("uma faixa muted durante minutos não é uma morte enquanto a página está escondida", () => {
+      const { relogio, mortes, saude } = montar({ faixa: { readyState: "live", muted: false }, escondida: true })
+      saude.faixa.muted = true
+      relogio.andar(15 * 60_000)
+      expect(mortes).toEqual([])
+    })
+
+    it("um contexto parado e uma cadeia sem batimento também esperam pela volta", () => {
+      const { relogio, mortes } = montar({
+        faixa: { readyState: "live", muted: false },
+        contexto: { state: "interrupted" },
+        cadeia: { ultimoBatimento: 0, rebentou: false },
+        escondida: true,
+      })
+      relogio.andar(5 * 60_000)
+      expect(mortes).toEqual([])
+    })
+
+    it("uma faixa que terminou escondida morre na primeira leitura depois de voltar", () => {
+      const { relogio, mortes, saude } = montar({ faixa: { readyState: "live", muted: false }, escondida: true })
+      saude.faixa.readyState = "ended"
+      relogio.andar(60_000)
+      expect(mortes).toEqual([])
+      saude.escondida = false
+      relogio.andar(1_000)
+      expect(mortes).toEqual([{ morte: "terminou", detalhe: "ao voltar" }])
+    })
+
+    it("uma faixa ainda muted ao voltar morre logo, sem esperar 3 s", () => {
+      const { relogio, mortes, saude } = montar({ faixa: { readyState: "live", muted: false }, escondida: true })
+      saude.faixa.muted = true
+      relogio.andar(60_000)
+      saude.escondida = false
+      relogio.andar(1_000)
+      expect(mortes).toEqual([{ morte: "calado", detalhe: "ao voltar" }])
+    })
+
+    it("uma faixa que o sistema devolveu ao voltar não morre", () => {
+      const { relogio, mortes, saude } = montar({ faixa: { readyState: "live", muted: false }, escondida: true })
+      saude.faixa.muted = true
+      relogio.andar(60_000)
+      saude.faixa.muted = false
+      saude.escondida = false
+      relogio.andar(10_000)
+      expect(mortes).toEqual([])
+    })
+
+    it("um contexto parado ao voltar tem os 2 s de sempre para retomar", () => {
+      const contexto = { state: "interrupted" }
+      const { relogio, mortes, saude } = montar({ faixa: { readyState: "live", muted: false }, contexto, escondida: true })
+      relogio.andar(60_000)
+      saude.escondida = false
+      relogio.andar(1_000)
+      contexto.state = "running"
+      relogio.andar(10_000)
+      expect(mortes).toEqual([])
+    })
+  })
+
+  describe("sistemaSuspendeCaptura: só o telemóvel e o iOS", () => {
+    it("o computador não suspende, o telemóvel e o iOS suspendem", () => {
+      const rato = () => ({ matches: false })
+      const toque = (consulta: string) => ({ matches: consulta === "(pointer: coarse)" })
+      expect(sistemaSuspendeCaptura({ matchMedia: rato, navigator: { userAgent: "Mozilla/5.0 (Windows NT 10.0) Electron/39", platform: "Win32", maxTouchPoints: 0 } })).toBe(false)
+      expect(sistemaSuspendeCaptura({ matchMedia: rato, navigator: { userAgent: "Mozilla/5.0 (Macintosh)", platform: "MacIntel", maxTouchPoints: 0 } })).toBe(false)
+      expect(sistemaSuspendeCaptura({ matchMedia: toque, navigator: { userAgent: "Mozilla/5.0 (Linux; Android 14)" } })).toBe(true)
+      expect(sistemaSuspendeCaptura({ navigator: { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0)" } })).toBe(true)
+      // An iPad that reports itself as a Mac.
+      expect(sistemaSuspendeCaptura({ matchMedia: rato, navigator: { userAgent: "Mozilla/5.0 (Macintosh)", platform: "MacIntel", maxTouchPoints: 5 } })).toBe(true)
+      expect(sistemaSuspendeCaptura({})).toBe(false)
+    })
   })
 })

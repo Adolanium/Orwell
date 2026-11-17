@@ -11,7 +11,7 @@ const MURAL_EU = moradaDeTeste("mural eu", "casa.pt")
 /**
  * In a community, a report (S4) can arrive before the server event. The
  * session tells both copies to the interface: the one from the report comes without the card
- * thumbnail (it is not signed), the one from the server brings it. Owner report with 1.1.0:
+ * thumbnail (it is not signed), the one from the server brings it. The bug in 1.1.0:
  * "the app still has no YouTube thumbnails in communities". The card showed
  * with the title and the "play", and without the image.
  */

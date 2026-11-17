@@ -191,7 +191,6 @@ describe("o Service Worker", () => {
   it.each([
     ["interceptar pedidos", /fetch/i],
     ["guardar cópias", /caches?\b/i],
-    ["avisos remotos", /push/i],
     ["carregar outros guiões", /importScripts/i],
     ["sincronização em segundo plano", /\bsync\b|periodicsync/i],
     ["falar com a rede por outro lado", /XMLHttpRequest|WebSocket|EventSource|sendBeacon/],
@@ -231,8 +230,57 @@ stated as a WHITELIST.
     expect(leituras).toEqual([".close()", ".data && event.notification.data.id"])
     // No other path to the same object: no other name, no destructuring.
     expect([...sw.matchAll(/\bnotification\b(?!click)/g)]).toHaveLength(3)
-    expect([...sw.matchAll(/\.data\b/g)]).toHaveLength(2)
+    expect([...sw.matchAll(/event\.notification\.data\b/g)]).toHaveLength(2)
+    // The push data is read once, as text, and nothing else of it.
+    const linhasDoPush = sw.split("\n").filter((linha) => /event\.data\b/.test(linha)).map((linha) => linha.trim())
+    expect(linhasDoPush).toEqual(['const lingua = event.data ? event.data.text() : ""'])
+    expect([...sw.matchAll(/event\.data\b/g)]).toHaveLength(2)
+    expect([...sw.matchAll(/\.data\b/g)]).toHaveLength(4)
     expect(sw).not.toMatch(/\}\s*=\s*event\b/)
+  })
+
+  /*
+    The push, by WHITELIST. It carries only the device language, and the
+    Service Worker turns it into one of two fixed sentences. It always shows a
+    notice (Safari drops a subscription that pushes without one), with the tag
+    the page closes on reconnect and no `data`: a tap only brings the app
+    forward.
+  */
+  describe("o push, por lista branca", () => {
+    const ouvinte = /self\.addEventListener\("push", \(event\) => \{\n([\s\S]*?)\n\}\)/.exec(sw)?.[1] ?? ""
+
+    it("o ouvinte do push tem três linhas, e são estas", () => {
+      expect(ouvinte.split("\n").map((linha) => linha.trim())).toEqual([
+        'const lingua = event.data ? event.data.text() : ""',
+        'const corpo = lingua === "pt" ? "Nova mensagem no Orwell" : "New message in Orwell"',
+        'event.waitUntil(self.registration.showNotification("Orwell", { body: corpo, tag: "orwell-push" }))',
+      ])
+    })
+
+    it("só mostra um aviso, o do push, com a etiqueta e nenhum data", () => {
+      // Calls with arguments; the header comment names the method once, with none.
+      const mostrados = [...sw.matchAll(/showNotification\(([^)]+)\)/g)].map((m) => m[1])
+      expect(mostrados).toEqual(['"Orwell", { body: corpo, tag: "orwell-push" }'])
+    })
+
+    it("os dois textos do push são os das línguas", () => {
+      const pt = /pushCorpo: "([^"]+)"/.exec(ler("packages/ui/src/linguas/pt.ts"))?.[1]
+      const en = /pushCorpo: "([^"]+)"/.exec(ler("packages/ui/src/linguas/en.ts"))?.[1]
+      expect(pt).toBe("Nova mensagem no Orwell")
+      expect(en).toBe("New message in Orwell")
+      expect(ouvinte).toContain(`"${pt}"`)
+      expect(ouvinte).toContain(`"${en}"`)
+    })
+
+    it("a etiqueta é a que a página fecha ao voltar a ligar", () => {
+      const daPagina = /ETIQUETA_DO_PUSH = "([^"]+)"/.exec(ler("apps/web/src/push.ts"))?.[1]
+      expect(daPagina).toBe("orwell-push")
+      expect(ouvinte).toContain(`tag: "${daPagina}"`)
+    })
+
+    it("e não trata pushsubscriptionchange: teria de falar com o servidor", () => {
+      expect(sw).not.toMatch(/pushsubscriptionchange/)
+    })
   })
 
   it("e não escreve URL nenhum: nem com esquema, nem sem ele, nem caminho à mão", () => {
@@ -240,9 +288,9 @@ stated as a WHITELIST.
     expect(sw).not.toMatch(/["'`]\/{1,2}[a-z0-9_]/i)
   })
 
-  it("ouve três acontecimentos, e são estes", () => {
+  it("ouve quatro acontecimentos, e são estes", () => {
     const ouvidos = [...sw.matchAll(/addEventListener\(\s*["']([a-z]+)["']/g)].map((m) => m[1])
-    expect(ouvidos.sort()).toEqual(["activate", "install", "notificationclick"])
+    expect(ouvidos.sort()).toEqual(["activate", "install", "notificationclick", "push"])
     // And there are no listeners through the other side (`self.onmessage = ...`).
     expect(sw).not.toMatch(/\bon[a-z]+\s*=/)
   })
@@ -260,8 +308,10 @@ stated as a WHITELIST.
     expect(registos[0]).toContain("scope: import.meta.env.BASE_URL")
     expect(arranque).toMatch(/if \(import\.meta\.env\.PROD && "serviceWorker" in navigator\) \{\s*navigator\.serviceWorker\s*\.register/)
     // No one else registers anything: not the bridge, not the package shared
-    // with the desktop app.
+    // with the desktop app. The push subscription lives in `push.ts`, which
+    // only reads the registration `main.tsx` made.
     expect(ler("apps/web/src/bridge.ts")).not.toMatch(/serviceWorker/)
+    expect(ler("apps/web/src/push.ts")).not.toMatch(/\.register\(/)
     expect(ler("packages/ui/src/lib/notifications.ts")).not.toMatch(/\.register\(/)
   })
 

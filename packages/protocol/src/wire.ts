@@ -169,6 +169,18 @@ export const CARTAO_MAX_CARACTERES = 8 * 1024 * 1024
 export const CAPACIDADE_ENVIO_RECUSADO = "envio-recusado"
 
 /**
+ * The client reads a history refusal (12/11/2026): above the history cap
+ * (`Gateway.BACKFILLS_POR_MINUTO`) the server answers with an empty
+ * `channel.backfill.page` carrying `retryAfterMs`, instead of silence.
+ *
+ * Only to clients that announce this. An older client reads an empty page as
+ * "the server has no event there": it would drop a gap from its list, or
+ * decide its account channel was never created and create a second one. That
+ * client keeps the silence.
+ */
+export const CAPACIDADE_HISTORICO_RECUSADO = "historico-recusado"
+
+/**
  * The server arbitrates the creation of a direct conversation (phase 1g, 28/10/2026).
  *
  * `channel.claim` on a `!dm-a.b` is only valid for one of the two accounts in
@@ -1276,6 +1288,14 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
     ),
     /** True when more remain past this page, so the client keeps asking. */
     more: z.boolean().default(false),
+    /**
+     * Set only on a REFUSAL (12/11/2026): the account is above the history cap
+     * (`Gateway.BACKFILLS_POR_MINUTO`), `events` is empty, and asking again
+     * before this many ms is refused again. A client before this ignores the
+     * field and reads an empty page, which ends its recovery pass, as the
+     * silence did, only ten seconds sooner.
+     */
+    retryAfterMs: z.number().int().nonnegative().optional(),
   }),
 
   /**
@@ -1741,7 +1761,20 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
     retryAfterMs: z.number().int().nonnegative().optional(),
   }),
 
-  z.object({ t: z.literal("error"), code: z.string(), message: z.string(), fatal: z.boolean().default(false) }),
+  z.object({
+    t: z.literal("error"),
+    code: z.string(),
+    message: z.string(),
+    fatal: z.boolean().default(false),
+    /**
+     * With `device-revoked` (1.3.16): the account manifest that removed this device,
+     * as the server stores it. It is the proof: signed by the account key, a
+     * version above the one the device saw, and without the device. Only with
+     * it does the removed device sign out and erase its vault; a client before
+     * 1.3.16 drops the field. A copy replaced by an import gets no manifest.
+     */
+    manifest: DeviceManifestWire.optional(),
+  }),
   z.object({ t: z.literal("pong") }),
 ])
 export type ServerFrame = z.infer<typeof ServerFrame>
@@ -1962,5 +1995,89 @@ const TramasDoCofreDoServidor = [
   }),
 ] as const
 
-export const ClientFrame = z.discriminatedUnion("t", [...TramasDoClienteSemCofre.options, ...TramasDoCofreDoCliente])
-export const ServerFrame = z.discriminatedUnion("t", [...TramasDoServidorSemCofre.options, ...TramasDoCofreDoServidor])
+// ---------------------------------------------------------------- Web Push
+//
+// One block, at the end, like the vault's: the push frames join the unions
+// below and touch nothing above.
+
+/**
+ * The capability that says "this server wakes closed apps with Web Push".
+ *
+ * Announced only when the operator turned push on (`ENCLAVE_PUSH=on`).
+ * A client sends `push.*` frames only after seeing it; an old client ignores the
+ * name, and an old server never announces it.
+ *
+ * What a push carries: only the device language, encrypted for that device
+ * (RFC 8291), padded to a fixed size. No channel, no sender, no text. The
+ * push service (Apple, Google, Mozilla) sees that a push went to a device, and
+ * when. See `docs/THREAT-MODEL.md`.
+ */
+export const CAPACIDADE_WEB_PUSH = "web-push"
+
+/** `calarAte` for "until I say otherwise" (the Busy state). */
+export const CALAR_PARA_SEMPRE = Number.MAX_SAFE_INTEGER
+
+/** How many muted channels one subscription carries. Above this the client sends the first ones. */
+export const PUSH_SILENCIADOS_MAX = 512
+
+/**
+ * Why the server refused a `push.subscribe`. Keys are stable.
+ *
+ * - `push-off`: this server does not send pushes.
+ * - `no-device`: the connection logged in without a device chain.
+ * - `endpoint-not-allowed`: the endpoint is not https on port 443 of a known push service.
+ * - `bad-keys`: `p256dh` is not a P-256 point, or `auth` is not 16 bytes.
+ * - `rate-limited`: too many subscriptions from this account this minute.
+ */
+export const RAZOES_DE_RECUSA_DO_PUSH = ["push-off", "no-device", "endpoint-not-allowed", "bad-keys", "rate-limited"] as const
+export type RazaoDeRecusaDoPush = (typeof RAZOES_DE_RECUSA_DO_PUSH)[number]
+
+/** A P-256 uncompressed point (65 bytes) in unpadded base64url. */
+const ChaveP256DoPush = z.string().regex(/^[A-Za-z0-9_-]{87}$/, "expected a 65-byte key in base64url")
+
+const TramasDoPushDoCliente = [
+  /** Ask for the server's VAPID public key. Reply: `push.key`. */
+  z.object({ t: z.literal("push.key.get") }),
+
+  /**
+   * Subscribe THIS device (the connection's account and device key) to pushes.
+   * Idempotent: the client sends it on every connect, and again when the
+   * language, the muted channels, the pause or Busy change. Reply: `push.subscribed`.
+   *
+   * `silenciados`: channels this device does not want to be woken for. Only
+   * whole channels: a room is inside the ciphertext. `calarAte`: epoch ms
+   * before which no push is sent (the pause; `CALAR_PARA_SEMPRE` for Busy).
+   * `expiresAt`: what the browser said, in epoch ms, if it said.
+   */
+  z.object({
+    t: z.literal("push.subscribe"),
+    endpoint: z.string().max(2048).regex(/^https:\/\//, "expected an https endpoint"),
+    p256dh: ChaveP256DoPush,
+    auth: z.string().regex(/^[A-Za-z0-9_-]{22}$/, "expected a 16-byte secret in base64url"),
+    lingua: z.enum(["pt", "en"]),
+    silenciados: z.array(z.string().max(255)).max(PUSH_SILENCIADOS_MAX),
+    calarAte: z.number().int().nonnegative().max(CALAR_PARA_SEMPRE),
+    expiresAt: z.number().int().nonnegative().max(CALAR_PARA_SEMPRE).optional(),
+  }),
+
+  /** Remove this device's subscription. Reply: `push.unsubscribed`. */
+  z.object({ t: z.literal("push.unsubscribe") }),
+] as const
+
+const TramasDoPushDoServidor = [
+  /** The VAPID public key, or `null` when push is off on this server. */
+  z.object({ t: z.literal("push.key"), publicKey: ChaveP256DoPush.nullable() }),
+  z.object({ t: z.literal("push.subscribed"), ok: z.boolean(), reason: z.enum(RAZOES_DE_RECUSA_DO_PUSH).optional() }),
+  z.object({ t: z.literal("push.unsubscribed") }),
+] as const
+
+export const ClientFrame = z.discriminatedUnion("t", [
+  ...TramasDoClienteSemCofre.options,
+  ...TramasDoCofreDoCliente,
+  ...TramasDoPushDoCliente,
+])
+export const ServerFrame = z.discriminatedUnion("t", [
+  ...TramasDoServidorSemCofre.options,
+  ...TramasDoCofreDoServidor,
+  ...TramasDoPushDoServidor,
+])

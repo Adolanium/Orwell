@@ -1,7 +1,7 @@
 /*
   The control panel: the bottom of the left column.
   
-  Design P1 from the owner, "console in three tiers", chosen on 28 October 2026
+  Design P1, "console in three tiers", chosen
   from six options. The "Connected" banner and the account banner became one
   piece (`CartaoDaConta`, with the sidebar dock in the middle), larger and more
   prominent, because it is where you control everything that is yours:
@@ -231,8 +231,8 @@
 
 /*
   Hang up the call: a ghost with the icon in the title color, which turns
-  red for "busy" (not pink for "danger") on hover or focus. Choice A from the
-  owner, 28 October 2026, kept in P1.
+  red for "busy" (not pink for "danger") on hover or focus. Design choice A,
+  kept in P1.
 */
 .me-faixa.painel .me-btn.me-sair {
   color: var(--titulo);

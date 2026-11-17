@@ -17,7 +17,7 @@ const BRUNO = "@bruno:casa.pt"
 const CANAL = "!lagar:casa.pt"
 
 /**
- * The order of roles seen from the full screen (4/11/2026, owner request: "the
+ * The order of roles seen from the full screen (requirement: "the
  * founder/admin should be able to reorder the order in which roles are
  * shown").
  *

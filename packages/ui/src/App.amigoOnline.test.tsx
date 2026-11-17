@@ -43,6 +43,8 @@ const ANA = "@ana:casa.pt"
 const BRUNO = "@bruno:casa.pt"
 const CARLA = "@carla:casa.pt"
 const LAGAR = "!lagar:casa.pt"
+/** The channel name not decrypted yet (16/11/2026). */
+let semNomeDoLagar = false
 const MEU_FEED = moradaDeTeste("mural eu", "casa.pt")
 const DM = moradaDeTeste("directa ana eu", "casa.pt")
 const CARA = "data:image/png;base64,iVBORw0KGgo="
@@ -54,7 +56,7 @@ const FICHAS = (): Record<string, FichaDoCanal> => ({
 let onPresence: ((event: { address: string; online: boolean }) => void) | null = null
 let onConnection: ((payload: { state: string }) => void) | null = null
 let onChannels: ((payload: { channels: string[] }) => void) | null = null
-let onMessage: ((message: { channel: string; sender: string; seq: number; payload: Record<string, unknown> }) => void) | null =
+let onMessage: ((message: { channel: string; sender: string; seq: number; aoVivo?: boolean; payload: Record<string, unknown> }) => void) | null =
   null
 let openDirect: ReturnType<typeof vi.fn>
 let onEpoch: ((payload: { channel: string }) => void) | null = null
@@ -103,6 +105,8 @@ function ponte(): EnclaveBridge {
       safetyNumber: async () => null,
       rooms: (canal: string) =>
         canal === LAGAR ? [{ room: "lounge", name: "Lounge", kind: "voice", position: 0 }] : [],
+      // The channel's name, decrypted. `semNomeDoLagar` plays the moment before it arrives.
+      meta: (canal: string) => (canal === LAGAR && !semNomeDoLagar ? { name: "Lagar" } : undefined),
     },
     invites: {
       create: async () => "enclave://join/x/y#z",
@@ -220,7 +224,7 @@ function anfitriao(janelaAFrente = false): { mostrados: { notice: SystemNotice; 
 }
 
 function comAvisosDoSistema(preview = true): void {
-  writePrefs({ ...readPrefs(), notifications: true, notifyPreview: preview })
+  writePrefs({ ...readPrefs(), notifications: true, notifyPreview: preview, conteudoDosAvisosEscolhido: true })
 }
 
 describe("um amigo fica online", () => {
@@ -348,10 +352,27 @@ describe("os avisos do sistema com a janela à frente", () => {
     const { mostrados } = anfitriao(true)
     await abrirELigar()
     await act(async () => {
-      onMessage?.({ channel: DM, sender: ANA, seq: 1, payload: { t: "message", id: "m1", sentAt: agora, body: "olá" } })
+      onMessage?.({ channel: DM, sender: ANA, seq: 1, aoVivo: true, payload: { t: "message", id: "m1", sentAt: agora, body: "olá" } })
       await Promise.resolve()
     })
     expect(mostrados.map((m) => m.notice.channel)).toEqual([DM])
+  })
+
+  it("uma mensagem que chega pelo histórico não avisa, e a mesma mensagem duas vezes avisa uma vez (12/11/2026)", async () => {
+    comAvisosDoSistema()
+    const { mostrados } = anfitriao(true)
+    await abrirELigar()
+    await act(async () => {
+      // Recovery: no `aoVivo`. Goes into the bell, silent.
+      onMessage?.({ channel: DM, sender: ANA, seq: 1, payload: { t: "message", id: "m-antiga", sentAt: agora - 3_600_000, body: "de ontem" } })
+      // Live, twice (live and again by a second path).
+      onMessage?.({ channel: DM, sender: ANA, seq: 2, aoVivo: true, payload: { t: "message", id: "m-nova", sentAt: agora, body: "olá" } })
+      onMessage?.({ channel: DM, sender: ANA, seq: 2, aoVivo: true, payload: { t: "message", id: "m-nova", sentAt: agora, body: "olá" } })
+      await Promise.resolve()
+    })
+    expect(mostrados).toHaveLength(1)
+    // And the body never carries the channel identifier.
+    expect(mostrados[0]?.notice.body).not.toContain(DM.replace(/^!/, "").split(":")[0] ?? "")
   })
 })
 
@@ -447,6 +468,18 @@ describe("um amigo entra numa sala de voz", () => {
   })
 })
 
+describe("o aviso nunca diz um identificador (16/11/2026)", () => {
+  it("uma sala de voz sem nome conhecido: o aviso diz quem, e não o identificador da sala", async () => {
+    comAvisosDoSistema()
+    const { mostrados } = anfitriao()
+    await abrirELigar()
+    await voz(ANA, true, { room: "x7Hk2q" }, 30_000)
+    await waitFor(() => expect(corpos(mostrados)).toHaveLength(1))
+    expect(corpos(mostrados)[0]).not.toContain("x7Hk2q")
+    expect(corpos(mostrados)[0]).toBe(strings.notifications.amigoNaVozSemSala("Ana"))
+  })
+})
+
 describe("um amigo começa a partilhar o ecrã", () => {
   it('chega a quem está fora da sala: o card diz o ecrã e o botão "Ver" entra na sala', async () => {
     comAvisosDoSistema()
@@ -494,6 +527,18 @@ describe("um amigo entra numa comunidade minha", () => {
       await Promise.resolve()
     })
   }
+
+  it("uma comunidade sem nome decifrado: o aviso não diz o identificador (16/11/2026)", async () => {
+    semNomeDoLagar = true
+    comAvisosDoSistema()
+    const { mostrados } = anfitriao()
+    await abrirELigar()
+    await entraNoLagar(ANA)
+    await waitFor(() => expect(corpos(mostrados)).toHaveLength(1))
+    expect(corpos(mostrados)[0]).not.toContain("lagar")
+    expect(corpos(mostrados)[0]).toBe(strings.notifications.amigoNaComunidadeSemNome("Ana"))
+    semNomeDoLagar = false
+  })
 
   it('o card diz a comunidade, e "Abrir" abre-a', async () => {
     await abrirELigar()

@@ -262,7 +262,7 @@ export type RoleColour = (typeof ROLE_COLOURS)[number]
 export const TYPING_TTL_MS = 6_000
 
 /**
- * The minimum interval between nudges, requested by the owner.
+ * The minimum interval between nudges.
  *
  * Five seconds. It lives here for the same reason as the timeout above: the
  * sender throttles itself by it, and the receiver rejects by it. Two layers, one
@@ -1255,7 +1255,7 @@ export const Payload = z.discriminatedUnion("t", [
   /**
    * A channel role: name and the responsibilities it grants.
    *
-   * Empty `powers` is the case the owner asked for first and the easiest to
+   * Empty `powers` is the first case required and the easiest to
    * lose: a role that grants no management power and only says that this person
    * has access to the channel. It's not a list waiting to be filled in; it's the
    * thing itself.
@@ -1592,7 +1592,7 @@ export const Payload = z.discriminatedUnion("t", [
      * device HEARD, and joins sent earlier are not recovered in the catch-up:
      * voice signaling only counts live, on purpose (see `session.ts`). Until now
      * the answer was to wait for the heartbeat of whoever was there, which comes
-     * every 50 seconds. The owner reported it twice: "some people do not see who is in
+     * every 50 seconds. It was reported twice: "some people do not see who is in
      * the room before they enter".
      *
      * The server warns others when someone arrives, and those in the call answer

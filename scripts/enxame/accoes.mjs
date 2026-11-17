@@ -589,7 +589,7 @@ export const CATALOGO = [
     /**
      * Low weight, and on purpose.
      *
-     * The cycle the owner asked for is request, undo, request again -- and it
+     * The cycle is request, undo, request again -- and it
      * exists because undo is not the opposite of request: undo removes the spot
      * the person had in our feed, and requesting again has to restore it. If
      * something stays uncleaned in between, you see it the second time.

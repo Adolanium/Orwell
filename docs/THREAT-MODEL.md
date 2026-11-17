@@ -75,6 +75,7 @@ adds a line here.
 | Pairing boxes, ephemeral signals, vault entries | See their sections | Memory only, or no author on disk |
 | Invite records, including short codes in the clear | It manages invites | See "Invites" |
 | The app version (`hello.versao`) | Minimum version check | Never written down |
+| Web Push subscriptions, per device that turned on "Notifications when the app is closed" (`push_subscriptions`): the push service endpoint (so which service), the two encryption keys, the device language, the whole channels that device muted, the end of its pause or Busy, expiry, last renewal, and the last push with the count for the day | To wake a closed app the server must know where to knock, and must not knock for a muted channel or a paused device | Opt-in per device, off by default, and off on the server unless `ENCLAVE_PUSH=on`. The push carries only the language, encrypted for that device (RFC 8291) and padded to one size. Rows go on revocation, on a 404 or 410 from the push service, at expiry, and after 90 days without renewal. See "Web Push" |
 | IP addresses and connection times; in calls, who is with whom and who speaks | It is a server; the SFU forwards packets | Not logged by default. See "Calls" |
 | **A diagnostic log, when the person sends one** ("Send log" in Help and diagnostics; `POST /_enclave/relato`, `apps/server/src/relato.ts`): the app's event log for that session, the account address, the app version and the second it arrived, in `<data>/relatos/<day>-<address>.txt`, outside `enclave.sqlite` | The operator reads it when the person describes a problem; it saves pasting the log by hand | Sent only on a click, never on its own. The log holds events, not messages and not text the person wrote, and is capped at 64 kB, 10 per hour per address and 30 per hour per IP. **From the 1.3.15 server on, the request is signed** by a device of the account (the signed request below, the same as the report routes), the account must have logged in here, and a revoked device is refused: the address on the file is proven, not claimed. Before that the route was open and the address was what the caller declared. The IP is counted in memory for the cap and never written. Each file is **deleted after 30 days** (`RELATO_DIAS`), by a sweep every six hours |
 
@@ -184,6 +185,37 @@ terminated after each call (`apps/web/src/kdf.ts`).
 **Several accounts on one device keep their names in clear:** a small list with
 an opaque id and display name each (`contas.json`, or `orwell.contas` in
 `localStorage`). The vaults stay sealed. One account, no list.
+
+## Web Push
+
+With "Notifications when the app is closed" on, a device with no socket open
+gets an empty push when a message arrives in one of its account's channels. The
+phone shows "Orwell: New message in Orwell", and nothing more. Push is off
+unless the operator sets `ENCLAVE_PUSH=on`; off, there is no capability, no key
+and no table growth, and Apple and Google stay out of the path.
+
+- **What the push carries.** Only the device language, encrypted for that
+  device with RFC 8291 (`apps/server/src/push-cifra.ts`, held against the RFC
+  vectors) and padded to 64 bytes. No channel, no sender, no text, no count.
+- **What the push service sees** (Apple, Google, Mozilla, Microsoft): that the
+  device has this web app, the homeserver's IP, the instant and fixed size of
+  each push, the server's VAPID key and contact, and a constant `Topic`. Never
+  the content, the channel or the sender. **The rhythm is what is left:** in a
+  direct conversation, counting pushes is knowing when two people talk. One
+  push per device every two minutes, and 200 per day, lowers the resolution; it
+  does not remove it.
+- **What the homeserver learns in addition** is the `push_subscriptions` row
+  above. A muted room and a mention in a muted channel cannot be honoured: both
+  are inside the ciphertext. The settings say so.
+- **Who gets a push.** A device with an open, authenticated socket gets the
+  message over it; the account's other devices get a push. The sender's account
+  never does. The server POSTs only to `https` on port 443 of a host on the push
+  service list (`ENCLAVE_PUSH_SERVICOS` extends it), through the same name guard
+  as link previews.
+- **The VAPID key** (`push.key.json`, mode 0600, next to `server.key.json`) only
+  identifies the server to the push services. It reads nothing.
+- **The desktop app has no push.** Closing the window hides it in the tray with
+  the socket alive.
 
 ## Ephemeral channel signals
 
@@ -401,8 +433,9 @@ but that is a property of the code, not a guarantee against an operator.
 ## The web build
 
 **The Service Worker has no cache.** `apps/web/public/sw.js` exists only for
-Android notifications: no `fetch` or `push` handler, no Cache API, no imports, no
-URLs, so it cannot pin old code (`apps/web/src/pwa.test.ts`,
+notifications: no `fetch` handler, no Cache API, no imports, no URLs, so it
+cannot pin old code. Its `push` listener is held line by line by the test: it
+reads the device language and shows one of two fixed sentences (`apps/web/src/pwa.test.ts`,
 `scripts/verificar-pwa.mjs`). Its CSP blocks the network but not the Cache API;
 the test does that. Deleting the file does not uninstall it: publish a worker
 that unregisters itself instead.
@@ -410,7 +443,7 @@ that unregisters itself instead.
 **Notifications through it persist outside the vault** until dismissed. It is
 used only where a normal notification fails (Chrome on Android). `tag` and
 `data` carry only a random token. With "show content" on, the body names who
-wrote and where. There is no Web Push, so Apple and Google see no wake-ups.
+wrote and where. Pushes through Web Push carry no names or text; see "Web Push".
 
 **iOS Lockdown Mode** disables Service Workers and IndexedDB (from WebKit source,
 not yet seen on a device). If so, the web app does not work in that mode.

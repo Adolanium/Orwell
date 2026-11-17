@@ -19,7 +19,7 @@ const cofreDe = (session: Session): Vault => (session as unknown as { vault: Vau
  * `seat` the other files exercise, and it is the path everyone takes when they
  * open an account on a server with a common room.
  *
- * Written on 18 August 2026 for the owner's report: *"she is seeing the first
+ * Written for the bug: *"she is seeing the first
  * word of the address instead of the username"*, with the detail that makes it
  * diagnostic, **she sees the right name of one user and not the others**.
  */
@@ -67,6 +67,8 @@ async function peer(nome: string, avatarDataUrl?: string): Promise<Peer> {
   await vault.create("frase-passe-de-teste")
   const session = new Session(vault)
   const identity = await session.createIdentity(`localhost:${PORT}`)
+  // Joining the common room is opt-in since 12/11/2026: these accounts ticked the box.
+  await session.escolherSalaComum(true)
   const seen: Peer["seen"] = []
   session.on("message", (event) => {
     seen.push({
@@ -101,7 +103,7 @@ async function until(predicate: () => boolean, label: string, timeoutMs = 30_000
  * the interface reads (`useDirectory` is seeded from `profile.directory()`), and a
  * profile that arrives and is not saved produces exactly the same defect as a
  * profile that never arrives. Empty means the interface falls back to
- * `shortAddress`, the first word of the address, which is the owner's report
+ * `shortAddress`, the first word of the address, which is the bug report
  * word for word.
  */
 function nomeQueVe(quem: Peer, de: string): string {

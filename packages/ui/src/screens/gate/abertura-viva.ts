@@ -1,7 +1,7 @@
 /**
  * The opening from start to finish: one lap only, and a fade-out.
  *
- * The splash mounts several times in a row: the one from `index.html`, the one from `main.tsx`, the one from `Unlock` opening and the one from `App`. Each mount is a new element, and a new element starts its animations from zero. Until November 3, 2026 the phase was tuned by a negative delay in the stylesheet (`--abertura-fase`), and the reduced motion block, with its `animation: … !important`, reset that delay to zero: on the owner's Windows the ring jumped each time.
+ * The splash mounts several times in a row: the one from `index.html`, the one from `main.tsx`, the one from `Unlock` opening and the one from `App`. Each mount is a new element, and a new element starts its animations from zero. Until November 3, 2026 the phase was tuned by a negative delay in the stylesheet (`--abertura-fase`), and the reduced motion block, with its `animation: … !important`, reset that delay to zero: on Windows with animation effects off the ring jumped each time.
  *
  * Now the phase is tuned by Web Animations: on mount, each `abertura-*` animation gets the `startTime` of the first opening on this page. The clock is the same for all, in any motion mode, and each banner's delay (`--linha`) stays in the stylesheet, over it.
  *
@@ -13,7 +13,7 @@
 /** The fade-out of the exit. */
 export const SAIDA_MS = 200
 
-/** The fade-out with reduced motion: the same, slower (owner's rule). */
+/** The fade-out with reduced motion: the same, slower (nothing stops). */
 export const SAIDA_REDUZIDA_MS = 360
 
 /** The minimum time the opening stays on screen, counted from the first time it was seen. */

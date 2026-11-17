@@ -40,16 +40,22 @@ export function ScreenStage({
   stream,
   label,
   children,
+  sobreposicao,
 }: {
   stream: MediaStream
   label: string
+  /**
+   * Who is in the call, drawn over the top-left corner of the screen (12/11/2026,
+   * Discord parity). It hides when the pointer stops, like the player controls.
+   */
+  sobreposicao?: React.ReactNode
   /** The stage gestures, drawn over the screen. */
   children?: React.ReactNode
 }): React.JSX.Element {
   const video = useRef<HTMLVideoElement>(null)
   const palco = useRef<HTMLElement>(null)
   /*
-    Full screen (requested by owner, 11/2/2026). `emEcraInteiro` follows the
+    Full screen. `emEcraInteiro` follows the
     document, not our button: Escape and the system gesture also exit, and the
     button must tell the truth afterward. `modo` is read after mounting, because
     it needs the elements.
@@ -86,12 +92,23 @@ export function ScreenStage({
    * silent, and audio turns on by itself on the next gesture the user makes on
    * the page.
    *
-   * It was a "Turn on screen audio" button, and the owner does not want it
-   * (11/2/2026): "audio is also transmitted by default, this doesn't need to be
+   * It was a "Turn on screen audio" button, and it went away:
+   * "audio is also transmitted by default, this doesn't need to be
    * an option". The viewer already tapped to enter and to see, so almost always
    * audio plays right away; this is just the safety net for when it doesn't.
    */
   const [somBloqueado, setSomBloqueado] = useState(false)
+  /** The pointer stopped over the stage for a while: the overlay fades out. */
+  const [parado, setParado] = useState(false)
+  const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mexeu = (): void => {
+    setParado(false)
+    if (temporizador.current) clearTimeout(temporizador.current)
+    temporizador.current = setTimeout(() => setParado(true), 3000)
+  }
+  useEffect(() => () => {
+    if (temporizador.current) clearTimeout(temporizador.current)
+  }, [])
 
   useEffect(() => {
     const mudou = (): void => redesenhar((n) => n + 1)
@@ -169,8 +186,15 @@ export function ScreenStage({
   }, [somBloqueado, temSom])
 
   return (
-    <section ref={palco} className={emEcraInteiro ? "call-palco em-ecra-inteiro" : "call-palco"} aria-label={label}>
+    <section
+      ref={palco}
+      className={`${emEcraInteiro ? "call-palco em-ecra-inteiro" : "call-palco"}${parado ? " parado" : ""}`}
+      aria-label={label}
+      onPointerMove={mexeu}
+      onPointerLeave={() => setParado(true)}
+    >
       <video ref={video} autoPlay playsInline muted onDoubleClick={alternarEcraInteiro} />
+      {sobreposicao && <div className="call-palco-presentes">{sobreposicao}</div>}
       <footer className="call-palco-label">
         {label}
         {temSom && (

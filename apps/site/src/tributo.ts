@@ -59,7 +59,7 @@ export function desenharTributo(dados: unknown, lingua: Lingua = "pt"): string {
 /**
  * The banner on the landing page: the names in a loop, or nothing.
  *
- * Requested by the owner on November 2, 2026 (the line) and November 3 (the banner:
+ * The line, and the banner:
  * "names scroll in a loop, with more prominence and animation"). Empty shows nothing:
  * the empty phrase lives only on the app page, where the space is explained.
  *

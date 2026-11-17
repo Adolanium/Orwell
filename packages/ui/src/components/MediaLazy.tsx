@@ -132,6 +132,8 @@ export function MediaLazy({
           className={src === original.src ? "media-original" : "media-mini"}
           src={src}
           alt={item.name ?? ""}
+          // Decoded off the frame that shows it: the box is reserved, nothing jumps.
+          decoding="async"
           {...medidas}
           {...(draggable !== undefined ? { draggable } : {})}
         />

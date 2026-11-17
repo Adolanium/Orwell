@@ -235,7 +235,7 @@ const CAIXAS = `
   const m = await page.evaluate(CAIXAS)
 
   /*
-    The axis. The owner's question was this and nothing else: the search box and
+    The axis. The question was this and nothing else: the search box and
     the list centered in the body. Measure the center of each one against the
     center of the column where they live, not against the center of the WINDOW,
     which includes the sidebar and the conversation column and was never the axis

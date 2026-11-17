@@ -114,7 +114,7 @@ export function CallChip({
    * The person is in the room by presence, and OUR connection to them is still
    * establishing.
    *
-   * Owner request on October 27, 2026: entering a voice room, the faces the sidebar
+   * The bug: entering a voice room, the faces the sidebar
    * showed would vanish from the panel until media arrived, and the room looked empty.
    * The card stays, faded with a spinning ring: the same progress indicator as opening,
    * and says "they are there, connection pending".
@@ -122,7 +122,7 @@ export function CallChip({
   aLigar?: boolean | undefined
   /**
    * This person's music is muted on this device, and the gesture to mute or unmute it
-   * (owner, October 27, 2026). Mutes only music: voice continues. The slider keeps its
+   * Mutes only music: voice continues. The slider keeps its
    * value, to return to the same level.
    */
   musicaCalada?: boolean | undefined
@@ -141,8 +141,8 @@ export function CallChip({
    */
   onMenu?: ((at: { x: number; y: number }) => void) | undefined
   /**
-   * This person is sharing their screen: "A with C", chosen by the owner on November 2,
-   * 2026 (`Downloads/Orwell-overlays-ao-vivo/`).
+   * This person is sharing their screen: "A with C", the chosen mockup
+   * (`Downloads/Orwell-overlays-ao-vivo/`).
    *
    * - `aVer`: how many are watching (the eye icon next to the badge); `null` when
    *   unknown, and then no number shows.
@@ -209,7 +209,7 @@ export function CallChip({
           : undefined
       }
     >
-      {/* Behind everything: the background that dances with the music (owner, October 27, 2026). */}
+      {/* Behind everything: the background that dances with the music. */}
       {aTocar && musica && !comCamara && <Visualizador stream={musica} />}
       <span className="call-chip-rosto">
         {comCamara ? (
@@ -236,12 +236,12 @@ export function CallChip({
         {aTocar && musicaCalada && <span className="call-chip-musica-calada">{strings.musicaNaChamada.silenciada}</span>}
       </span>
 
-      {/* The track name in the footer, scrolling when it does not fit (owner, October 27,
-          2026): a band the width of the card, like a news ticker footer. It is the
+      {/* The track name in the footer, scrolling when it does not fit:
+          a band the width of the card, like a news ticker footer. It is the
           same `Andante` as in the call sidebar card.
 
-          The footer is also the console for the listener (design D1, chosen by the
-          owner on October 28, 2026): "audio when streamed should be regulated by the
+          The footer is also the console for the listener (design D1):
+          "audio when streamed should be regulated by the
           listener". The mute button and this person's music slider live INSIDE the
           footer, in a row with the name. Before they were separate, in absolute
           positions in the bottom corner, and the footer covered them. In a flex row
@@ -359,8 +359,8 @@ export function CallChip({
 }
 
 /**
- * The halo and ring around the avatar (board A3, "Halo", chosen by the owner on
- * October 21, 2026).
+ * The halo and ring around the avatar (board A3, "Halo", the design picked from
+ * the boards).
  *
  * The halo is ONE layer with the green shadow already painted once, at max size. Per
  * frame only `opacity` and `transform: scale` change, both read from `--voz`: they

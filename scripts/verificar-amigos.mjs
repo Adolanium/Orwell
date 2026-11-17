@@ -102,7 +102,7 @@ await A.page.waitForTimeout(6000)
 const linhas = await A.page.locator(".people-aside .direct-row").count()
 check("a conversa directa aparece na coluna de Amigos", linhas >= 1, `${linhas} linha(s)`)
 
-// Open the chat from the column. That's the gesture the owner asked for: "the chat should open in Friends on the sidebar".
+// Open the chat from the column. That's the required gesture: "the chat should open in Friends on the sidebar".
 await A.page.locator(".people-aside .direct-row .direct-open").first().click()
 await A.page.waitForTimeout(2500)
 

@@ -778,3 +778,52 @@ describe("reclassificar espera pelo disco (1.3.15)", () => {
   })
 })
 
+/*
+  Return from a minimized window: decrypting a 1 MB photo is
+  ~150 ms on a slow laptop, on the thread that draws, right when the channel
+  opens. With a `decifrador` (a Worker in the web app) the store hands the blob
+  over and awaits the bytes; without one, it decrypts here, as before.
+*/
+describe("o decifrador fora da thread", () => {
+  it("obter usa o decifrador quando existe, e os bytes são os mesmos", async () => {
+    const { armazem } = await aberto()
+    const m = media()
+    armazem.absorver(m.bytes, m.ref, m.sha)
+    await armazem.drenar()
+    const { decifrarBlob } = await import("./blob.js")
+    let chamadas = 0
+    armazem.decifrador = async (blob, k, n, sha, classe) => {
+      chamadas++
+      return decifrarBlob(blob, k, n, sha, classe)
+    }
+    expect(await armazem.obter(m.sha, m.ref)).toEqual(m.bytes)
+    expect(chamadas).toBe(1)
+  })
+
+  it("um decifrador que pára não apaga um blob bom: abre-se aqui", async () => {
+    // A blob that does not open is deleted from disk; a Worker that stopped says nothing about the blob.
+    const { armazem, backend } = await aberto()
+    const m = media()
+    armazem.absorver(m.bytes, m.ref, m.sha)
+    await armazem.drenar()
+    armazem.decifrador = async () => {
+      throw new Error("worker stopped")
+    }
+    expect(await armazem.obter(m.sha, m.ref)).toEqual(m.bytes)
+    await armazem.drenar()
+    expect(armazem.tem(m.sha)).toBe(true)
+    expect(await backend.ler(m.sha)).not.toBeNull()
+  })
+
+  it("um decifrador que falha com um blob que não abre dá o mesmo erro de blob estragado", async () => {
+    const { armazem } = await aberto()
+    const m = media()
+    armazem.absorver(m.bytes, { ...m.ref, k: toBase64(Uint8Array.from(randomBytes(32))) }, m.sha)
+    await armazem.drenar()
+    armazem.decifrador = async () => {
+      throw new Error("worker stopped")
+    }
+    await expect(armazem.obter(m.sha, m.ref)).rejects.toThrow("media blob is damaged")
+    expect(armazem.tem(m.sha)).toBe(false)
+  })
+})

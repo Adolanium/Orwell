@@ -20,7 +20,7 @@ import { FolhaMudarDeConta } from "../gate/MudarDeConta.js"
  *   for the gate to open by itself afterwards. Sign out did nothing. Hides itself,
  *   with "Expire session", and a line explains why. "Set password" (F3) converts
  *   the vault, and from then on it is a vault like any other.
- * - **remembered session**: "Expire session" disappears (owner decision 3), with
+ * - **remembered session**: "Expire session" disappears (design decision 3), with
  *   the line explaining why. "Sign out" forgets the session and locks.
  * - **no memory**: as it has always been.
  */

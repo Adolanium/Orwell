@@ -437,7 +437,7 @@ interface ConsumoInstalado {
    * person has no leaf in our channel tree yet (the commit that seats them hasn't arrived).
    * No key means no decryption attached, and a receiver without decryption would hand
    * encrypted frames to the decoder forever: the person muted with "connected" under their
-   * name (owner report, November 3, 2026). So the stream doesn't enter the audio mix and
+   * name. So the stream doesn't enter the audio mix and
    * doesn't count as connected, and `protegerOsSemChave` completes the setup when the key
    * arrives.
    *
@@ -624,6 +624,12 @@ export interface DependenciasDoMotorSfu {
    * to see them is entering the call, and that doesn't change.
    */
   verOEcraDe: (address: UserAddress) => boolean
+  /**
+   * Whether this person may share the screen here (`transmitir`). False drops
+   * their screen offer: not listed, never consumed. Synchronous on purpose, it
+   * runs on each announcement. Absent means "yes".
+   */
+  podeTransmitirDe?: (address: UserAddress) => boolean
   /**
    * A refusal the person must read, in a gesture that doesn't drop the call.
    *
@@ -884,7 +890,7 @@ export class MotorSfu {
      * The voice, and a cipher that fails does not bring the call down (4/11/2026).
      *
      * Up to 1.3.0 a cipher that was not ready on the first try made joining fail
-     * with 448, and the person exited. The owner: "if the cipher fails, you must
+     * with 448, and the person exited. The requirement: "if the cipher fails, you must
      * try again". Now the first attempt is here, as always, and if the cipher
      * fails the engine keeps mounting (you hear who is there) while the voice
      * retries in the background (`#insistirNaCifra`). The guarantee does not
@@ -1500,6 +1506,11 @@ export class MotorSfu {
       `ecra` source nothing changes: camera and audio consume as always, and
       consent to see them is just joining the call.
       */
+    // A screen from someone without `transmitir` here: an app rule, the receiver refuses it.
+    if (fonteDeclarada === "ecra" && this.deps.podeTransmitirDe?.(address) === false) {
+      this.deps.aoDiagnosticar("sfu-ecra-sem-permissao", produtorId)
+      return
+    }
     if (fonteDeclarada === "ecra" && !this.deps.verOEcraDe(address)) {
       this.#ofertasDeEcra.set(produtorId, address)
       this.deps.aoMudar()
@@ -2893,9 +2904,9 @@ export class MotorSfu {
    * How long the voice send transport has to reach `connected`.
    *
    * A normal entry connects in under a second (measured on localhost and in
-   * production from the owner's logs). Eight seconds is very slow network, or
+   * production from real logs). Eight seconds is very slow network, or
    * a transport that will never connect: the producer exists on the server, the
-   * microphone measures here, and no packet leaves (report from 4/11/2026, 14:15).
+   * microphone measures here, and no packet leaves (seen in a real log).
    */
   static readonly PRAZO_DO_ENVIO_MS = 8_000
 

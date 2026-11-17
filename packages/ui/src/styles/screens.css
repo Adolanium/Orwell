@@ -344,7 +344,7 @@
 }
 
 /* Smaller than a normal avatar: it's a presence, not a conversation partner.
-   Was 18px, owner said on October 27, 2026: "it's hard to read; make it 1.3×".
+   Was 18px, and it was hard to read, so it is 1.3× that.
    18 × 1.3 = 23.4, rounds to 23px for a crisp ring. */
 .room-voice-members .avatar,
 .room-voice-members .message-avatar {
@@ -373,7 +373,7 @@
 /*
   The account bar: the foot of the column, Discord-style.
 
-  Owner's choice on October 27, 2026, among twelve options (the B in the
+  Chosen among twelve options (the B in the
   "Orwell Settings 0.9" mockup). Replaces the three-tier card that was here,
   with frame, margin, radius and a spinning outline. Now there's no card: the
   bar is the end of the column, in a darker tint than it, and a line above
@@ -458,8 +458,8 @@
   min-width: 0;
 }
 
-/* 14px, not the 18 from the card: owner asked for bigger name on August 19,
-   2026, on a card where the name had the whole row. On the bar it shares the
+/* 14px, not the 18 from the card: the bigger name was made
+   for a card where the name had the whole row. On the bar it shares the
    row with four buttons, and at 18px it fit in three letters. */
 .me-name {
   display: flex;
@@ -672,34 +672,41 @@
 }
 
 /**
- * With reduced motion, the notice still arrives, it changes form.
+ * With reduced motion, the bell still swings: slower and smaller (12/11/2026).
  *
- * Swapping motion for NOTHING gave this person exactly the problem the animation
- * came to solve: a notification that goes unnoticed. Keep the same highlight as
- * the nudge, the mark color rising under the bell, without a single pixel
- * moving, which is what this preference protects.
+ * The house rule: nothing stops, it moves slower. Up to 1.3.7 this block
+ * swapped the swing for a colour highlight. Now it is the same pendulum at twice
+ * the time and half the angle, on `transform` only, like the calm nudge.
  *
- * **This swaps the animation NAME and nothing else. Duration comes from
- * `base.css`.** See the nudge comment below: the universal rule there zeros
- * every duration with `!important`, and the exception that restores it sits
- * next to it. Changing duration here has no effect.
+ * `!important` against the universal rule in `base.css` (0.01 ms); two classes
+ * beat `*`. `useSinoAvisa` keeps the class on for the whole 1040 ms
+ * (`SINO_AVISO_CALMO_MS`): change one, change the other.
  */
 @media (prefers-reduced-motion: reduce) {
   .me-bell.avisa {
-    animation: sino-realce 520ms var(--ease);
+    animation: sino-bate-calmo 1040ms cubic-bezier(0.36, 0.07, 0.19, 0.97) !important;
   }
 }
 
-@keyframes sino-realce {
+@keyframes sino-bate-calmo {
   0%,
   100% {
-    background: transparent;
-    color: var(--text-faint);
+    transform: rotate(0deg);
   }
-  25%,
-  60% {
-    background: color-mix(in srgb, var(--accent) 30%, transparent);
-    color: var(--accent);
+  15% {
+    transform: rotate(-6.5deg);
+  }
+  33% {
+    transform: rotate(5.5deg);
+  }
+  52% {
+    transform: rotate(-3.5deg);
+  }
+  70% {
+    transform: rotate(2deg);
+  }
+  86% {
+    transform: rotate(-1deg);
   }
 }
 
@@ -999,8 +1006,7 @@
  *
  * It inherited the text color and looked the same as everything else: in a
  * sidebar that is a column of names, what separates a header from an item is
- * color, and without it the hierarchy was read only by font size. Requested by
- * the owner on August 14, 2026.
+ * color, and without it the hierarchy was read only by font size.
  *
  * `--accent`, not a fixed color: it is the one the person chose when creating
  * the account and can change in Settings, and a category that did not follow it
@@ -1120,7 +1126,7 @@
 }
 
 /* With less motion the room keeps pulsing, at twice the duration and lighter:
-   the opacity only drops to 0.65, not to 0.3. The owner's rule is that nothing
+   the opacity only drops to 0.65, not to 0.3. The rule is that nothing
    stops, it just moves slower. Up to 1.3.7 this was `animation: none`. The
    `!important` is against the universal rule in `base.css`. */
 @media (prefers-reduced-motion: reduce) {
@@ -1517,6 +1523,38 @@
 
 .member-group.offline .member-row:hover {
   opacity: 1;
+}
+
+/* The windowed offline list of a big channel (12/11/2026). Each row has the
+   height `ALTURA_DA_LINHA` in `MemberPanel.tsx` says, and no gap: the spacer
+   rows above and below are counted in rows of that height. */
+.member-janela {
+  gap: 0;
+}
+
+.member-janela > li {
+  height: 44px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* "+X people on this server": a row of the list, quiet like the offline ones. */
+.member-mais {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.member-mais:hover,
+.member-mais:focus-visible {
+  color: inherit;
+  background: var(--bg-hover);
 }
 
 .member-row {
@@ -1996,7 +2034,7 @@ numbers again. */
 
 /* ------------------------------------------- the open role, like Discord
 
-   Owner request on 27 October 2026: "reorganize the menu, exactly like Discord".
+   The requirement: "reorganize the menu, exactly like Discord".
    Open a role, the list shrinks to a left column and the role opens in three
    tabs (Appearance, Permissions, Members). Replaces the running form below the
    list, with the three boxes by nature.
@@ -3041,46 +3079,50 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 }
 
 /**
- * With reduced motion, the nudge still lands, it changes form.
+ * With reduced motion, the nudge still shakes: slower and smaller.
  *
- * Shaking a screen is literally what this preference exists to prevent, and
- * people can get genuinely nauseous from it. What stays is a highlight: same
- * information (someone called you, now), without a single thing moving. Sound
- * is decided elsewhere and keeps playing, see the comment at the top of
- * `sounds.ts` about not confusing vestibular safety with audio.
+ * The house rule (a Windows machine can run with reduced motion): nothing stops, it
+ * moves slower. Up to 1.3.7 this block swapped the shake for a blue highlight,
+ * and on that Windows the nudge was "the window turns blue", not a nudge. Now
+ * it is the same shake at twice the time and half the distance, on `transform`
+ * only. Sound is decided elsewhere and keeps playing, see `sounds.ts`.
  *
- * **This swaps the animation NAME and nothing else. Duration comes from
- * `base.css`.** The universal rule there zeros all durations with `!important`,
- * and for a while it won this too: the highlight existed, was written, and ran
- * for 0.01 ms, invisible. The exception that gives it back 0.82 s lives in the
- * same `@media` block in `base.css`, where the rule that killed it lives. Editing
- * duration here has no effect: edit it there.
+ * `!important` against the universal rule in `base.css` (0.01 ms, a single
+ * iteration), like the other calm versions. Two classes beat `*`. The class
+ * stays on for the whole 1.64 s because `useBuzz` reads the same preference
+ * (`SHAKE_CALMO_MS`): change one, change the other.
  */
 @media (prefers-reduced-motion: reduce) {
   .main.buzzing {
-    animation: buzz-flash 0.82s var(--ease);
+    animation: buzz-shake-calmo 1.64s cubic-bezier(0.36, 0.07, 0.19, 0.97) !important;
   }
 }
 
-/**
- * The highlight, strong enough to see.
- *
- * It was at 14% blend over the background, and 14% is the kind of thing you
- * notice when you're waiting for it and miss when you're not, which is the
- * nudge case. Color rises to 26% and gains an inner border: users who can't have
- * the screen shake still know they were called, and without a single thing
- * shifting.
- */
-@keyframes buzz-flash {
+@keyframes buzz-shake-calmo {
   0%,
   100% {
-    background: var(--bg-main);
-    box-shadow: inset 0 0 0 0 transparent;
+    transform: translate(0, 0);
   }
-  25%,
+  10% {
+    transform: translate(-3px, 1.5px);
+  }
+  20% {
+    transform: translate(3px, -1.5px);
+  }
+  30% {
+    transform: translate(-2.5px, -1px);
+  }
+  45% {
+    transform: translate(2px, 1px);
+  }
   60% {
-    background: color-mix(in srgb, var(--accent) 26%, var(--bg-main));
-    box-shadow: inset 0 0 0 2px var(--accent);
+    transform: translate(-1.5px, 0.5px);
+  }
+  75% {
+    transform: translate(1px, -0.5px);
+  }
+  90% {
+    transform: translate(-0.5px, 0);
   }
 }
 
@@ -3147,8 +3189,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   padding: var(--space-3) 18px;
   border: 1px solid var(--vidro-contorno);
   /* Same radius as other panels (`--painel-raio`): was 14 px here and 20 px on
-     people cards, and the call strip over chat didn't match anything (owner, 27
-     October 2026). */
+     people cards, and the call strip over chat didn't match anything. */
   border-radius: var(--painel-raio);
   background: var(--vidro);
   font-size: var(--font-base);
@@ -3396,8 +3437,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 }
 
 /*
-  A screen-share card: "A with C" (owner, 2 November 2026,
-  `Downloads/Orwell-overlays-ao-vivo/`).
+  A screen-share card: design "A with C".
   
   A, always visible: top-left, a solid red rectangle "AO VIVO" with a white
   pulsing dot, and next to it a dark pill with the eye and the count of viewers.
@@ -3522,7 +3562,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 }
 
 /* The blur is on what lies below, with `filter` on the card's children not
-   `backdrop-filter`, which the owner removed from all surfaces in 0.8.3
+   `backdrop-filter`, which was removed from all surfaces in 0.8.3
    (see `paineis.test.ts`). The badge and invite stay sharp. */
 .call-chip.ao-vivo-convida > :not(.ao-vivo-convite, .ao-vivo-cimo, .chip-volume, .call-chip-mais, .call-chip-musica, .call-chip-labels) {
   transition: filter var(--dur-fast) var(--ease);
@@ -3719,7 +3759,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 }
 
 /* 2 px not 1: at 1 px, on a 1x screen, the circle came out jagged and read
-   as a broken line (owner, 27 October 2026). */
+   as a broken line. */
 .anel-de-voz circle {
   fill: none;
   stroke-width: 2px;
@@ -3756,7 +3796,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 }
 
 /*
-  "Connecting" (owner request 27 October 2026): the person is in the room by
+  "Connecting": the person is in the room by
   presence and our connection to them is still forming. The card fades and the
   ring spins, with an open arc so the spin shows. It is the opening progress
   indicator (`.abertura-anel`): a progress ring also spins with reduced motion,
@@ -3795,7 +3835,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 }
 
 /* Reduced motion: the halo steps at 10% (the hook), and between steps it
-   slides at double the time. It does not stop or jump: the owner's rule for
+   slides at double the time. It does not stop or jump: the rule for
    Windows with effects off. The `!important` fights the universal rule in
    `base.css`, which sets transitions to 0 s. */
 @media (prefers-reduced-motion: reduce) {
@@ -4049,7 +4089,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 }
 
 /*
-  Fullscreen (owner request, 2/11/2026). The button sits bottom-right, away from
+  Fullscreen. The button sits bottom-right, away from
   the gestures above and the name below. In fullscreen the stage loses its frame
   and fills the screen, with the whole image (`contain`).
 */
@@ -4186,6 +4226,14 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   color: var(--text-dim);
 }
 
+/* The profile photo with the camera off (16/11/2026): round, the size the initial takes. */
+.tile-cara {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
 .tile-label {
   position: absolute;
   left: 0;
@@ -4206,7 +4254,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 /* ------------------------------------------- the control bar */
 
 /*
-  The "Minimal" bar, chosen by the owner on 21 October 2026 (mockup H4):
+  The "Minimal" bar (mockup H4):
   icons only, 40 px, no background or frame, in a thin line with a glass bar
   underneath. Order: microphone, sound, screen, video, hang up.
 
@@ -4395,7 +4443,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 /*
   Call buttons, as in the mockups: smooth-cornered squares in a dark well. On
   is the accent; off is grey with a line on the icon (pink is only for error,
-  badge, and hang up, decided by the owner on 20 October 2026).
+  badge, and hang up).
 */
 .call-btn {
   width: 34px;
@@ -5000,8 +5048,8 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 
 /* The frame for publication images has a FIXED ratio: 16:10, the card width.
    Until 27 October 2026 the height followed the image up to 380 px, and a
-   portrait photo was shorter than a landscape one. The owner asked for a fixed
-   ratio, so the feed and the profile thumbnails (`.post-tile`, 16:10) have the
+   portrait photo was shorter than a landscape one. Now the ratio is
+   fixed, so the feed and the profile thumbnails (`.post-tile`, 16:10) have the
    same box. The image fills the frame (`object-fit: cover`); what does not fit
    shows when you open it. With two, three, or four images the frame is the
    same and divides inside. */
@@ -5702,8 +5750,11 @@ button.tag-pill[aria-pressed="true"] {
 .lightbox img {
   display: block;
   max-width: 100%;
-  max-height: 88vh;
-  max-height: 88dvh;
+  /* A small picture sits in the middle, over its buttons, not against the left edge. */
+  margin: 0 auto;
+  /* Room left under the picture for the row of buttons. */
+  max-height: calc(88vh - 52px);
+  max-height: calc(88dvh - 52px);
   object-fit: contain;
   border-radius: var(--radius-lg);
 }
@@ -5898,8 +5949,8 @@ button.tag-pill[aria-pressed="true"] {
 
 /* The danger zone: a separate card, with outline and background tilted toward
    pink, the title in pink and the button filled. Until October 27, 2026 it was
-   a footer of the "This device" card, with a line above it: "too subtle",
-   the owner said. Here everything says "caution" before you read it. */
+   a footer of the "This device" card, with a line above it: "too subtle"
+   for a danger zone. Here everything says "caution" before you read it. */
 .settings-card.zona-de-perigo {
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
   background: color-mix(in srgb, var(--danger) 7%, var(--painel-tinta));
@@ -6073,8 +6124,8 @@ button.tag-pill[aria-pressed="true"] {
   font-weight: 600;
   overflow: hidden;
   flex: none;
-  /* No ring. There was a 4px one in soft accent; the owner had it removed on
-     October 27, 2026: it read as a white line around the photo. */
+  /* No ring. There was a 4px one in soft accent; it was removed
+     because it read as a white line around the photo. */
 }
 
 /* With a photo, the background goes: the accent underneath peeked at the rounded
@@ -6123,6 +6174,36 @@ button.tag-pill[aria-pressed="true"] {
   line-height: 1.6;
   max-width: 52ch;
   white-space: pre-wrap;
+  /* A long word or URL breaks instead of running off the screen (12/11/2026).
+     Only words that do not fit break: a bio that fits does not change. */
+  overflow-wrap: anywhere;
+}
+
+/*
+  A phone (12/11/2026, an iPhone 13): the profile head was still the
+  wide row, photo on the left and facts on the right, so the bio sat in a
+  138 px column with the photo's 144 px of empty space to its left. Here the
+  photo goes above, the facts take the whole width, and the bio with them,
+  aligned with the name. The wide screen does not change.
+*/
+@media (max-width: 560px) {
+  .profile-head {
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .profile-facts {
+    width: 100%;
+  }
+
+  .profile-bio {
+    align-self: stretch;
+    max-width: none;
+  }
+
+  .pessoa-factos .profile-bio {
+    width: 100%;
+  }
 }
 
 .profile-contact {
@@ -6222,7 +6303,7 @@ button.tag-pill[aria-pressed="true"] {
 
 /* The same frame as the feed, not an Instagram square.
 
-   Owner request on October 27, 2026: "the shape of the thumbnail in the profile
+   The requirement: "the shape of the thumbnail in the profile
    must match the shape (frame) of the feed". In the feed an image lives in a
    wide frame with 14px corners (`.post-images`, `--radius-lg`), no border.
    Here it was a square with 4px corners and a border, three per line. Now it is
@@ -6412,7 +6493,7 @@ button.tag-pill[aria-pressed="true"] {
   background: color-mix(in srgb, white 3%, var(--bg-side));
 }
 
-/* Name and status on the same line, like Messenger (owner, October 28, 2026):
+/* Name and status on the same line, like Messenger:
    name first, personal message next in italic, and the message is what gives
    way. */
 .person-labels {
@@ -7463,7 +7544,7 @@ button.tag-pill[aria-pressed="true"] {
 /* ---------------------------------------------------------- notifications */
 
 /*
-  The bell as timeline (layout chosen by the owner on November 3, 2026). A window in the center (`Modal`, `.sheet`), and on the phone a sheet full width, pinned to the bottom. The tokens are from the skin: no new colors.
+  The bell as timeline (the chosen layout). A window in the center (`Modal`, `.sheet`), and on the phone a sheet full width, pinned to the bottom. The tokens are from the skin: no new colors.
   */
 .sheet.notif-janela {
   width: min(720px, calc(100vw - 2 * var(--space-5)));
@@ -7811,7 +7892,7 @@ button.tag-pill[aria-pressed="true"] {
 }
 
 /* A member reads top-down: who, which account, what they are up to. */
-/* The personal message next to the name, Messenger style (owner, October 28, 2026): italic, dimmed, unweighted, and it is the one that gives when the line does not fit. */
+/* The personal message next to the name, Messenger style: italic, dimmed, unweighted, and it is the one that gives when the line does not fit. */
 .member-status {
   flex: 1;
   min-width: 0;
@@ -8087,7 +8168,7 @@ button.tag-pill[aria-pressed="true"] {
 }
 
 /* A pill with an arrow and the word "Back": 32 px of icon alone couldn't be
-   found (owner request on October 27, 2026). The background and border signal
+   found. The background and border signal
    it's a button before you hover over it. */
 .pessoa-voltar {
   display: inline-flex;
@@ -8464,6 +8545,15 @@ button.tag-pill[aria-pressed="true"] {
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+}
+
+/* The nudge button lives in the line only on a wide screen (12/11/2026). At
+   390 px the line is the text box and the two everyday buttons, by the
+   choice of 12/08/2026: there the nudge is reached through the "+" menu. */
+@media (max-width: 480px) {
+  .composer-line .composer-buzz {
+    display: none;
   }
 }
 
@@ -9534,6 +9624,31 @@ button.pinned-texto:hover {
   color: var(--text-faint);
 }
 
+/* The attachments of a pinned message: a small image and the names of the files. */
+.pinned-anexos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pinned-miniatura {
+  max-width: 96px;
+  max-height: 72px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.pinned-anexo {
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
 /* The limit, stated in the footer not discovered later: what travels with the pinned item
    is a copy of the text, not the conversation around it. */
 .pinned-note {
@@ -9771,8 +9886,8 @@ button.pinned-texto:hover {
  * linger. It lights and fades on its own: it's a response to the gesture, not a state.
  *
  * With `prefers-reduced-motion` the highlight still fades, more slowly
- * (4.8 s instead of 2.4 s), and never stops abruptly: it's been the rule since
- * 28/10/2026, and the owner's Windows has this preference on. It sat still and
+ * (4.8 s instead of 2.4 s), and never stops abruptly: it's the rule, and
+ * Windows with animation effects off turns this preference on. It sat still and
  * vanished at once, which reads exactly like a bug. The shell drops the highlight after
  * the slow version ends (`DESTAQUE_LENTO_MS`).
  */
@@ -10774,6 +10889,28 @@ button.message-citacao:focus-visible {
   height: 4px;
 }
 
+/* "Keep this device on" (16/11/2026): the device that sends the history. Three lines, then the bar. */
+.barra-envio {
+  color: var(--text);
+}
+
+.barra-envio-titulo {
+  flex: 1 1 100%;
+  font-weight: 600;
+}
+
+.barra-envio .barra-sincronia-texto {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.barra-envio .barra-envio-progresso {
+  flex: 1 1 auto;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 /* The history notice that stopped short (12/11/2026): one line and a close button. */
 .barra-historico-aviso .barra-sincronia-texto {
   flex: 1 1 0;
@@ -11037,7 +11174,7 @@ button.message-citacao:focus-visible {
 
 .partilhar-audio {
   width: min(620px, calc(100vw - 2 * var(--space-5)));
-  /* 18 px corners (owner, October 27, 2026), with the panel text color. */
+  /* 18 px corners, with the panel text color. */
   border-radius: 18px;
 }
 
@@ -11522,7 +11659,7 @@ button.message-citacao:focus-visible {
 }
 
 /*
-  "Now playing: ..." in the footer, full card width (owner, October 27, 2026):
+  "Now playing: ..." in the footer, full card width:
   a dark bar fixed to the bottom, with the note and name scrolling when they
   don't fit (`Andante`).
   
@@ -11766,5 +11903,536 @@ button.message-citacao:focus-visible {
     min-width: 44px;
     min-height: 44px;
     justify-content: center;
+  }
+}
+
+/* "Report a bug": the exact list of what goes, small and quiet under the box. */
+.comunicar-erro-lista ul {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+}
+
+.comunicar-erro-lista ul ul {
+  margin: 2px 0;
+}
+
+/* ------------------------------------------------- reactions (12/11/2026) */
+
+/* The chips under a message, like Discord: emoji and count, mine in the accent.
+   32 px tall on a coarse pointer, 26 px with a mouse. */
+.message-reaccoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.reaccao {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-sm);
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.reaccao:hover:not(:disabled) {
+  border-color: var(--text-dim);
+}
+
+.reaccao.minha {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+.reaccao:disabled {
+  cursor: default;
+}
+
+.reaccao-emoji {
+  font-size: 1.05em;
+}
+
+/* The "+" chip shows on hover with a mouse; on touch it always shows, since
+   there is no hover to find it. */
+.reaccao-mais {
+  opacity: 0;
+}
+
+.message:hover .reaccao-mais,
+.message:focus-within .reaccao-mais {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .reaccao {
+    min-height: 32px;
+    padding: 0 10px;
+  }
+
+  .reaccao-mais {
+    opacity: 1;
+  }
+}
+
+/* Slower, never stopped, see the reduced-motion rule of the house. */
+@media (prefers-reduced-motion: reduce) {
+  .reaccao {
+    transition-duration: 360ms;
+  }
+}
+
+/* ------------------------------------------- role and room tags (12/11/2026) */
+
+/* A role chip takes the role's colour when it has one (`--role-tint`), on the
+   same soft ground as a person's mention. */
+.mention-cargo {
+  color: var(--role-tint, var(--accent-deep));
+  background: color-mix(in srgb, var(--role-tint, var(--accent)) 18%, transparent);
+  cursor: default;
+}
+
+.mention-sala {
+  display: inline;
+}
+
+/* A room this account does not see: quiet, and never a button. */
+.mention-sala-privada {
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-style: italic;
+  cursor: default;
+}
+
+.mention-sala-privada:hover {
+  background: var(--bg-raised);
+  color: var(--text-dim);
+}
+
+.mention-sinal {
+  display: inline-flex;
+  width: 24px;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.mention-cor-do-cargo {
+  width: 12px;
+  height: 12px;
+  margin: 0 6px;
+  border-radius: 50%;
+  background: var(--role-tint, var(--text-dim));
+  flex: none;
+}
+
+/* A message that mentions me (me, @all, or a role I hold): lit like Discord,
+   a soft ground and a bar on the left. */
+.message.menciona-me {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* The history progress in the channel's top bar (wide screen, 12/11/2026): one
+   line beside the name, shrinking before the name does, never wrapping. */
+.barra-historico-no-topo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 0 1 auto;
+  margin-left: var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+.barra-historico-no-topo .barra-sincronia-texto {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.barra-historico-no-topo .barra-sincronia-progresso {
+  flex: 0 0 96px;
+  height: 4px;
+}
+
+/* The "edited" mark on its own line (12/11/2026): smaller, italic, secondary
+   colour, and a serif face that message text never uses, so it cannot be
+   imitated. Outside the copy. */
+.message-editada {
+  display: block;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font-family: Georgia, "Times New Roman", "Noto Serif", serif;
+  font-size: var(--font-xs);
+  font-style: italic;
+  line-height: 1.3;
+  text-align: left;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@media (pointer: coarse) {
+  .message-editada {
+    min-height: 24px;
+  }
+}
+
+/* The day separator (12/11/2026): centred date between two lines, quiet, out of
+   the copy, like the unread mark. */
+.timeline-dia {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.timeline-dia::before,
+.timeline-dia::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+/* The three buttons under the large picture (copy, download, message link). On a
+   phone they wrap to a second line instead of shrinking under the finger. */
+.lightbox-accoes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.lightbox-accoes button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+.lightbox-accoes button:hover {
+  background: var(--bg-hover);
+}
+
+/* ------------------------------------------------- página de votações */
+
+/* The polls page of a community. Same slot as the ticket board; a single column
+   that scrolls inside itself, so a phone at 390 px never scrolls sideways. */
+.votacoes-pagina {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6);
+  overflow: hidden;
+}
+
+.votacoes-pagina-topo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.votacoes-pagina-topo h2 {
+  font-size: var(--font-lg);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.votacoes-pagina-barra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.votacoes-pagina-separadores {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.votacoes-separador {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.votacoes-separador.activo {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.votacoes-contagem {
+  margin-left: var(--space-1);
+  font-size: var(--font-sm);
+  opacity: 0.8;
+}
+
+.votacoes-pagina-filtro {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+}
+
+.votacoes-pagina-filtro select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.votacoes-pagina-lista {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.votacoes-pagina-lista ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  list-style: none;
+}
+
+.votacoes-pagina-cartao {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+.votacoes-pagina-cartao .votacao {
+  width: 100%;
+}
+
+.votacoes-pagina-meta,
+.votacoes-pagina-prazo {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+
+@media (max-width: 640px) {
+  .votacoes-pagina {
+    padding: var(--space-4);
+  }
+}
+
+/* The deadline of a new poll: three ways to say it, and the fields of the chosen one. */
+.nova-votacao-prazo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.nova-votacao-prazo legend {
+  margin-bottom: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+}
+
+.nova-votacao-prazo-modos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.nova-votacao-prazo-modos label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+}
+
+.nova-votacao-prazo-campos {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.votacao-fechada {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* The polls row at the top of a community's room list: same shape as a room, but it opens a page. */
+.room-votacoes-nome {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* The list of polls rooms, when a community has more than one. */
+.votacoes-escolha {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  list-style: none;
+}
+
+.votacoes-escolha-sala {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.votacoes-escolha-sala:hover {
+  background: var(--bg-hover);
+}
+
+/* Polls room, layout A: cards stacked in full width, a big question and
+   result bars from edge to edge of the card. The section is the full main area; the middle column
+   holds the content at a readable width. */
+.votacoes-pagina {
+  padding: 0;
+  overflow-y: auto;
+  align-items: stretch;
+}
+
+.votacoes-pagina-miolo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-6) var(--space-7);
+  min-width: 0;
+}
+
+.votacoes-pagina-lista {
+  flex: none;
+  overflow: visible;
+}
+
+.votacoes-pagina-cartao {
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-7);
+}
+
+/* In this room the card is the poll: the chat poll's own box (border, padding, 460 px cap) goes,
+   so the bars run across the whole card. */
+.votacoes-pagina-cartao {
+  align-items: stretch;
+}
+
+.votacoes-pagina-cartao .votacao {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.votacoes-pagina-cartao .votacao-rodape {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+
+.votacoes-pagina-cartao > .button,
+.votacoes-pagina-cartao > button {
+  align-self: flex-start;
+}
+
+.votacoes-pagina-cartao .votacao-pergunta {
+  font-size: 28px;
+  line-height: 1.15;
+  font-weight: 600;
+}
+
+.votacoes-pagina-cartao .votacao-opcao {
+  padding: var(--space-4) var(--space-5);
+  font-size: var(--font-md);
+  border-radius: var(--radius-md);
+}
+
+.votacoes-pagina-cartao .votacao-rodape,
+.votacoes-pagina-meta {
+  font-size: var(--font-base);
+}
+
+@media (max-width: 640px) {
+  /* Phone: cards run from margin to margin. */
+  .votacoes-pagina-miolo {
+    padding: var(--space-4) 0 var(--space-6);
+  }
+  .votacoes-pagina-topo,
+  .votacoes-pagina-separadores,
+  .votacoes-pagina > .votacoes-pagina-miolo > .hint {
+    padding-inline: var(--space-4);
+  }
+  .votacoes-pagina-cartao {
+    border-radius: 0;
+    border-inline: 0;
+    padding: var(--space-5) var(--space-4);
+  }
+  .votacoes-pagina-cartao .votacao-pergunta {
+    font-size: 21px;
+  }
+  .votacoes-pagina-cartao .votacao-opcao {
+    padding: var(--space-4) var(--space-3);
   }
 }

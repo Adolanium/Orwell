@@ -279,7 +279,7 @@ export function Unlock({
           </p>
           {/* Only with another account on this device: for those with one, the gate stays the same. */}
           <LigacaoMudarDeConta disabled={busy} />
-          {/* No "How it works" here (owner, 28 October 2026: "remove the how it works
+          {/* No "How it works" here ("remove the how it works
               from login"). The page stays in sign up (`Setup`) and in settings;
               the entry gate has only what is to enter. */}
         </div>

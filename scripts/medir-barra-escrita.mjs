@@ -214,7 +214,7 @@ for (let i = 0; i < 60 && !abanouBruno; i++) {
 check("a cotovelada da Ana abana o ecrã do Bruno", abanouBruno)
 
 // And who GIVES also sees something: without this the button looks like it did
-// nothing but make a sound, the exact complaint from the owner.
+// nothing but make a sound, the exact bug that was reported.
 let ecoNaAna = false
 for (let i = 0; i < 40 && !ecoNaAna; i++) {
   ecoNaAna = await ana.page.evaluate(

@@ -48,7 +48,7 @@ interface Bancada {
 }
 
 function bancada(
-  opcoes: { cofre?: "abre" | "pede-palavra" | "nao-existe"; aplicacaoInstalada?: boolean; destroy?: () => Promise<{ ok: boolean }> } = {},
+  opcoes: { cofre?: "abre" | "pede-palavra" | "nao-existe"; aplicacaoInstalada?: boolean; destroy?: () => Promise<{ ok: boolean }>; exportar?: boolean } = {},
 ): Bancada {
   const cofre = opcoes.cofre ?? "abre"
   const redeem = vi.fn(async () => ({ ok: true }))
@@ -64,6 +64,9 @@ function bancada(
         return { ok: true }
       },
       create: async () => ({ ok: true }),
+      // Only where the account is created here: the account-file step needs it. An
+      // account that already exists, with no export, gets no one-time notice.
+      ...(cofre === "nao-existe" || opcoes.exportar ? { export: async () => ({ data: "ficheiro-da-conta" }) } : {}),
       lock: async () => ({ ok: true }),
       destroy: opcoes.destroy ?? (async () => ({ ok: true })),
     },
@@ -436,6 +439,37 @@ describe("à espera de entrada", () => {
   })
 })
 
+/** The account-file step after creating (16/11/2026): download, tick, continue. */
+async function passarOFicheiroDaConta(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  URL.createObjectURL = vi.fn(() => "blob:conta")
+  URL.revokeObjectURL = vi.fn()
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+  const descarregar = await screen.findByRole("button", { name: strings.ficheiroDaConta.descarregar })
+  await waitFor(() => expect((descarregar as HTMLButtonElement).disabled).toBe(false))
+  await user.click(descarregar)
+  await user.click(screen.getByRole("checkbox", { name: strings.ficheiroDaConta.guardei }))
+  await user.click(screen.getByRole("button", { name: strings.ficheiroDaConta.continuar }))
+}
+
+describe("o aviso único do ficheiro da conta (16/11/2026)", () => {
+  it("uma conta que já existia e nunca guardou o ficheiro recebe o aviso ao abrir; fechado, não volta", async () => {
+    const user = userEvent.setup()
+    const { bridge, ligar } = bancada({ exportar: true })
+    render(<App bridge={bridge} />)
+    ligar()
+    expect(await screen.findByRole("heading", { name: strings.ficheiroDaConta.aviso })).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: strings.ficheiroDaConta.fechar }))
+    await waitFor(() => expect(screen.queryByRole("heading", { name: strings.ficheiroDaConta.aviso })).toBeNull())
+    cleanup()
+    const outra = bancada({ exportar: true })
+    render(<App bridge={outra.bridge} />)
+    outra.ligar()
+    await screen.findByRole("button", { name: "Configurações" }).catch(() => null)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole("heading", { name: strings.ficheiroDaConta.aviso })).toBeNull()
+  })
+})
+
 describe("a primeira vez", () => {
   it("depois de criar a conta, o cartão dá os três caminhos; fechar tira-o de vez", async () => {
     const user = userEvent.setup()
@@ -450,6 +484,7 @@ describe("a primeira vez", () => {
     // in a host with a key vault. The phrase and the confirmation.
     await escolherFrase(user)
     await user.click(await screen.findByRole("button", { name: strings.gate.create }))
+    await passarOFicheiroDaConta(user)
     await dentro()
     ligar()
 
@@ -488,6 +523,7 @@ describe("a primeira vez", () => {
     // in a host with a key vault. The phrase and the confirmation.
     await escolherFrase(user)
     await user.click(await screen.findByRole("button", { name: strings.gate.create }))
+    await passarOFicheiroDaConta(user)
     await dentro()
     ligar()
     await screen.findByText(strings.primeirosPassos.titulo)

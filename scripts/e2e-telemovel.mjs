@@ -53,8 +53,8 @@ const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
 const SERVIDOR_JS = join(RAIZ, "apps/server/dist/main.js")
 const CAPTURAS = join(RAIZ, "capturas")
-const PORTA_DA_FRENTE = 8472
-const PORTA_DO_SERVIDOR = 8473
+const PORTA_DA_FRENTE = Number(process.env.E2E_PORTA_DA_FRENTE ?? 8472)
+const PORTA_DO_SERVIDOR = Number(process.env.E2E_PORTA_DO_SERVIDOR ?? 8473)
 const NOME = `localhost:${PORTA_DA_FRENTE}`
 const APP = `http://${NOME}/app/?lingua=pt`
 const FRASE = "frase-de-verificacao-2026"

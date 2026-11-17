@@ -42,6 +42,7 @@ export function PostImages({
             src={src}
             alt={item.name ?? ""}
             loading="lazy"
+            decoding="async"
             {...(d ? { width: d.largura, height: d.altura } : {})}
           />
         )

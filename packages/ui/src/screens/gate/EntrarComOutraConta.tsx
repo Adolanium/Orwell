@@ -13,7 +13,7 @@ import { pagina } from "./MudarDeConta.js"
  *
  * Import and pairing put the other account IN PLACE of this one. Anyone who
  * wants both on this device has the third option, "Add another account"
- * (owner request on November 3, 2026, see `MudarDeConta.tsx`): this account
+ * (see `MudarDeConta.tsx`): this account
  * stays, closed, and the login opens a new account next to it.
  *
  * **Choose first, delete at the end.** The first version of this sheet deleted

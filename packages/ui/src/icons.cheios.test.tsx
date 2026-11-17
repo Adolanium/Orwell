@@ -1,5 +1,5 @@
 /**
- * The call icons are filled (owner, October 28, 2026), and the "disconnected"
+ * The call icons are filled, and the "disconnected"
  * bar cuts a path in the filled form instead of getting lost in it.
  */
 import { cleanup, render } from "@testing-library/react"

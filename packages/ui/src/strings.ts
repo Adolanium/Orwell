@@ -8,6 +8,7 @@ import {
   type DetalheDoErro,
   type FraseDeErro,
 } from "./lib/codigosDeErro.js"
+import { registarErroMostrado } from "./lib/errosMostrados.js"
 import {
   type ArranqueDaLingua,
   detectarLingua,
@@ -206,27 +207,12 @@ export function definirLingua(lingua: Lingua): boolean {
 }
 
 /**
- * The system languages the host gave on startup, if it gave any.
- *
- * Going back to "automatic" in settings must decide from the same list as
- * startup. In the installed app that list comes from the main process, and the
- * renderer's `navigator` often says something else (see `ArranqueDaLingua`).
- */
-let linguasDoAnfitriao: readonly string[] | undefined
-
-/** The host's list, if it gave one on startup. Otherwise nothing: read `navigator`. */
-export function linguasDoSistemaDoArranque(): readonly string[] | undefined {
-  return linguasDoAnfitriao
-}
-
-/**
  * Detect and apply the language. Called ONCE, by the host, on startup.
  *
  * Returns the chosen language-the caller may want to mark it in `<html lang>`,
  * and should.
  */
 export function arrancarLingua(opcoes: ArranqueDaLingua = {}): Lingua {
-  linguasDoAnfitriao = opcoes.doSistema
   const escolhida = detectarLingua(opcoes)
   definirLingua(escolhida)
   return escolhida
@@ -255,6 +241,8 @@ export function translateError(message: string, cause?: unknown): string {
   // and `hasOwn`: the key "constructor" cannot fetch `Object` from the prototype.
   const chave = String(message ?? "")
   const codigo = codigoDoErro(chave)
+  // The code and the hour only, for "Report a bug". See `errosMostrados.ts`.
+  registarErroMostrado(codigo)
   if (codigo === CODIGO_DESCONHECIDO) {
     const cru = chave.trim()
     return `${strings.errors.codigo(codigo)}\n${strings.errors.desconhecido}${cru === "" ? "" : `\n${cru}`}`

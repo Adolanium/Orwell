@@ -18,14 +18,23 @@ import {
 // By its own path: accounts are pure logic, and bridge tests that swap the
 // entire core for a double still have the real one.
 import { CONTA_PRINCIPAL, ContasDoAparelho } from "@enclave/client-core/contas"
+import { decifradorNoWorker, seladorNoWorker, type TrabalhadorDoSelo } from "@enclave/client-core/selo-worker"
 import { kindOf } from "@enclave/crypto"
 import { CAPACIDADE_REVOGACAO, TYPING_TTL_MS, type Payload, type Sobreposicao, type UserAddress } from "@enclave/protocol"
 import { Device } from "mediasoup-client"
-import { ehIos, type EnclaveBridge, type Profile } from "@enclave/ui"
+import { ehIos, type DefinicoesDoPush, type EnclaveBridge, type Profile } from "@enclave/ui"
 import { BrowserVaultBackend, type MotivoDaPerda } from "./vault-backend.js"
 import { BrowserArmazemBackend } from "./armazem-backend.js"
 import { miniaturistaDaWeb } from "./miniaturista.js"
 import { derivarNoWorker } from "./kdf.js"
+import {
+  ambienteDoBrowser,
+  cancelarNoBrowser,
+  dadosDaSubscricao,
+  estadoDoPushNoBrowser,
+  fecharAvisosDoPush,
+  subscreverNoBrowser,
+} from "./push.js"
 import pacote from "../package.json" with { type: "json" }
 
 /**
@@ -162,6 +171,8 @@ export type PonteDoBrowser = EnclaveBridge & {
    * vault. See `BrowserVaultBackend.assumirPosse`.
    */
   assumirPosse(id: string): Promise<void>
+  /** A call is open in this tab, now. See `pagina-escondida.ts`. */
+  emChamada(): boolean
 }
 
 export interface OpcoesDaPonte {
@@ -208,7 +219,16 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
   const backend: BrowserVaultBackend =
     opcoes.backend ??
     new BrowserVaultBackend({ ...(opcoes.aoPerderPosse ? { aoPerderPosse: opcoes.aoPerderPosse } : {}), conta })
-  const vault = new Vault(backend, opcoes.derivar ?? derivarNoWorker)
+  /*
+    The seal of batched vault writes runs in a Worker: the
+    cipher and the base64 of the whole vault left the page thread. Without
+    Worker support (a test DOM), everything seals here, as before.
+  */
+  const selador =
+    typeof Worker === "function"
+      ? seladorNoWorker(() => new Worker(new URL("./selo-worker.ts", import.meta.url), { type: "module" }) as unknown as TrabalhadorDoSelo)
+      : undefined
+  const vault = new Vault(backend, opcoes.derivar ?? derivarNoWorker, selador)
   // The version goes in both `hello` messages, for the 1.0 server to check. See `Session`.
   /*
     The media store (design §4): a database separate from the vault, for the
@@ -220,6 +240,14 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
     versaoDaApp: pacote.version,
     armazem: opcoes.armazem ?? new BrowserArmazemBackend({ conta }),
     miniaturista: "miniaturista" in opcoes ? (opcoes.miniaturista ?? null) : miniaturistaDaWeb(),
+    // Media blobs open in a Worker too: a 1 MB photo is ~150 ms on a slow laptop.
+    ...(typeof Worker === "function"
+      ? {
+          decifradorDeMedia: decifradorNoWorker(
+            () => new Worker(new URL("./selo-worker.ts", import.meta.url), { type: "module" }) as unknown as TrabalhadorDoSelo,
+          ),
+        }
+      : {}),
   })
   opcoes.aoCriar?.({ session, vault })
 
@@ -247,7 +275,13 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
   window.addEventListener("pagehide", () => {
     // Stopped is stopped: the vault is now another tab's, or this tab is stale.
     if (escritaParada) return
+    // The transaction must be born in this handler: no seal in the Worker now, and none in flight waits.
+    vault.semFundo = true
     void session.flush().catch(() => {})
+  })
+  // Back from the back-forward cache: batched writes seal in the Worker again.
+  window.addEventListener("pageshow", () => {
+    if (!escritaParada) vault.semFundo = false
   })
   /*
     And when returning to the tab, reconciliation runs (sync across accounts, F9).
@@ -292,6 +326,8 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       session.reservarContadorSframe(channel, keyId),
     // The AFK room (2/11/2026). See `salaAfk` in `CallBridge`.
     salaAfk: (channel: string, room: string): boolean => session.salaAfk(channel)?.room === room,
+    // Screen sharing is a role power (12/11/2026). See `podeTransmitir` in `CallBridge`.
+    podeTransmitir: (channel: string, room: string, address: UserAddress): boolean => session.mayTransmit(channel, room, address),
 
     /**
      * The worker where media encryption runs when the engine lacks insertable streams.
@@ -424,7 +460,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
    * and they heard none of the ones already gone. They cannot recover them because
    * voice signals do not replicate in the snapshot. Without this line, someone
    * opening the app sees an empty server while three people talk next to them.
-   * This is the owner's report from 18 August 2026.
+   * This was a reported bug.
    *
    * The presence announcement goes out the moment the other side SUBSCRIBES to
    * the channel, so ears are already open when the response arrives: it is the
@@ -559,6 +595,25 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
     desligarPreferenciasDeVoz = null
   }
 
+  /*
+    Web Push: the server key is read once per server and kept, so the browser
+    subscription follows the permission gesture without a round trip in
+    between (iOS wants it close to the gesture).
+  */
+  const ambienteDoPush = ambienteDoBrowser()
+  // The promise, not the value: the settings' read-ahead and a renewal in the same tick ask once.
+  let chaveGuardada: Promise<string> | null = null
+  const chaveDoPush = (): Promise<string> =>
+    (chaveGuardada ??= session.chaveDoPush().catch((erro: unknown) => {
+      chaveGuardada = null
+      throw erro
+    }))
+  /** The browser subscription for the server key, then `push.subscribe`. A changed key is caught by `subscreverNoBrowser`. */
+  const subscreverPush = async (definicoes: DefinicoesDoPush): Promise<void> => {
+    const subscricao = await subscreverNoBrowser(ambienteDoPush, await chaveDoPush())
+    await session.subscreverPush(dadosDaSubscricao(subscricao, definicoes))
+  }
+
   /** The name of the open account's profile, for the account list; `undefined` with vault closed. */
   const nomeDaContaAberta = (): string | undefined =>
     vault.unlocked && !vault.provisorio ? vault.contents.profile.displayName : undefined
@@ -633,6 +688,15 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         // runs and the account stays up. That is the decision, written in
         // `Session.prepareAccountDeletion`.
         await session.prepareAccountDeletion()
+        /*
+          The push subscription goes with the account, or the server keeps
+          waking this browser for an account that no longer exists. The server
+          row first, while the socket is still open. The browser subscription is
+          one per origin, shared by every account here: it goes only with the
+          last one.
+        */
+        await session.cancelarPush().catch(() => {})
+        if (contas.lista.contas.length <= 1) await cancelarNoBrowser(ambienteDoPush)
         largarPreferenciasDeVoz()
         session.disconnect()
         session.reset()
@@ -985,6 +1049,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       },
       mayMoveIn: (channel, de, para) => session.mayMoveIn(channel, de, para),
       mayMentionAll: (channel, room) => session.may(channel, "mencionartodos", room),
+      mayTransmit: (channel, room, address) => session.mayTransmit(channel, room, address),
       // The permission model for 1.2. The real guard is in the core.
       permissoes: {
         todos: (channel) => session.todosOf(channel),
@@ -1054,18 +1119,25 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         await session.send(channel, mensagemAEnviar(body, room, extras, { id: crypto.randomUUID(), sentAt: Date.now() }), { daPessoa: true })
         return { ok: true }
       },
+      pedirPerfis: async (channel, contas) => {
+        session.pedirPerfisDe(channel, contas)
+      },
       typing: async (channel, room) => {
         // The timeout travels with the signal. The receiver clears the indicator when it passes, without waiting
         // for an end message that may never come, see `useTyping.ts`. By the ephemeral signal: `sinalizarEscrita`.
         await session.sinalizarEscrita(channel, room, Date.now() + TYPING_TTL_MS)
         return { ok: true }
       },
-      editMessage: async (channel, target, body) => {
-        await session.editMessage(channel, target, body)
+      editMessage: async (channel, target, body, opcoes) => {
+        await session.editMessage(channel, target, body, opcoes)
         return { ok: true }
       },
       deleteMessage: async (channel, target) => {
         await session.deleteMessage(channel, target)
+        return { ok: true }
+      },
+      react: async (channel, target, emoji, remove) => {
+        await session.reactToMessage(channel, target, emoji, remove ?? false)
         return { ok: true }
       },
       buzz: async (channel) => {
@@ -1338,9 +1410,44 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       pedirRevisao: (nota) => session.pedirRevisao(nota, window.location.origin),
     },
 
+    // "Report a bug" (12/11/2026): to the same origin, the account server, like reports.
+    bugs: {
+      plataforma: window.matchMedia?.("(display-mode: standalone)").matches ? "pwa" : "web",
+      suportado: async () => session.suportaBugs,
+      enviar: (corpo) => session.comunicarErro(corpo, window.location.origin),
+    },
+
+    // Notifications when the app is closed (Web Push). See `push.ts`.
+    push: {
+      estado: async () => {
+        if (!session.suportaPush) return "sem-servidor"
+        const estado = estadoDoPushNoBrowser(ambienteDoPush)
+        if (estado === "pronto") void chaveDoPush().catch(() => {})
+        return estado
+      },
+      ligar: async (definicoes) => {
+        await subscreverPush(definicoes)
+        return { ok: true }
+      },
+      renovar: async (definicoes) => {
+        if (!session.suportaPush || estadoDoPushNoBrowser(ambienteDoPush) !== "pronto") return { ok: false }
+        if (typeof Notification === "undefined" || Notification.permission !== "granted") return { ok: false }
+        await subscreverPush(definicoes)
+        return { ok: true }
+      },
+      desligar: async () => {
+        await session.cancelarPush().catch(() => {})
+        await cancelarNoBrowser(ambienteDoPush)
+        return { ok: true }
+      },
+      fecharAvisos: () => fecharAvisosDoPush(ambienteDoPush),
+    },
+
     pararDeEscrever: async (modo = { gravar: true }) => {
       if (escritaParada) return backend.escritasAcabadas()
       escritaParada = true
+      // From here every write is synchronous to the disk, and a seal still in the Worker never lands.
+      vault.semFundo = true
       if (!modo.gravar) {
         /*
           We are no longer the owner: another tab may be reading the vault right now. Seal BEFORE
@@ -1391,5 +1498,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
     assumirPosse: async (id) => {
       await backend.assumirPosse(id)
     },
+
+    emChamada: () => call.channel !== null,
   }
 }

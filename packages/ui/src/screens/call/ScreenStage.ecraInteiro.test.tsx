@@ -4,7 +4,7 @@ import { strings } from "../../strings.js"
 import { ScreenStage } from "./ScreenStage.js"
 
 /**
- * Full screen for screen sharing. Requested by the owner on November 2, 2026:
+ * Full screen for screen sharing. The requirement:
  * "I want a full-screen option for screen sharing".
  *
  * A button in the corner of the stage and double-clicking the screen put the

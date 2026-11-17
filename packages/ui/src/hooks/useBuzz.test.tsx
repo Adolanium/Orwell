@@ -196,6 +196,39 @@ describe("a receber a cotovelada", () => {
     expect(result.current.shaking).toBe(false)
   })
 
+  it("uma cotovelada vinda de um canal de grupo não abana, nem com o canal aberto à frente", () => {
+    // The button only exists in directs, but an altered client can send a nudge
+    // anywhere. The core already drops it; this is the second wall.
+    const { bridge, emitir } = ponte()
+    const { result } = renderHook(() => useBuzz(bridge, ESPACO))
+    act(() => emitir({ channel: ESPACO, from: "@ana:s", at: Date.now() }))
+    expect(result.current.shaking).toBe(false)
+  })
+
+  it("com movimento reduzido o abanão não pára: dura o dobro, como a versão calma no CSS", () => {
+    // A Windows machine may run with reduced motion. Nothing stops, it moves slower:
+    // the calm shake in `screens.css` takes 1.64 s, and the class cannot come off
+    // halfway through it.
+    const original = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia
+    try {
+      const { bridge, emitir } = ponte()
+      const { result } = renderHook(() => useBuzz(bridge, DM))
+      act(() => emitir({ channel: DM, from: "@ana:s", at: Date.now() }))
+      act(() => vi.advanceTimersByTime(1_200))
+      expect(result.current.shaking).toBe(true)
+      act(() => vi.advanceTimersByTime(600))
+      expect(result.current.shaking).toBe(false)
+    } finally {
+      window.matchMedia = original
+    }
+  })
+
   it("uma cotovelada velha não se sente", () => {
     // Defense against a replay that slipped past the session cut: without it,
     // opening the app would shake the screen with yesterday's buzzes.

@@ -3,7 +3,7 @@ import type { ConnectionState, Profile } from "../bridge.js"
 import type { ChatMessage } from "../types.js"
 import { eImagem } from "./ficheiros.js"
 import { canalDoMuralNaInterface, fichaNaInterface, tipoNaInterface } from "./tipoDoCanal.js"
-import { strings } from "../strings.js"
+import { linguaActual, strings } from "../strings.js"
 
 /**
  * Posts, newest first, with edits and deletions folded in. Time is the only
@@ -567,9 +567,28 @@ export function connectionLabel(state: ConnectionState): string {
   }
 }
 
+/**
+ * One formatter per shape, made on first use and kept.
+ *
+ * `toLocaleTimeString` with options builds a new `Intl.DateTimeFormat` on every
+ * call: about 1 ms each on a slow laptop, and a channel switch draws the time
+ * of every line (150 lines, 150 formatters, measured in `medir-fluidez.mjs`).
+ * The output is the same: same locale, same options.
+ */
+const formatadores = new Map<string, Intl.DateTimeFormat>()
+function formatador(chave: string, opcoes: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  let f = formatadores.get(chave)
+  if (!f) {
+    f = new Intl.DateTimeFormat("pt-PT", opcoes)
+    formatadores.set(chave, f)
+  }
+  return f
+}
+const HORA: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" }
+
 export function formatTime(sentAt: number | undefined): string {
   if (!sentAt) return ""
-  return new Date(sentAt).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })
+  return formatador("hora", HORA).format(sentAt)
 }
 
 /**
@@ -592,16 +611,15 @@ export function formatRelative(at: number | undefined, now: number = Date.now())
   yesterday.setDate(yesterday.getDate() - 1)
   if (date.toDateString() === yesterday.toDateString()) return "ontem"
   const sameYear = date.getFullYear() === new Date(now).getFullYear()
-  return date.toLocaleDateString(
-    "pt-PT",
-    sameYear ? { day: "2-digit", month: "short" } : { day: "2-digit", month: "short", year: "numeric" },
-  )
+  return sameYear
+    ? formatador("dia-mes", { day: "2-digit", month: "short" }).format(date)
+    : formatador("dia-mes-ano", { day: "2-digit", month: "short", year: "numeric" }).format(date)
 }
 
 /** dd/mm/aa — for the edit disclaimer, where the full stamp lives in `title`. */
 export function formatShortDate(at: number | undefined): string {
   if (!at) return ""
-  return new Date(at).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "2-digit" })
+  return formatador("curta", { day: "2-digit", month: "2-digit", year: "2-digit" }).format(at)
 }
 
 export function formatStamp(at: number | undefined): string {
@@ -609,6 +627,31 @@ export function formatStamp(at: number | undefined): string {
   const date = new Date(at)
   const today = new Date().toDateString() === date.toDateString()
   return today
-    ? `hoje, ${date.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}`
-    : date.toLocaleString("pt-PT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+    ? `hoje, ${formatador("hora", HORA).format(date)}`
+    : formatador("carimbo", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date)
+}
+
+/** The locale of the interface language, for dates (12/11/2026). */
+function localeDaLingua(): string {
+  return linguaActual() === "en" ? "en-US" : "pt-PT"
+}
+
+/**
+ * The local calendar day of a timestamp, as a key: "2026-11-12". Local, not UTC:
+ * the day separator changes at the reader's midnight.
+ */
+export function chaveDoDia(at: number): string {
+  const d = new Date(at)
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
+}
+
+/** The day separator: "12 de novembro de 2026" / "November 12, 2026". */
+export function formatarDia(at: number): string {
+  return new Intl.DateTimeFormat(localeDaLingua(), { day: "numeric", month: "long", year: "numeric" }).format(at)
+}
+
+/** Full date and time, for the hover on a message's time. */
+export function formatarDataEHora(at: number | undefined): string {
+  if (!at) return ""
+  return new Intl.DateTimeFormat(localeDaLingua(), { dateStyle: "full", timeStyle: "short" }).format(at)
 }

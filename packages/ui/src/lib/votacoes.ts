@@ -1,5 +1,6 @@
 import type { ChatMessage } from "../types.js"
 import { strings } from "../strings.js"
+import { formatarDataEHora } from "./format.js"
 
 /**
  * The question and the options, as they travel. See `Poll` in the protocol.
@@ -13,6 +14,8 @@ import { strings } from "../strings.js"
 export interface Votacao {
   question: string
   options: string[]
+  /** When it closes by itself, set by who created it. Absent: no deadline. */
+  closesAt?: number
 }
 
 /** What a vote received, already counted. */
@@ -23,6 +26,12 @@ export interface Apuramento {
   total: number
   /** This account's choice, or `null` if they have not voted yet. */
   minha: number | null
+  /**
+   * The instant the poll closes (deadline or the closing edit, the earlier), or `null` if it has none.
+   * Votes with a later timestamp are already left out of this count. Whether it is closed NOW is
+   * the reader's clock against this, and that is the only part that follows the clock.
+   */
+  fechoEm: number | null
 }
 
 /**
@@ -36,7 +45,10 @@ export function votacaoDe(payload: ChatMessage["payload"]): Votacao | null {
   const poll = payload.poll
   if (!poll || typeof poll.question !== "string" || poll.question === "") return null
   if (!Array.isArray(poll.options) || poll.options.length < 2) return null
-  return { question: poll.question, options: poll.options.filter((opcao) => typeof opcao === "string") }
+  const opcoes = poll.options.filter((opcao) => typeof opcao === "string")
+  return typeof poll.closesAt === "number" && Number.isFinite(poll.closesAt)
+    ? { question: poll.question, options: opcoes, closesAt: poll.closesAt }
+    : { question: poll.question, options: opcoes }
 }
 
 /**
@@ -69,7 +81,11 @@ export function votacaoDe(payload: ChatMessage["payload"]): Votacao | null {
  * and does not go here, as a vote does not go in thumbs-ups. Both mechanisms
  * share the `t`, see `post.reaction` in the protocol, and cannot share the sum.
  */
-export function votosDe(messages: ChatMessage[]): Map<string, Map<string, number>> {
+export function votosDe(
+  messages: ChatMessage[],
+  /** The closing instant of each poll (`fechosDe`). A vote stamped later does not count. */
+  fechos?: ReadonlyMap<string, number>,
+): Map<string, Map<string, number>> {
   /** target → voter → { option chosen (or none), when } */
   const porAlvo = new Map<string, Map<string, { opcao: number | null; at: number }>>()
 
@@ -80,9 +96,14 @@ export function votosDe(messages: ChatMessage[]): Map<string, Map<string, number
     // A reaction with no vote is a thumbs-up, and thumbs-ups are summed elsewhere.
     if (typeof payload.vote !== "number") continue
 
+    const at = payload.at ?? 0
+    // After the close, by the vote's OWN timestamp and not by anyone's clock now: every device
+    // with the same events reaches the same count.
+    const fecho = fechos?.get(payload.target)
+    if (fecho !== undefined && at > fecho) continue
+
     const porPessoa = porAlvo.get(payload.target) ?? new Map<string, { opcao: number | null; at: number }>()
     const conhecido = porPessoa.get(sender)
-    const at = payload.at ?? 0
     if (!conhecido || at >= conhecido.at) {
       porPessoa.set(sender, { opcao: payload.remove ? null : payload.vote, at })
     }
@@ -107,7 +128,12 @@ export function votosDe(messages: ChatMessage[]): Map<string, Map<string, number
  * options, or from an altered client; counting it in any option was worse than
  * not counting it.
  */
-export function apurar(escolhas: Map<string, number> | undefined, opcoes: number, eu: string | null): Apuramento {
+export function apurar(
+  escolhas: Map<string, number> | undefined,
+  opcoes: number,
+  eu: string | null,
+  fechoEm: number | null = null,
+): Apuramento {
   const porOpcao: string[][] = Array.from({ length: opcoes }, () => [])
   let total = 0
   let minha: number | null = null
@@ -117,7 +143,7 @@ export function apurar(escolhas: Map<string, number> | undefined, opcoes: number
     total += 1
     if (quem === eu) minha = opcao
   }
-  return { porOpcao, total, minha }
+  return { porOpcao, total, minha, fechoEm }
 }
 
 /**
@@ -134,5 +160,42 @@ export function apurar(escolhas: Map<string, number> | undefined, opcoes: number
  */
 export function corpoDaVotacao(votacao: Votacao): string {
   const linhas = votacao.options.map((opcao, indice) => strings.votacao.linhaDeOpcao(indice + 1, opcao))
-  return [votacao.question, ...linhas].join("\n")
+  const prazo = votacao.closesAt === undefined ? [] : [strings.votacao.linhaDoPrazo(formatarDataEHora(votacao.closesAt))]
+  return [votacao.question, ...linhas, ...prazo].join("\n")
+}
+
+/**
+ * When each poll closes: its own deadline, or the closing edit, whichever comes first.
+ *
+ * **The closing edit is judged here, against the sender authenticated by MLS.**
+ * Only the author of the poll message, or whoever moderates the channel (`modera`,
+ * the same question the deletion fold asks), can close it. The instant is the edit's
+ * own `editedAt`. A poll nobody closed and with no deadline has no entry.
+ *
+ * Polls whose message this device does not have are not in the map: without the
+ * original there is no author to judge, and the closing waits for it, like a deletion.
+ */
+export function fechosDe(
+  messages: ChatMessage[],
+  modera: (quem: string) => boolean = () => false,
+): Map<string, number> {
+  const autores = new Map<string, string>()
+  const fechos = new Map<string, number>()
+  for (const { payload, sender } of messages) {
+    if (payload.t !== "message" && payload.t !== "post") continue
+    const id = payload.id
+    if (!id || !votacaoDe(payload) || autores.has(id)) continue
+    autores.set(id, sender)
+    const prazo = votacaoDe(payload)?.closesAt
+    if (prazo !== undefined) fechos.set(id, prazo)
+  }
+  for (const { payload, sender } of messages) {
+    if (payload.t !== "edit" || payload.closePoll !== true || !payload.target) continue
+    const autor = autores.get(payload.target)
+    if (autor === undefined || (autor !== sender && !modera(sender))) continue
+    const quando = payload.editedAt ?? 0
+    const actual = fechos.get(payload.target)
+    if (actual === undefined || quando < actual) fechos.set(payload.target, quando)
+  }
+  return fechos
 }

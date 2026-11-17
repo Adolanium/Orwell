@@ -9,8 +9,8 @@ import { CallChip } from "./CallChip.js"
 afterEach(cleanup)
 
 /**
- * The card for screen sharing, "A with C" (chosen by the owner on November 2,
- * 2026, `Downloads/Orwell-overlays-ao-vivo/`).
+ * The card for screen sharing, "A with C" (the chosen mockup,
+ * `Downloads/Orwell-overlays-ao-vivo/`).
  *
  * Always in view (A): the red "LIVE" badge with a pulsing dot, and next to it
  * the eye and the number of people watching. On hover, and always on touch
@@ -90,7 +90,7 @@ describe("o cartão de quem está ao vivo", () => {
 
 describe("o ponto do selo com movimento reduzido", () => {
   /*
-   * Owner rule: the dot keeps pulsing with reduced motion, slower. The universal
+   * The rule: the dot keeps pulsing with reduced motion, slower. The universal
    * rule in `base.css` zeros the duration of all animations with `!important`;
    * without an exception in the same place, the dot would stay still. It is the
    * same trap the elbow and the bell already had.

@@ -177,7 +177,7 @@ describe("terminologia inglesa", () => {
 
 describe("o aviso de pôr a conversa em dia (hotfix 1.3.10)", () => {
   it("diz só que a conversa está a pôr-se em dia, sem a frase sobre o que se escreve", () => {
-    // The owner asked for the second sentence to go. The wait behaviour stays.
+    // The second sentence is gone. The wait behaviour stays.
     expect(pt.chat.aPorEmDia).toBe("A pôr a conversa em dia…")
     expect(en.chat?.aPorEmDia).toBe("Catching up on this conversation…")
   })

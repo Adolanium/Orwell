@@ -5,7 +5,7 @@
  * where are what you want to assert in a test without mounting a screen. The panel draws
  * what this function says.
  *
- * The template is Discord's, which is what the owner asked for: roles first, in channel
+ * The template is Discord's: roles first, in channel
  * order; online members with no role next; and a final block with everyone offline, with no
  * division by role, a role is a responsibility over the channel, and the responsibility of
  * someone offline is not being exercised.

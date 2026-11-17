@@ -18,7 +18,7 @@ import { Vault, type VaultBackend } from "./vault.js"
 /**
  * The profile the same on all devices of the account (phase 1e).
  *
- * The owner's report (27/10/2026): "I log into the app: I don't have the same
+ * The bug: "I log into the app: I don't have the same
  * profile photo I had in the browser". Three parts, and each one has its
  * test here: the profile travels in pairing and the new device is born with it;
  * each change goes through the account channel and the newest wins, with whoever

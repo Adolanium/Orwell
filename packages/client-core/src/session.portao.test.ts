@@ -7,7 +7,7 @@ import { Vault, type VaultBackend } from "./vault.js"
 /**
  * **The application gate: live frames wait their turn on the channel.**
  *
- * The bug this measures was reported by the owner on 5 October 2026,  * real messages gone missing on a device that stayed closed for days, and the chain
+ * The bug this measures:  * real messages gone missing on a device that stayed closed for days, and the chain
  * is about order, not history:
  *
  *   1. subscribing opens live frames from ALL channels at once, and

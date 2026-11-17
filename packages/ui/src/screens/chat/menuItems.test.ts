@@ -377,7 +377,7 @@ describe("menu de quem está numa sala de voz", () => {
     }))
 
   /**
-   * One "Move to" entry and rooms in a list (2/11/2026, owner request: "in the menu I don't want a name for each room where I can move the user").
+   * One "Move to" entry and rooms in a list (requirement: "in the menu I don't want a name for each room where I can move the user").
    */
   it('há uma só entrada "Mover para", e nenhuma linha por sala no menu da pessoa', () => {
     const tres = [...salas, { room: "v3", name: "Régie", kind: "voice" } as SalaResumo]
@@ -543,7 +543,7 @@ describe("menu de quem está numa chamada", () => {
   })
 
   /*
-    Owner request on November 2, 2026: "instead of fixed levels 25, 50, 100, 150, 200, I want a volume slider". One entry, one slider from 0 to 200%, no fixed levels.
+    The requirement: "instead of fixed levels 25, 50, 100, 150, 200, I want a volume slider". One entry, one slider from 0 to 200%, no fixed levels.
     */
   it("o volume é uma barra de 0 a 200 %, de 5 em 5, e não uma fila de níveis", () => {
     const itens = menu({ volume: 1.5 })
@@ -688,7 +688,7 @@ describe("itensDaCategoria", () => {
 })
 
 /**
- * Mute (owner request from October 27, 2026). It belongs to everyone, not just organizers: it is about what THIS person hears. The entry says what the tap will do.
+ * Mute. It belongs to everyone, not just organizers: it is about what THIS person hears. The entry says what the tap will do.
  */
 describe("silenciar no menu do canal e da sala", () => {
   it('no canal: "Silenciar notificações", a seguir a "marcar como lido", e o toque alterna', () => {

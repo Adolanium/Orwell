@@ -1,7 +1,7 @@
 /**
  * The role editor, measured in a real layout engine, at 1280 and 390 px.
  *
- * Since 27 October 2026 the editor arranges a role like Discord (owner request:
+ * The editor arranges a role like Discord (the requirement:
  * "reorganize the menu, exactly like Discord"): closed, it shows the card list;
  * open a role, the list moves left (up on mobile) and the role opens in three
  * tabs, "Appearance", "Permissions" and "Members". This script replaces the

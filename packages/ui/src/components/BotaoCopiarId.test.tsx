@@ -11,7 +11,7 @@ import { strings } from "../strings.js"
 afterEach(cleanup)
 
 /**
- * "I do not want ids exposed" (owner order on 27 October 2026). The id
+ * "I do not want ids exposed" (the requirement). The id
  * copies via this button, next to the name, and is never read.
  */
 describe("BotaoCopiarId", () => {
@@ -56,8 +56,8 @@ describe("BotaoCopiarId", () => {
 })
 
 /*
-  Until 4 November 2026 the name was "Unnamed" for everyone. Changed to
-  the first word of the address (owner order); the full proof is in
+  Before, the name was "Unnamed" for everyone. Changed to
+  the first word of the address; the full proof is in
   `lib/nomeEmFalta.test.ts`. The full id remains the business of this button.
 */
 describe("nomeEmFalta", () => {

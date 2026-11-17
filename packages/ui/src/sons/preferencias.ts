@@ -60,7 +60,6 @@ export const PREFERENCIAS_DE_SOM_POR_OMISSAO: PreferenciasDeSom = {
     "sala-afk": true,
     // A new type: those who already have saved choices get it on, because reading
     // applies defaults to each type the disk doesn't have.
-    enviada: true,
     // The Discord parity ones (3/11/2026), all on, for the same reason.
     "a-chamar": true,
     "voz-perdida": true,

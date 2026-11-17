@@ -190,7 +190,7 @@ export function PeopleScreen({
      * not a record you consult, the entire app shows the first word of the
      * address (`shortAddress`), and this list showed
      * `@garbicis-xapsensis-giprete-birmyris:orwell.pt` in full, breaking the
-     * line alignment. It was one of three owner reports about names.
+     * line alignment. It was one of three bug reports about names.
      *
      * `nameFor` is optional because the component is tested without a wrapper.
      * The local resource has to be the SAME as the one from `useDirectory`, the
@@ -259,7 +259,7 @@ export function PeopleScreen({
           2026).
           
           When it does not fit, it flows as a news footer (the `Andante`), instead
-          of cutting with ellipsis (owner, October 28 2026).
+          of cutting with ellipsis.
           */}
         {profile.statusText ? (
           <Andante className="person-status" texto={profile.statusText} />

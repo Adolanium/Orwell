@@ -863,8 +863,9 @@ describe("emparelhamento: PC + telemóvel na mesma conta", () => {
     const evento = await certificado
     expect(evento.address).toBe(pc.address)
 
-    // The device vault: account public key and certificate, and NEVER the private key.
-    expect(vault.contents.signingPrivateKey).toBe("")
+    // The device vault: account public key, certificate and, since 1.3.16, the account
+    // private key (the fix for Erro 609), the same as the computer's.
+    expect(vault.contents.signingPrivateKey).toBe(pc.vault.contents.signingPrivateKey)
     expect(vault.contents.accountPublicKey).toBe(toBase64(pc.session.identity.signingPublicKey))
     expect(vault.contents.deviceCert).not.toBe("")
     expect(vault.contents.deviceSigningPrivateKey).not.toBe("")
@@ -872,24 +873,20 @@ describe("emparelhamento: PC + telemóvel na mesma conta", () => {
 
     const identidade = telemovel.loadIdentity()
     expect(identidade.address).toBe(pc.address)
-    expect(identidade.signingPrivateKey).toBeUndefined()
-    expect(telemovel.temChaveDeConta).toBe(false)
+    expect(identidade.signingPrivateKey).toBeDefined()
+    // The certificate minted from the key is the one the computer signed (Ed25519 is deterministic).
+    expect(toBase64(identidade.credential.signature)).toBe(vault.contents.deviceCert)
+    expect(telemovel.temChaveDeConta).toBe(true)
     expect(pc.session.temChaveDeConta).toBe(true)
-    // The `#garantirManifesto` gate: a device without the account key publishes no
-    // manifest and, before that, doesn't even ASK for it on connect. The read is
-    // what you see on the server side; the publish, without the key, would die on
-    // signature in silence, and this test didn't tell them apart.
-    const leiturasAntes = rele.leituras.get(pc.address) ?? 0
     await telemovel.connect()
     await settle(40)
-    expect(rele.leituras.get(pc.address) ?? 0).toBe(leiturasAntes)
     telemovel.concluirEmparelhamento()
     await concluidoPc
 
     return { session: telemovel, address: identidade.address, vault, deviceKey: toBase64(identidade.deviceSigningPublicKey), avisos }
   }
 
-  it("as seis palavras batem, o telemóvel fica sem a privada, e o manifesto v2 é publicado pelo PC", async () => {
+  it("as seis palavras batem, o telemóvel recebe a privada, e o manifesto v2 tem os dois", async () => {
     const ana = await conta()
     expect(rele.manifestos.get(ana.address)?.version).toBe(1)
     const telemovel = await emparelhar(ana)
@@ -898,8 +895,8 @@ describe("emparelhamento: PC + telemóvel na mesma conta", () => {
     expect(v2?.version).toBe(2)
     expect(v2?.devices.map((d) => d.deviceKey)).toEqual([ana.deviceKey, telemovel.deviceKey])
     expect(verifyDeviceManifest(v2 as DeviceManifestWire).ok).toBe(true)
-    // The PC published: the phone connected, doesn't have the private key, and its
-    // `#garantirManifesto` didn't publish any v3.
+    // One v2 only: whichever of the two published it (the phone has the key and its
+    // `#garantirManifesto` may come first), the other sees the phone there and does not publish a v3.
     await settle(60)
     expect(rele.manifestos.get(ana.address)?.version).toBe(2)
     // And the phone has its pool of key packages on the server.
@@ -1047,10 +1044,12 @@ describe("emparelhamento: PC + telemóvel na mesma conta", () => {
     ana.session.cancelarEmparelhamento()
   }, 20_000)
 
-  it("um aparelho emparelhado não pode acrescentar aparelhos", async () => {
+  it("o telemóvel emparelhado também acrescenta aparelhos (1.3.16): mostra o link", async () => {
     const ana = await conta()
     const telemovel = await emparelhar(ana)
-    await expect(telemovel.session.emparelharComoAnfitriao()).rejects.toThrow("this device has no account key")
+    const { link } = await telemovel.session.emparelharComoAnfitriao()
+    expect(link).toContain("/app/emparelhar#")
+    telemovel.session.cancelarEmparelhamento()
   }, 40_000)
 
   /**

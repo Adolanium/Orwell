@@ -1,7 +1,7 @@
 /**
  * The priority of each call stream at the WebRTC sender.
  *
- * Requested by the owner on November 2, 2026: "make voice the priority". Voice, video, and sound
+ * The requirement: "make voice the priority". Voice, video, and sound
  * share the same link for each person (one transport, with a 5 Mbit/s cap at the server) and the
  * same server output. Without priority, the spec gives "low" to all, and on a tight network the
  * browser splits what it has equally: voice could choke next to a 2.5 Mbit/s screen.

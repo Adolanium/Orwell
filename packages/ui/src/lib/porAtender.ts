@@ -18,8 +18,8 @@ import { estaSilenciado } from "./silenciados.js"
  * is why the rule is deliberately tight.
  *
  * **Communities (channels)**, all unread messages. Until October 27, 2026,
- * only mentions were counted, and the rail had a quiet dot for the rest; the
- * owner asked for the full number, like Discord does, and the fix for a
+ * only mentions were counted, and the rail had a quiet dot for the rest; now
+ * it shows the full number, like Discord does, and the fix for a
  * thirty-person channel became mute it, not hide the number from everyone. The
  * sum is from `repartirPorDestino` over the counts that the sidebar already
  * shows. In a muted place only mentions count (see `lib/silenciados.ts`); the

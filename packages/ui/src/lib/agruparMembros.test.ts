@@ -13,8 +13,8 @@ import { agruparMembros, type CargoDoMembro } from "./agruparMembros.js"
  * - **Offline members go into a single block at the end, with no division by role.**
  *   A role is a responsibility over the channel, and the responsibility of someone offline
  *   is not being exercised; separating absent members by role would fill the list with
- *   headers for one person each. This is also what Discord does, and the owner asked for
- *   Discord.
+ *   headers for one person each. This is also what Discord does, and Discord is the
+ *   model.
  * - **Online members group by their highest role**, and only that one: a person shows once.
  *   The subtext still lists all their roles.
  * - **Alphabetical order within each group, by display name.** The address breaks ties, so

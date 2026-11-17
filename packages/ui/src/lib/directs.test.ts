@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import type { ChatMessage } from "../types.js"
 import {
   closeDirect,
+  directasQueContam,
   listDirects,
   readClosedDirects,
   reopenDirect,
@@ -171,5 +172,42 @@ describe("a memória de quais estão fechadas", () => {
         },
       }),
     ).not.toThrow()
+  })
+})
+
+/**
+ * Opening a conversation is not a notice (12/11/2026).
+ *
+ * Someone who opens a direct with a stranger and says nothing must not appear on
+ * the other side: not in the conversation column, not in the friends circle.
+ */
+describe("as conversas directas que contam para a outra pessoa", () => {
+  const ninguem = (): boolean => false
+
+  it("uma conversa vazia com quem não conheço não conta", () => {
+    expect(directasQueContam([CONVERSA], [], EU, ninguem)).toEqual(new Set())
+  })
+
+  it("uma conversa com uma fala conta", () => {
+    expect(directasQueContam([CONVERSA], [fala(CONVERSA, ELA, "olá", 10)], EU, ninguem)).toEqual(new Set([CONVERSA]))
+  })
+
+  it("um pedido de amizade conta", () => {
+    const pedido: ChatMessage = { channel: CONVERSA, seq: 1, sender: ELA, payload: { t: "friend.request" } }
+    expect(directasQueContam([CONVERSA], [pedido], EU, ninguem)).toEqual(new Set([CONVERSA]))
+  })
+
+  it("um perfil sozinho não conta: é o que chega quando alguém só abre a conversa", () => {
+    const perfil: ChatMessage = { channel: CONVERSA, seq: 1, sender: ELA, payload: { t: "profile" } }
+    expect(directasQueContam([CONVERSA], [perfil], EU, ninguem)).toEqual(new Set())
+  })
+
+  it("uma conversa vazia com quem já conheço conta", () => {
+    const conhecida = (peer: string): boolean => peer === ELA
+    expect(directasQueContam([CONVERSA, OUTRA], [], EU, conhecida)).toEqual(new Set([CONVERSA]))
+  })
+
+  it("deixa de fora o que não é conversa directa", () => {
+    expect(directasQueContam(["!geral:orwell.pt", MEU_FEED], [], EU, () => true)).toEqual(new Set())
   })
 })

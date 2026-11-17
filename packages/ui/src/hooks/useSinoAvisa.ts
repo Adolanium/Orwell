@@ -34,6 +34,17 @@ import { useEffect, useRef, useState } from "react"
  * happens once or twice.
  */
 export const SINO_AVISO_MS = 520
+/** With reduced motion the swing is the calm one in `screens.css`: twice as long. */
+export const SINO_AVISO_CALMO_MS = 1040
+
+/** Read at each swing: the preference can change while the app is open. */
+function duracaoDoAviso(): number {
+  const reduzido =
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  return reduzido ? SINO_AVISO_CALMO_MS : SINO_AVISO_MS
+}
 
 /**
  * Two notifications in a row are one event, not two.
@@ -77,7 +88,7 @@ export function useSinoAvisa(porLer: number, silenciado: boolean): boolean {
   // this the bell would ring once and stay silent for the rest of the session.
   useEffect(() => {
     if (!avisa) return
-    const fim = setTimeout(() => setAvisa(false), SINO_AVISO_MS)
+    const fim = setTimeout(() => setAvisa(false), duracaoDoAviso())
     return () => clearTimeout(fim)
   }, [avisa])
 

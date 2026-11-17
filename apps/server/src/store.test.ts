@@ -150,6 +150,42 @@ describe("channelNeverUsed", () => {
 })
 
 /**
+ * Retention empties a channel and numbering does not go back (12/11/2026).
+ *
+ * `seq` came from `MAX(seq)` of the stored events. Once retention deleted all of
+ * them, the next event was `seq` 0 again, and every client that already held a
+ * higher one read it as old: the Welcome snapshot refused its own rooms and pins
+ * as "the server still serves them". The floor stays, rounded, and only grows.
+ */
+describe("o seq depois de a retenção esvaziar o canal", () => {
+  const anexar = (): number =>
+    (store.appendEvent({ channel: CANAL, kind: "application", ciphertext: new Uint8Array([1]) }, { refundavel: false }) as {
+      event: { seq: number }
+    }).event.seq
+
+  it("continua acima do último, arredondado, e não volta a zero", () => {
+    for (let i = 0; i < 5; i++) anexar()
+    expect(store.expireEvents(0)).toBe(5)
+    const depois = anexar()
+    expect(depois).toBeGreaterThan(4)
+    expect(depois % Store.SEQ_FLOOR_STEP).toBe(0)
+    // A second empty spell does not lower the floor.
+    expect(store.expireEvents(0)).toBe(1)
+    expect(anexar()).toBeGreaterThan(depois)
+  })
+
+  it("um canal que ainda guarda eventos numera como antes", () => {
+    anexar()
+    anexar()
+    vi.setSystemTime(new Date(Date.now() + 40 * 24 * 60 * 60_000))
+    anexar()
+    // The first two go; the third stays and holds the height.
+    expect(store.expireEvents(30)).toBe(2)
+    expect(anexar()).toBe(3)
+  })
+})
+
+/**
  * A legitimate invite cannot be buried by another one that arrives later.
  *
  * `pendingWelcomes` returned only the welcome with `MAX(seq)` per channel and
@@ -188,7 +224,7 @@ describe("welcomes pendentes", () => {
  * Up to four rows per account, and beyond that the oldest is removed. It was one
  * row per account until 22 September 2026, kept by a DELETE on each login: the
  * server enforced one device at a time, which is what multi-device removes. The
- * cap is the owner's choice, and rotation is what makes the fifth fresh reinstall
+ * cap is a product choice, and rotation is what makes the fifth fresh reinstall
  * keep logging in as it always has.
  *
  * The numbers here are literals on purpose: `4` and `5`, not the constant. The

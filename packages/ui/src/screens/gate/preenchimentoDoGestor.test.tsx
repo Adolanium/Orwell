@@ -104,7 +104,8 @@ describe("desbloquear: o que vale é o que está no campo", () => {
 describe("criar conta: o cofre nasce com o que está no campo", () => {
   function ponteQueCriaConta(create: (frase: string | null) => Promise<unknown>): EnclaveBridge {
     return {
-      vault: { status: async () => ({ exists: false, supportsOsProtection: false }), create },
+      // export: the step after the vault is born offers the account file.
+      vault: { status: async () => ({ exists: false, supportsOsProtection: false }), create, export: async () => ({ data: "ficheiro" }) },
       identity: { create: async () => ({ address: "@abc:localhost:8448", accountId: "abc" }) },
       session: { connect: async () => ({ ok: true }) },
       profile: { set: async () => ({ ok: true }) },
@@ -170,6 +171,8 @@ describe("emparelhar: o cofre do aparelho novo nasce com o que está no campo", 
           return { ok: true }
         },
         destroy: async () => ({ ok: true }),
+        // The step after the vault is born offers the account file: it calls export.
+        export: async () => ({ data: "ficheiro" }),
       },
       pairing: { join: async () => ({ ok: true }), cancel: async () => ({ ok: true }) },
       on: { pair: () => () => {} },

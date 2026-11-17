@@ -1,7 +1,9 @@
 import { temAnfitriaoDeAvisos } from "../../lib/notifications.js"
+import { marcarFicheiroTratado } from "../../lib/ficheiroDaConta.js"
 import { useEffect, useId, useRef, useState } from "react"
 import { copiarTexto } from "../../lib/copiar.js"
 import { useBridge } from "../../App.js"
+import { ComunicarErro, useComunicarErro } from "../../components/ComunicarErro.js"
 import type { ConnectionState, FicheiroDeContaExportado } from "../../bridge.js"
 import { Button } from "../../components/Button.js"
 import { ApagarConta } from "../../components/ConfirmarDestruicao.js"
@@ -28,6 +30,7 @@ import { prefsDeMediaParaONucleo } from "../../lib/mediaPrefs.js"
 import { VERSAO_DA_APP } from "../../lib/versao.js"
 import { SeccaoDeSons } from "../../sons/SeccaoDeSons.js"
 import { Aparelhos } from "./Aparelhos.js"
+import { AvisosComAppFechada } from "./AvisosComAppFechada.js"
 import { AtalhosDeVoz } from "./AtalhosDeVoz.js"
 import { fraseDoCampo } from "../gate/fraseDoCampo.js"
 import { LINGUAS, strings, traduzirErro } from "../../strings.js"
@@ -139,7 +142,7 @@ export function SettingsScreen({
    *
    * Microphone tests (the meter and recording) use this track instead of
    * opening the microphone again. A second capture from the same device can
-   * stop or change the call's: that was the owner's report, "you drop the call
+   * stop or change the call's: that was the bug, "you drop the call
    * when you go to settings, or you stop hearing the others".
    */
   microfoneDaChamada?: MediaStream | null | undefined
@@ -168,12 +171,13 @@ export function SettingsScreen({
 
   /*
     The language: stored here, and carried to the other devices in the account
-    via the account channel (phase 5, `lib/preferenciasDaConta.ts`). `preferencia`
-    and not the language to display, because they are different things and both
-    appear on screen: someone on "Automatic" in an English system sees English,
-    and what is marked is "Automatic". See `hooks/useLingua.ts`.
+    via the account channel (phase 5, `lib/preferenciasDaConta.ts`). Since 1.3.9
+    there is no "Automatic": nothing follows the system. Without a choice
+    ("auto", from before or from a sibling device) the pill lit is the language
+    on screen, which is English. See `escolha-da-lingua.ts`.
   */
-  const { preferencia, escolher: escolherLingua } = usePreferenciaDeLingua()
+  const { preferencia, lingua, escolher: escolherLingua } = usePreferenciaDeLingua()
+  const linguaMarcada = preferencia === "auto" ? lingua : preferencia
 
   /**
    * Save the preference AND carry it to the engine, in the same gesture.
@@ -273,6 +277,9 @@ export function SettingsScreen({
   const [confirmingDestroy, setConfirmingDestroy] = useState(false)
   /** The "How it works" page, opened on top of settings. */
   const [comoFunciona, setComoFunciona] = useState(false)
+  // "Report a bug": only where the server announced it (12/11/2026).
+  const podeComunicarErro = useComunicarErro(bridge, connection)
+  const [comunicarErro, setComunicarErro] = useState(false)
   /** Only OS-protected vaults (desktop) need this: the keychain cannot travel. */
   const [exportPassphrase, setExportPassphrase] = useState<string | null>(null)
   /**
@@ -317,7 +324,10 @@ export function SettingsScreen({
   const download = (exportado: FicheiroDeContaExportado): void => {
     // The desktop already wrote it where the person chose; cancelling says nothing.
     if ("gravado" in exportado) {
-      if (exportado.gravado) toast(strings.settings.exported)
+      if (exportado.gravado) {
+        if (address) void marcarFicheiroTratado(address)
+        toast(strings.settings.exported)
+      }
       return
     }
     const blob = "ficheiro" in exportado ? exportado.ficheiro : new Blob([exportado.data], { type: "application/json" })
@@ -327,6 +337,8 @@ export function SettingsScreen({
     anchor.download = "conta.enclave"
     anchor.click()
     URL.revokeObjectURL(url)
+    // The account file went out: the one-time notice is not owed anymore.
+    if (address) void marcarFicheiroTratado(address)
     toast(strings.settings.exported)
   }
 
@@ -455,24 +467,16 @@ export function SettingsScreen({
               now it is in Account, which is where you look for what is about
               the app user.
               
-              "Automatic" is the first pill because it is the factory state, and
-              language names are each in their own language. See `strings.ts`.
+              Language names are each in their own language. See `strings.ts`.
               */}
             <section className="card settings-card">
               <h2>{strings.settings.language}</h2>
               <div className="choice-row">
-                <button
-                  className={preferencia === "auto" ? "chip on" : "chip"}
-                  aria-pressed={preferencia === "auto"}
-                  onClick={() => escolherLingua("auto")}
-                >
-                  {strings.settings.languageAuto}
-                </button>
                 {LINGUAS.map((entrada) => (
                   <button
                     key={entrada.codigo}
-                    className={preferencia === entrada.codigo ? "chip on" : "chip"}
-                    aria-pressed={preferencia === entrada.codigo}
+                    className={linguaMarcada === entrada.codigo ? "chip on" : "chip"}
+                    aria-pressed={linguaMarcada === entrada.codigo}
                     onClick={() => escolherLingua(entrada.codigo)}
                   >
                     {entrada.nome}
@@ -513,6 +517,10 @@ export function SettingsScreen({
                 )}
               </>
             )}
+            {/* Web Push: web only, with the server's capability. Outside the branch above:
+                on iOS outside the Home Screen there is no `Notification`, and the note
+                saying how to get push is exactly for that case. See `AvisosComAppFechada`. */}
+            <AvisosComAppFechada bridge={bridge} connection={connection} notificacoesLigadas={notificationsOn} />
 
             {/* MSN-style warnings (item 6, and the others since November 3, 2026).
                 Outside browser permission: without it the warning shows inside
@@ -661,6 +669,14 @@ export function SettingsScreen({
                 rotulo={strings.definicoesNovas.entrarSilenciado}
                 onMudar={(entrarSilenciado) => setPreferencia({ entrarSilenciado })}
               />
+              {/* The screen wake lock during calls. The lock itself is in
+                  `useChamadaEmSegundoPlano`; this just stores the choice. */}
+              <Interruptor
+                ligado={prefs.ecraLigadoNaChamada}
+                rotulo={strings.definicoesNovas.ecraLigadoNaChamada}
+                onMudar={(ecraLigadoNaChamada) => setPreferencia({ ecraLigadoNaChamada })}
+              />
+              <p className="field-note">{strings.definicoesNovas.ecraLigadoNaChamadaNota}</p>
             </section>
 
             {/*
@@ -906,8 +922,8 @@ export function SettingsScreen({
 
             {/* The danger zone is a separate card, with pink title and solid button: it
                 lived at the end of the "This device" card, with just one line
-                above it, and the owner said it was "too smooth" (October 27,
-                2026). A button that deletes the account must not look like the
+                above it, and it looked "too smooth".
+                A button that deletes the account must not look like the
                 others. */}
             <section className="card settings-card zona-de-perigo" aria-labelledby="zona-de-perigo-titulo">
               <h2 id="zona-de-perigo-titulo" className="zona-de-perigo-titulo">
@@ -952,6 +968,15 @@ export function SettingsScreen({
               {bridge.relato && <p className="field-note">{strings.definicoesNovas.enviarRegistoNota}</p>}
             </section>
 
+            {podeComunicarErro && (
+              <section className="card settings-card">
+                <h2>{strings.comunicarErro.titulo}</h2>
+                <Button variant="ghost" onClick={() => setComunicarErro(true)}>
+                  {strings.comunicarErro.botao}
+                </Button>
+              </section>
+            )}
+
             {/* "How it works" at the end: someone with a problem finds repair first. The
                 page opens in a sheet, the same one the gate opens without an
                 account. See `ComoFunciona`. */}
@@ -980,6 +1005,7 @@ export function SettingsScreen({
 
       {confirmingDestroy && <DestroyModal onClose={() => setConfirmingDestroy(false)} />}
       {comoFunciona && <FolhaComoFunciona onClose={() => setComoFunciona(false)} />}
+      {comunicarErro && <ComunicarErro bridge={bridge} connection={connection} onClose={() => setComunicarErro(false)} />}
 
       <footer className="statusbar">{connectionLabel(connection)}</footer>
     </main>

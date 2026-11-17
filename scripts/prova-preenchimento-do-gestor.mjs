@@ -18,14 +18,14 @@
  * Each fill method is tested against the same account and the same phrase. All
  * local and disposable, following the `e2e-cofre-entre-versoes.mjs` pattern.
  *
- * **What this proved, on 30 September 2026: THIS is the owner's bug.** Account
+ * **What this proved: THIS is the reported bug.** Account
  * created in 0.3.0, opened in 0.3.1, same passphrase by four paths. Three opened.
  * The fourth-the manager filling the field without firing any event-gave, with the
  * RIGHT phrase visible in the field:
  *
  *     "Wrong passphrase, or the vault is corrupt."
  *
- * Which is, word for word, what the owner described. Fixed that same day
+ * Which is, word for word, what the bug report described. Fixed that same day
  * (`fraseDoCampo`, on all three gate screens): 4/4 open.
  */
 import { spawn } from "node:child_process"
@@ -187,7 +187,7 @@ try {
     const pasta = join(perfis, `perfil-${caso}`)
     console.log(`\n=== ${maneira.nome} ===`)
 
-    // The account is born in 0.3.0, like the owner's.
+    // The account is born in 0.3.0, like the one in the report.
     distActual = DIST_030
     {
       const ctx = await chromium.launchPersistentContext(pasta, { headless: true, locale: "pt-PT", viewport: { width: 1200, height: 900 } })

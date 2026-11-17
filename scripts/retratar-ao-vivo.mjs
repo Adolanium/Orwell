@@ -1,5 +1,5 @@
 /**
- * The card of the person sharing the screen, "A with C" (owner, 2 November 2026),
+ * The card of the person sharing the screen, "A with C",
  * in a real layout engine.
  *
  * The card tests run in jsdom, which does not apply stylesheets and does not

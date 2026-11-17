@@ -47,6 +47,8 @@ import { constants as fsConstants, readFileSync, rmSync } from "node:fs"
 import { access, readFile, rm, writeFile } from "node:fs/promises"
 import { release } from "node:os"
 import { basename, dirname, join } from "node:path"
+import { decifradorNoWorker, seladorNoWorker } from "@enclave/client-core/selo-worker"
+import { trabalhadorDoSelo } from "./selador.js"
 import { CANAIS_DE_ACTUALIZACAO, ENDERECO_DAS_DESCARGAS, verificarActualizacao } from "./actualizacao.js"
 import {
   ARGUMENTOS_DO_INSTALADOR,
@@ -228,7 +230,16 @@ const contas: ContasDoAparelho = new ContasDoAparelho({
   largarConta: async (id) => armazemDoCofre.largarConta(id),
 })
 const armazemDoCofre: DesktopVaultBackend = new DesktopVaultBackend(app.getPath("userData"), contas.activa)
-const vault = new Vault(armazemDoCofre)
+/*
+  The seal of batched vault writes runs in a worker thread: this process also answers the window's synchronous reads, and
+  while it sealed the whole vault the window waited. The quit and the account
+  switch still write synchronously (`shutdown`, `vault.lock`).
+*/
+const vault = new Vault(
+  armazemDoCofre,
+  undefined,
+  seladorNoWorker(() => trabalhadorDoSelo(join(__dirname, "selo.cjs"))),
+)
 // The version goes in both `hello` messages, for the 1.0 server to check. See `Session`.
 /*
   The media store (design §4): files in `media/`, in the active account
@@ -241,6 +252,8 @@ const session = new Session(vault, {
   versaoDaApp: app.getVersion(),
   armazem: armazemDeMedia,
   miniaturista: miniaturistaDaSecretaria(),
+  // Media blobs open in a worker thread, like the vault seal: this process answers the window.
+  decifradorDeMedia: decifradorNoWorker(() => trabalhadorDoSelo(join(__dirname, "selo.cjs"))),
 })
 
 /**
@@ -774,31 +787,6 @@ function registerIpc(window: BrowserWindow): void {
     ipcMain.handle(nome, embrulharErros(fazer as (...quaisquer: unknown[]) => R))
   }
 
-  /*
-    The SYSTEM languages, which the renderer doesn't know.
-
-    `navigator.languages` inside Electron returns the locale the app started with,
-    and on macOS that's often just "en-US" even though the whole system is in
-    Portuguese: the user's list is in System Preferences, not Chromium.
-    `app.getPreferredSystemLanguages()` reads it for real, and that's why this
-    port exists instead of the packaged app sticking with what the browser tells
-    it.
-
-    Synchronous, and it's the same reason `canais.ts` reads synchronously: this
-    is read ONCE, at startup, before the first render. A promise would force
-    drawing first in one language and switching after, which is a flicker
-    nobody asked for.
-  */
-  ipcMain.on("lingua:sistema", (event) => {
-    try {
-      event.returnValue = app.getPreferredSystemLanguages()
-    } catch {
-      // An Electron version without this read, or a system that
-      // doesn't respond. The renderer treats the empty list as "don't know" and
-      // falls back to `navigator`, the browser's response, better than nothing.
-      event.returnValue = []
-    }
-  })
   /*
     The update: warn, never update.
     
@@ -1355,6 +1343,12 @@ function registerIpc(window: BrowserWindow): void {
     return { ok: true }
   })
 
+  tratar("channel:pedir-perfis", async (_event, channel: string, contas: unknown) => {
+    // Strings only, and a bounded list: whatever crosses the IPC is checked here.
+    if (typeof channel !== "string" || !Array.isArray(contas)) return
+    session.pedirPerfisDe(channel, contas.filter((conta): conta is string => typeof conta === "string").slice(0, 400))
+  })
+
   tratar("channel:buzz", async (_event, channel: string) => {
     // Ephemeral for the same reason as above, taken further: a saved buzz
     // would play on backfill, shaking the screen of whoever opened
@@ -1500,6 +1494,10 @@ function registerIpc(window: BrowserWindow): void {
     if (!lida || !escolhida) throw new Error("the server did not take the report")
     return session.denunciar(lida, escolhida, origemDoServidorDe(session.identity.address), app.getVersion())
   })
+  // "Report a bug" (12/11/2026): the server is the open account's, decided here. The
+  // body from the renderer is checked by the schema in `enviarBug` (the untrusted part).
+  tratar("bug:suportado", async () => session.suportaBugs)
+  tratar("bug:enviar", async (_event, corpo: unknown) => session.comunicarErro(corpo, origemDoServidorDe(session.identity.address)))
   tratar("denuncia:lista", async (_event, canal: unknown) => (typeof canal === "string" ? session.denunciasDe(canal) : []))
   tratar("denuncia:porAbrir", async (_event, canal: unknown) => (typeof canal === "string" ? session.denunciasPorAbrir(canal) : 0))
   tratar("denuncia:marcarLida", async (_event, id: unknown) => {
@@ -1940,7 +1938,9 @@ async function start(): Promise<void> {
 
 function shutdown(): void {
   // Persist buffered group state before the process goes away; losing it would
-  // put us behind our own MLS epoch on the next launch.
+  // put us behind our own MLS epoch on the next launch. Synchronous to the disk:
+  // no seal in the worker thread now, and none in flight waits.
+  vault.semFundo = true
   void session.flush().catch(() => {
     // Vault already locked, or nothing to write.
   })

@@ -1,5 +1,5 @@
 import type { FichaDoCanal, Ticket } from "@enclave/client-core"
-import type { PinnedMessage, Power, RoleColour, TicketState } from "@enclave/protocol"
+import type { PinnedMessage, Power, RoleColour, Sobreposicao, TicketState } from "@enclave/protocol"
 
 /**
  * The channel operations on the main process side.
@@ -60,6 +60,7 @@ export const CANAIS_DE_CANAL = {
   propriedades: "channel:set-meta",
   emendarMensagem: "channel:edit-message",
   apagarMensagem: "channel:delete-message",
+  reagir: "channel:react",
   eliminarCanal: "channel:remove",
 } as const
 
@@ -94,6 +95,7 @@ export const LEITURAS_DE_CANAL = {
   podeEliminar: "channel:may-delete",
   podeModerar: "channel:may-moderate",
   podeMencionarTodos: "channel:may-mention-all",
+  podeTransmitir: "channel:may-transmit",
   apelidos: "channel:nicknames",
   fichas: "channel:fichas",
 } as const
@@ -159,6 +161,8 @@ export interface SessaoDeCanais {
   spaceMeta(channel: string): { name: string; topic?: string; icon?: string; iconRef?: string; iconMini?: string; updatedAt: number } | null
   fichasDosCanais(): Record<string, FichaDoCanal>
   mayEditChannel(channel: string): boolean
+  /** Screen sharing as a role power (12/11/2026). See `Session.mayTransmit`. */
+  mayTransmit(channel: string, room: string, address?: string): boolean
   founderOf(channel: string): string | null
   adminsOf(channel: string): string[]
   rolesOf(channel: string): { role: string; name: string; powers: Power[]; colour?: RoleColour; position: number }[]
@@ -190,6 +194,8 @@ export interface SessaoDeCanais {
       closed?: boolean
       removed?: boolean
       afk?: { minutos: number }
+      /** The room overrides in the same publish (read-only rooms). See `Session.upsertRoom`. */
+      perms?: Sobreposicao[]
     },
   ): Promise<void>
   upsertCategory(
@@ -199,7 +205,7 @@ export interface SessaoDeCanais {
   pinMessage(
     channel: string,
     room: string,
-    message: { id: string; sender: string; body: string; sentAt: number },
+    message: { id: string; sender: string; body: string; sentAt: number; attachments?: readonly unknown[]; thumbnail?: string },
   ): Promise<void>
   unpinMessage(channel: string, room: string, id: string): Promise<void>
   openTicket(channel: string, room: string, subject: string): Promise<string>
@@ -224,8 +230,9 @@ export interface SessaoDeCanais {
   reorderRoles(channel: string, ordem: string[]): Promise<void>
   claimFounder(channel: string): Promise<void>
   updateSpaceMeta(channel: string, next: { name: string; topic?: string; icon?: string; iconRef?: string }): Promise<void>
-  editMessage(channel: string, target: string, body: string): Promise<void>
+  editMessage(channel: string, target: string, body: string, opcoes?: { closePoll?: true }): Promise<void>
   deleteMessage(channel: string, target: string): Promise<void>
+  reactToMessage(channel: string, target: string, emoji: string, remove?: boolean): Promise<void>
   deleteChannel(channel: string): Promise<void>
 }
 
@@ -313,7 +320,7 @@ export function ligarCanais({ registarPedido, registarLeitura, sessao }: PortasD
     */
   registarPedido(
     CANAIS_DE_CANAL.criarSala,
-    async (channel: string, next: SalaDoNucleo & { closed?: boolean; removed?: boolean }) => {
+    async (channel: string, next: SalaDoNucleo & { closed?: boolean; removed?: boolean; perms?: Sobreposicao[] }) => {
       await sessao.upsertRoom(channel, next)
       return { ok: true }
     },
@@ -409,6 +416,9 @@ export function ligarCanais({ registarPedido, registarLeitura, sessao }: PortasD
     sessao.may(channel, "mencionartodos", room),
   )
   leitura(LEITURAS_DE_CANAL.podeConvidar, (channel: string) => sessao.may(channel, "convidar"))
+  leitura(LEITURAS_DE_CANAL.podeTransmitir, (channel: string, room: string, address?: string) =>
+    sessao.mayTransmit(channel, room, address),
+  )
   /*
     `expulsar` was on the REQUESTS side, and it is the bug this file fixes
     instead of adding to: `ipcMain.handle` answers with a promise, the UI reads
@@ -441,7 +451,7 @@ export function ligarCanais({ registarPedido, registarLeitura, sessao }: PortasD
   */
   registarPedido(
     CANAIS_DE_CANAL.fixar,
-    async (channel: string, room: string, message: { id: string; sender: string; body: string; sentAt: number }) => {
+    async (channel: string, room: string, message: { id: string; sender: string; body: string; sentAt: number; attachments?: readonly unknown[]; thumbnail?: string }) => {
       await sessao.pinMessage(channel, room, message)
       return { ok: true }
     },
@@ -507,13 +517,18 @@ export function ligarCanais({ registarPedido, registarLeitura, sessao }: PortasD
     It leaves the screen of whoever handles it. Readers keep what they've seen.
     A modified client ignores it.
   */
-  registarPedido(CANAIS_DE_CANAL.emendarMensagem, async (channel: string, target: string, body: string) => {
-    await sessao.editMessage(channel, target, body)
+  registarPedido(CANAIS_DE_CANAL.emendarMensagem, async (channel: string, target: string, body: string, opcoes?: { closePoll?: true }) => {
+    await sessao.editMessage(channel, target, body, opcoes?.closePoll === true ? { closePoll: true } : undefined)
     return { ok: true }
   })
 
   registarPedido(CANAIS_DE_CANAL.apagarMensagem, async (channel: string, target: string) => {
     await sessao.deleteMessage(channel, target)
+    return { ok: true }
+  })
+
+  registarPedido(CANAIS_DE_CANAL.reagir, async (channel: string, target: string, emoji: string, remove?: boolean) => {
+    await sessao.reactToMessage(channel, target, emoji, remove === true)
     return { ok: true }
   })
 }

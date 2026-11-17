@@ -56,7 +56,7 @@ export function useMemorizarDepoisDeAbrir(bridge: EnclaveBridge): (ligada: boole
 }
 
 /**
- * The checkbox, below the password. Enabled by default (owner decision 1).
+ * The checkbox, below the password. Enabled by default (design decision 1).
  * The note states the price in full: whoever uses the unlocked device enters.
  */
 export function CaixaMemorizar({

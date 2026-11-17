@@ -44,4 +44,23 @@ describe("BarraDoHistorico", () => {
     render(<BarraDoHistorico estado={{ ...base, aTrazer: false, feitas: 0, total: 0, inicial: false }} />)
     expect(screen.queryByRole("status")).toBeNull()
   })
+
+  it("por omissão é a barra própria, por cima da conversa", () => {
+    const { container } = render(<BarraDoHistorico estado={base} />)
+    expect(container.querySelector(".barra-sincronia.barra-historico")).not.toBeNull()
+  })
+
+  it("no topo é uma linha só, com o texto e o progresso", () => {
+    const { container } = render(<BarraDoHistorico estado={{ ...base, feitas: 340, total: 1200 }} noTopo />)
+    const barra = container.querySelector(".barra-historico-no-topo")
+    expect(barra).not.toBeNull()
+    expect(barra?.querySelector("progress")?.getAttribute("value")).toBe("340")
+    expect(container.querySelector(".barra-sincronia")).toBeNull()
+  })
+
+  it("no topo, o aviso de que parou também fica no topo", () => {
+    const { container } = render(<BarraDoHistorico estado={{ ...base, aTrazer: false, perdidas: 18, razao: "irmao-calado" }} noTopo />)
+    expect(container.querySelector(".barra-historico-no-topo.barra-historico-aviso")).not.toBeNull()
+    expect(container.querySelector(".barra-sincronia")).toBeNull()
+  })
 })

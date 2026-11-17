@@ -144,7 +144,7 @@ describe("amizades desfeitas", () => {
 })
 
 /**
- * The owner rule, measured as a rule and not as a screen.
+ * The product rule, measured as a rule and not as a screen.
  *
  * *"It is only after accepted by the request target that it is possible to
  * exchange private messages, not before."* Live, on September 10, 2026,

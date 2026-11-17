@@ -3,7 +3,7 @@
  *
  *   node scripts/e2e-salas-sem-administrador.mjs   (requires `npm run build` first)
  *
- * Report from the owner on 2/11/2026 (1.0.6): "users on mobile are not seeing the
+ * The bug in 1.0.6: "users on mobile are not seeing the
  * community rooms". Ana founds the common room and creates "prensa" and "barricas";
  * Bruno joins on a wide screen and stays connected with no role. Ana CLOSES the
  * app. Carla creates an account on a mobile device (390 x 844, touch) and joins the

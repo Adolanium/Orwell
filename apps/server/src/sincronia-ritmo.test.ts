@@ -12,6 +12,7 @@ import {
   COMMIT_DEPOIS_DO_ECO,
   contasDeTeste,
   desligarContas,
+  emparelharAparelho,
   levantarServidor,
   type ContaDeTeste,
   type ServidorDeTeste,
@@ -201,27 +202,14 @@ describe("S6, revisão: dois baldes, e um tecto às recusas", () => {
   })
 })
 
-/** A second device on an account: another vault with the same account key, which mints its own device key. */
+/**
+ * A second device on an account, by real pairing. It used to be another vault with
+ * a copy of the account key, which put itself in the manifest; since 1.3.16 the
+ * server takes a manifest change only from a device already in the manifest, and
+ * a copied key alone no longer adds a device.
+ */
 async function segundoAparelho(conta: ContaDeTeste): Promise<ContaDeTeste> {
-  const backend = new CofreEmMemoria()
-  const vault = new Vault(backend)
-  await vault.create("frase-passe-de-teste")
-  await vault.update((contents) => {
-    contents.signingPrivateKey = conta.vault.contents.signingPrivateKey
-    contents.homeserver = conta.vault.contents.homeserver
-    const minuto = conta.vault.contents.identityCreatedAtMinute
-    if (minuto !== undefined) contents.identityCreatedAtMinute = minuto
-    contents.profile = { ...conta.vault.contents.profile }
-  })
-  const session = new Session(vault)
-  const avisos: string[] = []
-  session.on("status", (evento) => {
-    if (evento.code) avisos.push(evento.code)
-  })
-  const identidade = session.loadIdentity()
-  expect(identidade.address).toBe(conta.address)
-  await session.connect()
-  return { nome: `${conta.nome} (2)`, session, vault, backend, address: identidade.address, avisos }
+  return emparelharAparelho(conta, `${conta.nome} (2)`)
 }
 
 describe("S6, revisão: dois aparelhos da conta a disputar o balde", () => {

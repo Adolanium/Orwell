@@ -3,7 +3,7 @@
  *
  *   node scripts/e2e-juntar-contas.mjs        (needs `npm run build` first)
  *
- * Owner order (27/10/2026): "merge friends and channels, and merge nothing
+ * The requirement: "merge friends and channels, and merge nothing
  * else; the secondary account is destroyed and hidden from all spaces".
  *
  * The people: Ana is the extra account (the secondary). She is friends with

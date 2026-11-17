@@ -71,7 +71,7 @@ describe("campos novos no voice.join", () => {
   /**
    * The two fields of October 5, 2026, read as a 0.3.3 client reads them.
    *
-   * The owner reported three things after a real call, and two of them needed a
+   * A real call showed three problems, and two of them needed a
    * new field on the wire: `aVer` in `voice.join` (who is this person watching
    * the screen of, so the sharer can count viewers) and `quemEsta` in
    * `voice.leave` (the question "who is in the room?", which arrivals ask because

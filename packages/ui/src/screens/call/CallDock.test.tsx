@@ -59,7 +59,7 @@ describe("CallDock", () => {
 /**
  * The dock stops floating without saying where it is.
  *
- * The owner's report was this: a card saying there is a call, without saying WHICH.
+ * The bug was this: a card saying there is a call, without saying WHICH.
  * With two voice rooms open on the same channel, or with the call continuing
  * while reading another channel, hanging up was a leap in the dark.
  *

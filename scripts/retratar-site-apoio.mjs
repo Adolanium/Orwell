@@ -4,7 +4,7 @@
  *   cd apps/site && npx vite build && cd ../..
  *   node scripts/retratar-site-apoio.mjs
  *
- * Requested by the owner on 3 November 2026. Per language (en, pt) and width (1440,
+ * Per language (en, pt) and width (1440,
  * 390), on the landing page served by `vite preview` (port 8516). The
  * `vite preview` has no Orwell server behind it: this script serves `/_enclave/apoiar.json`
  * via Playwright, in the format of the server (`apps/server/src/apoio.ts`). Verifies:

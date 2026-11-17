@@ -6,15 +6,15 @@ import { nomeEmFalta, shortAddress } from "./lib/format.js"
 /**
  * A raw address never takes the place of a name.
  *
- * Owner report on October 5, 2026, after a call with others: "there are
+ * The bug, seen after a call with others: "there are
  * usernames that show up as an address". Two distinct issues gave the same
  * symptom, and this is the half that belongs to the interface.
  *
  * A name is not a lookup record: it is something a member told a group,
  * encrypted, and so it may not have arrived. The app has an answer for that
- * case, today `nomeEmFalta`, the first word of the address capitalized (since
- * November 4, 2026, owner order: with the Reddit account wave the shared
- * channel was a column of identical "Unnamed"); from October 27 to November 4
+ * case, today `nomeEmFalta`, the first word of the address capitalized
+ * (with a wave of new accounts the shared channel was a column of
+ * identical "Unnamed"); before that
  * it was "Unnamed". What cannot happen is a screen inventing its own resource,
  * and there were four doing it:
  *
@@ -196,7 +196,7 @@ describe("nenhum ecrã escreve um endereço no lugar de um nome", () => {
 describe("o recurso de quem não tem nome", () => {
   /*
     * It said "it is "Unnamed", and neither the address nor a piece of it". Changed
-    * on November 4, 2026 by owner order: the resource became the first word of the
+    * later: the resource became the first word of the
     * address, which tells people apart. What stays pinned is that it is never the
     * address. The whole proof is in `lib/nomeEmFalta.test.ts`.
   */

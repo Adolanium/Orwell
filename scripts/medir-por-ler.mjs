@@ -1,7 +1,6 @@
 /**
  * Unread messages in rooms, muted indicators and active speaker indicators,
- * measured in a real browser (owner requests from October 27, 2026, 23:30
- * and 23:55).
+ * measured in a real browser.
  *
  * The tree tests (`ChannelSidebar.test.tsx`, `App.crachas.test.tsx`) prove
  * what is counted and what is drawn. JSDOM has no layout, so it does not prove

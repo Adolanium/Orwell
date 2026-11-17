@@ -72,6 +72,16 @@ describe("dobrarConversa", () => {
     expect(dobrarConversa(lista)[0]?.payload["body"]).toBe("três")
   })
 
+  it("uma edição que só fecha a votação não muda o texto nem marca a mensagem como editada", () => {
+    const lista = [
+      e(1, ANA, { t: "message", id: "m", body: "pergunta" }),
+      e(2, ANA, { t: "edit", id: "f", target: "m", body: "outro texto", editedAt: 10, closePoll: true }),
+    ]
+    const dita = dobrarConversa(lista)[0]
+    expect(dita?.payload["body"]).toBe("pergunta")
+    expect(dita?.payload["editedAt"]).toBeUndefined()
+  })
+
   it("uma edição de outra pessoa não conta; uma lápide do autor é absorvente", () => {
     const lista = [
       e(1, ANA, { t: "message", id: "m", body: "um" }),

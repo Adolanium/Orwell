@@ -6,7 +6,7 @@ import { Vault, type VaultBackend } from "./vault.js"
  * The feed as seen from outside: what reaches those who FOLLOW, and what stays
  * there.
  *
- * Two complaints from the owner, reported in production with two real devices:
+ * Two bugs, seen in production with two real devices:
  * "posts appear duplicated" and "when I delete them they only delete for me
  *, they don't delete for everyone else".
  *
@@ -316,7 +316,7 @@ describe("o mural de quem segue", () => {
     await settle(160)
 
     expect(publicacoesVistas(bento, feed)).toHaveLength(1)
-    // And on the screen of whoever published it, which is where the owner saw it duplicated.
+    // And on the screen of whoever published it, which is where it was seen duplicated.
     expect(publicacoesVistas(ana, feed)).toHaveLength(1)
   })
 
@@ -613,7 +613,7 @@ describe("uma votação no mural", () => {
    *
    * Until 20/10/2026 it wasn't, by choice: thumbs were an open case, and
    * broadening their re-emission along the way was passing off a decision
-   * nobody had made as a fix. The owner made it by approving the absolute sync
+   * nobody had made as a fix. It was made by approving the absolute sync
    * plan (§3, "each author resends their own"): `republishEngagement`
    * says the last like of each post again, with the original `id` and timestamp.
    * Once: the copy doesn't enter twice in the vault of whoever arrives.

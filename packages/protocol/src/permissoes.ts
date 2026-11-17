@@ -109,6 +109,7 @@ export const PODERES_POR_SALA: readonly Power[] = [
   "silenciarvoz",
   "ensurdecer",
   "prioridade",
+  "transmitir",
 ]
 
 /**
@@ -123,10 +124,19 @@ export const PODERES_CUMPRIDOS: readonly Power[] = [
   "gerirsalas",
   "desligar",
   "mencionartodos",
+  "transmitir",
+  "mencionavel",
 ]
 
-/** The per-room permissions that THIS version enforces (`mover`, `desligar`, `gerirsalas`, `mencionartodos`). */
-export const PODERES_POR_SALA_CUMPRIDOS: readonly Power[] = ["mover", "desligar", "gerirsalas", "mencionartodos"]
+/**
+ * The per-room permissions that THIS version enforces (`mover`, `desligar`,
+ * `gerirsalas`, `mencionartodos`, `escrever`).
+ *
+ * `escrever` since 12/11/2026: it is what makes a room read-only (see
+ * `soLeituraDe`). The sender hides the writing bar and refuses to send; the
+ * receiver drops a message from someone without it in that room.
+ */
+export const PODERES_POR_SALA_CUMPRIDOS: readonly Power[] = ["mover", "desligar", "gerirsalas", "mencionartodos", "escrever", "transmitir"]
 
 /**
  * The mention of everyone (`@all`, `@todos`, `@everyone`) on the wire: this text
@@ -153,6 +163,43 @@ export const MENCAO_TODOS = "todos"
 export function mencoesConferidas(mentions: readonly string[], podeMencionarTodos: boolean): readonly string[] {
   if (podeMencionarTodos || !mentions.includes(MENCAO_TODOS)) return mentions
   return mentions.filter((mencao) => mencao !== MENCAO_TODOS)
+}
+
+/**
+ * The mention of a role on the wire (12/11/2026): `&` and the role id, inside
+ * `mentions`. Like `MENCAO_TODOS`, it never collides with an account (those start
+ * with `@`) nor with `todos`. A 1.3.7 reads it as one more address that is not
+ * its own, and nothing happens.
+ */
+export const PREFIXO_DE_CARGO = "&"
+
+export function mencaoDeCargo(role: string): string {
+  return `${PREFIXO_DE_CARGO}${role}`
+}
+
+/** The role id of a mention, or `null` if the mention is not of a role. */
+export function cargoDaMencao(mencao: string): string | null {
+  return mencao.startsWith(PREFIXO_DE_CARGO) && mencao.length > 1 ? mencao.slice(1) : null
+}
+
+/**
+ * The role mentions that count, after checking the sender, like `mencoesConferidas`.
+ *
+ * A role is mentioned by whoever has `mencionartodos` in that room, or by anyone
+ * when the role itself carries `mencionavel`. The rest leaves the list; the body
+ * keeps the text. Returns the SAME list when nothing changes.
+ */
+export function mencoesDeCargoConferidas(
+  mentions: readonly string[],
+  podeMencionarTodos: boolean,
+  mencionavel: (role: string) => boolean,
+): readonly string[] {
+  if (podeMencionarTodos) return mentions
+  const ficam = mentions.filter((mencao) => {
+    const cargo = cargoDaMencao(mencao)
+    return cargo === null || mencionavel(cargo)
+  })
+  return ficam.length === mentions.length ? mentions : ficam
 }
 
 /** Only the names this version knows, in the order of `POWERS`. A future name is not granted. */
@@ -227,7 +274,7 @@ function aplicar(tem: Set<Power>, sobreposicoes: readonly Sobreposicao[] | undef
  * 2. No known founder: only what can be undone (the old `powersOf` rule).
  * 3. `admin` can do everything; overrides do not touch it.
  * 4. The base: `@todos` plus this person's roles, with implications.
- * 5. The room's category, then the room (`aplicar`).
+ * 5. The room's category, then the room (`aplicar`), for live roles only.
  */
 export function permissoesEm(estado: EstadoDePermissoes, address: string, lugar: Lugar = {}): Power[] {
   if (estado.fundador !== null && estado.fundador === address) return [...POWERS]
@@ -240,8 +287,11 @@ export function permissoesEm(estado: EstadoDePermissoes, address: string, lugar:
   const tem = comImplicacoes(base)
   const categoria =
     lugar.categoria ?? (lugar.sala !== undefined ? (estado.categoriaDaSala?.(lugar.sala) ?? "") : undefined)
-  if (categoria) aplicar(tem, estado.sobreposicoesDaCategoria?.(categoria), cargos)
-  if (lugar.sala !== undefined) aplicar(tem, estado.sobreposicoesDaSala?.(lugar.sala), cargos)
+  // A deleted role is taken off whoever had it, as on Discord (12/11/2026): it
+  // grants nothing in the base and matches no room or category override either.
+  const vivos = cargos.filter((role) => estado.cargo(role) !== undefined)
+  if (categoria) aplicar(tem, estado.sobreposicoesDaCategoria?.(categoria), vivos)
+  if (lugar.sala !== undefined) aplicar(tem, estado.sobreposicoesDaSala?.(lugar.sala), vivos)
   return POWERS.filter((poder) => tem.has(poder))
 }
 
@@ -449,4 +499,79 @@ export function sobreposicoesAGuardar(
 ): readonly Sobreposicao[] | undefined {
   if (propostas === undefined || !pode) return anteriores
   return propostas
+}
+
+/**
+ * A read-only room, as the interface shows it: whether it is, and which roles write.
+ *
+ * **Not a new field on the wire.** It is the room override from 1.2, read in one
+ * fixed shape: `@todos` denies `escrever` in the room (that is "read-only"), and
+ * each role that allows `escrever` there is a role that writes. `admin` and the
+ * founder always write (`permissoesEm`), so they never go in the list.
+ *
+ * Why the override and not a `readOnly` flag: the override already travels signed
+ * with the room, already syncs between members, tabs and devices, already has the
+ * rule of who may change it (`podeSobrepor`), and a 1.3.7 client already parses
+ * it and keeps it when it republishes the room. A new flag would need all of that
+ * again. A 1.3.7 client does not enforce `escrever` per room: it shows the writing
+ * bar and accepts the messages. Newer clients drop what comes from it.
+ */
+export interface SoLeitura {
+  soLeitura: boolean
+  /** The roles that write in the room, in the order of the overrides. */
+  quemEscreve: string[]
+}
+
+export function soLeituraDe(perms: readonly Sobreposicao[] | undefined): SoLeitura {
+  const lista = perms ?? []
+  const soLeitura = lista.some((entrada) => entrada.role === CARGO_TODOS && entrada.deny.includes("escrever"))
+  const quemEscreve = soLeitura
+    ? lista
+        .filter((entrada) => entrada.role !== CARGO_TODOS && entrada.role !== CARGO_ADMIN && entrada.allow.includes("escrever"))
+        .map((entrada) => entrada.role)
+    : []
+  return { soLeitura, quemEscreve }
+}
+
+/**
+ * The room overrides with this read-only choice applied. Touches only `escrever`:
+ * every other entry and power stays as it was. An entry left empty goes away, so
+ * turning read-only off gives back the list from before it was turned on.
+ */
+export function comSoLeitura(perms: readonly Sobreposicao[] | undefined, escolha: SoLeitura): Sobreposicao[] {
+  const escrevem = new Set(escolha.soLeitura ? escolha.quemEscreve.filter((role) => role !== CARGO_TODOS && role !== CARGO_ADMIN) : [])
+  const sem = (lista: readonly string[]): string[] => lista.filter((poder) => poder !== "escrever")
+  const com = (lista: readonly string[]): string[] => [...sem(lista), "escrever"]
+  const resultado: Sobreposicao[] = []
+  const vistos = new Set<string>()
+  const juntar = (entrada: Sobreposicao): void => {
+    if (entrada.allow.length > 0 || entrada.deny.length > 0) resultado.push(entrada)
+  }
+  for (const entrada of perms ?? []) {
+    vistos.add(entrada.role)
+    if (entrada.role === CARGO_TODOS) {
+      juntar({ role: entrada.role, allow: sem(entrada.allow), deny: escolha.soLeitura ? com(entrada.deny) : sem(entrada.deny) })
+    } else if (escrevem.has(entrada.role)) {
+      juntar({ role: entrada.role, allow: com(entrada.allow), deny: sem(entrada.deny) })
+    } else {
+      juntar({ role: entrada.role, allow: sem(entrada.allow), deny: [...entrada.deny] })
+    }
+  }
+  if (escolha.soLeitura && !vistos.has(CARGO_TODOS)) resultado.unshift({ role: CARGO_TODOS, allow: [], deny: ["escrever"] })
+  for (const role of escrevem) if (!vistos.has(role)) resultado.push({ role, allow: ["escrever"], deny: [] })
+  return resultado
+}
+
+/**
+ * Whether this payload is writing in the room, for the read-only check.
+ *
+ * Only a `message`. Not reactions (they stay allowed, as on Discord), not edits
+ * or deletions of one's own messages, and not the system acts that travel inside
+ * a message with their own authority check: a nickname change (`apelido`) and an
+ * account succession (`sucessora`). Dropping those would break the nickname of
+ * someone whose default room is read-only.
+ */
+export function mensagemPrecisaDeEscrita(payload: { t: string } & Readonly<Record<string, unknown>>): boolean {
+  if (payload.t !== "message") return false
+  return payload["apelido"] === undefined && payload["sucessora"] === undefined
 }

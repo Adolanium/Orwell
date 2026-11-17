@@ -1,4 +1,5 @@
-import { marcarArranque } from "./marcasDeArranque.js"
+import { marcarArranque, medirRecuperacao } from "./marcasDeArranque.js"
+import { lugaresDoHistorico, proximoPedidoDeLugar } from "./lugaresDoAparelhoNovo.js"
 import {
   addMembers,
   addressAtLeaf,
@@ -39,6 +40,7 @@ import { desempateDaDirecta, type DesempateDaDirecta } from "./desempateDaDirect
 import { credentialAtLeaf, derivarChaveDoSinal, type ChaveDoSinal } from "@enclave/crypto"
 import {
   CAPACIDADE_ENVIO_RECUSADO,
+  CAPACIDADE_HISTORICO_RECUSADO,
   CAPACIDADE_ESTREIA_DA_DIRECTA,
   CAPACIDADE_LIGACOES_CURTAS,
   CAPACIDADE_SINAL_EFEMERO,
@@ -50,6 +52,7 @@ import {
   AntiEntropia,
   CAPACIDADE_SINCRONIA,
   comAutoria,
+  PERFIS_POR_PEDIDO,
   type EstatisticasDaSincronia,
   type DesfechoDoAnexo,
   type PortaDaAntiEntropia,
@@ -71,8 +74,11 @@ import {
   type ItemDaCaixaLido,
 } from "./denuncia.js"
 import { origemDoServidorDe } from "./relato.js"
+import { enviarBug } from "./bugs.js"
+import type { DadosDoPush } from "./push.js"
 import { escolherFundador, montarRetrato, ordemDeAplicacao, perfisParaRelatar, type RetratoMontado } from "./retrato.js"
 import { HistoricoEntreAparelhos, type DesfechoDoIrmao, type EventoDoHistorico, type PortaDoHistorico } from "./historico/historico.js"
+import { PassagemDaChaveDaConta } from "./chaveDaConta.js"
 import {
   itemApagado,
   itemDoPayload,
@@ -128,7 +134,10 @@ import {
   mandaNosCargos,
   permissoesEm as permissoesNoModelo,
   MENCAO_TODOS,
+  cargoDaMencao,
+  mencoesDeCargoConferidas,
   mencoesConferidas,
+  mensagemPrecisaDeEscrita,
   podeAtribuir,
   podeGerirCargo,
   podeSobrepor,
@@ -147,7 +156,9 @@ import {
   type RoleColour,
   ROLE_COLOURS,
   CAPACIDADE_APARELHOS,
+  CAPACIDADE_BUGS,
   CAPACIDADE_BUNDLE,
+  CAPACIDADE_WEB_PUSH,
   CAPACIDADE_EMPARELHAMENTO,
   CAPACIDADE_REVOGACAO,
   CAPACIDADE_SFU,
@@ -204,6 +215,16 @@ import {
 } from "./tipoDoCanal.js"
 import { APELIDO_MAX, apelidoDaMensagem, apelidosDoCanal, esquecerApelidos, registarApelido, type RegistoDeApelido } from "./apelidos.js"
 import { chaveDoEvento, porOrdemDoServidor, venceCarimbo } from "./dobras.js"
+import {
+  anexosParaFixar,
+  apagadasDe,
+  fixadasVencem,
+  guardarApagada,
+  originalDasFixadas,
+  provaAceite,
+  semApagadas,
+  type PropostaDeFixadas,
+} from "./fixadas.js"
 import { AnfitriaoDeEmparelhamento, ConvidadoDeEmparelhamento, type CofreDeAparelho, type PairEvento } from "./emparelhar.js"
 import { PREFERENCIA_SALA_COMUM, SALA_COMUM_ENTRAR, SALA_COMUM_FORA, querSalaComum } from "./salaComum.js"
 import {
@@ -223,6 +244,7 @@ import {
   canaisComFalha,
   esquecerRevogado,
   estaRevogado,
+  provaDeRemocao,
   lerRevogacao,
   notarAvisado,
   notarRevogado,
@@ -257,7 +279,7 @@ import {
   hasTransmitted,
   hasTransmitterEvidence,
   mayRepair,
-  REPAIR_COOLDOWN_MS,
+  ASSENTO_PROPRIO_MS,
   mergeOlderHistory,
   noteDeviceManifest,
   noteTransmitter,
@@ -266,6 +288,7 @@ import {
   semBytes,
   type DenunciaRecebida,
   type StoredChatMessage,
+  relatoJaGuardado,
   type StoredPayload,
   type StoredNotification,
   type StoredPeerProfile,
@@ -333,6 +356,13 @@ export interface ReceivedMessage {
    * Absent from recovery on reconnect, in telemetry and in mine. The interface reads this for the sound of channel messages: the history that arrives on app open is not a new message, and cannot play thirty times.
    */
   aoVivo?: true
+  /**
+   * Roles this account just got in this message (a live, accepted `role.assign`
+   * to us, 12/11/2026). Only the added ones: none for a removal, none for a
+   * republished list, none in recovery. With the name and colour known now. The
+   * interface turns it into one notice, however many roles.
+   */
+  cargosNovos?: { role: string; nome?: string; cor?: string }[]
 }
 
 export type ConnectionState = "offline" | "connecting" | "online" | "reconnecting"
@@ -379,7 +409,7 @@ const CAPACIDADE_UM_COMMIT_POR_EPOCA = "commit-per-epoch"
 /*
   `envio-recusado` (S6): this client reads the rejection of a send for rate limit (`channel.rejected` with `rate-limited`) and retries the send. See `#aoRecusaPorRitmo`.
   */
-const GARANTIAS_DO_CLIENTE = ["commit-after-echo", CAPACIDADE_SINAL_EFEMERO, CAPACIDADE_ENVIO_RECUSADO]
+const GARANTIAS_DO_CLIENTE = ["commit-after-echo", CAPACIDADE_SINAL_EFEMERO, CAPACIDADE_ENVIO_RECUSADO, CAPACIDADE_HISTORICO_RECUSADO]
 
 /** How many reconnections to wait for an event before calling it lost. */
 const TENTATIVAS_POR_BURACO = 3
@@ -820,8 +850,7 @@ const VOTOS_REPUBLICADOS = 20
  *    a vault imported from another device brings the `publishedProfileAt` of
  *    whoever exported it, which says "already published" on channels where this
  *    device never published: the repair round is the only path to undo it.
- *    Reported by the owner on October 5, 2026, with names appearing as
- *    addresses in a three-way call.
+ *    The bug: names appearing as addresses in a three-way call.
  */
 const RONDA_DE_REPARACAO = 2
 
@@ -1531,6 +1560,8 @@ export type StatusCode =
   | "device-revoked"
   /** A `device.revoke` that does not match the account key of who sent it. See `lerRevogacao`. */
   | "device-revoke-invalid"
+  /** A message in a read-only room from someone who may not write there, dropped (12/11/2026). */
+  | "read-only-dropped"
   /** A link entry request from a device outside the account's manifest, or revoked. See `#admit`. */
   | "device-not-in-account"
   /** This device is not in the manifest and the account is at the limit: not adding it. See `#garantirManifesto`. */
@@ -1545,6 +1576,8 @@ export type StatusCode =
   | "denuncia-caixa-falhou"
   /** The server suspended this account (reports, section 8). Comes with the `notice` when read. The session disconnects. */
   | "account-suspended"
+  /** A device paired before 1.3.16 received the account private key from a sibling. See `chaveDaConta.ts`. */
+  | "account-key-received"
 
 export type SessionEvents = {
   message: ReceivedMessage
@@ -1564,6 +1597,12 @@ export type SessionEvents = {
     aviso?: AvisoDeSuspensao
     /** In `denuncia-decidida` only: the decision, and nothing else. */
     decisao?: "suspensa" | "sem-accao"
+    /**
+     * In `device-revoked` only (1.3.16): the server sent the signed manifest that
+     * removed this device, and it holds (`provaDeRemocao`). The interface signs
+     * out and erases this device's vault.
+     */
+    removido?: true
   }
   connection: { state: ConnectionState; detail?: string }
   channels: { channels: string[] }
@@ -1771,7 +1810,15 @@ function shaDoVideoDoAnexo(anexo: unknown): string | null {
   return typeof sha === "string" ? sha : null
 }
 
-export type DesfechoDoTrazer = { ok: true } | { ok: false; motivo: "sem-irmao" | "ninguem" | "sem-ligacao" }
+/**
+ * What a "Fetch" ended in. On "ninguem" from the members' request, the author's
+ * state comes along (`autorLigado`, `autor`; see `DesfechoDoAnexo`): the screen
+ * says which of the two it was, and asks again when the author connects.
+ */
+export type DesfechoDoTrazer =
+  | { ok: true }
+  | { ok: false; motivo: "ninguem"; autorLigado?: boolean; autor?: string }
+  | { ok: false; motivo: "sem-irmao" | "sem-ligacao" }
 
 /** What `trazerMedia` can fetch: an attachment of a message or post, an account's portrait, or a `sha`. */
 export type MediaATrazer = { channel: string; alvo: string; indice: number } | { a: string } | { sha: string }
@@ -1866,12 +1913,20 @@ export class Session extends Emitter<SessionEvents> {
    */
   constructor(
     private readonly vault: Vault,
-    opcoes: { versaoDaApp?: string; armazem?: ArmazemBackend; miniaturista?: Miniaturista | null } = {},
+    opcoes: {
+      versaoDaApp?: string
+      armazem?: ArmazemBackend
+      miniaturista?: Miniaturista | null
+      /** Opens media blobs off this thread. See `ArmazemDeMedia.decifrador`. */
+      decifradorDeMedia?: ArmazemDeMedia["decifrador"]
+    } = {},
   ) {
     super()
     this.#versaoDaApp = opcoes.versaoDaApp
     vault.aoSerializar = (contents) => this.#escreverGruposAdiados(contents)
+    vault.antesDaGravacaoAdiada = () => this.#preExportar()
     this.#armazem = new ArmazemDeMedia(opcoes.armazem ?? new ArmazemEmMemoria(), opcoes.miniaturista ?? null)
+    this.#armazem.decifrador = opcoes.decifradorDeMedia ?? null
     this.#armazem.aoMudar((evento) => {
       if (evento.estado === "falhou") this.#retratoProprioFalhou(evento.sha)
       this.emit("media", evento)
@@ -2047,6 +2102,15 @@ export class Session extends Emitter<SessionEvents> {
   static PRAZO_DA_VERIFICACAO_MS = 15_000
 
   /**
+   * The check deadline on the return of a phone that was in a call and heard
+   * nothing for the whole absence (screen locked). The call keeps the socket,
+   * so the check is what finds a dead one, and the media only rebuilds after
+   * it. Nothing was queued on the server for this connection while the page
+   * slept, so the `pong` comes at once: 5 s, not 15 s.
+   */
+  static PRAZO_DA_VERIFICACAO_NA_CHAMADA_MS = 5_000
+
+  /**
    * The silence there must be BEFORE the `ping` for the check to ask. With a
    * frame more recent than this, the socket is delivering and the answer is
    * `true` without sending anything.
@@ -2172,7 +2236,12 @@ export class Session extends Emitter<SessionEvents> {
     }
     this.#reconciliarAoVoltar()
     if (!silenciosa && escondidaMs > 0) return "nada"
-    void this.verificarLigacao().catch(() => false)
+    // A call on a phone back from a long silent absence: ask now, with the short deadline.
+    const longaNaChamada = silenciosa && opcoes.suspende === true && escondidaMs >= Session.AUSENCIA_QUE_RELIGA_MS && this.#emChamada
+    const verificacao = longaNaChamada
+      ? this.verificarLigacao({ silencioMinimoMs: 0, prazoMs: Session.PRAZO_DA_VERIFICACAO_NA_CHAMADA_MS })
+      : this.verificarLigacao()
+    void verificacao.catch(() => false)
     return "verificar"
   }
 
@@ -2682,6 +2751,7 @@ export class Session extends Emitter<SessionEvents> {
     if (!this.#visible) this.#send({ t: "presence.set", visible: false })
     this.#setConnection("online", identity.address)
     marcarArranque("auth-ok")
+    this.#renovarPush()
 
     const { restored, failed } = await this.restore()
     // A new connection restarts the account: what was left to recover in the last
@@ -2743,6 +2813,8 @@ export class Session extends Emitter<SessionEvents> {
     this.#anti.aoLigar([...this.#groups.keys()])
     // And the history across devices: a plan midway continues here.
     this.#historico.aoLigar()
+    // A device paired before 1.3.16 asks for the account key until it has it (`chaveDaConta.ts`).
+    this.#passagemDaChave.aoLigar()
     if (restored.length > 0) {
       /*
         Recover BEFORE subscribing, and this is where M1 came in.
@@ -2873,6 +2945,15 @@ export class Session extends Emitter<SessionEvents> {
         `sala` makes ONE leaf report the items (and the author signs its own).
         Proved by `apps/server/src/republicar-so-com-sinal.test.ts`.
       */
+      /*
+        Pins whose message was deleted while no one with `fixar` was here (12/11/2026).
+        Not a republish: `#desafixarApagadas` sends only the unpins that are missing,
+        and only from a device that may pin. A channel with none costs nothing.
+      */
+      for (const canal of restored) {
+        // Nothing to do, and no vault write, in a channel with no deleted pins.
+        if (this.#apagadasDoCanal(canal).size > 0) void this.#desafixarApagadas(canal).catch(() => {})
+      }
     }
     if (failed.length > 0) {
       this.emit("status", {
@@ -3099,6 +3180,7 @@ export class Session extends Emitter<SessionEvents> {
     // And anti-entropy requests in flight (S4): responses came on this connection.
     this.#antiEntropia?.aoDesligar()
     this.#historicoDosIrmaos?.aoDesligar()
+    this.#passagemDaChaveDaConta?.aoDesligar()
     this.#chavesProntas = false
     // And the grace of exits: grace is counted with a connection, because the
     // Welcome of a reseat arrives with a connection. It restarts at the end of the
@@ -3203,6 +3285,7 @@ export class Session extends Emitter<SessionEvents> {
     }
     this.#antiEntropia?.aoDesligar()
     this.#historicoDosIrmaos?.aoDesligar()
+    this.#passagemDaChaveDaConta?.aoDesligar()
     this.#pararRevezamentos()
     this.#chavesProntas = false
     // Exit grace too: restarts at the end of the next handshake (I2).
@@ -3253,6 +3336,7 @@ export class Session extends Emitter<SessionEvents> {
     // And anti-entropy requests in flight (S4): responses came on this connection.
     this.#antiEntropia?.aoDesligar()
     this.#historicoDosIrmaos?.aoDesligar()
+    this.#passagemDaChaveDaConta?.aoDesligar()
     this.#chavesProntas = false
     for (const relogio of this.#saidasPorConfirmar.values()) clearTimeout(relogio)
     this.#saidasPorConfirmar.clear()
@@ -3351,6 +3435,8 @@ export class Session extends Emitter<SessionEvents> {
     this.#cartaoAdiado = false
     // A new connection reads in `hello.ok` whether the room has a card: what this one published may have been taken.
     this.#cartaoPublicadoNaEpoca = null
+    for (const temporizador of this.#continuacoes.values()) clearTimeout(temporizador)
+    this.#continuacoes.clear()
     this.#recuperacoesPorFazer.clear()
     this.#recuperacoes.clear()
     this.#avisarRecuperacao()
@@ -4962,6 +5048,18 @@ What was left behind:
    * the channel's recovery with no cap. See `#esperarPelaRecuperacao`.
    */
   async send(channel: string, payload: Payload, opcoes: { daPessoa?: boolean } = {}): Promise<void> {
+    /*
+      Read-only rooms (12/11/2026): this app does not write where the room does
+      not let it. Asked through `mayWrite`, the public question, so a test can play
+      an altered client by answering yes. The receivers drop it anyway: see
+      `#escritaRecusada`.
+    */
+    if (mensagemPrecisaDeEscrita(payload) && !this.#eDirecta(channel)) {
+      const room = (payload as { room?: unknown }).room
+      if (!this.mayWrite(channel, typeof room === "string" ? room : DEFAULT_ROOM.room)) {
+        throw new Error("you may not write in this room", { cause: { channel } })
+      }
+    }
     await this.#sendPayload(channel, this.#comMencoesConferidas(channel, this.identity.address, payload), opcoes.daPessoa === true)
   }
 
@@ -5097,12 +5195,39 @@ What was left behind:
   #comMencoesConferidas<P extends { t: string }>(channel: string, sender: string, payload: P): P {
     if (payload.t !== "message") return payload
     const mentions = (payload as { mentions?: unknown }).mentions
-    if (!Array.isArray(mentions) || !mentions.includes(MENCAO_TODOS)) return payload
+    if (!Array.isArray(mentions)) return payload
+    const deCargo = (mentions as unknown[]).some((mencao) => typeof mencao === "string" && cargoDaMencao(mencao) !== null)
+    if (!mentions.includes(MENCAO_TODOS) && !deCargo) return payload
     const room = (payload as { room?: unknown }).room
     const sala = typeof room === "string" ? room : DEFAULT_ROOM.room
     const pode = !this.#eDirecta(channel) && this.permissoesEm(channel, sender, sala).includes("mencionartodos")
-    const conferidas = mencoesConferidas(mentions as string[], pode)
+    let conferidas = mencoesConferidas(mentions as string[], pode)
+    if (deCargo) conferidas = this.#mencoesDeCargo(channel, sender, conferidas, pode)
     return conferidas === mentions ? payload : { ...payload, mentions: [...conferidas] }
+  }
+
+  /**
+   * Role mentions (`&role`, 12/11/2026): the same check as `@all`, and then the
+   * reader's own address when this account holds a mentioned role.
+   *
+   * Only on delivery from someone else (`sender` is not us), never on send: we
+   * do not put our own address in the thread. With the address in the list,
+   * everything that already reads `mentions` (highlight, bell, sound, unread
+   * count) treats it as a mention of me, with no second rule. A role that is
+   * gone or unknown here mentions nobody. Membership is the signed roles this
+   * device knows NOW (`rolesFor`), as for the moderator's tombstone.
+   */
+  #mencoesDeCargo(channel: string, sender: string, mentions: readonly string[], pode: boolean): readonly string[] {
+    const cargos = new Map(this.rolesOf(channel).map((cargo) => [cargo.role, cargo]))
+    const conferidas = mencoesDeCargoConferidas(mentions, pode, (role) => cargos.get(role)?.powers.includes("mencionavel") === true)
+    const eu = this.identity.address
+    if (sender === eu || conferidas.includes(eu)) return conferidas
+    const meus = new Set(this.rolesFor(channel, eu))
+    const tocaMe = conferidas.some((mencao) => {
+      const cargo = cargoDaMencao(mencao)
+      return cargo !== null && cargos.has(cargo) && meus.has(cargo)
+    })
+    return tocaMe ? [...conferidas, eu] : conferidas
   }
 
   /**
@@ -6211,6 +6336,151 @@ What was left behind:
   }
 
   /**
+   * Whether `address` may write a message in this room, by the read-only rule
+   * (12/11/2026, `soLeituraDe` in the protocol). Direct conversations: always.
+   *
+   * The same `permissoesEm` as everything else, with one difference: it also
+   * counts the room declarations and role assignments that arrived and still wait
+   * for the vault write (`#pendingRooms`, `#pendingAuthority`). A catch-up page
+   * applies many events before it writes. Without this, a role given in the same
+   * page as the first message of whoever got it dropped that message, and a room
+   * turned read-only in the same page as a forbidden message let it in.
+   */
+  #podeEscreverNaSala(channel: string, address: string, room: string): boolean {
+    if (this.#eDirecta(channel)) return true
+    const estado = this.#estadoDePermissoes(channel)
+    const guardada = this.vault.contents.channelRooms[channel]?.[room]
+    let quandoSala = guardada?.at ?? -1
+    let perms: readonly Sobreposicao[] | undefined = sobreposicoesDe(guardada?.payload)
+    for (const pendente of this.#pendingRooms) {
+      if (pendente.channel !== channel || pendente.room !== room || pendente.at < quandoSala) continue
+      quandoSala = pendente.at
+      // The save rule (`sobreposicoesAGuardar`): absent keeps, without authority it does not count.
+      perms = sobreposicoesAGuardar(perms, sobreposicoesDe(pendente.payload), pendente.podeSobrepor)
+    }
+    let carimbo: { at: number; seq?: number | undefined } | undefined = this.vault.contents.channelMemberRolesAt?.[channel]?.[address]
+    let cargos: readonly string[] | undefined
+    for (const pendente of this.#pendingAuthority) {
+      if (pendente.kind !== "roles" || pendente.channel !== channel || pendente.address !== address) continue
+      if (!venceCarimbo(carimbo, pendente)) continue
+      carimbo = pendente
+      cargos = pendente.roles
+    }
+    // A role defined (or deleted) in the same page counts too: a deleted role no longer matches overrides.
+    const definicoes = new Map<string, CargoDefinido | undefined>()
+    for (const pendente of this.#pendingRoleDefs) {
+      if (pendente.channel !== channel) continue
+      const bruto = pendente.payload as { removed?: unknown; powers?: unknown; rank?: unknown }
+      definicoes.set(
+        pendente.role,
+        bruto.removed === true ? undefined : { powers: poderesConhecidos(bruto.powers), rank: typeof bruto.rank === "number" ? bruto.rank : 0 },
+      )
+    }
+    const comPendentes: EstadoDePermissoes = {
+      ...estado,
+      ...(definicoes.size > 0
+        ? { cargo: (role: string) => (definicoes.has(role) ? definicoes.get(role) : estado.cargo(role)) }
+        : {}),
+      sobreposicoesDaSala: (sala) => (sala === room ? perms : estado.sobreposicoesDaSala?.(sala)),
+      ...(cargos ? { cargosDe: (quem: string) => (quem === address ? cargos : estado.cargosDe(quem)) } : {}),
+    }
+    return permissoesNoModelo(comPendentes, address, { sala: room }).includes("escrever")
+  }
+
+  /**
+   * Whether this payload is a message its author may not write in its room, and
+   * so is dropped on arrival (read-only rooms, 12/11/2026).
+   *
+   * **An app rule, not a crypto rule**, like `mencoesConferidas`: MLS lets any
+   * member encrypt to the group, and an altered app sends what it wants. What
+   * leaves it without effect is each honest app refusing it here, with the
+   * author authenticated by MLS and the roles signed up to the founder.
+   *
+   * Judged at arrival, against the state this device has at that point in the
+   * server order, and never again: the vault keeps what was accepted. That is
+   * what keeps the messages written before the room became read-only, and why
+   * `history` does not filter. Nickname and succession acts are not writing
+   * (`mensagemPrecisaDeEscrita`).
+   */
+  #escritaRecusada(channel: string, sender: string, payload: Payload): boolean {
+    if (!mensagemPrecisaDeEscrita(payload) || this.#eDirecta(channel)) return false
+    const room = (payload as { room?: unknown }).room
+    const sala = typeof room === "string" ? room : DEFAULT_ROOM.room
+    if (this.#podeEscreverNaSala(channel, sender, sala)) return false
+    this.emit("status", {
+      detail: `${channel}: mensagem de ${sender} numa sala só de leitura descartada`,
+      level: "info",
+      code: "read-only-dropped",
+      route: "log",
+      channel,
+    })
+    return true
+  }
+
+  /**
+   * How old a `role.assign` may be and still give the "role given" notice. Wider
+   * than any live delivery, and some clock skew between devices.
+   */
+  static AVISO_DE_CARGO_RECENTE_MS = 10 * 60_000
+
+  /**
+   * Whether `address` may share the screen in this room (`transmitir`, 12/11/2026).
+   * A direct conversation has no roles: both share. For the call (`podeTransmitir`).
+   */
+  mayTransmit(channel: string, room: string, address: string = this.identity.address): boolean {
+    if (this.#eDirecta(channel)) return true
+    return this.permissoesEm(channel, address, room).includes("transmitir")
+  }
+
+  /**
+   * The roles a live `role.assign` gives THIS account that it did not have (12/11/2026).
+   *
+   * Only an assignment that will be accepted: from someone allowed
+   * (`#autoridadeAceita`, the same rule as the record) and newer than the one
+   * stored (`venceCarimbo`). Not from ourselves (another device of ours already
+   * knew). `@todos` is never a given role. Names from the role definitions,
+   * those still waiting for the vault write included, since a new role and its
+   * assignment often arrive together.
+   *
+   * Only a RECENT act (`AVISO_DE_CARGO_RECENTE_MS`, 16/11/2026). Since 1.3.12 the
+   * state cascades republish old assignments live, and a new person got ~150 of
+   * them: every role they had was "new" to an empty vault. An assignment made
+   * long ago still applies, quietly. Copies of the same recent act give one
+   * notice: each frame's write drains the record into the vault contents at once
+   * (`updateEmBreve` mutates now), so the next copy finds the roles already there.
+   */
+  #cargosNovosParaMim(channel: string, sender: string, payload: Payload, seq: number): { role: string; nome?: string; cor?: string }[] {
+    if (payload.t !== "role.assign" || payload.subject !== this.identity.address || sender === this.identity.address) return []
+    if (Math.abs(Date.now() - payload.assignedAt) > Session.AVISO_DE_CARGO_RECENTE_MS) return []
+    if (this.#eDirecta(channel) || !this.#autoridadeAceita(channel, sender, payload)) return []
+    const carimbo = this.vault.contents.channelMemberRolesAt?.[channel]?.[payload.subject]
+    if (!venceCarimbo(carimbo, { at: payload.assignedAt, seq })) return []
+    const antes = new Set(this.rolesFor(channel, payload.subject))
+    const novos = [...new Set(payload.roles)].filter((role) => role !== CARGO_TODOS && !antes.has(role))
+    if (novos.length === 0) return []
+    const definidos = new Map(this.rolesOf(channel).map((papel) => [papel.role, { nome: papel.name, cor: papel.colour }]))
+    for (const pendente of this.#pendingRoleDefs) {
+      if (pendente.channel !== channel) continue
+      const bruto = pendente.payload as { name?: unknown; colour?: unknown }
+      definidos.set(pendente.role, {
+        nome: typeof bruto.name === "string" ? bruto.name : pendente.role,
+        cor: ROLE_COLOURS.find((cor) => cor === bruto.colour),
+      })
+    }
+    const admin = this.adminRole(channel)
+    if (admin) definidos.set(ADMIN_ROLE, { nome: admin.name, cor: admin.colour })
+    return novos.map((role) => {
+      const definido = definidos.get(role)
+      return { role, ...(definido?.nome ? { nome: definido.nome } : {}), ...(definido?.cor ? { cor: definido.cor } : {}) }
+    })
+  }
+
+  /** Whether this account may write in this room (read-only rooms). For the interface. */
+  mayWrite(channel: string, room: string): boolean {
+    return this.#podeEscreverNaSala(channel, this.identity.address, room)
+  }
+
+  /**
    * Whether role delegation is on in this channel (decision D13): all leaves say
    * they read the permissions model. Until then, only the founder and whoever has
    * `admin` manage roles, as before, and a role with `gerircargos` waits: a 1.0.x
@@ -6776,7 +7046,7 @@ What was left behind:
    * Whether this account can manage the channel: name, description, icon, and rooms.
    *
    * This is the `rename` permission, not full administration. A role that grants
-   * only this must be able to use it, or the separation the owner requested was
+   * only this must be able to use it, or the separation between permissions is
    * just a label. Managing members is separate: `mayManageRoles`.
    */
   mayEditChannel(channel: string): boolean {
@@ -7173,12 +7443,26 @@ What was left behind:
       removed?: boolean
       /** This room is the AFK room of the channel. See `SalaAfk`. Only in a voice room. */
       afk?: { minutos: number }
+      /**
+       * The room overrides, in the same publish (read-only rooms, 12/11/2026).
+       * Absent keeps the ones the room has. For a room being created: two
+       * publishes would leave it open to everyone in between.
+       */
+      perms?: Sobreposicao[]
     },
   ): Promise<void> {
     if (!this.#groups.has(channel)) throw new Error("not a member of this channel", { cause: { channel } })
     // `manage rooms` in THIS room (1.2): an overlap can remove it in just one room.
     if (!this.may(channel, "gerirsalas", next.room)) {
       throw new Error("only an administrator may edit this channel", { cause: { channel } })
+    }
+    // The same guard as `setSobreposicoes`, before anything leaves.
+    const perms = next.perms === undefined ? undefined : Sobreposicao.array().max(16).parse(next.perms)
+    if (perms !== undefined) {
+      const antes = sobreposicoesDe(this.vault.contents.channelRooms[channel]?.[next.room]?.payload)
+      if (this.#eDirecta(channel) || !podeSobrepor(this.#estadoDePermissoes(channel), this.identity.address, { sala: next.room }, antes, perms)) {
+        throw new Error("you may not change the permissions of this room", { cause: { channel } })
+      }
     }
     const nome = next.name.trim()
     if (!nome) throw new Error("the room needs a name")
@@ -7237,6 +7521,7 @@ What was left behind:
       closed: next.closed ?? false,
       removed: next.removed ?? false,
       ...(afk ? { afk } : {}),
+      ...(perms !== undefined ? { perms } : {}),
       updatedAt: this.#carimboSeguinte(this.vault.contents.channelRooms[channel]?.[next.room]?.at),
     })
     /*
@@ -7286,19 +7571,25 @@ What was left behind:
    * look like the click did not stick.
    */
   pinnedOf(channel: string, room: string): PinnedMessage[] {
-    const guardada = this.vault.contents.channelRooms[channel]?.[room]
-    let quando = guardada?.at ?? -1
+    let guardada = this.vault.contents.channelRooms[channel]?.[room]
     let fixadas = fixadasDe(guardada?.payload)
     for (const pendente of this.#pendingRooms) {
-      if (pendente.channel !== channel || pendente.room !== room) continue
-      if (pendente.at < quando) continue
-      quando = pendente.at
-      // The same rule as the save, on purpose in the same form: absent keeps what we
-      // knew, and without `pin` the proposal does not count.
-      const propostas = pendente.podeFixar ? fixadasDe(pendente.payload) : undefined
-      fixadas = propostas ?? fixadas
+      if (pendente.channel !== channel || pendente.room !== room || !pendente.fixadas) continue
+      // The same rule as the save, on purpose in the same form: the list's own stamp
+      // decides, absent keeps what we knew, and without `fixar` there is no proposal.
+      if (!fixadasVencem(guardada, pendente.fixadas)) continue
+      fixadas = pendente.fixadas.lista
+      guardada = { at: pendente.at, payload: pendente.payload, fixadas: { at: pendente.fixadas.at, seq: pendente.fixadas.seq, por: pendente.por } }
     }
-    return fixadas ?? []
+    // A pin whose message was deleted leaves with it (12/11/2026). See `fixadasApagadas`.
+    return semApagadas(fixadas ?? [], this.#apagadasDoCanal(channel))
+  }
+
+  /** The deleted pins of this channel: the vault's and those still waiting for the drain. */
+  #apagadasDoCanal(channel: string): ReadonlySet<string> {
+    const apagadas = new Set(apagadasDe(this.vault.contents, channel))
+    for (const pendente of this.#pendingApagadas) if (pendente.channel === channel) apagadas.add(pendente.id)
+    return apagadas
   }
 
   /** Whether this account can pin and unpin messages in this channel. */
@@ -7321,7 +7612,16 @@ What was left behind:
   async pinMessage(
     channel: string,
     room: string,
-    message: { id: string; sender: string; body: string; sentAt: number },
+    message: {
+      id: string
+      sender: string
+      body: string
+      sentAt: number
+      /** The attachments of the message as the history has them. Only name, kind, type and size are kept. */
+      attachments?: readonly unknown[]
+      /** A small image the interface made from the first picture. See `PINNED_THUMBNAIL_MAX`. */
+      thumbnail?: string
+    },
   ): Promise<void> {
     if (!this.#groups.has(channel)) throw new Error("not a member of this channel", { cause: { channel } })
     /**
@@ -7348,6 +7648,11 @@ What was left behind:
       sentAt: message.sentAt,
       pinnedAt: Date.now(),
       pinnedBy: this.identity.address,
+      // What the message showed, without its bytes: for whoever never has the original.
+      ...(() => {
+        const anexos = anexosParaFixar(message.attachments, message.thumbnail)
+        return anexos ? { attachments: anexos } : {}
+      })(),
     })
     await this.#publicarSala(channel, room, fixadas)
   }
@@ -7363,6 +7668,132 @@ What was left behind:
     // did not unpin anything is a message encrypted by mistake.
     if (restantes.length === fixadas.length) return
     await this.#publicarSala(channel, room, restantes)
+  }
+
+  /**
+   * The pin list a received `channel.meta` proposes, if any (12/11/2026).
+   *
+   * From a sender with `fixar`, its own `pinned`, as always. From anyone else, only a
+   * `pinnedProof` that checks out: the original declaration, signed by a device of
+   * an account that has `fixar` now (`provaAceite`). The proposal keeps the stamp of
+   * the declaration, so an old list never beats a newer one.
+   */
+  #fixadasPropostas(
+    channel: string,
+    sender: string,
+    seq: number,
+    at: number,
+    payload: StoredChatMessage["payload"],
+    podeFixar: boolean,
+  ): { fixadas?: PropostaDeFixadas } {
+    // Its own list first. Without one, a sender with `fixar` may still pass on a signed
+    // list: a channel whose founder this device does not know yet gives everyone `fixar`.
+    const propria = podeFixar ? fixadasDe(payload) : undefined
+    if (propria) {
+      const assinada = (payload as { autoria?: unknown }).autoria !== undefined
+      return { fixadas: { lista: propria, at, seq, ...(assinada ? { original: { por: sender, payload } } : {}) } }
+    }
+    const prova = (payload as { pinnedProof?: unknown }).pinnedProof
+    if (prova === undefined || this.#eDirecta(channel)) return {}
+    const aceite = provaAceite(channel, (payload as { room?: string }).room ?? "", prova, {
+      aparelhoDe: (autor, aparelho) => this.#aparelhoNaArvore(channel, autor, aparelho),
+      fixa: (autor) => this.powersOf(channel, autor).includes("fixar"),
+    })
+    const lista = aceite ? fixadasDe(aceite.payload) : undefined
+    if (!aceite || !lista) return {}
+    return { fixadas: { lista, at: aceite.at, seq, original: { por: aceite.autor, payload: aceite.payload } } }
+  }
+
+  /**
+   * Judge again the signed pin lists stored with each room, now that the authority
+   * of this channel changed (12/11/2026).
+   *
+   * Whoever joins by the card hears the rooms before they know who founded the
+   * channel: the `pinnedProof` arrives, the author's `fixar` cannot be told yet,
+   * and the list is set aside inside the stored room. When the founding or a role
+   * arrives, it counts, with its own stamp, like any other list.
+   */
+  #reverProvasDasFixadas(contents: VaultContents, channel: string): void {
+    for (const [sala, guardada] of Object.entries(contents.channelRooms[channel] ?? {})) {
+      const prova = (guardada.payload as { pinnedProof?: unknown }).pinnedProof
+      if (prova === undefined) continue
+      const proposta = this.#fixadasPropostas(channel, "", guardada.seq ?? -1, guardada.at, guardada.payload, false).fixadas
+      if (!proposta || !fixadasVencem(guardada, proposta)) continue
+      const proximo = structuredClone(guardada.payload) as Record<string, unknown>
+      proximo["pinned"] = structuredClone(proposta.lista)
+      contents.channelRooms[channel]![sala] = {
+        ...guardada,
+        payload: proximo as StoredChatMessage["payload"],
+        fixadas: { at: proposta.at, seq: proposta.seq, por: proposta.original!.por, payload: structuredClone(proposta.original!.payload) },
+      }
+    }
+  }
+
+  /** This device is a leaf of this account in this channel's tree, and is not revoked. */
+  #aparelhoNaArvore(channel: string, autor: string, aparelho: string): boolean {
+    if (estaRevogado(this.vault.contents, autor, aparelho)) return false
+    const g = this.#groups.get(channel)
+    if (!g) return false
+    for (const folha of leavesOf(g.state.ratchetTree, autor as UserAddress)) {
+      const chave = deviceKeyAtLeaf(g.state.ratchetTree, folha)
+      if (chave && toBase64(chave) === aparelho) return true
+    }
+    return false
+  }
+
+  /**
+   * A message was deleted: if it is pinned, its copy leaves too (12/11/2026).
+   *
+   * The same authority as the deletion itself (`dobrarConversa`): the author of the
+   * message, as the copy names them, or someone who moderates. The list stays as
+   * it was signed and is filtered on read; whoever has `fixar` then publishes the
+   * unpin, so that the list itself stops naming it (`#desafixarApagadas`).
+   */
+  #apagarFixada(channel: string, sender: string, alvo: string, at: number): void {
+    let fixada: PinnedMessage | undefined
+    for (const sala of Object.keys(this.vault.contents.channelRooms[channel] ?? {})) {
+      fixada ??= this.pinnedOf(channel, sala).find((entrada) => entrada.id === alvo)
+    }
+    for (const pendente of this.#pendingRooms) {
+      if (pendente.channel === channel) fixada ??= pendente.fixadas?.lista.find((entrada) => entrada.id === alvo)
+    }
+    if (!fixada || (fixada.sender !== sender && !this.mayModerate(channel, sender))) return
+    this.#pendingApagadas.push({ channel, id: alvo, at })
+    this.#agendarDesafixarApagadas(channel)
+  }
+
+  /** How long whoever has `fixar` waits before publishing the unpin of a deleted message. Random, so two do not speak at once. */
+  static DESAFIXAR_APAGADAS_MS = { de: 300, ate: 3_000 }
+  #desafixarAgendado = new Map<string, ReturnType<typeof setTimeout>>()
+
+  #agendarDesafixarApagadas(channel: string): void {
+    if (!this.mayPin(channel) || this.#desafixarAgendado.has(channel)) return
+    const { de, ate } = Session.DESAFIXAR_APAGADAS_MS
+    const espera = de + Math.floor(Math.random() * Math.max(0, ate - de))
+    this.#desafixarAgendado.set(
+      channel,
+      setTimeout(() => {
+        this.#desafixarAgendado.delete(channel)
+        void this.#desafixarApagadas(channel).catch(() => {})
+      }, espera),
+    )
+  }
+
+  /**
+   * Publish the unpin of every pinned message that was deleted, in each room whose
+   * list still names one. Only with `fixar`, and nothing when the list is already
+   * clean: if someone else published first, there is nothing left to say.
+   */
+  async #desafixarApagadas(channel: string): Promise<void> {
+    if (!this.#groups.has(channel) || !this.mayPin(channel) || this.#connection !== "online") return
+    await this.flush()
+    const apagadas = this.#apagadasDoCanal(channel)
+    if (apagadas.size === 0) return
+    for (const [sala, entrada] of Object.entries(this.vault.contents.channelRooms[channel] ?? {})) {
+      const guardadas = fixadasDe(entrada.payload)
+      if (!guardadas || !guardadas.some((fixada) => apagadas.has(fixada.id))) continue
+      await this.#publicarSala(channel, sala, semApagadas(guardadas, apagadas))
+    }
   }
 
   /**
@@ -7845,7 +8276,22 @@ What was left behind:
        * leaves the list of who receives as it was, which is the right reading of
        * a silence.
        */
-      const fixadas = this.mayPin(channel) ? fixadasDe(entrada.payload) : undefined
+      const apagadas = this.#apagadasDoCanal(channel)
+      const guardadas = fixadasDe(entrada.payload)
+      const fixadas = this.mayPin(channel) && guardadas ? semApagadas(guardadas, apagadas) : undefined
+      /**
+       * And without `fixar`, the list as whoever pinned signed it (12/11/2026). See
+       * `pinnedProof` in the protocol: the receiver checks the author, not us.
+       *
+       * Not when it names a message that was deleted: the signed list cannot be
+       * edited here, and passing it on would show the deleted copy to whoever
+       * joins. Silence instead, until someone with `fixar` publishes the unpin.
+       */
+      const original = !this.mayPin(channel) ? originalDasFixadas(channel, entrada) : null
+      const prova =
+        original && !((original.p["pinned"] as { id?: unknown }[] | undefined) ?? []).some((f) => typeof f.id === "string" && apagadas.has(f.id))
+          ? original
+          : undefined
       // The overlays, by the rule of pinned messages: only from who could write them.
       const perms = this.#sobreposicoesQuePossoDizer(channel, { sala: room })
       salas.push({
@@ -7870,6 +8316,7 @@ What was left behind:
         closed: bruto.closed === true,
         removed: bruto.removed === true,
         ...(fixadas && fixadas.length > 0 ? { pinned: fixadas } : {}),
+        ...(prova ? { pinnedProof: prova } : {}),
         ...(perms ? { perms } : {}),
         ...(afk ? { afk } : {}),
         updatedAt: entrada.at,
@@ -8112,7 +8559,7 @@ What was left behind:
 
   /**
    * The rooms and categories, said by a member WITHOUT a role to whoever just
-   * entered (report from the owner on 2/11/2026: "users on mobile aren't seeing the
+   * entered (the bug: "users on mobile aren't seeing the
    * rooms of the communities").
    *
    * `republishRooms` only comes from whoever manages the channel. With nobody from
@@ -9917,6 +10364,77 @@ What was left behind:
     return this.#serverCapabilities.includes(CAPACIDADE_BUNDLE)
   }
 
+  /** Does this server take bug reports? Without it, the interface hides "Report a bug". */
+  get suportaBugs(): boolean {
+    return this.#serverCapabilities.includes(CAPACIDADE_BUGS)
+  }
+
+  /** Does this server wake closed apps (Web Push)? Without it, no `push.*` frame leaves. */
+  get suportaPush(): boolean {
+    return this.#serverCapabilities.includes(CAPACIDADE_WEB_PUSH)
+  }
+
+  /**
+   * The last subscription this device sent and the server took. Resent on every
+   * connect (`#renovarPush`): that is the renewal, and it is how the server
+   * keeps the row alive. Memory only: the page sends it again when it opens.
+   */
+  #subscricaoDoPush: DadosDoPush | null = null
+
+  /** The server's VAPID public key, base64url. Throws 790 without push (`ERRO_PUSH_SEM_SERVIDOR`). */
+  async chaveDoPush(): Promise<string> {
+    if (!this.suportaPush) throw new Error("this server does not send notifications when the app is closed")
+    this.#send({ t: "push.key.get" })
+    const resposta = await this.#await("push.key")
+    if (resposta.t !== "push.key" || resposta.publicKey === null) throw new Error("this server does not send notifications when the app is closed")
+    return resposta.publicKey
+  }
+
+  /**
+   * Subscribe this device to pushes, or renew it with new settings (language,
+   * muted channels, pause, Busy). Idempotent on the server. Throws
+   * `ERRO_PUSH_SEM_SERVIDOR`, or `ERRO_PUSH_RECUSADO_PELO_SERVIDOR` with the
+   * reason in `cause`.
+   */
+  async subscreverPush(dados: DadosDoPush): Promise<void> {
+    if (!this.suportaPush) throw new Error("this server does not send notifications when the app is closed")
+    this.#send({ t: "push.subscribe", ...dados })
+    const resposta = await this.#await("push.subscribed")
+    if (resposta.t !== "push.subscribed") throw new Error("the server refused the notification subscription")
+    if (!resposta.ok) throw new Error("the server refused the notification subscription", { cause: { reason: resposta.reason } })
+    this.#subscricaoDoPush = dados
+  }
+
+  /**
+   * Remove this device's subscription. Quiet on a server without push: there
+   * is nothing there to remove. The resend stops at once, also when the
+   * server cannot be reached now.
+   */
+  async cancelarPush(): Promise<void> {
+    this.#subscricaoDoPush = null
+    if (!this.suportaPush) return
+    this.#send({ t: "push.unsubscribe" })
+    await this.#await("push.unsubscribed")
+  }
+
+  /** On each connect: the last subscription again. A failure waits for the next connect. */
+  #renovarPush(): void {
+    const dados = this.#subscricaoDoPush
+    if (!dados || !this.suportaPush) return
+    void this.subscreverPush(dados).catch(() => {})
+  }
+
+  /**
+   * Send a bug report (12/11/2026), signed by this device, to `origem`.
+   *
+   * The body is what the form showed, checked by the schema here and again on the
+   * server. The address goes only in the signature; the server stores it only with
+   * `contacto`. Throws the keys of `enviarBug`.
+   */
+  async comunicarErro(corpo: unknown, origem: string): Promise<{ ok: true }> {
+    return enviarBug(origem, this.identity, corpo)
+  }
+
   /**
    * Does this server have pairing boxes?
    *
@@ -10241,8 +10759,23 @@ What was left behind:
           // not seen would erase the account's other devices.
           const leitura = await this.#lerManifesto(identity.address, 10_000)
           if (!leitura.lido) throw new Error("manifesto por ler")
-          const version = await this.#publicarManifestoCom(leitura.manifesto, [identity.deviceSigningPublicKey, deviceKey])
-          if (version === null) throw new Error("manifesto recusado")
+          /*
+            Since 1.3.16 the phone has the account key, and its own
+            `#garantirManifesto` may have put it in the manifest first, when it
+            connected. Already there: nothing to publish. Both published the same
+            version at once and this one lost: read again, and it is the phone's
+            manifest that counts.
+          */
+          const nova = toBase64(deviceKey)
+          const jaLa = (manifesto: DeviceManifest | null): boolean =>
+            manifesto?.devices.some((device) => toBase64(device.deviceKey) === nova) === true
+          if (!jaLa(leitura.manifesto)) {
+            const version = await this.#publicarManifestoCom(leitura.manifesto, [identity.deviceSigningPublicKey, deviceKey])
+            if (version === null) {
+              const outraVez = await this.#lerManifesto(identity.address, 10_000)
+              if (!outraVez.lido || !jaLa(outraVez.manifesto)) throw new Error("manifesto recusado")
+            }
+          }
           // The short memory of the guards must see the new manifest now, or else
           // `#faltam` does not find the missing phone for five minutes.
           this.#manifestosRecentes.delete(identity.address)
@@ -10282,8 +10815,9 @@ What was left behind:
    * The vault must be open and with no account. There is no `Session` connected
    * (no identity yet): the guest runs on its own socket to the link server.
    * When the certificate arrives and closes, the vault is written in DEVICE form
-   * (`accountPublicKey`, `deviceCert`, device key; **never `signingPrivateKey`**)
-   * and the `certificado` event comes out. The interface then loads the identity,
+   * (`accountPublicKey`, `deviceCert`, device key) and, since 1.3.16, with the
+   * account `signingPrivateKey` the host passed (Erro 609), and the `certificado`
+   * event comes out. The interface then loads the identity,
    * connects, and calls `concluirEmparelhamento()`.
    */
   emparelharComoConvidado(link: string): void {
@@ -10307,6 +10841,8 @@ What was left behind:
               contents.accountPublicKey = toBase64(resultado.accountKey)
               contents.deviceCert = toBase64(resultado.deviceCert)
               contents.deviceSigningPrivateKey = toBase64(resultado.deviceSigningPrivateKey)
+              // 1.3.16: the account private key, already checked against the chain in `emparelhar.ts`.
+              if (resultado.accountPrivateKey) contents.signingPrivateKey = toBase64(resultado.accountPrivateKey)
               contents.homeserver = resultado.homeserver
               contents.identityCreatedAtMinute = Math.floor(Date.now() / 60_000)
               // The account state, if it came (phase 5): in the same `update`, so
@@ -10527,6 +11063,7 @@ What was left behind:
         contents.accountPublicKey = toBase64(cofre.accountKey)
         contents.deviceCert = toBase64(cofre.deviceCert)
         contents.deviceSigningPrivateKey = toBase64(cofre.deviceSigningPrivateKey)
+        if (cofre.accountPrivateKey) contents.signingPrivateKey = toBase64(cofre.accountPrivateKey)
         contents.homeserver = cofre.homeserver
         contents.identityCreatedAtMinute = Math.floor(Date.now() / 60_000)
         if (cofre.estado) {
@@ -10789,9 +11326,23 @@ What was left behind:
    * `ensureFeed` refuses to create.
    */
   get feedChannel(): string {
+    /*
+      Asked on every event of some paths, and it is a hash.
+      Kept by the secret it came from: the same secret and server give the same
+      address.
+    */
+    const guardado = this.vault.unlocked && this.#identity !== null ? this.vault.contents.segredoDoMural : undefined
+    if (guardado && this.#moradaDoMeuMural?.segredo === guardado && this.#moradaDoMeuMural.conta === this.#identity?.address) {
+      return this.#moradaDoMeuMural.morada
+    }
     const segredo = this.#segredoDoMural()
-    return segredo ? moradaDoMural(segredo, parseAddress(this.identity.address).server) : ""
+    const morada = segredo ? moradaDoMural(segredo, parseAddress(this.identity.address).server) : ""
+    const agora = this.vault.unlocked ? this.vault.contents.segredoDoMural : undefined
+    if (agora && this.#identity) this.#moradaDoMeuMural = { segredo: agora, conta: this.#identity.address, morada }
+    return morada
   }
+
+  #moradaDoMeuMural: { segredo: string; conta: string; morada: string } | null = null
 
   /**
    * The secret of the profile (32 bytes): the one from the vault; or, with the
@@ -11735,6 +12286,8 @@ What was left behind:
     this.#send({ t: "channel.backfill", channel: canal, afterSeq: -1, limit: 1 })
     try {
       const page = await this.#await("channel.backfill.page", 10_000, canal)
+      // A refused page (the history cap) says nothing about the channel: count it as used, like silence.
+      if (page.t === "channel.backfill.page" && page.retryAfterMs !== undefined) return true
       return page.t !== "channel.backfill.page" || page.events.length > 0
     } catch {
       return true
@@ -12206,6 +12759,21 @@ What was left behind:
     // repair; a second one on top of it would be the fork.
     if (epochOf(current) !== epochBefore) return
 
+    /*
+      A device of that account is missing here, and the account's signed
+      manifest lists it (12/11/2026): the request most likely comes from it, a
+      paired phone the main device did not seat, with the main device off. Add
+      that device and remove nobody: the seat the main device would have given.
+      A reseat would remove the account's leaves that gave no sign in this
+      epoch, and the main device off gives none. A deaf leaf that also asks is
+      served on its next request, after this commit.
+    */
+    if (channel !== this.#commonRoom && (await this.#haLugarPorDar(current, address))) {
+      await this.#seatInvite(channel, address)
+      this.#rejoinAnswered.set(key, Date.now())
+      return
+    }
+
     /**
      * The throttle marks ADMISSIONS, not attempts.
      *
@@ -12529,7 +13097,10 @@ What was left behind:
       temGrupo: (canal) => this.#groups.has(canal),
       bloqueado: (canal, autor) => autor !== this.identity.address && this.#bloqueadoAqui(canal, autor),
       lugar: (canal) => this.#lugarDaConta(canal),
-      emitir: (evento) => this.emit("historico", evento),
+      emitir: (evento) => {
+        if (evento.inicial && evento.total > 0) this.#lugaresDoHistorico()
+        this.emit("historico", evento)
+      },
       agora: () => Date.now(),
       armazem: {
         presente: this.#presente,
@@ -12553,7 +13124,100 @@ What was left behind:
           absorverVideo(contents, bytes, this.#tipoDoVideo(contents, sha), this.#armazem)
         },
       },
+      outroSinal: (aberto, remetente, epoca) => this.#passagemDaChave.aoSinalAberto(aberto, remetente, epoca),
     }
+  }
+
+  // --------------------------------- the account key to a paired device (1.3.16)
+  //
+  // Bridge only. Rules are in `chaveDaConta.ts`.
+
+  #passagemDaChaveDaConta: PassagemDaChaveDaConta | null = null
+
+  get #passagemDaChave(): PassagemDaChaveDaConta {
+    if (this.#passagemDaChaveDaConta) return this.#passagemDaChaveDaConta
+    const historico = this.#portaDoHistorico()
+    this.#passagemDaChaveDaConta = new PassagemDaChaveDaConta({
+      eu: historico.eu,
+      chavePublicaDaConta: () => this.identity.signingPublicKey,
+      chavePrivadaDaConta: () => {
+        const identity = this.#identity
+        return identity !== null && temChaveDeConta(identity) ? identity.signingPrivateKey : undefined
+      },
+      canalDaConta: historico.canalDaConta,
+      contaPronta: historico.contaPronta,
+      folhasDaConta: historico.folhasDaConta,
+      aparelhoAdmitido: (aparelho) => {
+        if (!this.vault.unlocked) return false
+        const address = this.identity.address
+        if (estaRevogado(this.vault.contents, address, aparelho)) return false
+        // The manifest this session read last, when it has one: a device out of it does not get the key.
+        const lido = this.#manifestosRecentes.get(address)?.manifesto
+        return !lido || lido.devices.some((device) => toBase64(device.deviceKey) === aparelho)
+      },
+      derivarChave: historico.derivarChave,
+      podeSinalizar: historico.podeSinalizar,
+      enviarSinal: historico.enviarSinal,
+      receber: (chave) => this.#receberChaveDaConta(chave),
+      agora: () => Date.now(),
+    })
+    return this.#passagemDaChaveDaConta
+  }
+
+  /** For tests: the numbers of the account key passing. */
+  get estatisticasDaChaveDaConta(): PassagemDaChaveDaConta["estatisticas"] {
+    return this.#passagemDaChave.estatisticas
+  }
+
+  /**
+   * The account private key arrived from a sibling, already checked against the
+   * account public key (`privadaDaConta`). Into the vault, and into the identity of
+   * this session, now: the next new direct conversation opens here (Erro 609 goes
+   * away). The certificate does not change (Ed25519 signs deterministically: the
+   * one minted from the key is the one the sibling signed).
+   */
+  async #receberChaveDaConta(chave: Uint8Array): Promise<void> {
+    const identity = this.#identity
+    if (identity === null || temChaveDeConta(identity) || !this.vault.unlocked) return
+    await this.vault.update((contents) => {
+      contents.signingPrivateKey = toBase64(chave)
+    })
+    this.#identity = identityFromPrivateKey(chave, parseServerName(homeserverOf(identity)), identity.deviceSigningPrivateKey)
+    this.emit("status", {
+      detail: "a chave da conta chegou de outro aparelho",
+      level: "info",
+      code: "account-key-received",
+      route: "log",
+    })
+    // What a device with the key does on connecting: the account channel, and the signal that says it has the key.
+    if (this.#connection === "online") void this.#estadoAoLigar().catch(() => {})
+  }
+
+  /**
+   * The channels the main device passed history for, and where this device has
+   * no group: seats to ask the members (12/11/2026). See `lugaresDoAparelhoNovo.ts`.
+   * Only on a freshly paired device (the initial plan), and only new ones.
+   */
+  #lugaresDoHistorico(): void {
+    if (!this.vault.unlocked) return
+    const contents = this.vault.contents
+    const plano = contents.historico?.plano
+    if (!plano) return
+    const novos = lugaresDoHistorico({
+      canaisDoPlano: Object.keys(plano.canais),
+      temGrupo: (canal) => this.#groups.has(canal),
+      salaComum: this.#commonRoom,
+      canalDaConta: this.canalDaConta,
+      arquivados: contents.canaisArquivados,
+      jaPedidos: contents.lugaresPorPedir,
+      agora: Date.now(),
+    })
+    if (Object.keys(novos).length === 0) return
+    void this.vault
+      .update((c) => {
+        c.lugaresPorPedir = { ...novos, ...c.lugaresPorPedir }
+      })
+      .catch(() => {})
   }
 
   /**
@@ -13042,8 +13706,14 @@ What was left behind:
       if (this.#connection !== "online" || !this.vault.unlocked || !this.#groups.has(sala)) return
       const eu = this.identity.address
       const diretorio = this.vault.contents.directory
+      /*
+        Only those online (12/11/2026). With 409 members, a login asked for a
+        hundred names at a time, and every relay carried them to the whole room.
+        The others are asked for when someone needs them: the full member list,
+        a mention, a message on screen (`pedirPerfisDe`).
+      */
       const semNome = [...new Set(this.membersOf(sala).map(String))].filter(
-        (conta) => conta !== eu && !diretorio[conta]?.payload["displayName"],
+        (conta) => conta !== eu && !diretorio[conta]?.payload["displayName"] && this.#presentes.has(conta),
       )
       /*
         One request carries at most `PERFIS_POR_PEDIDO` accounts, and the next
@@ -13063,6 +13733,55 @@ What was left behind:
   }
 
   #pedidoDePerfisNaSalaComum: ReturnType<typeof setTimeout> | null = null
+
+  /**
+   * Ask for the names of these accounts in the common room, because someone
+   * needs them now: the full member list opened, a mention, a message on screen
+   * (12/11/2026). Accounts with a name already, or not members, are left out.
+   * What the request cap holds back (one request a minute per channel) goes in
+   * the next one, together with whatever else was asked for meanwhile.
+   */
+  pedirPerfisDe(channel: string, contas: readonly string[]): void {
+    const sala = this.#commonRoom
+    if (!sala || channel !== sala || !this.vault.unlocked || !this.#groups.has(sala)) return
+    const eu = this.identity.address
+    const membros = new Set(this.membersOf(sala).map(String))
+    const diretorio = this.vault.contents.directory
+    for (const conta of contas) {
+      if (conta !== eu && membros.has(conta) && !diretorio[conta]?.payload["displayName"]) this.#perfisAPedir.add(conta)
+    }
+    this.#pedirPerfisAPedir()
+  }
+
+  #pedirPerfisAPedir(): void {
+    const sala = this.#commonRoom
+    if (!sala || this.#perfisAPedir.size === 0 || this.#perfisAPedirTimer !== null) return
+    if (this.#connection !== "online") return
+    // Asked for in the last minutes (or shown nameless by a relay): the answer
+    // came or is on its way. They leave the queue, so it never spins on them.
+    const elegiveis = new Set(this.#anti.contasPorPedir(sala, [...this.#perfisAPedir]))
+    for (const conta of this.#perfisAPedir) if (!elegiveis.has(conta)) this.#perfisAPedir.delete(conta)
+    if (this.#perfisAPedir.size === 0) return
+    const contas = [...this.#perfisAPedir].slice(0, PERFIS_POR_PEDIDO)
+    void this.#anti
+      .pedirPerfis(sala, contas)
+      .catch(() => false)
+      .then((saiu) => {
+        if (saiu) for (const conta of contas) this.#perfisAPedir.delete(conta)
+        if (this.#perfisAPedir.size === 0 || this.#perfisAPedirTimer !== null) return
+        // Held back by the cap (or nobody alive to answer): try again when it allows.
+        this.#perfisAPedirTimer = setTimeout(() => {
+          this.#perfisAPedirTimer = null
+          this.#pedirPerfisAPedir()
+        }, Session.REPETIR_PEDIDO_DE_PERFIS_MS)
+      })
+  }
+
+  /** Accounts whose names someone needs, still to ask for. Memory only. */
+  readonly #perfisAPedir = new Set<string>()
+  #perfisAPedirTimer: ReturnType<typeof setTimeout> | null = null
+  /** The request cap in anti-entropy is one a minute per channel. Static for tests. */
+  static REPETIR_PEDIDO_DE_PERFIS_MS = 61_000
 
   /** Before requesting common room names, plus randomness on top. Static for tests. */
   static ESPERA_DO_PEDIDO_DE_PERFIS_MS = 5_000
@@ -13177,7 +13896,8 @@ What was left behind:
         } catch {
           // A platform failure: it stays without a thumbnail, and the next opening tries again.
         }
-        if (this.vault.contents !== contents) return
+        // Locked during the await (sign out, delete the account): `contents` would throw, and nobody awaits this job.
+        if (!this.vault.unlocked || this.vault.contents !== contents) return
         if (contents.media?.[sha]?.c !== classe) await this.vault.update(() => {}).catch(() => {})
         else void this.vault.updateEmBreve(() => {}).catch(() => {})
         await ceder()
@@ -13468,7 +14188,19 @@ What was left behind:
       return retrato.ok || retrato.motivo === "sem-ligacao" ? retrato : ninguem
     }
     const desfecho = await this.pedirAnexo(alvo.channel, alvo.alvo, alvo.indice)
-    if (!desfecho.ok) return desfecho.motivo === "sem-ligacao" ? { ok: false, motivo: "sem-ligacao" } : ninguem
+    if (!desfecho.ok) {
+      if (desfecho.motivo === "sem-ligacao") return { ok: false, motivo: "sem-ligacao" }
+      // The members' answer knows about the author: it goes up with "ninguem".
+      if (desfecho.motivo === "ninguem" && irmao !== "sem-irmao") {
+        return {
+          ok: false,
+          motivo: "ninguem",
+          ...(desfecho.autorLigado !== undefined ? { autorLigado: desfecho.autorLigado } : {}),
+          ...(desfecho.autor !== undefined ? { autor: desfecho.autor } : {}),
+        }
+      }
+      return ninguem
+    }
     const sha = this.#shaDoAnexo(alvo)
     if (sha) this.emit("media", { sha, estado: "chegou" })
     return { ok: true }
@@ -13822,6 +14554,10 @@ What was left behind:
       `MAX(seq) + 1` repeated numbers). Saved without it, with the order mark
       just before it.
     */
+    // The read-only rule, as on live arrival. See `#escritaRecusada`.
+    if (this.#escritaRecusada(canal, autor, payload)) return
+    // The same event without `id` already at that `seq`: nothing to store. See `relatoJaGuardado`.
+    if (relatoJaGuardado(this.vault.contents, canal, seq, autor, payload as unknown as StoredPayload)) return
     const ocupado = seq >= 0 && entradasDoCanal(this.vault.contents, canal).some((entrada) => entrada.seq === seq)
     const antes = this.#pendingHistory.length
     if (ocupado) this.#recordPayload(canal, -1, autor, payload, seq - 1)
@@ -14101,7 +14837,7 @@ What was left behind:
       }
       if (soPar !== null && this.#parDoCanal(canal) !== soPar && this.#donoDoFeed(canal) !== soPar) continue
       /*
-        And spaced out (M1): one minute, two, four, up to six hours between requests.
+        And spaced out (M1): one minute, two, four, up to half an hour between requests.
         The peer's presence lighting up overrides this (`soPar`), because that's
         where the request has someone to answer it.
       */
@@ -14110,7 +14846,8 @@ What was left behind:
       proximos[canal] = {
         desde: lugar.desde,
         tentativas: lugar.tentativas + 1,
-        proxima: agora + Math.min(60_000 * 2 ** lugar.tentativas, 6 * 60 * 60_000),
+        // The cap was six hours; half an hour now (12/11/2026, see `PEDIDO_DE_LUGAR_MAX_MS`).
+        proxima: proximoPedidoDeLugar(lugar.tentativas, agora),
       }
       mudou = true
     }
@@ -14176,7 +14913,7 @@ What was left behind:
         on the server, and without throttle each pass spent three claims per channel.
       */
       const chaveDoTravao = `${canal}|aparelho`
-      if (!mayRepair(this.vault.contents.repairAttempts, eu, chaveDoTravao)) continue
+      if (!mayRepair(this.vault.contents.repairAttempts, eu, chaveDoTravao, Date.now(), ASSENTO_PROPRIO_MS)) continue
       try {
         if (!(await this.#haLugarPorDar(grupo, eu))) continue
         /*
@@ -14215,7 +14952,7 @@ What was left behind:
           */
           if (erro instanceof AparelhoSemChaves) {
             await this.vault.update((contents) => {
-              contents.repairAttempts[`${eu}|${chaveDoTravao}`] = Date.now() - REPAIR_COOLDOWN_MS + Session.SEM_CHAVES_VOLTA_MS
+              contents.repairAttempts[`${eu}|${chaveDoTravao}`] = Date.now() - ASSENTO_PROPRIO_MS + Session.SEM_CHAVES_VOLTA_MS
             })
           }
           throw erro
@@ -14365,8 +15102,39 @@ What was left behind:
    * can send this with someone else's message id. The rule, only the author, is
    * enforced by whoever reads, against the sender authenticated by MLS.
    */
-  async editMessage(channel: string, target: string, body: string): Promise<void> {
+  async editMessage(channel: string, target: string, body: string, opcoes?: { closePoll?: true }): Promise<void> {
+    if (opcoes?.closePoll) {
+      /*
+        Closing a poll: the author, or whoever moderates. The guard looks at
+        the author this vault knows; without the message here it lets through, and whoever
+        reads judges the sender again (`fechosDe`). The body goes unchanged.
+      */
+      const autor = this.#autorDaMensagem(channel, target)
+      if (autor !== undefined && autor !== this.identity.address && !this.mayModerate(channel)) {
+        throw new Error("only the author or a moderator may close this poll", { cause: { channel } })
+      }
+      await this.send(
+        channel,
+        { t: "edit", id: crypto.randomUUID(), target, editedAt: Date.now(), body, closePoll: true },
+        { daPessoa: true },
+      )
+      return
+    }
     await this.send(channel, { t: "edit", id: crypto.randomUUID(), target, editedAt: Date.now(), body }, { daPessoa: true })
+  }
+
+  /**
+   * React to a message, or take the reaction back (`remove`).
+   *
+   * The `reaction` payload exists since the first protocol and every client
+   * parses it; nothing new travels. One event per act, never a counter: the
+   * chips come from `dobrarReaccoes`, the last act of each person per emoji by
+   * server order. The emoji is checked here because the schema caps it at 32
+   * UTF-16 units, and a send the schema refuses would only fail later, in silence.
+   */
+  async reactToMessage(channel: string, target: string, emoji: string, remove = false): Promise<void> {
+    if (emoji === "" || emoji.length > 32) throw new Error("the reaction emoji is not valid", { cause: { channel } })
+    await this.send(channel, { t: "reaction", target, emoji, remove })
   }
 
   /**
@@ -15166,7 +15934,27 @@ What was left behind:
     const guardada = this.vault.contents.fichasDosCanais?.[channel]
     if (guardada) return guardada
     if (channel === this.canalDaConta) return { tipo: "conta" }
+    /*
+      A channel with no card to deduce (a room, the common room) asked again on
+      every group write: the member addresses of the whole tree (400 leaves in
+      the common room) and a hash per known wall, per event. The answer only changes with the epoch (who is in the group),
+      the walls we know, or the profiles waiting for the batch: kept until one
+      of them changes.
+    */
+    const marca = `${grupo.state.groupContext.epoch}|${Object.keys(this.vault.contents.muraisDosOutros ?? {}).length}|${this.#pendingDirectory.length}|${this.feedChannel}`
+    if (this.#semFichaDeduzivel.get(channel) === marca) return null
+    const deduzida = this.#deduzirFicha(channel, grupo)
+    if (deduzida === null) this.#semFichaDeduzivel.set(channel, marca)
+    else this.#semFichaDeduzivel.delete(channel)
+    return deduzida
+  }
+
+  /** Channels where no card could be deduced, with the state they were asked in. See `#fichaDeduzida`. */
+  #semFichaDeduzivel = new Map<string, string>()
+
+  #deduzirFicha(channel: string, grupo: GroupSession): FichaDoCanal | null {
     const identity = this.#identity
+    if (identity === null) return null
     const contas = [...new Set([...memberAddresses(grupo.state.ratchetTree).values()].map(String))]
     const outros = contas.filter((conta) => conta !== identity.address)
     const [par] = outros
@@ -16600,6 +17388,9 @@ What was left behind:
    * the same pages and apply the same events twice; the second would fail
    * each one and count them as deaf.
    */
+  /** Events and commits each channel's catch-up read, for `medirRecuperacao` (startup measure). */
+  readonly #contagemDaRecuperacao = new Map<string, { eventos: number; commits: number }>()
+
   /** `gravarNoFim`: write the deferred window when this channel ends. `#catchUp` writes once for all. */
   async #catchUpChannel(channel: string, gravarNoFim = true): Promise<void> {
     const emCurso = this.#recuperacoes.get(channel)
@@ -16634,11 +17425,15 @@ What was left behind:
         // Three passes maximum: whoever asks for another one is whoever changed something
         // (a Welcome, a gap live), and a broken channel cannot put this
         // asking for pages in a loop.
+        const inicio = globalThis.performance?.now?.() ?? 0
+        this.#contagemDaRecuperacao.set(channel, { eventos: 0, commits: 0 })
         for (let volta = 0; volta < 3; volta++) {
           estado.repetir = false
           await this.#recuperarUmaVez(channel)
           if (!estado.repetir) break
         }
+        const contagem = this.#contagemDaRecuperacao.get(channel)
+        if (contagem) medirRecuperacao(channel, inicio, contagem.eventos, contagem.commits)
       } finally {
         if (this.#recuperacoes.get(channel) === estado) this.#recuperacoes.delete(channel)
         /*
@@ -17403,6 +18198,8 @@ What was left behind:
         return
       }
       if (page.t !== "channel.backfill.page" || page.channel !== channel) return
+      // Refused by the history cap: like silence, it waits for the next connection. It is not "the server no longer has it".
+      if (page.retryAfterMs !== undefined) return
       const evento = page.events[0]
       // The server no longer has the event: retention passed it by. It leaves the
       // list, because insisting asks forever for what never comes.
@@ -17518,9 +18315,16 @@ What was left behind:
       avancar(seq)
     }
 
-    // Bounded so a channel with an enormous backlog cannot hold the
-    // connection open indefinitely; the rest arrives on the next connect.
-    while (guard++ < 40) {
+    /*
+      Bounded so a channel with an enormous backlog cannot hold its gate closed
+      for minutes. What is left is not left for the next connection any more
+      (12/11/2026): someone a day away from the common room of 10/11 needed ~13
+      connections to reach the present. A pass that stops with more to read, or
+      that the server refuses for the history cap, schedules the next one
+      (`#continuarRecuperacao`), with the gate open in between.
+    */
+    let continuarEm: number | null = null
+    while (guard++ < Session.PAGINAS_POR_PASSAGEM) {
       // Counted per channel and per connection: this count is what `#pedirLacunas`
       // reads to know if backfills budget remains. See `PAGINAS_ANTES_DE_LACUNAS`.
       this.#paginasGastas.set(channel, (this.#paginasGastas.get(channel) ?? 0) + 1)
@@ -17536,7 +18340,17 @@ What was left behind:
         break
       }
       if (page.t !== "channel.backfill.page" || page.channel !== channel) break
+      // Refused by the history cap (`CAPACIDADE_HISTORICO_RECUSADO`): stop here, and come back when it allows.
+      if (page.retryAfterMs !== undefined) {
+        continuarEm = page.retryAfterMs
+        break
+      }
       if (page.events.length === 0) break
+      const contagem = this.#contagemDaRecuperacao.get(channel)
+      if (contagem) {
+        contagem.eventos += page.events.length
+        for (const evento of page.events) if (evento.kind === "handshake") contagem.commits += 1
+      }
 
       /*
         The anchor advanced over everything, including what hadn't been read.
@@ -17626,7 +18440,9 @@ What was left behind:
       */
       if (suspeito === undefined) await this.#rememberSeq(channel, ancora, true, Session.JANELA_DA_RECUPERACAO_MS)
       if (esperar || !page.more) break
+      if (guard >= Session.PAGINAS_POR_PASSAGEM) continuarEm = Session.PAUSA_ENTRE_PASSAGENS_MS
     }
+    if (continuarEm !== null) this.#continuarRecuperacao(channel, continuarEm)
 
     if (suspeito !== undefined) {
       // Until the end of what the server has, and nothing entered in the group's
@@ -17641,9 +18457,31 @@ What was left behind:
 
   /** During a recovery, the vault reaches the disk at most this often. See `#recuperarUmaVez`. */
   static JANELA_DA_RECUPERACAO_MS = 10_000
+  /** Pages per recovery pass, and events per page (the wire maximum is 200). */
+  static PAGINAS_POR_PASSAGEM = 40
+  static EVENTOS_POR_PAGINA = 200
+  /** Between two passes of a long recovery: the gate opens, and live frames apply. */
+  static PAUSA_ENTRE_PASSAGENS_MS = 2_000
 
-  /** Events per recovery page (the wire maximum is 200). Static for tests. */
-  static EVENTOS_POR_PAGINA = 100
+  /**
+   * Another recovery pass on this channel, `ms` from now, if the connection is
+   * still this one. See `#recuperarUmaVez`. One scheduled per channel.
+   */
+  #continuarRecuperacao(channel: string, ms: number): void {
+    if (this.#continuacoes.has(channel)) return
+    const geracao = this.#geracaoDaLigacao
+    this.#continuacoes.set(
+      channel,
+      setTimeout(() => {
+        this.#continuacoes.delete(channel)
+        if (geracao !== this.#geracaoDaLigacao || this.#connection !== "online" || !this.#groups.has(channel)) return
+        void this.#catchUpChannel(channel).catch(() => {})
+      }, Math.min(ms, 60_000) + 50),
+    )
+  }
+
+  /** The recovery passes scheduled, per channel. They die with the connection (`#onClose`). */
+  readonly #continuacoes = new Map<string, ReturnType<typeof setTimeout>>()
 
   /**
    * Apply one event and never throw.
@@ -17875,7 +18713,45 @@ What was left behind:
     if (this.#gruposAdiados.size === 0) return
     const adiados = [...this.#gruposAdiados]
     this.#gruposAdiados.clear()
-    for (const [canal, session] of adiados) contents.groups[canal] = toBase64(exportSession(session))
+    for (const [canal, session] of adiados) contents.groups[canal] = this.#exportar(session)
+  }
+
+  /**
+   * A group's bytes for the vault, kept by the state object they came from
+   * (return from a minimized window).
+   *
+   * Every MLS operation gives a new state object (ts-mls never changes one in
+   * place), so the same object always encodes to the same bytes. A write after
+   * a long absence exported every group that changed in one task (680 ms on a
+   * slow laptop in a room of 400), right when the person came back.
+   * `#preExportar` now does it a group at a time, before the write; the write
+   * reuses what is here and exports only what changed since.
+   */
+  #exportar(session: GroupSession): string {
+    let bytes = this.#exportados.get(session.state)
+    if (bytes === undefined) {
+      bytes = toBase64(exportSession(session))
+      this.#exportados.set(session.state, bytes)
+    }
+    return bytes
+  }
+
+  #exportados = new WeakMap<object, string>()
+
+  /**
+   * Before a batched write: export the changed groups one at a time, yielding
+   * between them, so the write's snapshot (which must stay in one task) only
+   * reuses them. Changes that arrive meanwhile give a new state, which the
+   * snapshot exports itself: the anchor never gets ahead of its group.
+   */
+  async #preExportar(): Promise<void> {
+    const canais = new Set<string>([...this.#gruposAdiados.keys(), ...this.#dirty])
+    for (const canal of canais) {
+      const session = this.#gruposAdiados.get(canal) ?? this.#groups.get(canal)
+      if (!session || this.#exportados.has(session.state)) continue
+      this.#exportar(session)
+      await cederAVez()
+    }
   }
 
   /** The in-memory state of these channels, for inside a vault write. */
@@ -17890,7 +18766,7 @@ What was left behind:
   }
 
   #escreverGrupo(contents: VaultContents, canal: string, session: GroupSession): void {
-    contents.groups[canal] = toBase64(exportSession(session))
+    contents.groups[canal] = this.#exportar(session)
     this.#escreverFicha(contents, canal, session)
   }
 
@@ -17986,9 +18862,17 @@ What was left behind:
     por: string
     payload: StoredChatMessage["payload"]
     podeFixar: boolean
+    /**
+     * The pin list this record proposes, with its own stamp (12/11/2026): from a
+     * sender with `fixar`, or signed by one (`pinnedProof`). Absent: it says nothing
+     * about pins. See `#fixadasPropostas`.
+     */
+    fixadas?: PropostaDeFixadas
     /** Whether the `perms` that arrives can be written (1.2). See `#podeSobreporDe`. */
     podeSobrepor: boolean
   }[] = []
+  /** Pins whose message was deleted, waiting for the drain. See `fixadasApagadas`. */
+  #pendingApagadas: { channel: string; id: string; at: number }[] = []
   #pendingCategories: {
     channel: string
     category: string
@@ -18043,12 +18927,18 @@ What was left behind:
       const at = payload.t === "edit" ? payload.editedAt : payload.redactedAt
       this.#pendingHistory.push({ channel, entry: { seq, sender, ...marcaDeOrdem, at, payload } })
       if (payload.t === "redact") this.#largarVideosDe(channel, sender, payload.target)
+      if (payload.t === "redact") this.#apagarFixada(channel, sender, payload.target, at)
     } else if (payload.t === "post.comment" || payload.t === "post.reaction") {
       // For the same reason as amendments: the likes and comments of a post are
       // worked out from the history, and not storing them made them vanish on
       // reload while the post stayed.
       const at = payload.t === "post.comment" ? payload.postedAt : payload.at
       this.#pendingHistory.push({ channel, entry: { seq, sender, ...marcaDeOrdem, at, payload } })
+    } else if (payload.t === "reaction") {
+      // Chat reactions, for the same reason: the chips are folded from history
+      // (`dobrarReaccoes`), and without this they vanished on reload. The payload
+      // carries no clock; `at` is only when this device stored it.
+      this.#pendingHistory.push({ channel, entry: { seq, sender, ...marcaDeOrdem, at: Date.now(), payload } })
     } else if (isFriendPayload(payload)) {
       // A pending request that vanished on reload would look like it was ignored, // worse for both people than remembering it.
       //
@@ -18145,14 +19035,17 @@ What was left behind:
       // what they wanted at the top of everyone's room with a `channel.meta` in
       // hand. The decision is made here, where the sender comes authenticated by
       // MLS, and it's carried out in the write.
+      const at = payload.updatedAt || Date.now()
+      const podeFixar = this.powersOf(channel, sender).includes("fixar")
       this.#pendingRooms.push({
         channel,
         room: payload.room,
-        at: payload.updatedAt || Date.now(),
+        at,
         seq,
         por: sender,
         payload,
-        podeFixar: this.powersOf(channel, sender).includes("fixar"),
+        podeFixar,
+        ...this.#fixadasPropostas(channel, sender, seq, at, payload, podeFixar),
         podeSobrepor:
           payload.perms !== undefined &&
           this.#podeSobreporDe(
@@ -18384,9 +19277,32 @@ What was left behind:
       }
     }
     this.#pendingSpaceMeta = []
-    for (const { channel, room, at, seq, por, payload, podeFixar, podeSobrepor } of this.#pendingRooms) {
+    for (const { channel, room, at, seq, por, payload, fixadas: proposta, podeSobrepor } of this.#pendingRooms) {
       const doCanal = contents.channelRooms[channel] ?? {}
       const actual = doCanal[room]
+      /*
+        The pin list competes with its OWN stamp (12/11/2026), not the room's. A
+        rename that says nothing about pins replaces the room and keeps the list,
+        and the declaration that set the list is older than the room from then on.
+        Judged by the room's stamp, that declaration, passed on later by the Welcome
+        snapshot or by a member without `fixar`, lost to the rename and the pins
+        never reached whoever joined.
+      */
+      const listaVence = proposta !== undefined && fixadasVencem(actual, proposta)
+      const carimboDaLista = (vencedora: PropostaDeFixadas): NonNullable<StoredPeerProfile["fixadas"]> => ({
+        at: vencedora.at,
+        seq: vencedora.seq,
+        por: vencedora.original?.por ?? por,
+        ...(vencedora.original ? { payload: structuredClone(vencedora.original.payload) } : {}),
+      })
+      if (!venceCarimbo(actual, { at, seq }) && actual && listaVence) {
+        // The room stays as it is; only the list, and where it came from, change.
+        const proximo = structuredClone(actual.payload) as Record<string, unknown>
+        proximo["pinned"] = structuredClone(proposta.lista)
+        doCanal[room] = { ...actual, payload: proximo as StoredChatMessage["payload"], fixadas: carimboDaLista(proposta) }
+        contents.channelRooms[channel] = doCanal
+        continue
+      }
       if (venceCarimbo(actual, { at, seq })) {
         /**
          * The room is replaced; the pinned list is MERGED. Two different rules
@@ -18405,20 +19321,22 @@ What was left behind:
          * to rename the room if someone else changed it by mistake.
          */
         const anteriores = fixadasDe(actual?.payload)
-        const propostas = podeFixar ? fixadasDe(payload) : undefined
-        const fixadas = propostas ?? anteriores
+        const fixadas = listaVence ? proposta.lista : anteriores
         const proximo = structuredClone(this.#absorver(contents, payload)) as Record<string, unknown>
-        if (fixadas) proximo["pinned"] = fixadas
+        if (fixadas) proximo["pinned"] = structuredClone(fixadas)
         else delete proximo["pinned"]
         // The overlays (1.2), by the same rule: absent keeps what is there, from someone who cannot drops it.
         const perms = sobreposicoesAGuardar(sobreposicoesDe(actual?.payload), sobreposicoesDe(payload), podeSobrepor)
         if (perms) proximo["perms"] = structuredClone(perms)
         else delete proximo["perms"]
-        doCanal[room] = { at, payload: proximo as StoredChatMessage["payload"], ...comSeq(seq), por }
+        const origem = listaVence ? carimboDaLista(proposta) : fixadas ? actual?.fixadas : undefined
+        doCanal[room] = { at, payload: proximo as StoredChatMessage["payload"], ...comSeq(seq), por, ...(origem ? { fixadas: origem } : {}) }
       }
       contents.channelRooms[channel] = doCanal
     }
     this.#pendingRooms = []
+    for (const { channel, id, at } of this.#pendingApagadas) guardarApagada(contents, channel, id, at)
+    this.#pendingApagadas = []
     for (const { channel, category, at, seq, por, payload, podeSobrepor } of this.#pendingCategories) {
       // `?? {}` on the field itself: a vault written before declared categories
       // has no map, and reads as "none declared".
@@ -18435,6 +19353,8 @@ What was left behind:
       contents.channelCategories = { ...(contents.channelCategories ?? {}), [channel]: doCanal }
     }
     this.#pendingCategories = []
+    // Channels whose authority may change in this write: their signed pin lists are judged again below.
+    const autoridadeMexida = new Set([...this.#pendingRoleDefs, ...this.#pendingAuthority].map((entrada) => entrada.channel))
     for (const { channel, role, at, seq, por, payload } of this.#pendingRoleDefs) {
       const doCanal = contents.channelRoles[channel] ?? {}
       const actual = doCanal[role]
@@ -18495,6 +19415,7 @@ What was left behind:
       }
     }
     this.#pendingAuthority = []
+    for (const channel of autoridadeMexida) this.#reverProvasDasFixadas(contents, channel)
     for (const { channel, address } of this.#pendingTransmitters) noteTransmitter(contents, channel, address)
     this.#pendingTransmitters = []
     // And gaps go in the SAME write, for the usual reason: the vault is
@@ -18568,6 +19489,7 @@ What was left behind:
       return 0
     }
     if (page.t !== "channel.backfill.page" || page.channel !== channel) return 0
+    if (page.retryAfterMs !== undefined) return 0
 
     const recovered: StoredChatMessage[] = []
     const apelidosRecuperados: ({ subject: string } & RegistoDeApelido)[] = []
@@ -18667,6 +19589,8 @@ What was left behind:
         } else if (payload.t === "post.comment" || payload.t === "post.reaction") {
           const at = payload.t === "post.comment" ? payload.postedAt : payload.at
           recovered.push({ seq: event.seq, sender: result.sender, at, payload })
+        } else if (payload.t === "reaction") {
+          recovered.push({ seq: event.seq, sender: result.sender, at: Date.now(), payload })
         } else if (isFriendPayload(payload)) {
           /*
             ALL FOUR, not two. This is where a declined or ended friendship
@@ -18853,6 +19777,14 @@ What was left behind:
         this.#agendarCartao(sala)
       }
       this.#pararDeInsistir()
+      /*
+        An account from before the choice was opt-in (12/11/2026) has no mark.
+        Already inside means it said yes, in practice: written now, so it keeps
+        returning to the room if it loses it. See `salaComum.ts`.
+      */
+      if (this.preferencias()[PREFERENCIA_SALA_COMUM] === undefined) {
+        await this.definirPreferencia(PREFERENCIA_SALA_COMUM, SALA_COMUM_ENTRAR).catch(() => {})
+      }
       return
     }
 
@@ -19597,8 +20529,13 @@ None of this touches the deafness counter: whoever reads it is the next
          * stored buzz, yesterday's whole conversation, in one go, when the app
          * opened. It is the same trap as the typing signal taken to the worst
          * case, because this one has motion and sound stuck to it.
+         *
+         * And only in a direct conversation (12/11/2026). The button
+         * only exists there, but an altered client can send one anywhere, and a
+         * nudge on a thirty-person channel is an alarm. Refused here, on the
+         * receiving side, where the rule cannot be skipped.
          */
-        if (seq >= 0 && aoVivo) this.emit("buzz", { channel, from: result.sender, at: result.payload.at })
+        if (seq >= 0 && aoVivo && this.#eDirecta(channel)) this.emit("buzz", { channel, from: result.sender, at: result.payload.at })
         return
       }
       if (result.payload.t === "member.left") {
@@ -19717,6 +20654,12 @@ None of this touches the deafness counter: whoever reads it is the next
           }
         }
       }
+      // A message in a read-only room from someone who may not write there: not
+      // stored, not shown. Decided NOW, in server order, so what was written
+      // before the room became read-only stays. See `#escritaRecusada`.
+      if (this.#escritaRecusada(channel, result.sender, result.payload)) return
+      // Before recording: what we had is what the vault still says. See `#cargosNovosParaMim`.
+      const cargosNovos = aoVivo ? this.#cargosNovosParaMim(channel, result.sender, result.payload, seq) : []
       // Queue the chat-visible payloads for the vault write that `#rememberSeq`
       // is about to do anyway. Ephemeral kinds (typing, signalling) never land
       // on disk, and voice.* already returned above.
@@ -19755,7 +20698,14 @@ None of this touches the deafness counter: whoever reads it is the next
           .then(() => this.#onInvitePayload(channel, sender, payload))
           .catch(() => {})
       }
-      this.emit("message", { channel, seq, sender: result.sender, payload: this.#comMencoesConferidas(channel, result.sender, result.payload), ...(aoVivo ? { aoVivo: true as const } : {}) })
+      this.emit("message", {
+        channel,
+        seq,
+        sender: result.sender,
+        payload: this.#comMencoesConferidas(channel, result.sender, result.payload),
+        ...(aoVivo ? { aoVivo: true as const } : {}),
+        ...(cargosNovos.length > 0 ? { cargosNovos } : {}),
+      })
     } else if (result.kind === "epoch") {
       this.emit("epoch", { channel, epoch: result.epoch.toString() })
       // An epoch change is a membership change: whoever just joined has never
@@ -20129,12 +21079,30 @@ None of this touches the deafness counter: whoever reads it is the next
     if (frame.t === "error" && frame.code === "device-revoked") {
       /*
         The server refused this device: the account removed it from the manifest on another device. It is not a network failure, and reconnecting gives the same refusal: disconnect for real, and the UI says why.
+
+        Since 1.3.16 the server sends the manifest that removed it. With that proof
+        (`provaDeRemocao`: signed by this account, newer than what this vault saw,
+        without this device) the status says `removido`, and the interface signs
+        out and erases this device's vault. Without
+        it (a copy replaced by an import, an older server, a proof that does not
+        hold) only the lock, as before.
         */
+      const identity = this.#identity
+      const removido =
+        identity !== null &&
+        this.vault.unlocked &&
+        provaDeRemocao(
+          frame.manifest,
+          identity.address,
+          toBase64(identity.deviceSigningPublicKey),
+          deviceManifestSeen(this.vault.contents, identity.address),
+        )
       this.emit("status", {
         detail: "este aparelho foi tirado da conta noutro aparelho",
         level: "error",
         code: "device-revoked",
         route: "toast",
+        ...(removido ? { removido: true as const } : {}),
       })
       this.disconnect()
       return
@@ -20983,8 +21951,16 @@ None of this touches the deafness counter: whoever reads it is the next
       this.#flushTimer = null
       // The failure must be handled HERE, and there is nowhere else to handle it:
       // no one is waiting for this promise. See `#falhaAoGravar`.
-      void this.flush().catch((erro: unknown) => this.#falhaAoGravar(erro))
-    }, aRecuperar ? Session.JANELA_DA_RECUPERACAO_MS : Session.FLUSH_MS)
+      void this.#preExportar()
+        .then(() => this.flush())
+        .catch((erro: unknown) => this.#falhaAoGravar(erro))
+      /*
+        Outside a recovery, `FLUSH_MS` or the vault's own window when it grew
+        because the snapshot is slow (see
+        `Vault.janelaDaGravacao`): this batch carries only what the server
+        gives back, like the vault's deferred write.
+      */
+    }, aRecuperar ? Session.JANELA_DA_RECUPERACAO_MS : Math.max(Session.FLUSH_MS, this.vault.janelaDaGravacao))
   }
 
   /**

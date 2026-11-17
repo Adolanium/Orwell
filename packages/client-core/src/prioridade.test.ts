@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest"
 import { aplicarPrioridade, prioridadeDoFluxo } from "./prioridade.js"
 
 /**
- * Voice takes priority over video when the network is tight. Requested by the owner on
- * November 2, 2026: "make voice the priority".
+ * Voice takes priority over video when the network is tight. The requirement:
+ * "make voice the priority".
  */
 describe("a prioridade dos fluxos", () => {
   it("a voz é alta, o som do ecrã e a música médios, a imagem baixa", () => {

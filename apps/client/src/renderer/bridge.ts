@@ -69,6 +69,7 @@ interface CanaisDoAnfitriao {
   declineChannelInvite?: CanaisDaInterface["declineChannelInvite"]
   send?: CanaisDaInterface["send"]
   typing?: CanaisDaInterface["typing"]
+  pedirPerfis?: NonNullable<CanaisDaInterface["pedirPerfis"]>
   buzz?: CanaisDaInterface["buzz"]
   members?: CanaisDaInterface["members"]
   history?: CanaisDaInterface["history"]
@@ -98,6 +99,7 @@ interface CanaisDoAnfitriao {
   setNickname?: NonNullable<CanaisDaInterface["setNickname"]>
   editMessage?: NonNullable<CanaisDaInterface["editMessage"]>
   deleteMessage?: NonNullable<CanaisDaInterface["deleteMessage"]>
+  react?: NonNullable<CanaisDaInterface["react"]>
 
   // ------------------------------------------------------- as leituras
   rooms?: (channel: string) => Resposta<Salas>
@@ -118,6 +120,7 @@ interface CanaisDoAnfitriao {
   nicknames?: (channel: string) => Resposta<Record<string, string>>
   mayMove?: (channel: string) => Resposta<boolean>
   mayMentionAll?: (channel: string, room: string) => Resposta<boolean>
+  mayTransmit?: (channel: string, room: string, address?: string) => Resposta<boolean>
   mayInvite?: (channel: string) => Resposta<boolean>
   mayExpel?: (channel: string) => Resposta<boolean>
   pins?: (channel: string, room: string) => Resposta<Fixadas>
@@ -276,6 +279,8 @@ interface HostApi {
   relato?: NonNullable<EnclaveBridge["relato"]>
   /** The reports. Optional for the same reason: an old `preload` doesn't provide them. */
   denuncias?: NonNullable<EnclaveBridge["denuncias"]>
+  /** "Report a bug". Optional for the same reason: an old `preload` doesn't provide it. */
+  bugs?: NonNullable<EnclaveBridge["bugs"]>
   /**
    * The global shortcuts. Optional for the same reason. `aoAccionar` delivers what crossed the IPC as-is; the shape is validated in the bridge.
    */
@@ -399,6 +404,7 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
     declineChannelInvite: pedido("declineChannelInvite", canais.declineChannelInvite),
     send: pedido("send", canais.send),
     typing: pedido("typing", canais.typing),
+    pedirPerfis: pedido("pedirPerfis", canais.pedirPerfis),
     buzz: pedido("buzz", canais.buzz),
     members: pedido("members", canais.members),
     history: pedido("history", canais.history),
@@ -499,6 +505,13 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
             ler("mayMentionAll", [channel, room], () => canais.mayMentionAll!(channel, room), false),
         }
       : {}),
+    // Screen sharing as a role power. An old preload without it answers "yes", as before.
+    ...(canais.mayTransmit
+      ? {
+          mayTransmit: (channel: string, room: string, address?: string) =>
+            ler("mayTransmit", [channel, room, address], () => canais.mayTransmit!(channel, room, address), true),
+        }
+      : {}),
     ...(canais.mayInvite
       ? { mayInvite: (channel: string) => ler("mayInvite", [channel], () => canais.mayInvite!(channel), false) }
       : {}),
@@ -525,6 +538,7 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
 
     ...(canais.editMessage ? { editMessage: pedido("editMessage", canais.editMessage) } : {}),
     ...(canais.deleteMessage ? { deleteMessage: pedido("deleteMessage", canais.deleteMessage) } : {}),
+    ...(canais.react ? { react: pedido("react", canais.react) } : {}),
   }
 
   return { canais: canaisDaPonte, esquecer }
@@ -731,6 +745,8 @@ export function createDesktopBridge(): EnclaveBridge {
     // The AFK room (2/11/2026): the room list already crosses the IPC in a synchronous read,
     // and it's that which says which one it is. See `salaAfk` in `CallBridge`.
     salaAfk: (channel, room) => canais.rooms(channel).some((sala) => sala.room === room && sala.afk !== undefined),
+    // Screen sharing as a role power, by the same synchronous read. See `podeTransmitir` in `CallBridge`.
+    podeTransmitir: (channel, room, address) => canais.mayTransmit?.(channel, room, address) !== false,
     /*
       The screen audio: here the selector is ours and has no checkbox, so
       the absence of audio means the SYSTEM doesn't provide it. We ask the
@@ -1075,6 +1091,8 @@ export function createDesktopBridge(): EnclaveBridge {
     ...(host.relato ? { relato: host.relato } : {}),
     // And the reports, for the same reason: the server is chosen in the main process.
     ...(host.denuncias ? { denuncias: host.denuncias } : {}),
+    // "Report a bug": the server is the open account's, chosen in the main process.
+    ...(host.bugs ? { bugs: host.bugs } : {}),
     ...(host.atalhosGlobais ? { atalhosGlobais: atalhosGlobaisDe(host.atalhosGlobais) } : {}),
     ...(host.overlay ? { overlay: overlayDe(host.overlay) } : {}),
     identity: {

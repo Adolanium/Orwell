@@ -10,7 +10,7 @@ import type { ServerConfig } from "./config.js"
 /**
  * The state that already exists, for whoever arrives later.
  *
- * Reproduces the owner's report from 18 August 2026: *"when they join, they
+ * Reproduces the bug: *"when they join, they
  * don't see me in a call either"* and *"no call shows up: users join as if
  * everything were empty"*.
  *
@@ -269,7 +269,7 @@ describe("quem chega e o que já lá estava", () => {
    *
    * Someone already a member does not move the epoch when they return. If
    * reaffirmation depended only on the group growing, this would stay empty,
-   * and this is the owner's report: *"users join as if everything were empty"*.
+   * and this is the bug: *"users join as if everything were empty"*.
    * Whoever joins a channel joins once; whoever opens the app opens it every day.
    *
    * The voice list lives in memory on the viewer's side, and nothing seeds it:

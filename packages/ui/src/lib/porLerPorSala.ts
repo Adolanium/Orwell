@@ -8,7 +8,7 @@ import { estaSilenciado } from "./silenciados.js"
 /**
  * What is unread in each ROOM, not just each channel.
  *
- * Owner request from October 27, 2026: each room on the sidebar shows the
+ * The rule: each room on the sidebar shows the
  * unread count, and the expanded channel shows the sum.
  *
  * **Why the channel mark is not enough.** The read mark is per channel

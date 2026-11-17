@@ -8,7 +8,7 @@ import { CallPanel } from "./CallPanel.js"
 /**
  * On entering a voice room, the faces that the sidebar already showed land in
  * the panel in a "connecting" state, until the connection to each one arrives.
- * Owner request on October 27, 2026: before, the room looked empty while joining.
+ * Before, the room looked empty while joining.
  */
 
 afterEach(cleanup)

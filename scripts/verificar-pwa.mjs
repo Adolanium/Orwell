@@ -16,7 +16,9 @@
 //      load, no response comes from the Service Worker, and the Cache API is
 //      empty;
 //   5. `version-watch` still detects a swapped `index.html` on the server, which
-//      is exactly what a Service Worker with cache would have broken.
+//      is exactly what a Service Worker with cache would have broken;
+//   6. a push delivered by CDP shows one notice with the fixed sentence of its
+//      language, and after the pushes points 4 and 5 still hold.
 //
 // LOCAL by design. Serves the `dist` at 127.0.0.1, opens a fresh profile
 // (without a vault, the app stays on the start screen and does not connect to
@@ -34,6 +36,7 @@ import { createServer } from "node:http"
 import { extname, join, normalize } from "node:path"
 import { fileURLToPath } from "node:url"
 import { chromium } from "playwright"
+import { comLingua } from "./ambiente.mjs"
 
 const REPO = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(REPO, "apps/web/dist")
@@ -123,6 +126,10 @@ const base = `http://127.0.0.1:${PORTO}`
 // --- 3 to 5. a real browser --------------------------------------------
 
 const browser = await chromium.launch({
+  // The full Chromium in new headless mode, not the headless shell: the shell
+  // denies notification permission whatever the context grants, and point 6
+  // needs the Service Worker to show a notice.
+  channel: "chromium",
   // Nothing resolves outside the machine. The app without a vault does not connect
   // to anyone; this is the belt over the braces.
   args: ["--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"],
@@ -130,10 +137,6 @@ const browser = await chromium.launch({
 try {
   const contexto = await browser.newContext({
     viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
-    // In Portuguese on purpose: the banner check looks for "Recarregar". Without
-    // this Playwright starts in en-US, the interface says "Reload", and the check
-    // fails even though the product did not fail (October 20, 2026).
-    locale: "pt-PT",
   })
   const pagina = await contexto.newPage()
   const paraFora = []
@@ -151,7 +154,10 @@ try {
     if (msg.type() === "error") erros.push(msg.text())
   })
 
-  await pagina.goto(`${base}/app/`, { waitUntil: "load" })
+  // In Portuguese on purpose: the banner check looks for "Recarregar". Since 1.3.9
+  // the app opens in English until someone chooses, and the browser language no
+  // longer counts (it used to be `locale: "pt-PT"` here), so ask in the address.
+  await pagina.goto(comLingua(`${base}/app/`), { waitUntil: "load" })
   const registo = await pagina.evaluate(async () => {
     const pronto = await Promise.race([
       navigator.serviceWorker.ready,
@@ -198,6 +204,58 @@ try {
   check("nenhuma resposta veio do Service Worker", doServiceWorker.length === 0, doServiceWorker.slice(0, 3).join(" "))
   const chaves = await pagina.evaluate(() => caches.keys())
   check("a Cache API está vazia", chaves.length === 0, chaves.join(", "))
+
+  // 6. Web Push, without a phone: Chromium delivers a push to the registration by
+  // CDP, as the push service would. The Service Worker must show ONE notice with a
+  // fixed sentence per language, folded by its tag, and nothing else must change:
+  // index.html from the network, no response from the worker, empty Cache API.
+  await contexto.grantPermissions(["notifications"], { origin: base })
+  const cdp = await contexto.newCDPSession(pagina)
+  const registos = new Map()
+  cdp.on("ServiceWorker.workerRegistrationUpdated", ({ registrations }) => {
+    for (const r of registrations) registos.set(r.scopeURL, r.registrationId)
+  })
+  await cdp.send("ServiceWorker.enable")
+  for (let i = 0; i < 50 && !registos.has(`${base}/app/`); i++) await pagina.waitForTimeout(100)
+  const registrationId = registos.get(`${base}/app/`)
+  check("(o CDP vê o registo do Service Worker)", registrationId !== undefined, String(registrationId))
+  const avisosDepoisDe = async (dados, { fecharAntes = true } = {}) => {
+    // Closing first makes the read wait for THIS push's notice, not the last one.
+    if (fecharAntes) {
+      await pagina.evaluate(async () => {
+        for (const n of await (await navigator.serviceWorker.ready).getNotifications()) n.close()
+      })
+    }
+    await cdp.send("ServiceWorker.deliverPushMessage", { origin: `${base}/`, registrationId, data: dados })
+    // Without closing, a second notice would show up next to the first: give it time to.
+    if (!fecharAntes) await pagina.waitForTimeout(500)
+    // The worker shows the notice asynchronously; read until it settles.
+    let ultimo = []
+    for (let i = 0; i < 30; i++) {
+      await pagina.waitForTimeout(100)
+      ultimo = await pagina.evaluate(async () => {
+        const registo = await navigator.serviceWorker.ready
+        return (await registo.getNotifications()).map((n) => ({ titulo: n.title, corpo: n.body, etiqueta: n.tag, data: n.data }))
+      })
+      if (ultimo.length > 0) break
+    }
+    return ultimo
+  }
+  const antesDosPushes = pedidosAoIndex
+  const pt = await avisosDepoisDe("pt")
+  check("push \"pt\": um aviso, «Nova mensagem no Orwell»", pt.length === 1 && pt[0].titulo === "Orwell" && pt[0].corpo === "Nova mensagem no Orwell", JSON.stringify(pt))
+  check("o aviso do push leva a etiqueta e nenhum data", pt[0]?.etiqueta === "orwell-push" && (pt[0]?.data ?? null) === null)
+  const outraVez = await avisosDepoisDe("pt", { fecharAntes: false })
+  check("push \"pt\" outra vez: continua um (a etiqueta junta)", outraVez.length === 1, JSON.stringify(outraVez))
+  const en = await avisosDepoisDe("en")
+  check("push \"en\": «New message in Orwell»", en.length === 1 && en[0].corpo === "New message in Orwell", JSON.stringify(en))
+  const vazio = await avisosDepoisDe("")
+  check("push vazio: em inglês", vazio.length === 1 && vazio[0].corpo === "New message in Orwell", JSON.stringify(vazio))
+  await pagina.reload({ waitUntil: "load" })
+  check("depois dos pushes, o index.html continua a vir da rede", pedidosAoIndex - antesDosPushes === 1, `${pedidosAoIndex - antesDosPushes} pedido(s)`)
+  check("depois dos pushes, nenhuma resposta veio do Service Worker", doServiceWorker.length === 0)
+  const chavesDepois = await pagina.evaluate(() => caches.keys())
+  check("depois dos pushes, a Cache API continua vazia", chavesDepois.length === 0, chavesDepois.join(", "))
 
   if (process.argv.includes("--captura")) {
     await pagina.waitForTimeout(800)

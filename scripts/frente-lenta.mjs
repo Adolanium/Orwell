@@ -39,7 +39,7 @@ async function portaLivre(porta) {
 
 const TIPOS = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".woff2": "font/woff2", ".map": "application/json", ".wasm": "application/wasm" }
 
-export async function levantarServidor({ dist, portaDaFrente, portaDoServidor, rede = REDE_4G_LENTA, prefixo = "orwell-frente-lenta-" }) {
+export async function levantarServidor({ dist, portaDaFrente, portaDoServidor, rede = REDE_4G_LENTA, prefixo = "orwell-frente-lenta-", dados: pastaDada = null }) {
   const portaInterna = portaDaFrente + 100
   for (const caminho of [join(dist, "index.html"), SERVIDOR_JS]) {
     if (!existsSync(caminho)) throw new Error(`Falta ${caminho}. Corre \`npm run build\` primeiro.`)
@@ -49,7 +49,8 @@ export async function levantarServidor({ dist, portaDaFrente, portaDoServidor, r
   }
   const nome = `localhost:${portaDaFrente}`
   const salaComum = `!orwell:${nome}`
-  const dados = mkdtempSync(join(tmpdir(), prefixo))
+  // `dados`: a given data folder (a case kept between runs) is reused and never deleted.
+  const dados = pastaDada ?? mkdtempSync(join(tmpdir(), prefixo))
   const servidor = spawn(process.execPath, [SERVIDOR_JS], {
     env: {
       ...process.env,
@@ -191,7 +192,7 @@ export async function levantarServidor({ dist, portaDaFrente, portaDoServidor, r
       frente.close()
       interna.close()
       servidor.kill()
-      rmSync(dados, { recursive: true, force: true })
+      if (!pastaDada) rmSync(dados, { recursive: true, force: true })
     },
   }
 }

@@ -287,8 +287,8 @@ for (const [largura, altura] of [
       }
 
       if (verSalas) {
-        /* Voice room faces no longer have a ring or pulse (owner, October 27, 2026,
-           commit 35d24c4): measures the size (1.3 × 18 px) and that nothing
+        /* Voice room faces no longer have a ring or pulse (commit
+           35d24c4): measures the size (1.3 × 18 px) and that nothing
            clips them, and that there is no `[data-anel]` or pulse there. */
         const caras = await page.evaluate(() =>
           [...document.querySelectorAll(".room-voice-members .message-avatar")].map((cara) => {

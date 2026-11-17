@@ -277,7 +277,7 @@ try {
       tarja: getComputedStyle(document.querySelector(".abertura-marca path")).animationName,
       marca: getComputedStyle(document.querySelector(".abertura-marca")).animationName,
     }))
-    // Since October 27, 2026 the ring keeps spinning with reduced motion (the owner's Windows reads effects off as reduced motion and startup seemed stuck); since the 28th it spins with speeds.
+    // Since October 27, 2026 the ring keeps spinning with reduced motion (Windows with animation effects off reports reduced motion, and startup seemed stuck); since the 28th it spins with speeds.
     check("movimento reduzido: o anel gira na mesma", a.anel === "abertura-gira-vivo", a.anel)
     check("e as tarjas não acendem por partes", a.tarja === "none", a.tarja)
     check("só a marca pulsa a opacidade", a.marca === "abertura-pulsa", a.marca)

@@ -5,7 +5,7 @@ import { strings } from "../strings.js"
 /**
  * Reorder roles: by drag and drop or with "Up" and "Down" buttons.
  *
- * **One place for both editors** (4/11/2026, owner request: "the
+ * **One place for both editors** (requirement: "the
  * founder/admin should be able to reorganize the order roles are
  * presented"). The role editor (`RoleEditor`) and the permissions model
  * section (`CargosEPermissoes`) show the same list; both sort here, with

@@ -194,7 +194,7 @@ describe("PeopleScreen — pedidos de amizade e presença", () => {
    *
    * They used to be stacked at the top of "Everyone", above the friends list.
    * And since conversations landed in this destination, above the conversation
-   * itself. The owner asked for them in the top banner: who counts them now is
+   * itself. They moved to the top banner: who counts them now is
    * the tab counter, and the body stays for what you are doing.
    *
    * Nothing was lost. A request still announces itself in three places: the
@@ -345,7 +345,7 @@ describe("PeopleScreen — pedidos de amizade e presença", () => {
 /**
  * What shows for someone who has no profile yet.
  *
- * Report from the owner on October 5, 2026, after a call with other people:
+ * The bug, seen after a call with other people:
  * "there are usernames that appear as an address". This screen was the only
  * place in the app that wrote the FULL address in place of the name. The others
  * use `nameFor`, whose fallback is the first word of the address. A profile that
@@ -562,7 +562,7 @@ describe("PeopleScreen — Enviados, Encontrar e bloqueados", () => {
 
 /**
  * The personal message, when it does not fit, flows as a footer (the `Andante`)
- * instead of cutting with ellipsis (owner, October 28 2026). Without a message,
+ * instead of cutting with ellipsis. Without a message,
  * the `&nbsp;` always holds the line height.
  */
 describe("PeopleScreen — a mensagem pessoal que não cabe", () => {

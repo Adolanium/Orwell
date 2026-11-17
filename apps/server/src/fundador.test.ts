@@ -375,7 +375,7 @@ describe("a ronda de reparação de perfis", () => {
    * exactly the method that swallows errors with the desired behavior. It passed
    * green on broken code.
    *
-   * The cost of being wrong the other way is one extra attempt. Reported by the owner on October 5, 2026,
+   * The cost of being wrong the other way is one extra attempt. Seen in production
    * with names showing as addresses in a call.
    */
   it("uma ronda que falha fica por cumprir, e a ligação seguinte volta a tentar", async () => {
@@ -453,7 +453,7 @@ describe("a ronda de reparação de perfis", () => {
    * in the field: an updated vault carries `profileRepairRound: 1` and must publish
    * the profile again in all channels, once.
    *
-   * The owner's case is this, not a new channel: he imported onto the computer a
+   * The real case is this, not a new channel: a device imported a
    * weeks-old vault, which carries the `publishedProfileAt` of whoever exported it,
    * saying "I already published" on channels where THIS device never published anything. The
    * channel did not grow, nothing changes epoch, and without a new round no path
@@ -489,7 +489,7 @@ describe("a ronda de reparação de perfis", () => {
 /**
  * The name of EVERYBODY, not just whoever invited.
  *
- * The owner's report on August 18, 2026: *"she is seeing the first word
+ * The bug: *"she is seeing the first word
  * of the address instead of the username"*, and the detail that makes it diagnostic:
  * **she sees the right name of ONE of the users, and not the others**.
  *

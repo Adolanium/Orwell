@@ -58,7 +58,7 @@ export interface Prefs {
   accent: number
   density: Density
   /**
-   * System alerts. ON by default since November 2, 2026 (owner directive:
+   * System alerts. ON by default (the requirement:
    * "notifications on by default at 100 percent"). On the browser they only
    * show with browser permission; on the desktop app they show via the main
    * process.
@@ -71,13 +71,24 @@ export interface Prefs {
    * once, and from then on the user's preference applies.
    */
   avisosDaAppRevistos: boolean
-  /** Whether a notification may carry the sender and text. Off by default:
-   * the OS notification centre is outside the app's encryption boundary. */
+  /**
+   * Whether a notification may carry names and text ("Mostrar nomes e texto
+   * nas notificações"). ON by default since 12/11/2026, as in the common chat
+   * apps (notices said "a friend is online" and showed channel
+   * identifiers). Off, the OS notification centre gets only generic text.
+   */
   notifyPreview: boolean
+  /**
+   * The choice above was made on this device AFTER the default changed. Before
+   * that, every stored record carries `notifyPreview: false` (the old default,
+   * written back with every other preference), and that `false` was never a
+   * choice: read without this marker, it turns into the new default once.
+   */
+  conteudoDosAvisosEscolhido: boolean
   /** Short synthesised tones for arrivals. On by default, unlike the OS
    * notifications, this needs no permission and never leaves the page. */
   sounds: boolean
-  /** 0-100. At 100 by default since November 2, 2026 (was 50), by owner directive. */
+  /** 0-100. At 100 by default (was 50), with notifications on by default. */
   soundVolume: number
   /**
    * How loud EVERYONE is in a call, from 0 to 2.
@@ -173,7 +184,7 @@ export interface Prefs {
   frasesVistas: string[]
   /**
    * The "Broadcast volume" of the DJ, from 0 to 1: how much music GOES OUT
-   * to the call (owner, October 27, 2026). Per device: it is this computer's
+   * to the call. Per device: it is this computer's
    * level and these files, and does not travel with the account.
    */
   volumeDaEmissao: number
@@ -207,12 +218,27 @@ export interface Prefs {
    */
   pausaAte: number
   /**
+   * "Notifications when the app is closed" (Web Push). Per device and never
+   * sent to the account: it is this browser's subscription. Off by default;
+   * turning it on asks for the browser permission from the gesture. See
+   * `hooks/usePushFechada.ts`.
+   */
+  pushFechada: boolean
+  /**
    * "Join calls with microphone muted". On, every entry to a voice room or
    * call starts with the mic silenced (`micMuted`), and the person unmutes
    * when ready to speak. Off by default, for the same reason as `micMuted`:
    * joining and nobody hearing you without you asking is a bug.
    */
   entrarSilenciado: boolean
+  /**
+   * "Keep the screen on during calls" (Microphone and camera). A screen wake
+   * lock while a call is open and the app is in front: the phone does not lock
+   * by itself mid-call. Off by default, because it costs battery and does
+   * nothing for a person who presses the lock button. Per device. See
+   * `useChamadaEmSegundoPlano`.
+   */
+  ecraLigadoNaChamada: boolean
   /**
    * "Notify when a friend comes online" (Notifications), like MSN: an alert
    * with their picture and name, plus a short sound (item 6, November 2, 2026).
@@ -221,8 +247,8 @@ export interface Prefs {
    */
   avisarAmigosOnline: boolean
   /**
-   * Other friend alerts (Notifications › "Friend alerts", owner request
-   * November 3, 2026): joined a voice room, sharing screen, joined a community
+   * Other friend alerts (Notifications › "Friend alerts"):
+   * joined a voice room, sharing screen, joined a community
    * we are in. On by default, like the online alert: only an explicit `false`
    * turns them off. Per device. See `lib/avisosDeAmigos.ts`.
    */
@@ -256,8 +282,8 @@ export interface Prefs {
    */
   mostrarOnline: boolean
   /**
-   * "Show game overlay" (Voice, desktop app only). OFF by default since
-   * November 2, 2026 (owner directive: "disable overlay by default for now").
+   * "Show game overlay" (Voice, desktop app only). OFF by default for
+   * now (the requirement: "disable overlay by default for now").
    * Only shows in a call and with the Orwell window behind another app, and
    * the hotkey hides it. Per device: it is a window on this computer.
    *
@@ -271,7 +297,7 @@ export interface Prefs {
   /** The overlay's background opacity, from 0.2 to 1. Per device, like the overlay. */
   opacidadeDaOverlay: number
   /**
-   * "Microphone sensitivity" › "Automatic" (owner, November 2, 2026). On by
+   * "Microphone sensitivity" › "Automatic". On by
    * default: the usual gate, which tracks room noise. Off, the mic only
    * transmits above `limiarDoMicrofone`. Per device, like input volume: it is
    * this microphone and this room.
@@ -313,7 +339,8 @@ export const DEFAULT_PREFS: Prefs = {
   density: "confortavel",
   notifications: true,
   avisosDaAppRevistos: false,
-  notifyPreview: false,
+  notifyPreview: true,
+  conteudoDosAvisosEscolhido: false,
   sounds: true,
   soundVolume: 100,
   /** 1 is the sound as it arrives: amplifying by default would decide for
@@ -357,7 +384,9 @@ export const DEFAULT_PREFS: Prefs = {
   silenciados: [],
   bloqueioAutomatico: 15,
   pausaAte: 0,
+  pushFechada: false,
   entrarSilenciado: false,
+  ecraLigadoNaChamada: false,
   avisarAmigosOnline: true,
   avisarAmigosNaVoz: true,
   avisarAmigosNoEcra: true,
@@ -471,7 +500,8 @@ export function readPrefs(storage: Pick<Storage, "getItem"> = localStorage): Pre
       notifications:
         temAnfitriaoDeAvisos() && parsed?.avisosDaAppRevistos !== true ? true : parsed?.notifications !== false,
       avisosDaAppRevistos: temAnfitriaoDeAvisos() || parsed?.avisosDaAppRevistos === true,
-      notifyPreview: parsed?.notifyPreview === true,
+      notifyPreview: parsed?.conteudoDosAvisosEscolhido === true ? parsed.notifyPreview === true : true,
+      conteudoDosAvisosEscolhido: parsed?.conteudoDosAvisosEscolhido === true,
       // Default-on, so the safe reading flips: only an explicit `false` mutes.
       sounds: parsed?.sounds !== false,
       soundVolume,
@@ -537,7 +567,9 @@ export function readPrefs(storage: Pick<Storage, "getItem"> = localStorage): Pre
         typeof parsed?.pausaAte === "number" && Number.isFinite(parsed.pausaAte) && parsed.pausaAte > 0
           ? parsed.pausaAte
           : 0,
+      pushFechada: parsed?.pushFechada === true,
       entrarSilenciado: parsed?.entrarSilenciado === true,
+      ecraLigadoNaChamada: parsed?.ecraLigadoNaChamada === true,
       // On by factory default: only an explicit `false` turns it off.
       avisarAmigosOnline: parsed?.avisarAmigosOnline !== false,
       // The same ones, read separately: turning off the online one in an old value
@@ -641,7 +673,9 @@ export function applyPrefs(prefs: Prefs): void {
 export type PreferenciaDaFase4 =
   | "bloqueioAutomatico"
   | "pausaAte"
+  | "pushFechada"
   | "entrarSilenciado"
+  | "ecraLigadoNaChamada"
   | "avisarAmigosOnline"
   | "avisarAmigosNaVoz"
   | "avisarAmigosNoEcra"
@@ -734,7 +768,7 @@ export function usePrefs(): {
   // Color and density no longer have toggles (see `applyPrefs`): there is no
   // `setAccent` or `setDensity`, and no gesture here sends them to the account.
   const setNotifications = useCallback((notifications: boolean) => choose({ notifications }), [choose])
-  const setNotifyPreview = useCallback((notifyPreview: boolean) => choose({ notifyPreview }), [choose])
+  const setNotifyPreview = useCallback((notifyPreview: boolean) => choose({ notifyPreview, conteudoDosAvisosEscolhido: true }), [choose])
   const setSounds = useCallback((sounds: boolean) => choose({ sounds }), [choose])
   const setSoundVolume = useCallback((soundVolume: number) => choose({ soundVolume }), [choose])
   const setOutputVolume = useCallback((outputVolume: number) => choose({ outputVolume }), [choose])

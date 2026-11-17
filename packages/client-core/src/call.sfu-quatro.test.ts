@@ -733,7 +733,7 @@ describe("uma chamada de voz a quatro, pelo SFU", () => {
    * from `#drop`). The session reconnects by itself and redoes what it can redo:
    * authenticates, subscribes, recovers what it lost. Media was not on that list.
    *
-   * The result is asymmetric, and it is what the owner reported: whoever
+   * The result is asymmetric, and it is the reported bug: whoever
    * reconnected stays in everyone's encrypted roster, the heartbeat knows
    * nothing of media and comes back out, but their producer died in the router
    * and nobody recreated it. They reappear on other screens WITHOUT FLOW, which
@@ -851,6 +851,74 @@ describe("uma chamada de voz a quatro, pelo SFU", () => {
       await sala.largar()
     } finally {
       Call.PAUSA_ENTRE_REFAZERES_MS = pausa
+    }
+  }, 30_000)
+
+  /*
+    The phone unlocked with the network still coming up (screen-locked study,
+    M2). The 30 s window used to run while there was no connection at all, so
+    a slow return to the network was a 403 before anything could be tried.
+    Time without a connection no longer counts, and neither do the attempts
+    that failed only for lack of it.
+  */
+  it("sem ligação durante mais do que a janela: espera pela ligação, e não dá o 403", async () => {
+    const janela = Call.JANELA_DE_REFAZER_MS
+    const pausa = Call.PAUSA_ENTRE_REFAZERES_MS
+    Call.JANELA_DE_REFAZER_MS = 300
+    Call.PAUSA_ENTRE_REFAZERES_MS = 20
+    try {
+      const sala = new Sala()
+      const [ana, bruno] = ["ana", "bruno"].map((nome) => sala.criar(nome)) as [Pessoa, Pessoa]
+      await ana.call.join(sala.canal)
+      await bruno.call.join(sala.canal)
+      await sala.assentar()
+      const erros: string[] = []
+      let acabou = false
+      bruno.call.on("error", ({ detail }) => erros.push(detail))
+      bruno.call.on("ended", () => (acabou = true))
+      sala.central.largar(bruno.address)
+      sala.entradasQueFalham.set(bruno.address, ["the connection dropped", "not connected"])
+      const refazer = bruno.call.ligacaoVoltou()
+      // Twice the window with no connection.
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      expect(erros).toEqual([])
+      expect(acabou).toBe(false)
+      // The session connects: the first wake fails again for lack of connection, the second gets through.
+      void bruno.call.ligacaoVoltou()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      void bruno.call.ligacaoVoltou()
+      await refazer
+      await sala.assentar()
+      expect(erros).toEqual([])
+      expect(acabou).toBe(false)
+      expect(ligados(ana)).toEqual([bruno.address])
+      await sala.largar()
+    } finally {
+      Call.JANELA_DE_REFAZER_MS = janela
+      Call.PAUSA_ENTRE_REFAZERES_MS = pausa
+    }
+  }, 30_000)
+
+  it("sem ligação nenhuma durante a espera máxima: só então o 403", async () => {
+    const espera = Call.ESPERA_PELA_LIGACAO_MS
+    Call.ESPERA_PELA_LIGACAO_MS = 300
+    try {
+      const sala = new Sala()
+      const [ana, bruno] = ["ana", "bruno"].map((nome) => sala.criar(nome)) as [Pessoa, Pessoa]
+      await ana.call.join(sala.canal)
+      await bruno.call.join(sala.canal)
+      await sala.assentar()
+      const erros: string[] = []
+      bruno.call.on("error", ({ detail }) => erros.push(detail))
+      sala.central.largar(bruno.address)
+      sala.entradasQueFalham.set(bruno.address, Array(10).fill("not connected"))
+      const partiu = Date.now()
+      await bruno.call.ligacaoVoltou()
+      expect(Date.now() - partiu).toBeLessThan(2_000)
+      expect(erros).toEqual(["the call dropped and did not come back"])
+      await sala.largar()
+    } finally {
+      Call.ESPERA_PELA_LIGACAO_MS = espera
     }
   }, 30_000)
 
@@ -1238,7 +1306,7 @@ describe("uma chamada de voz a quatro, pelo SFU", () => {
 })
 
 /**
- * Someone this device still does not know how to hear (owner report, 3/11/2026).
+ * Someone this device still does not know how to hear.
  *
  * Bruno's consumption is set up on Ana's side before his sheet reaches her
  * tree. Before this the stream came in unencrypted, the interface said
@@ -1247,7 +1315,7 @@ describe("uma chamada de voz a quatro, pelo SFU", () => {
  */
 describe("uma recusa de tempo do servidor ao consumo (4/11/2026, #984)", () => {
   /**
-   * The owner report across the whole `Call`: "the user hears me but I do not
+   * The reported bug across the whole `Call`: "the user hears me but I do not
    * hear them". Ana's first `sfu.consume` to Bruno is refused by the server with
    * `produtor-desconhecido`, and the second is accepted. Until 1.3.0 the refusal
    * was final: Bruno heard Ana, Ana never heard Bruno again until she left and

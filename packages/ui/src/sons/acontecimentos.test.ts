@@ -30,7 +30,7 @@ describe("o som de cada entrada do sino", () => {
       "dm-message": "directa",
       "dm-new": "directa",
       mention: "mencao",
-      "room-added": "mencao",
+      "room-added": "canal",
       "friend-request": "pedido",
       "friend-accept": "aceite",
       "channel-join": null,
@@ -39,6 +39,8 @@ describe("o som de cada entrada do sino", () => {
       // A report in my channel goes to the bell, silent.
       "report-copy": null,
       "report-decision": null,
+      // A role given to me (12/11/2026): the mention family.
+      "role-given": "mencao",
     }
     for (const [kind, som] of Object.entries(esperado)) {
       expect(somDaNotificacao(kind as AppNotification["kind"]), kind).toBe(som)
@@ -100,7 +102,7 @@ describe("o som de uma mensagem que não entra no sino", () => {
 
 describe("o toque da chamada", () => {
   /*
-    Owner request (2 November 2026, point 7): the ring is only for private
+    Point 7: the ring is only for private
     messages. In a voice room of a community nobody calls anyone: whoever enters
     shows up in the room roster, and that is all.
   */

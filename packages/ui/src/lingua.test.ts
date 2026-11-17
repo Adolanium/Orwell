@@ -3,6 +3,7 @@ import {
   aoMudarLingua,
   CHAVE_DA_LINGUA,
   definirLingua,
+  detectarLingua,
   escolherLingua,
   guardarPreferencia,
   lerPreferencia,
@@ -46,54 +47,57 @@ describe("a língua por omissão", () => {
 })
 
 describe("escolherLingua — a ordem de quem manda", () => {
+  /*
+    Since 1.3.9 (12/11/2026): the interface opens in English until the
+    person chooses another language. The browser and the system no longer count.
+    Only the address (`?lingua=`) and the saved choice do.
+  */
   it("o endereço ganha a tudo", () => {
-    expect(escolherLingua({ doEndereco: "en", guardada: "pt", doSistema: ["pt-PT"] })).toBe("en")
+    expect(escolherLingua({ doEndereco: "en", guardada: "pt" })).toBe("en")
+    expect(escolherLingua({ doEndereco: "pt", guardada: "en" })).toBe("pt")
   })
 
   it("depois do endereço, a escolha guardada", () => {
-    expect(escolherLingua({ guardada: "en", doSistema: ["pt-PT"] })).toBe("en")
+    expect(escolherLingua({ guardada: "pt" })).toBe("pt")
+    expect(escolherLingua({ guardada: "en" })).toBe("en")
   })
 
-  it('"auto" não é uma escolha: deixa passar para o sistema', () => {
-    expect(escolherLingua({ guardada: "auto", doSistema: ["en-GB"] })).toBe("en")
+  it("sem escolha, inglês", () => {
+    expect(escolherLingua({})).toBe("en")
+    expect(escolherLingua({ guardada: "auto" })).toBe("en")
+    expect(escolherLingua({ doEndereco: "klingon" })).toBe("en")
+    expect(escolherLingua({ doEndereco: "pt-PT" })).toBe("pt")
+  })
+})
+
+describe("o browser e o sistema já não contam (1.3.9)", () => {
+  const original = Object.getOwnPropertyDescriptor(Navigator.prototype, "languages")
+  afterEach(() => {
+    if (original) Object.defineProperty(navigator, "languages", { ...original, configurable: true })
+    delete (navigator as unknown as Record<string, unknown>)["languages"]
   })
 
-  it("o sistema lê-se POR ORDEM, e a segunda preferência conta", () => {
-    // A French person with English as second choice picks English, not Portuguese
-    // just because Portuguese is the base: what they wrote was that they prefer
-    // English next.
-    expect(escolherLingua({ doSistema: ["fr-FR", "en-GB", "pt-PT"] })).toBe("en")
+  it("um browser em português abre em inglês", () => {
+    Object.defineProperty(navigator, "languages", { value: ["pt-PT", "pt"], configurable: true })
+    expect(detectarLingua({ endereco: "http://localhost/app/" })).toBe("en")
   })
 
-  it("uma etiqueta regional conta pela língua, não pela região", () => {
-    expect(escolherLingua({ doSistema: ["pt-BR"] })).toBe("pt")
-    expect(escolherLingua({ doSistema: ["en-US"] })).toBe("en")
-    expect(escolherLingua({ doSistema: ["EN_gb"] })).toBe("en")
+  it("com a escolha guardada, a escolha", () => {
+    Object.defineProperty(navigator, "languages", { value: ["en-US"], configurable: true })
+    guardarPreferencia("pt")
+    expect(detectarLingua({ endereco: "http://localhost/app/" })).toBe("pt")
   })
 
-  it("um sistema que só nomeia línguas que não existem aqui apanha inglês", () => {
-    // 1.3.6: two users with the browser in German and French saw the
-    // app only in Portuguese. Someone who speaks neither reads English better.
-    expect(escolherLingua({ doSistema: ["de-DE"] })).toBe("en")
-    expect(escolherLingua({ doSistema: ["fr-FR"] })).toBe("en")
-    expect(escolherLingua({ doSistema: ["es-ES"] })).toBe("en")
-    expect(escolherLingua({ doSistema: ["de-DE", "ja"] })).toBe("en")
-    expect(escolherLingua({ guardada: "auto", doSistema: ["de-DE"] })).toBe("en")
-    expect(escolherLingua({ doEndereco: "klingon", doSistema: ["de-DE"] })).toBe("en")
+  it("com `?lingua=pt`, português, sem guardar nada", () => {
+    expect(detectarLingua({ endereco: "http://localhost/app/?lingua=pt" })).toBe("pt")
+    expect(lerPreferencia()).toBe("auto")
   })
 
-  it("uma língua conhecida mais abaixo na lista ganha ao inglês de recurso", () => {
-    expect(escolherLingua({ doSistema: ["de-DE", "pt-PT"] })).toBe("pt")
-    expect(escolherLingua({ doSistema: ["fr", "en-GB"] })).toBe("en")
-    expect(escolherLingua({ doSistema: ["pt-BR"] })).toBe("pt")
-  })
-
-  it("sem informação nenhuma do sistema, cai na base e não numa chave em cru", () => {
-    expect(escolherLingua({ doSistema: [] })).toBe("pt")
-    expect(escolherLingua({})).toBe("pt")
-    expect(escolherLingua({ doEndereco: "klingon" })).toBe("pt")
-    // Junk in the list is not information: it counts as empty.
-    expect(escolherLingua({ doSistema: ["", "  "] })).toBe("pt")
+  it("arrancar sem escolha dá inglês, num browser em português", async () => {
+    const { arrancarLingua } = await import("./strings.js")
+    Object.defineProperty(navigator, "languages", { value: ["pt-PT"], configurable: true })
+    expect(arrancarLingua({ endereco: "http://localhost/app/" })).toBe("en")
+    expect(strings.menu.leave).not.toBe("Sair do canal")
   })
 })
 
@@ -213,16 +217,13 @@ describe("translateError — o único recurso que não é o português", () => {
   })
 })
 
-describe('voltar a "automática" segue o mesmo sistema que o arranque', () => {
-  it("na aplicação instalada, a lista do anfitrião, e não o `navigator`", async () => {
-    const { arrancarLingua } = await import("./strings.js")
+describe('"auto" guardado (de antes da 1.3.9, ou de outro aparelho) é inglês', () => {
+  it("escolher português e depois voltar a \"auto\" dá inglês", async () => {
     const { aplicarEscolhaDeLingua } = await import("./hooks/useLingua.js")
-    // The host (Electron) says Portuguese; the jsdom `navigator` says "en-US".
-    expect(arrancarLingua({ doSistema: ["pt-PT"] })).toBe("pt")
-    aplicarEscolhaDeLingua("en")
-    expect(linguaActual()).toBe("en")
-    aplicarEscolhaDeLingua("auto")
+    aplicarEscolhaDeLingua("pt")
     expect(linguaActual()).toBe("pt")
+    aplicarEscolhaDeLingua("auto")
+    expect(linguaActual()).toBe("en")
   })
 })
 

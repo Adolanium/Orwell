@@ -169,13 +169,13 @@ describe('o cartão "Ligado · sala" da barra lateral', () => {
     const voltar = vi.fn()
     const sair = vi.fn()
     render(doca({ onBack: voltar, onLeave: sair }))
-    // "Connected" on top; below, only "Channel · Room" (owner request, 27 October
-    // 2026, commit 5a3b061). See `CallDock.estado.test.tsx`.
+    // "Connected" on top; below, only "Channel · Room" (commit
+    // 5a3b061). See `CallDock.estado.test.tsx`.
     expect(screen.getByText(strings.callDock.ligado)).toBeTruthy()
     expect(document.querySelector(".call-dock.lateral .call-dock-where")?.textContent).toBe("nexo · voz")
     const lateral = screen.getByRole("complementary", { name: strings.callDock.ongoing })
     expect(lateral.classList.contains("lateral")).toBe(true)
-    // The microphone is in the account bar, at the bottom (owner, 27 October 2026):
+    // The microphone is in the account bar, at the bottom:
     // the card does not draw it, even with `onToggleMic` passed.
     expect(screen.queryByRole("button", { name: strings.call.micAria(false) })).toBeNull()
     expect(screen.queryByRole("button", { name: strings.call.micAria(true) })).toBeNull()

@@ -435,7 +435,9 @@ export function itensDoCanal(contents: VaultContents, canal: string, opcoes: Opc
     }
   }
   for (const [chave, entrada] of reaccoes) {
-    if (entrada.payload["remove"] !== true) itens.push({ tipo: "reaccao", balde: dia(entrada.at), chave, fonte: fonteDe(entrada) })
+    // One bucket, as in `itemDoPayload`: a reaction carries no clock, and the stored
+    // `at` is when each device received it, which differs between devices.
+    if (entrada.payload["remove"] !== true) itens.push({ tipo: "reaccao", balde: "", chave, fonte: fonteDe(entrada) })
   }
   for (const [autor, acto] of lacos) itens.push({ tipo: "laco", balde: autor, chave: `laco|${autor}|${acto}` })
 

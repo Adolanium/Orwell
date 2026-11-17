@@ -37,7 +37,7 @@ describe("Avatar", () => {
 })
 
 /**
- * The presence ring (requested by the owner, October 27, 2026): color by
+ * The presence ring: color by
  * state, and pulsing only during a call. jsdom does not paint, so we measure what
  * CSS reads: `data-anel` and `data-em-chamada`. The color for each state and the
  * animation are in `scripts/medir-aneis-de-presenca.mjs`.

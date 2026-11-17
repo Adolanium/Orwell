@@ -141,8 +141,8 @@ h3 {
 .message .message-body {
   min-width: 0;
   /* The balloon is the size of what it holds, not the column: "ok" is a small
-     balloon, a paragraph is a wide balloon, an image is the image. Owner request
-     on 27 October 2026, for rooms and direct messages. */
+     balloon, a paragraph is a wide balloon, an image is the image. This holds
+     for rooms and direct messages. */
   width: fit-content;
   max-width: min(640px, 100%);
   padding: var(--space-3) 14px;
@@ -183,7 +183,7 @@ h3 {
 /* ------------------------------------------------------------ the controls */
 
 /* The primary from the boards: gradient from indigo to accent, with dark text.
-   The glow around it (owner, 27 October 2026: "subtle glow on pink and blue
+   The glow around it ("subtle glow on pink and blue
    buttons") is only outer shadow: the background and letter stay the same, and
    so does the contrast. */
 .primary {
@@ -327,7 +327,7 @@ select option {
 
   /* The input bar spans the full width of the main area, like the top bar: without
      the 20px inner margin on each side, it ended 15px before the end of the members
-     panel and did not align with anything (owner, 27 October 2026). The capsule has
+     panel and did not align with anything. The capsule has
      its own padding; the margin was extra. */
   .chat-composer,
   .chat-escrita-trancada {
@@ -436,7 +436,7 @@ select option {
   /* With reduced motion the label still scrolls, at half speed. Until 28 October
      2026 it stopped and cut with ellipsis, and on Windows with animations off (which
      the browser reads as reduced motion) the personal message, room and track name
-     all got cut without ever scrolling: the owner saw it in places where text did not
+     all got cut without ever scrolling, in places where text did not
      fit. The scrolling label exists to read what does not fit; stopped, it does not
      help. Same logic as the opening ring. The `!important` overrides the universal
      rule in `base.css`, which sets duration to 0.01ms and one loop only. */
@@ -607,15 +607,15 @@ select option {
 /* The ring: one thin complete circle, and on top a ring in four quarters with
    the site colors, rotating.
    
-   Owner request 27 October 2026: "the circle around Orwell divided into 4 parts
+   The requirement: "the circle around Orwell divided into 4 parts
    with site colors alternately". The quarters are cyan, indigo, pink and green
    (`--acento`, `--indigo`, `--rosa`, `--presenca`: the four skin colors, in the
-   order the site uses them), adjacent with no gap: the owner chose this from four
+   order the site uses them), adjacent with no gap: this was chosen from four
    versions (one with gaps, one with two colors, this one, and one with cyan and
    pink). Drawn with a `conic-gradient` clipped to a ring with a radial mask: a
    `border` can only paint four sides, and the sides of a circle are not quarters.
    
-   28 October 2026, owner request: "gradients between colors and more speeds".
+   Then: "gradients between colors and more speeds".
    The four colors no longer have edges: each fades into the next, and the last
    fades back to the first, so the loop seam does not show. The ring no longer
    spins at constant speed: starts fast, brakes mid-loop, slows down, speeds up
@@ -689,7 +689,7 @@ select option {
   The small ring in "Opening...": the same arc as the splash, scaled to the
   letter, inside the gate button while the key derives (one to seven seconds on
   a phone). Until 26 October 2026 the button only changed the word, and a button
-  still for seven seconds reads as a frozen app. Owner request: "Opening" must
+  still for seven seconds reads as a frozen app. Requirement: "Opening" must
   have a spinning animation.
 
   Rotates with the text color where it is (`currentColor`): in the primary button

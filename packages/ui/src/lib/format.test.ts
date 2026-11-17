@@ -195,7 +195,7 @@ describe("feedOf — edições e apagados", () => {
 /**
  * The same post stated twice is one post, not two.
  *
- * Reported by the owner in production: "posts appear duplicated". It is not
+ * The bug in production: "posts appear duplicated". It is not
  * twice as many-it is the SAME post, same `id`, stored twice. `republishPosts`
  * restates the wall on each new feed entry, precisely so newcomers do not find
  * an empty wall, and writes in the header that this is "idempotent by design:

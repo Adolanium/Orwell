@@ -24,8 +24,8 @@ export type ChamadaNoPainel = {
 /**
  * The foot of a column: the control panel.
  *
- * **The P1 panel, console in three tiers.** The owner chose it on October 28,
- * 2026, from six options, with this request: the "Connected" banner and the
+ * **The P1 panel, console in three tiers.** Chosen from six options,
+ * with this requirement: the "Connected" banner and the
  * account banner "must be one," with proportion and weight, because "it is
  * practically our control panel." It replaces the Discord-style banner described
  * next, and looks like this:
@@ -47,11 +47,11 @@ export type ChamadaNoPainel = {
  * (channels and conversations) draw this same component, not two copies that
  * diverge at the first fix.
  *
- * **The Discord-style banner.** The owner chose it on October 27, 2026, from
+ * **The Discord-style banner.** Chosen from
  * twelve options (A through L), in the mockup "Orwell Settings 0.9". It replaces
  * the three-tier card that was here: the microphone and speaker pair with arrows,
  * the identity with the bell and copy, and the status text line. That card had
- * earlier owner decisions (icon instead of word, "the pair is the box"), and this
+ * earlier design decisions (icon instead of word, "the pair is the box"), and this
  * new choice supersedes them. What stays:
  *
  * - a banner without card, without margin and without radius, in the minimal bar

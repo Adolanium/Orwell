@@ -30,6 +30,8 @@ function ponte(chamadas: string[]): EnclaveBridge {
         return { ok: true }
       },
       destroy: async () => ({ ok: true }),
+      // The step after the vault is born offers the account file: it calls export.
+      export: async () => ({ data: "ficheiro" }),
     },
     identity: { create: async () => ({ address: "@ana:localhost", accountId: "ana" }) },
     session: { connect: async () => ({ ok: true }) },

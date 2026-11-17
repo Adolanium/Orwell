@@ -400,6 +400,37 @@ export function openDatabase(path: string): DatabaseSync {
     -- desde que segundo. ate_second é o fim (--ate, o último segundo desse
     -- dia em UTC), ou NULL: até à revisão. Depois do fim a conta volta a
     -- entrar sem ninguém mexer na linha, e activa fica a 1.
+    -- Web Push: one row per DEVICE that asked to be woken while the app is
+    -- closed (push.subscribe). The endpoint is a URL at the browser's push
+    -- service (Apple, Google, Mozilla, Microsoft); p256dh and auth are the keys
+    -- each push is encrypted to (RFC 8291), so the push service reads nothing.
+    --
+    -- What this table teaches the operator: which push service each device
+    -- uses, its language, which whole channels that device muted, the pause or
+    -- Busy end, and (from last_push_minute and pushes_dia) roughly when the
+    -- device was last woken and how often today. Nothing about rooms, senders
+    -- or text: those are inside the ciphertext. Deleted when the device is
+    -- revoked, when the push service answers 404 or 410, when the browser's
+    -- expiry passes, and after 90 days without renewal (Store.sweepPush).
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      address          TEXT NOT NULL,
+      device_key       BLOB NOT NULL,
+      endpoint         TEXT NOT NULL UNIQUE,
+      p256dh           BLOB NOT NULL,
+      auth             BLOB NOT NULL,
+      lingua           TEXT NOT NULL,
+      silenciados      TEXT NOT NULL,
+      calar_ate_minute INTEGER NOT NULL DEFAULT 0,
+      expires_minute   INTEGER,
+      renewed_minute   INTEGER NOT NULL,
+      last_push_minute INTEGER NOT NULL DEFAULT 0,
+      pushes_dia       INTEGER NOT NULL DEFAULT 0,
+      dia              INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (address, device_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS push_by_address ON push_subscriptions (address);
+
     CREATE TABLE IF NOT EXISTS suspensoes (
       address    TEXT PRIMARY KEY,
       activa     INTEGER NOT NULL,
@@ -411,6 +442,7 @@ export function openDatabase(path: string): DatabaseSync {
 
   migrarKeyPackages(db)
   migrarInvites(db)
+  migrarChannelActivity(db)
 
   return db
 }
@@ -470,6 +502,29 @@ function migrarInvites(db: DatabaseSync): void {
     db.exec("ALTER TABLE invites ADD COLUMN selo TEXT")
   }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS invites_by_short_code ON invites (short_code)")
+}
+
+/**
+ * The `channel_activity.seq_floor` column in a database created without it (1.3.7 and before).
+ *
+ * The floor for the next `seq` of a channel whose events retention deleted ALL of.
+ * Without it, numbering restarts at zero (`MAX(seq)` of an empty table), and every
+ * client that already holds a later `seq` reads the new events as old: the Welcome
+ * snapshot refuses its own items as "the server still serves them", and a backfill
+ * from the client's cursor skips them. See `Store.expireEvents`.
+ *
+ * The same step as `migrarKeyPackages`: add the missing column, without DEFAULT, so
+ * the table is not rewritten; old rows read NULL, which means "no floor". Channels
+ * that already restarted their numbering in production are not repaired here: there
+ * is nothing left to read the old height from.
+ *
+ * Idempotent: opening the same database twice does nothing the second time.
+ */
+function migrarChannelActivity(db: DatabaseSync): void {
+  const colunas = db.prepare("PRAGMA table_info(channel_activity)").all() as { name: string }[]
+  if (!colunas.some((coluna) => coluna.name === "seq_floor")) {
+    db.exec("ALTER TABLE channel_activity ADD COLUMN seq_floor INTEGER")
+  }
 }
 
 export function currentMinute(): number {

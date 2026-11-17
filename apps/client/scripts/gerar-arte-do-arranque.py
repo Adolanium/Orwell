@@ -13,7 +13,7 @@ O que sai, tudo em `data:` URI, porque a página do arranque não fala com a red
   - a Space Grotesk, cortada aos caracteres latinos, com o eixo do peso;
   - as tarjas da marca, lidas de `packages/ui/src/marca.gen.ts` (a cheia).
 
-A composição é a da folha que o dono escolheu: o recorte 4:5 do topo, reduzido
+A composição é a da folha escolhida: o recorte 4:5 do topo, reduzido
 a 84 %, com as margens esbatidas, e a metade de baixo fundida em #080c1a.
 """
 import base64

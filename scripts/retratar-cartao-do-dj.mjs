@@ -1,5 +1,5 @@
 /**
- * The DJ card (design D1, chosen by the owner on 28 October 2026),
+ * The DJ card (design D1),
  * in a real layout engine.
  *
  * The card tests run in jsdom, which does not apply stylesheets: they say

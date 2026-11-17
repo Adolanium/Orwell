@@ -52,7 +52,7 @@ export interface ImageBudget {
 /**
  * The cap for an animated GIF in avatar and icon: 160 KB.
  *
- * Owner decision on October 27, 2026 (phase 1c of the 0.9 settings plan). The math is
+ * Phase 1c of the 0.9 settings plan. The math is
  * the same, people × channels: the profile goes out again for every channel and every
  * membership change. In a community of 50 people with 20 channels each, 160 KB avatars
  * take about 160 MB, against 96 MB at 96 KB, and every membership change in a 50-person

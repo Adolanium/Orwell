@@ -11,8 +11,8 @@ afterEach(cleanup)
 /**
  * What the account banner SHOWS, and what it does when asked.
  *
- * The banner is alternative B ("Discord-style banner") that the owner chose on
- * October 27, 2026: one line only, with avatar, name, status and latency, and
+ * The banner is alternative B ("Discord-style banner"), the chosen design:
+ * one line only, with avatar, name, status and latency, and
  * four identical buttons. The address does not show: it is not selected, not
  * memorized, and anyone looking at their own banner already knows who they are.
  * Copying it lives in Account.
@@ -396,7 +396,7 @@ describe("CartaoDaConta — a identidade continua a abrir o que abria", () => {
 })
 
 /**
- * The ring of your own face (owner request, October 27, 2026): the same ring
+ * The ring of your own face: the same ring
  * as other faces, by the dot rule. The color is shown in
  * `scripts/medir-aneis-de-presenca.mjs`; here we measure what CSS reads.
  */
@@ -432,7 +432,7 @@ describe("CartaoDaConta — o anel da própria cara", () => {
 })
 
 /**
- * The P1 control panel (owner, October 28, 2026): the "Connected" banner and
+ * The P1 control panel: the "Connected" banner and
  * the account banner in one piece, in three tiers. You on top; the call in the
  * middle, in a box that goes back to the call; a row of identical buttons at
  * the bottom.

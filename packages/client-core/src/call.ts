@@ -21,7 +21,7 @@ import {
   type SinalizacaoSfu,
 } from "./call-sfu.js"
 import { ControloDeVoz, type EstadoDoAudio } from "./audio/controlo.js"
-import { VigiaDoMicrofone, type MorteDoMicrofone, type SaudeDoMicrofone } from "./audio/vigia-do-microfone.js"
+import { sistemaSuspendeCaptura, VigiaDoMicrofone, type MorteDoMicrofone, type SaudeDoMicrofone } from "./audio/vigia-do-microfone.js"
 import { Emitter } from "./emitter.js"
 import { chaveDoErroDoBrowser } from "./erros-do-browser.js"
 import { CifraDeMedia, cifraDeMediaEmFalta, type MaterialDeChave } from "./media-sframe.js"
@@ -147,7 +147,7 @@ export interface Participant {
    * This person says they are viewing the screen of (the `aVer` in their roster).
    *
    * For the sharer's card to count who is viewing (the eye next to the
-   * "LIVE" badge, owner, 2 November 2026), and not just who sees OURS.
+   * "LIVE" badge), and not just who sees OURS.
    * It is the same field that already travels in each person's `voice.join`: the server
    * did not change. Optional because test doubles do not bring it; absent, they said
    * nothing.
@@ -322,6 +322,14 @@ export interface CallBridge {
    * See `#entrarSemVoz`.
    */
   salaAfk?(channel: string, room: string): boolean | Promise<boolean>
+  /**
+   * Whether `address` may share the screen in this room (the `transmitir` role
+   * power, 12/11/2026). The roles belong to the session, like `salaAfk`.
+   * Asked before our own share, and before taking someone else's screen offer:
+   * an altered app can still produce, and an honest one does not show it.
+   * Absent means "yes", which is what an old host does.
+   */
+  podeTransmitir?(channel: string, room: string, address: UserAddress): boolean | Promise<boolean>
   /**
    * STUN and TURN servers for this call, from our own homeserver.
    *
@@ -855,7 +863,7 @@ export class Call extends Emitter<CallEvents> {
   /**
    * Whose screen we chose to view. See `aceitarEcra`.
    *
-   * Owner request, October 5, 2026: *when someone shares their screen, others
+   * The requirement: *when someone shares their screen, others
    * should only join the stream if they want to.* Before this it was automatic,
    * and anyone receiving took 2.5 Mbps forced with nowhere to refuse, no
    * simulcast or layers, so no small version to ask for.
@@ -1154,7 +1162,7 @@ export class Call extends Emitter<CallEvents> {
    * not been called", the error went up to the bridge and became a toast, and
    * one side was left without an answer.
    *
-   * Reported by the owner on August 14, 2026, with the full signature: failure
+   * The bug, with the full signature: failure
    * at the second connection, works at the third, and happens both ways. Works
    * at the third because the second offer arrives after the first is done.
    */
@@ -1474,7 +1482,7 @@ export class Call extends Emitter<CallEvents> {
    *    pushes past the signal ceiling, and what comes out is not louder speech:
    *    it is torn speech, which the other side hears as friction or static.
    *    The distortion was OURS, made here, not from the speaker's microphone.
-   *    Reported by the owner on September 13, 2026. Holds the peaks and lets
+   *    The limiter holds the peaks and lets
    *    the rest through.
    *
    * Context is taken back at the start: an `AudioContext` is born suspended when
@@ -1588,7 +1596,10 @@ export class Call extends Emitter<CallEvents> {
     const faixa = (this.#capturaCrua ?? this.#local)?.getAudioTracks()[0] ?? null
     if (!faixa) return null
     const cadeia = this.audio.saudeDaCadeia
-    return { faixa, contexto: cadeia?.contexto ?? this.#processador, cadeia }
+    // Screen locked or app in the background on a phone: the watchdog waits for the return. See `SaudeDoMicrofone.escondida`.
+    const escondida =
+      (globalThis as { document?: { visibilityState?: string } }).document?.visibilityState === "hidden" && sistemaSuspendeCaptura()
+    return { faixa, contexto: cadeia?.contexto ?? this.#processador, cadeia, escondida }
   }
 
   /**
@@ -1597,7 +1608,7 @@ export class Call extends Emitter<CallEvents> {
    *
    * Each cause gets its code in the log (`call-microfone-terminou`, `-calado`,
    * `-contexto-parado`, `-cadeia-rebentou`, `-cadeia-parada`), so the next
-   * report from the owner says what happened. Then `call-microfone-recuperado`
+   * bug report says what happened. Then `call-microfone-recuperado`
    * with the time it took, or `-nao-reabriu` for each failed attempt and
    * `-desistiu` at the end, with 412 on the screen (same as capture that won't
    * open on entry). The call always stays: you still hear without a microphone.
@@ -1758,7 +1769,7 @@ export class Call extends Emitter<CallEvents> {
     /**
      * The first line of the join in the log, before anything that can fail.
      *
-     * **Written because there was none.** On August 17, 2026 the owner
+     * **Written because there was none.** A user once
      * copied the diagnostics right after a call that did not join, and there
      * was not a single `call-` line in it: the join broke before the engine
      * even existed, and everything the call knows to say about itself came out
@@ -2126,7 +2137,7 @@ export class Call extends Emitter<CallEvents> {
    * Join the AFK room: be there, and nothing else (2/11/2026).
    *
    * "The room is like any other but it does not receive text, and there is no
-   * voice" (the owner). Others see us in the room list, and that is all that
+   * voice" (the requirement). Others see us in the room list, and that is all that
    * gets set up:
    *
    * - **no microphone**: we do not open capture, nor the host media gate. The
@@ -2709,6 +2720,17 @@ export class Call extends Emitter<CallEvents> {
   static JANELA_DE_REFAZER_MS = 30_000
   /** The pause between attempts with a connection (it grows: 2 s, 4 s). */
   static PAUSA_ENTRE_REFAZERES_MS = 2_000
+  /**
+   * How long a rebuild waits, in total, for a connection that is not there.
+   *
+   * A phone unlocking may take a while to get the network back. That time does
+   * not count against `JANELA_DE_REFAZER_MS`, and an attempt that failed only
+   * for lack of a connection does not count as one of the three. Past this,
+   * with no connection at all, the call is given up (403).
+   */
+  static ESPERA_PELA_LIGACAO_MS = 120_000
+  /** Attempts that fail for lack of a connection, at most, before giving up: a socket that flaps forever. */
+  static FALHAS_SEM_LIGACAO_MAXIMAS = 6
 
   /** A rebuild in progress. See `#refazerMedia`. */
   #aRefazer = false
@@ -2720,20 +2742,21 @@ export class Call extends Emitter<CallEvents> {
   /** The connection came back in the middle of an attempt: the next wait does not wait. */
   #voltouEntretanto = false
 
-  #esperarParaRefazer(ms: number): Promise<void> {
+  /** Waits `ms`, or less if woken. `true` when woken (the connection came back, or the person left). */
+  #esperarParaRefazer(ms: number): Promise<boolean> {
     if (this.#voltouEntretanto) {
       this.#voltouEntretanto = false
-      return Promise.resolve()
+      return Promise.resolve(true)
     }
     return new Promise((resolve) => {
       const prazo = setTimeout(() => {
         this.#acordarORefazer = null
-        resolve()
+        resolve(false)
       }, ms)
       this.#acordarORefazer = () => {
         clearTimeout(prazo)
         this.#acordarORefazer = null
-        resolve()
+        resolve(true)
       }
     })
   }
@@ -2783,7 +2806,14 @@ export class Call extends Emitter<CallEvents> {
     this.emit("diagnostic", { code: "call-sfu-a-religar", detail: motor.ambito ?? "" })
     this.#aRefazer = true
     this.#voltouEntretanto = false
-    const comecou = Date.now()
+    /*
+     * The window and the attempts count only time WITH a connection (screen
+     * locked, M2). `comecou` moves forward by every wait for a connection, and
+     * a failure for lack of one gives its attempt back.
+     */
+    let comecou = Date.now()
+    let esperaSemLigacao = 0
+    let falhasSemLigacao = 0
     let erro: unknown = null
     try {
       for (let tentativa = 1; tentativa <= Call.TENTATIVAS_DE_REFAZER; tentativa++) {
@@ -2797,11 +2827,24 @@ export class Call extends Emitter<CallEvents> {
           this.emit("diagnostic", { code: "call-sfu-refazer-tentativa", detail: `${tentativa}/${Call.TENTATIVAS_DE_REFAZER}: ${String((falha as Error)?.message ?? falha)}` })
           // A refusal with its own name (full, encryption) does not change by trying again.
           if (ehRecusaDoSfu(falha) || ehCifraDoEmissorEmFalta(falha)) break
+          const semLigacao = /not connected|connection dropped|connection was replaced/.test(String((falha as Error)?.message ?? ""))
+          if (semLigacao) {
+            // Without a connection, trying at once would fail again: wait for it to come back, which wakes this.
+            falhasSemLigacao++
+            const resta = Call.ESPERA_PELA_LIGACAO_MS - esperaSemLigacao
+            if (resta <= 0 || falhasSemLigacao > Call.FALHAS_SEM_LIGACAO_MAXIMAS) break
+            const esperouDesde = Date.now()
+            const acordou = await this.#esperarParaRefazer(resta)
+            const esperou = Date.now() - esperouDesde
+            esperaSemLigacao += esperou
+            comecou += esperou
+            if (!acordou) break
+            tentativa--
+            continue
+          }
           const resta = Call.JANELA_DE_REFAZER_MS - (Date.now() - comecou)
           if (tentativa === Call.TENTATIVAS_DE_REFAZER || resta <= 0) break
-          // Without a connection, trying at once would fail again: wait for it to come back, which wakes this.
-          const semLigacao = /not connected|connection dropped|connection was replaced/.test(String((falha as Error)?.message ?? ""))
-          await this.#esperarParaRefazer(semLigacao ? resta : Math.min(Call.PAUSA_ENTRE_REFAZERES_MS * tentativa, resta))
+          await this.#esperarParaRefazer(Math.min(Call.PAUSA_ENTRE_REFAZERES_MS * tentativa, resta))
         }
       }
     } finally {
@@ -3089,7 +3132,7 @@ export class Call extends Emitter<CallEvents> {
    * for everyone **forever**, with no retry and no signal. From the viewer's
    * side, a person speaking with the mute icon on, or the opposite.
    *
-   * Owner's report on August 14, 2026: "I'm hearing a user whose mute icon is
+   * The bug: "I'm hearing a user whose mute icon is
    * active... it's unpredictable". Unpredictable is the right word for a frame
    * that gets lost sometimes and other times doesn't.
    *
@@ -3365,6 +3408,16 @@ export class Call extends Emitter<CallEvents> {
    * repeated the lie that the call card footer was writing on the screen. See
    * `mediaIsE2EE`, above.
    */
+  /**
+   * Whether this person may share the screen in our room (`transmitir`). Only a
+   * synchronous "no" counts: an answer still on its way is not a refusal.
+   */
+  #transmiteAqui(address: UserAddress): boolean {
+    const canal = this.#channel
+    if (!canal) return true
+    return this.bridge.podeTransmitir?.(canal, this.#room, address) !== false
+  }
+
   async startScreenShare(): Promise<boolean> {
     const canal = this.#channel
     if (!canal) {
@@ -3387,6 +3440,12 @@ export class Call extends Emitter<CallEvents> {
     if (!this.podePartilharEcra) {
       this.emit("error", { detail: "this call server carries only voice" })
       this.emit("diagnostic", { code: "call-ecra-sem-caminho" })
+      return false
+    }
+
+    // The role power, also before the system picker. See `podeTransmitir` in `CallBridge`.
+    if ((await this.bridge.podeTransmitir?.(canal, this.#room, this.bridge.selfAddress)) === false) {
+      this.emit("error", { detail: "you may not share your screen in this room" })
       return false
     }
 
@@ -3432,7 +3491,7 @@ export class Call extends Emitter<CallEvents> {
             Thirty frames per second, capped at Full HD.
 
             It was fifteen until November 2, 2026, thinking of text and code,
-            which change in jumps. The owner wants 30 ("I want 30 fps"): a game
+            which change in jumps. It is 30 now ("I want 30 fps"): a game
             or a video at 15 stutters. The 2.5 Mbit/s cap does not change, and
             the `detail` hint (below) tells the encoder that when the network
             tightens, sacrifice smoothness not sharpness: text stays readable.
@@ -3633,8 +3692,8 @@ export class Call extends Emitter<CallEvents> {
       checkbox is checked, and the checkbox can't be checked by code: it's
       checked on a tab, unchecked on full screen, barely exists on a window,
       and Firefox and Safari don't provide audio at all. This was the case
-      "their choice, nothing to say", and the owner saw silent sharing without
-      knowing why (2/11/2026). Sharing continues; the user learns how to send
+      "their choice, nothing to say", and the user saw silent sharing without
+      knowing why. Sharing continues; the user learns how to send
       audio.
       */
     if (!this.bridge.somDoEcraDisponivel) {
@@ -4136,8 +4195,8 @@ export class Call extends Emitter<CallEvents> {
          * green card and lets nothing through.
          *
          * HONESTLY: this is the same trap as the microphone, fixed by
-         * symmetry with it, and it is NOT proven that this is what the owner saw on 13
-         * August 2026 ("appears connected but I stop hearing and
+         * symmetry with it, and it is NOT proven that this is the reported
+         * bug ("appears connected but I stop hearing and
          * vice-versa"). The test in `call.cifra-reentrada.test.ts` does not fail
          * when the old order is restored: there is another path that sets the value
          * before it matters. Left for the usual reason, a field read
@@ -4177,9 +4236,9 @@ export class Call extends Emitter<CallEvents> {
            * With two people it still worked, the one without a pair announces again
            * every five seconds. With three it stopped working, because a single live
            * connection silences the periodic announcement: the person saw the other in
-           * "connecting" while hearing the third just fine. The owner reported this on
-           * August 13, 2026: "whenever there are 3+ members it doesn't connect so
-           * seamlessly", and the asymmetry is his, we lose the one on the wrong side
+           * "connecting" while hearing the third just fine. The reported bug:
+           * "whenever there are 3+ members it doesn't connect so
+           * seamlessly", and the asymmetry is this one, we lose the one on the wrong side
            * of the address comparison.
            *
            * Recording the wait in `#perdidos` closes the gap: it tells "I am connected"
@@ -4875,8 +4934,8 @@ export class Call extends Emitter<CallEvents> {
      * address comparison, the one waiting for the offer instead of making it,
      * stayed waiting for a reannouncement that never came again.
      *
-     * HONESTLY: this is an invariant correction, and **not proven** to be what
-     * the owner reported on August 14th ("two connect, the third enters and
+     * HONESTLY: this is an invariant correction, and **not proven** to be
+     * the reported bug ("two connect, the third enters and
      * keeps calling"). The scenario set up to reproduce it passes with and
      * without this line, so either the path is elsewhere or it's missing a loss
      * the test doesn't simulate. It stays for the usual reason: a place that
@@ -5010,7 +5069,7 @@ export class Call extends Emitter<CallEvents> {
        *
        * In that state the person stays with `connected: false`, no timer, not
        * in `#perdidos`, and no reannouncement: "calling" indefinitely, which
-       * is what the owner reported on August 14th, "keeps calling until it
+       * is the reported bug, "keeps calling until it
        * drops".
        *
        * Rearming gives it the same window as any new connection: if it comes
@@ -5491,9 +5550,12 @@ once, and it left.
           still remains. Saving bandwidth in the mesh is simulcast and layers,
           and that is outside this slice.
           */
+        // Without `transmitir` here, the screen of an altered app is not shown: no stage, no "Watch".
         screen:
-          this.#peerScreen.get(address) === true && this.#ecrasAceites.has(address) ? peer.screen : null,
-        ecraOferecido: this.#peerScreen.get(address) === true,
+          this.#peerScreen.get(address) === true && this.#ecrasAceites.has(address) && this.#transmiteAqui(address)
+            ? peer.screen
+            : null,
+        ecraOferecido: this.#peerScreen.get(address) === true && this.#transmiteAqui(address),
         aVerONossoEcra: (this.#peerAVer.get(address) ?? []).includes(this.bridge.selfAddress),
         aVer: this.#peerAVer.get(address) ?? [],
         // The music slot always arrives (muted). It shows only while it SAYS it is
@@ -5681,6 +5743,8 @@ once, and it left.
         this.emit("diagnostic", detail === undefined ? { code } : { code, detail }),
       aoMudar: () => this.#announce(),
       verOEcraDe: (quem) => this.#ecrasAceites.has(quem),
+      // An offer from someone without `transmitir` here is not shown (12/11/2026).
+      podeTransmitirDe: (quem) => this.#transmiteAqui(quem),
       // The call continues: only the rejected gesture stays undone, and the user sees why.
       aoRecusar: (erro) => this.emit("error", erroDaChamada(erro)),
       /*
@@ -5739,7 +5803,7 @@ once, and it left.
        *
        * **And what it told was the raw error.** The interface shows the message it
        * gets, and what it got was `createEncodedStreams is not a
-       * function`-which is correct, the exact phrase the owner reported word for
+       * function`-which is correct, the exact phrase in the bug report, word for
        * word, and says nothing to someone who just wanted to talk to someone. The whole thing goes
        * to the log with a proper name, and to the screen goes a sentence.
        */

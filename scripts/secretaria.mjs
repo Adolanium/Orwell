@@ -65,6 +65,7 @@ if (process.env.ORWELL_E2E_VISIVEL !== "1") {
   }
 }
 require(process.env.ORWELL_E2E_PRINCIPAL)
+if (process.env.ORWELL_E2E_MEDIDOR) require(process.env.ORWELL_E2E_MEDIDOR)
 `
 
 /**
@@ -109,6 +110,76 @@ export async function abrirSecretaria({ rotulo, dados, selectorReal = false, pri
       } catch {}
       rmSync(pastaDaApp, { recursive: true, force: true })
       if (!guardarDados) rmSync(pastaDeDados, { recursive: true, force: true })
+    },
+  }
+}
+
+/**
+ * The same app, launched WITHOUT Playwright, with a driver module required in
+ * the main process after the app (`medidor`, a CommonJS file).
+ *
+ * Why it exists: Playwright's attachment keeps the page "visible" and awake
+ * whatever the window does (focus emulation; measured: hidden, minimized, the
+ * page stays visible). A bare Electron window goes hidden on minimize, like the
+ * installed app on Windows. A measure of the return from a minimized window has
+ * to run without Playwright attached. The driver talks over stdin/stdout lines.
+ *
+ * @param {{ dados: string, principal?: string, medidor: string }} opcoes
+ */
+export async function lancarSemPlaywright({ dados, principal = PRINCIPAL, medidor }) {
+  const { spawn } = await import("node:child_process")
+  const pastaDaApp = mkdtempSync(join(tmpdir(), "orwell-e2e-app-"))
+  writeFileSync(join(pastaDaApp, "package.json"), JSON.stringify({ name: "orwell-e2e", productName: "OrwellE2E", version: VERSAO, main: "arranque.cjs" }))
+  writeFileSync(join(pastaDaApp, "arranque.cjs"), ARRANQUE)
+  const executavel = (await import("electron")).default
+  const filho = spawn(executavel, [pastaDaApp], {
+    cwd: RAIZ,
+    env: { ...process.env, ORWELL_E2E_DADOS: dados, ORWELL_E2E_PRINCIPAL: principal, ORWELL_E2E_MEDIDOR: medidor, ENCLAVE_TRACE: "" },
+    stdio: ["pipe", "pipe", "pipe"],
+  })
+  // The app dies with this script, even when it is stopped: an orphan window would stay on screen.
+  const matar = () => {
+    try {
+      filho.kill("SIGKILL")
+    } catch {}
+  }
+  process.once("exit", matar)
+  for (const sinal of ["SIGINT", "SIGTERM"]) process.once(sinal, () => (matar(), process.exit(130)))
+  const registo = []
+  const esperas = []
+  let resto = ""
+  filho.stdout.on("data", (b) => {
+    resto += String(b)
+    let i
+    while ((i = resto.indexOf("\n")) >= 0) {
+      const linha = resto.slice(0, i)
+      resto = resto.slice(i + 1)
+      if (linha.startsWith("MEDIDOR ")) esperas.shift()?.(JSON.parse(linha.slice(8)))
+      else registo.push(`PRINCIPAL ${linha}`)
+    }
+  })
+  filho.stderr.on("data", (b) => registo.push(`PRINCIPAL! ${String(b).trim()}`))
+  return {
+    registo,
+    /** The main process (the Electron binary itself, spawned directly). */
+    pid: filho.pid,
+    /** Send one command to the driver and wait for its one-line JSON answer. */
+    pedir(comando, args = {}, ms = 300_000) {
+      return new Promise((ok, falha) => {
+        const relogio = setTimeout(() => falha(new Error(`driver did not answer: ${comando}`)), ms)
+        esperas.push((r) => {
+          clearTimeout(relogio)
+          if (r?.erro) falha(new Error(`driver: ${r.erro}`))
+          else ok(r)
+        })
+        filho.stdin.write(`${JSON.stringify({ comando, ...args })}\n`)
+      })
+    },
+    async fechar() {
+      try {
+        filho.kill("SIGKILL")
+      } catch {}
+      rmSync(pastaDaApp, { recursive: true, force: true })
     },
   }
 }

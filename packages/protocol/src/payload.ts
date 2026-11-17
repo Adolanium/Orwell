@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { CapacidadesDeAparelho, PAYLOADS_DE_ESTADO } from "./estado.js"
-import { Autoria, RelatosNoFio } from "./autoria.js"
+import { Autoria, ItemRelatado, RelatosNoFio } from "./autoria.js"
 import { ParteDeVideo, PartesDoVideo, PosterDoVideo } from "./video.js"
 import { TECTO_DO_NOME_DA_MUSICA } from "./musica.js"
 
@@ -242,6 +242,23 @@ export const POWERS = [
   "gerirconvites",
   "verregisto",
   "apelidos",
+  /*
+    Share the screen in a voice room (12/11/2026: "streams pass
+    to a role function instead of being open"). A NEW name and not `ecra`,
+    which has the same meaning and was vocabulary only: `ecra` is in the
+    defaults of `@todos` and in every `@todos` already published, so enforcing
+    it would leave screen sharing open in every existing channel. `transmitir`
+    is in no `@todos`, so only admins, the founder and the roles that get it
+    share. A 1.3.7 client does not know the name and drops it (`poderesConhecidos`).
+  */
+  "transmitir",
+  /*
+    A property of the role, not of its members (12/11/2026): anyone may mention
+    this role, as Discord's "Allow anyone to @mention this role". It travels in
+    `powers` because that list is open by design: a 1.3.7 drops the name and
+    nothing else changes, and the signed payload stays the same shape.
+  */
+  "mencionavel",
 ] as const
 export type Power = (typeof POWERS)[number]
 
@@ -314,7 +331,7 @@ export const ROLE_COLOURS = [
   "turquesa",
   "ceu",
   "lilas",
-  // Eight more, all vivid, on October 27, 2026 (owner request). At the end, as
+  // Eight more, all vivid. At the end, as
   // the note above says: an old version reads them as absent colour.
   "vermelho",
   "laranja",
@@ -344,7 +361,7 @@ export type RoleColour = (typeof ROLE_COLOURS)[number]
 export const TYPING_TTL_MS = 6_000
 
 /**
- * The minimum interval between nudges, requested by the owner.
+ * The minimum interval between nudges.
  *
  * Five seconds. It lives here for the same reason as the timeout above: the
  * sender throttles itself by it, and the receiver rejects by it. Two layers, one
@@ -581,6 +598,20 @@ export const Poll = z.object({
    * at most, which is what fits on a card without it becoming a form.
    */
   options: z.array(z.string().min(1).max(120)).min(2).max(10),
+  /**
+   * When the poll closes by itself, set by whoever creates it.
+   *
+   * A claim of the creator's clock, like every timestamp here, and that is
+   * enough: the votes are judged against it by THEIR OWN timestamp (`at`), not
+   * by the clock of whoever is reading, so two devices reach the same count
+   * for the same events. A client that does not know the field strips it and
+   * shows the poll with no deadline: nothing breaks, it only lets late votes
+   * through on its own screen.
+   *
+   * `.catch(undefined)`: an unreadable deadline counts as no deadline and does
+   * not take the poll down.
+   */
+  closesAt: Timestamp.optional().catch(undefined),
 })
 export type Poll = z.infer<typeof Poll>
 
@@ -771,6 +802,45 @@ export const PINNED_BODY_MAX = 1_000
  * sender is the republisher. Without this field, republishing would rewrite the
  * authorship of every pin to the republisher's name.
  */
+/**
+ * How many attachments of a pinned message travel with the copy. The rest is counted
+ * in the text of the interface, not carried.
+ */
+export const PINNED_ATTACHMENTS_MAX = 4
+
+/**
+ * The cap of the thumbnail of a pinned attachment, in data URL characters (12/11/2026).
+ *
+ * The copy of a pinned message is what whoever arrives later has, and for a
+ * message with a photo the photo is most of what was said. The photo itself does
+ * not fit: the list is republished to every person who joins, and twenty pins of
+ * 400 KB each would be a second history. A thumbnail of about 6 KB does fit, and
+ * only the FIRST attachment with an image carries one; the others travel by name
+ * and type. Twenty pins with a thumbnail each stay under 200 KB in the worst case.
+ */
+export const PINNED_THUMBNAIL_MAX = 8_000
+
+/**
+ * An attachment of a pinned message, as the copy keeps it: what it is, and a
+ * small image when there is one. Never the bytes, never the key of the blob.
+ */
+export const PinnedAttachment = z.object({
+  name: z.string().max(255),
+  kind: NarrowName.default("other"),
+  mediaType: z.string().max(128),
+  byteLength: z.number().int().nonnegative(),
+  /** Seconds, for audio and video. */
+  duration: z.number().nonnegative().optional().catch(undefined),
+  /** A small image, as a data URL. See `PINNED_THUMBNAIL_MAX`. */
+  thumbnail: z
+    .string()
+    .max(PINNED_THUMBNAIL_MAX)
+    .regex(/^data:image\/(?:webp|jpeg|png|gif);base64,[A-Za-z0-9+/=]+$/)
+    .optional()
+    .catch(undefined),
+})
+export type PinnedAttachment = z.infer<typeof PinnedAttachment>
+
 export const PinnedMessage = z.object({
   id: MessageId,
   /** Address of whoever wrote the message. */
@@ -781,6 +851,16 @@ export const PinnedMessage = z.object({
   pinnedAt: Timestamp,
   /** Address of whoever pinned it. See above for why it is not taken from the sender. */
   pinnedBy: z.string().max(128),
+  /**
+   * The attachments of the message, without bytes (12/11/2026). See `PinnedAttachment`.
+   *
+   * Absent when the message has none, and never an empty list: a 1.3.7 client
+   * strips the field it does not know, and the signature it checks on a relayed
+   * room no longer matches. Leaving the field out of text-only pins keeps those
+   * relayable through old clients. `.catch(undefined)`: a malformed list costs
+   * the thumbnails, never the pin or the room.
+   */
+  attachments: z.array(PinnedAttachment).min(1).max(PINNED_ATTACHMENTS_MAX).optional().catch(undefined),
 })
 export type PinnedMessage = z.infer<typeof PinnedMessage>
 
@@ -1001,6 +1081,16 @@ export const Payload = z.discriminatedUnion("t", [
     target: MessageId,
     editedAt: Timestamp,
     body: z.string().max(16_000),
+    /**
+     * This edit closes the poll `target` now, and edits nothing else.
+     *
+     * Not a new `t`, for the reason this file always gives: an unknown `t` fails
+     * the union. The `body` travels unchanged, so a client that does not know
+     * the field reads it as an edit with the same text. Only the author of the
+     * poll and whoever moderates the channel can close it; whoever reads judges
+     * that against the sender authenticated by MLS (`dobras.ts`).
+     */
+    closePoll: z.literal(true).optional().catch(undefined),
     /** The signature of the device that wrote this (phase S4). See `autoria.ts`. */
     autoria: Autoria.optional(),
   }),
@@ -1414,6 +1504,24 @@ export const Payload = z.discriminatedUnion("t", [
      */
     pinned: z.array(PinnedMessage).max(MAX_PINNED).optional(),
     /**
+     * The pin list of this room, as someone with `fixar` signed it (12/11/2026).
+     *
+     * `pinned` only counts from a sender with `fixar`: MLS authenticates the sender,
+     * and that is the whole guard. So a member without the responsibility could not
+     * pass the pins on to whoever joins, and with no one who pins online, the person
+     * who joined saw an empty top. This field is the way through: the ORIGINAL
+     * `channel.meta` that declared the list, with the authorship (`autoria`) of the
+     * device that wrote it and the address of its author, exactly as a report
+     * carries it (`ItemRelatado`). The receiver checks the signature, the device in
+     * the tree, and that the author has `fixar`; the sender adds no authority.
+     *
+     * Only the list comes from here, with the stamp of the original: an old list
+     * never replaces a newer one, so a replay cannot pin again what was unpinned.
+     * Absent from a sender with `fixar`, who says `pinned` with its own authority.
+     * A 1.3.7 client strips it and reads the room as before.
+     */
+    pinnedProof: ItemRelatado.optional().catch(undefined),
+    /**
      * This voice room is the AFK room of the channel. See `SalaAfk`.
      *
      * **Absent is "not the AFK room"**, like `layout`: the most recent statement wins
@@ -1519,7 +1627,7 @@ export const Payload = z.discriminatedUnion("t", [
   /**
    * A channel role: name and the responsibilities it grants.
    *
-   * Empty `powers` is the case the owner asked for first and the easiest to
+   * Empty `powers` is the first case required and the easiest to
    * lose: a role that grants no management power and only says that this person
    * has access to the channel. It's not a list waiting to be filled in; it's the
    * thing itself.
@@ -1903,7 +2011,7 @@ export const Payload = z.discriminatedUnion("t", [
      * device HEARD, and joins sent earlier are not recovered in the catch-up:
      * voice signaling only counts live, on purpose (see `session.ts`). Until now
      * the answer was to wait for the heartbeat of whoever was there, which comes
-     * every 50 seconds. The owner reported it twice: "some people do not see who is in
+     * every 50 seconds. It was reported twice: "some people do not see who is in
      * the room before they enter".
      *
      * The server warns others when someone arrives, and those in the call answer
@@ -2158,7 +2266,7 @@ export const Payload = z.discriminatedUnion("t", [
    * `subject` is who is moved, not who moves: who moves is the sender, whom MLS
    * already authenticates.
    *
-   * **Whoever obeys checks who gives the order** (2/11/2026, owner request: "like in
+   * **Whoever obeys checks who gives the order** (the requirement: "like in
    * Discord"). A client of this version only obeys the request from someone who
    * has `mover` in this channel, and obeys it without asking the moved person.
    * The check lives in the session of whoever receives, where the sender comes

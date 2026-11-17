@@ -22,7 +22,7 @@ import type {
   FichaDoCanal,
   Ticket,
 } from "@enclave/client-core"
-import type { AvisoDeSuspensao, FriendTie, InviteTie, PinnedMessage, Power } from "@enclave/protocol"
+import type { AvisoDeSuspensao, CorpoDoBug, FriendTie, InviteTie, PinnedMessage, Power } from "@enclave/protocol"
 import type { MessageExtras } from "./types.js"
 
 export type {
@@ -344,6 +344,11 @@ export interface HistoricoDosIrmaos {
   /** What did not come, and why (12/11/2026). See `EventoDoHistorico` in the core. */
   perdidas?: number
   razao?: "sem-irmao" | "irmao-calado" | "ilegiveis"
+  /** THIS device is sending the history to a freshly paired one (16/11/2026). See `EnvioDoHistorico` in the core. */
+  envio?: {
+    mensagens: { feitas: number; total: number }
+    fotografias: { feitas: number; total: number } | null
+  }
 }
 
 /** Which key maps to each global command. See `atalhosGlobais`. */
@@ -399,6 +404,15 @@ export interface EstadoDosAtalhosGlobais {
   soComAJanela: ComandoGlobal[]
   ocupados: ComandoGlobal[]
   faltaAcessibilidade: ComandoGlobal[]
+}
+
+/** What the server needs to know to wake this device (see `push` in the bridge). */
+export interface DefinicoesDoPush {
+  lingua: "pt" | "en"
+  /** Muted targets as `lib/silenciados.ts` keeps them; the host sends only whole channels. */
+  silenciados: readonly string[]
+  /** Epoch ms: the pause end, `CALAR_PARA_SEMPRE` while Busy, 0 otherwise. */
+  calarAte: number
 }
 
 export interface EnclaveBridge {
@@ -925,7 +939,14 @@ export interface EnclaveBridge {
      * protection there is against mistake. The default room refuses it in the
      * core.
      */
-    setRoom: (channel: string, next: ChannelRoom & { closed?: boolean; removed?: boolean }) => Promise<{ ok: boolean }>
+    /**
+     * `perms`: the room overrides in the same publish (read-only rooms,
+     * 12/11/2026). Absent keeps the ones the room has. An older host ignores it.
+     */
+    setRoom: (
+      channel: string,
+      next: ChannelRoom & { closed?: boolean; removed?: boolean; perms?: SobreposicaoDaSala[] },
+    ) => Promise<{ ok: boolean }>
     /**
      * Pinned messages in a room, oldest to newest.
      *
@@ -951,7 +972,8 @@ export interface EnclaveBridge {
     pin?: (
       channel: string,
       room: string,
-      message: { id: string; sender: string; body: string; sentAt: number },
+      /** `attachments` as the message has them, and the small image the interface made. See `pinMessage`. */
+      message: { id: string; sender: string; body: string; sentAt: number; attachments?: readonly unknown[]; thumbnail?: string },
     ) => Promise<{ ok: boolean }>
     unpin?: (channel: string, room: string, id: string) => Promise<{ ok: boolean }>
     /**
@@ -1082,6 +1104,11 @@ export interface EnclaveBridge {
      */
     mayMentionAll?: (channel: string, room: string) => boolean
     /**
+     * Whether this account may share the screen in this room (`transmitir`,
+     * 12/11/2026). Absent means "yes": an older host keeps the button as it was.
+     */
+    mayTransmit?: (channel: string, room: string, address?: string) => boolean
+    /**
      * The permission model of 1.2 (`permissoes.ts` in the protocol). All
      * optional: an older host does not bring it, and the `CargosEPermissoes`
      * component does not mount.
@@ -1147,6 +1174,12 @@ export interface EnclaveBridge {
      */
     typing: (channel: string, room?: string) => Promise<{ ok: boolean }>
     /**
+     * Ask for the names of these accounts, because the screen needs them now
+     * (the full member list of a big channel). Only the common room asks
+     * strangers; elsewhere it does nothing. Optional: an older host lacks it.
+     */
+    pedirPerfis?: (channel: string, contas: string[]) => Promise<void>
+    /**
      * A nudge, the MSN nudge.
      *
      * Ephemeral like the typing indicator, and for an even stronger reason: a
@@ -1166,8 +1199,14 @@ export interface EnclaveBridge {
      * who already read, have read, and an altered client ignores it. The
      * interface says this in words before anyone taps.
      */
-    editMessage?: (channel: string, target: string, body: string) => Promise<{ ok: boolean }>
+    /** `closePoll` closes the poll `target` (author or moderator) and edits nothing. */
+    editMessage?: (channel: string, target: string, body: string, opcoes?: { closePoll?: true }) => Promise<{ ok: boolean }>
     deleteMessage?: (channel: string, target: string) => Promise<{ ok: boolean }>
+    /**
+     * React to a message, or take the reaction back (`remove`). Optional like the
+     * two above: an older host does not bring it, and the reaction button does not appear.
+     */
+    react?: (channel: string, target: string, emoji: string, remove?: boolean) => Promise<{ ok: boolean }>
     /** Read from the group's own key tree, so it cannot be padded or trimmed. */
     members: (channel: string) => Promise<string[]>
     /**
@@ -1667,7 +1706,7 @@ export interface EnclaveBridge {
   }
   /**
    * The game overlay for the desktop app: a pill on top of the game showing the
-   * voice room and who is speaking (requested by the owner on November 2, 2026).
+   * voice room and who is speaking.
    * See `apps/client/src/main/overlay-janela.ts`.
    *
    * Absent in the browser: a page cannot open windows on top of another app. All
@@ -1727,6 +1766,43 @@ export interface EnclaveBridge {
     pedirRevisao?: (nota: string) => Promise<{ ok: true }>
     /** The suspension notice for this account, or `null` if none. From the signed request, no gateway. */
     suspensao?: () => Promise<AvisoDeSuspensao | null>
+  }
+  /**
+   * "Report a bug" (12/11/2026). The bridge picks the server, like `relato`; the
+   * interface gives only what the form showed (`CorpoDoBug`).
+   *
+   * - `plataforma`: what this host is, for the technical details.
+   * - `suportado`: whether the server announced `CAPACIDADE_BUGS`. Without it, no button.
+   * - `enviar`: throws "Erro 760" to "762", and the network and clock keys of the signed request.
+   *
+   * Optional: an old `preload` does not have it, and the button does not appear.
+   */
+  bugs?: {
+    plataforma: "web" | "pwa" | "electron"
+    suportado: () => Promise<boolean>
+    enviar: (corpo: CorpoDoBug) => Promise<{ ok: true }>
+  }
+  /**
+   * Notifications when the app is closed (Web Push). Web only: the desktop app
+   * keeps its socket in the tray and has no push, so it does not bring this.
+   *
+   * - `estado`: `sem-servidor` (no `web-push` from the server), `sem-browser`
+   *   (no `PushManager`), `ios-fora-do-ecra` (iOS outside the Home Screen), or
+   *   `pronto`. Read with the settings open; it also fetches the server key
+   *   ahead, so `ligar` stays close to the gesture.
+   * - `ligar`: subscribe in the browser and on the server. The page asks for
+   *   the notification permission first, from the gesture. Throws 790 to 792.
+   * - `renovar`: the same, silently, on each connect and when a setting
+   *   changes. `{ ok: false }` when it cannot (no permission, no support).
+   * - `desligar`: cancel on the server and in the browser. Never throws.
+   * - `fecharAvisos`: close the push notices still on screen.
+   */
+  push?: {
+    estado: () => Promise<"pronto" | "sem-servidor" | "sem-browser" | "ios-fora-do-ecra">
+    ligar: (definicoes: DefinicoesDoPush) => Promise<{ ok: true }>
+    renovar: (definicoes: DefinicoesDoPush) => Promise<{ ok: boolean }>
+    desligar: () => Promise<{ ok: true }>
+    fecharAvisos: () => Promise<void>
   }
   /** Apply mic and camera choices to the next capture. */
   applyMediaPrefs?: (next: {

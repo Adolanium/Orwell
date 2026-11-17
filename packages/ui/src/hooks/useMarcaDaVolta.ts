@@ -65,7 +65,7 @@ function observarTarefasLongas(): { ler: () => { ms: number; n: number }; parar:
 /**
  * A mark in the diagnostic log at each return to the foreground (1.3.15).
  *
- * The owner's Windows app (1.3.14) froze for about 5 s when restored from
+ * The Windows app (1.3.14) froze for about 5 s when restored from
  * minimized, and it does not happen headless. The log that the person copies
  * now says, for the `JANELA_DA_VOLTA_MS` after each return: how long the page
  * was held (its long tasks, summed), how many times the vault was written, how

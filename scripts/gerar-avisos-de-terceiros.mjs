@@ -134,7 +134,14 @@ SOFTWARE.`
 
 function componentesForaDoRegisto(raiz) {
   const fonte = (f) => readFileSync(join(raiz, "packages/ui/src/fontes", f), "utf8").replace(/\r\n?/g, "\n").trim()
+  const unicode = readFileSync(join(raiz, "packages/ui/dados/emoji/UNICODE-LICENSE.txt"), "utf8").replace(/\r\n?/g, "\n").trim()
   return [
+    {
+      titulo: "Unicode emoji data and CLDR annotations (packages/ui/dados/emoji, emoji.gen.ts)",
+      licenca: "Unicode-3.0",
+      onde: "web, desktop app",
+      texto: unicode + "\n\nSource: https://unicode.org/Public/emoji/15.0/ and https://github.com/unicode-org/cldr-json (CLDR 42.0.0)",
+    },
     {
       titulo: "GTCRN speech enhancement model (gtcrn.wasm, via @sapphi-red/web-noise-suppressor)",
       licenca: "MIT",

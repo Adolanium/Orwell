@@ -1,13 +1,19 @@
 /**
- * The common "Orwell" channel becomes a registration choice (owner request,
- * 3/11/2026). Four cases, one after another, against the same server:
+ * The official "Orwell" channel is opt-in at registration (3/11/2026 and
+ * 12/11/2026). Cases, one after another, against the same server:
  *
- *   1. New account with the box UNCHECKED: does not join, not after reload,
- *      not after closing and opening the tab again.
- *   2. The same account joins later via the "Join Orwell channel" button.
- *   3. New account with the box CHECKED (the default): joins, as today.
- *   4. Old account (no choice at all, like all pre-version ones) stays in the
- *      channel after reconnecting.
+ *   0. Language: the registration opens in English without `?lingua=` on an
+ *      English system, and in Portuguese on a Portuguese system (the current rule).
+ *   1. New account, box left as it comes (UNCHECKED): does not join, not after
+ *      reload, not after closing and opening the tab again. The communities
+ *      column has no join button.
+ *   2. The same account joins later via "Join with a link", where the official
+ *      channel is offered to whoever is not in it.
+ *   3. New account with the box CHECKED: joins at the end of registration.
+ *   4. Old account (in the room, no choice written) stays after reconnecting, and
+ *      gets the "yes" written.
+ *   5. Leaving the official channel from the channel menu ("Sair do canal") is the
+ *      real exit, and the app does not put the person back after a reload.
  *
  *   node scripts/e2e-canal-comum-opcional-browser.mjs   (needs `npm run build`)
  *
@@ -114,12 +120,13 @@ class MemoryBackend {
   async write(b) { this.bytes = b }
   async clear() { this.bytes = null }
 }
-/** An account in Node, as before this version: no choice in the vault. */
+/** An account in Node that said yes (joining is opt-in since 12/11/2026). */
 async function contaAntiga(nome) {
   const vault = new Vault(new MemoryBackend())
   await vault.create("frase-de-teste")
   const session = new Session(vault)
   await session.createIdentity(NOME)
+  await session.escolherSalaComum(true)
   await session.connect()
   await session.updateProfile({ displayName: nome, donations: [] })
   sessoes.push(session)
@@ -152,8 +159,10 @@ browser = await chromium.launch()
 const URL_DA_APP = `http://${NOME}/app/?lingua=pt`
 // Via the channel line in the list, not by `aria-label="Orwell"`: the app brand
 // is also called that, and it is on screen with or without the channel.
-const naBarra = (page) => page.locator(".channel-row .channel-name").filter({ hasText: /^Orwell$/ }).count()
-const botaoDeEntrar = (page) => page.getByRole("button", { name: "Entrar no canal Orwell", exact: true })
+const linhaDoCanal = (page) => page.locator(".channel-row").filter({ has: page.locator(".channel-name", { hasText: /^Orwell$/ }) })
+const naBarra = (page) => linhaDoCanal(page).count()
+const ENTRAR = "Entrar no canal oficial do Orwell"
+const botaoDeEntrar = (page) => page.getByRole("button", { name: ENTRAR, exact: true })
 const configuracoes = (page) => page.getByRole("button", { name: "Configurações", exact: true }).first()
 const ultimaConta = () => sql("select address from accounts order by created_minute desc, rowid desc limit 1")
 const membro = (endereco) => fundadora.membersOf(SALA).map(String).includes(endereco)
@@ -164,7 +173,7 @@ async function registar(contexto, nome, canalOficial) {
   const page = await contexto.newPage()
   await page.goto(URL_DA_APP)
   try {
-    await criarConta(page, { nome, servidor: NOME, ...(canalOficial === undefined ? {} : { canalOficial }) })
+    await criarConta(page, { nome, servidor: NOME, canalOficial })
     await configuracoes(page).waitFor({ timeout: 90_000 })
   } catch (erro) {
     await page.screenshot({ path: join(RAIZ, ".dev-data-scr", `canal-opcional-${nome}.png`) })
@@ -192,15 +201,34 @@ async function deFora(page, endereco, quando) {
   verificar(!subscrito(endereco), `${quando}: a conta não está subscrita à sala comum no servidor`)
 }
 
-// --------------------------------------------- 1. box unchecked: stays out
-console.log("\n1. Conta nova com a caixa desmarcada")
+// --------------------------------------------- 0. the language without ?lingua=
+console.log("\n0. A língua do registo sem ?lingua=")
+for (const [locale, espera, rotulo] of [
+  ["en-US", "How you want to appear", "inglês num sistema em inglês"],
+  ["de-DE", "How you want to appear", "inglês num sistema noutra língua"],
+  // Since 1.3.9 the browser language does not count: English until someone chooses.
+  ["pt-PT", "How you want to appear", "inglês num sistema em português (1.3.9)"],
+]) {
+  const ctx = await browser.newContext({ locale })
+  const page = await ctx.newPage()
+  await page.goto(`http://${NOME}/app/`)
+  const viu = await page.getByPlaceholder(espera).or(page.getByRole("button", { name: /^(No, create an account|Não, criar conta)$/ })).first().waitFor({ timeout: 30_000 }).then(() => true, () => false)
+  const naoCriar = page.getByRole("button", { name: /^(No, create an account|Não, criar conta)$/ })
+  if (await naoCriar.count()) await naoCriar.click()
+  const ok = await page.getByPlaceholder(espera).waitFor({ timeout: 15_000 }).then(() => true, () => false)
+  verificar(viu && ok, `o registo abre em ${rotulo} (${locale})`)
+  await ctx.close()
+}
+
+// --------------------------------------------- 1. box as it comes: stays out
+console.log("\n1. Conta nova com a caixa como vem (desmarcada)")
 const contextoFora = await browser.newContext({ locale: "pt-PT" })
-let paginaFora = await registar(contextoFora, "fora", false)
+let paginaFora = await registar(contextoFora, "fora", null)
 const enderecoFora = ultimaConta()
 console.log(`  conta ${enderecoFora}`)
 await pausa(ESPERA_DE_FORA_MS)
 await deFora(paginaFora, enderecoFora, "logo a seguir ao registo")
-verificar((await botaoDeEntrar(paginaFora).count()) === 1, 'o botão "Entrar no canal Orwell" está na coluna')
+verificar((await botaoDeEntrar(paginaFora).count()) === 0, "a coluna das comunidades não tem botão do canal oficial")
 
 await paginaFora.reload()
 await desbloquear(paginaFora)
@@ -214,37 +242,58 @@ await desbloquear(paginaFora)
 await pausa(ESPERA_DE_FORA_MS / 2)
 await deFora(paginaFora, enderecoFora, "depois de fechar e voltar a abrir")
 
-// ------------------------------------------------- 2. join later via button
-console.log("\n2. A mesma conta entra mais tarde pelo botão")
+// ------------------------------------------------- 2. join later via the join dialog
+console.log('\n2. A mesma conta entra mais tarde por "Entrar com um link"')
+await paginaFora.getByRole("button", { name: "Comunidades", exact: true }).first().click().catch(() => {})
+await paginaFora.getByRole("button", { name: "Entrar com um link" }).first().click()
+await botaoDeEntrar(paginaFora).waitFor({ timeout: 15_000 })
+await paginaFora.screenshot({ path: join(RAIZ, ".dev-data-scr", "canal-opcional-dialogo.png") })
 await botaoDeEntrar(paginaFora).click()
 verificar(await ate(async () => (await naBarra(paginaFora)) > 0, 90_000), '"Orwell" aparece na barra lateral')
 verificar(await ate(() => membro(enderecoFora), 30_000), "a fundadora vê a conta na sala comum")
-verificar((await botaoDeEntrar(paginaFora).count()) === 0, "o botão sai da coluna")
+await paginaFora.getByRole("button", { name: "Entrar com um link" }).first().click()
+await paginaFora.getByRole("heading", { name: /link/i }).first().waitFor({ timeout: 10_000 }).catch(() => {})
+verificar((await botaoDeEntrar(paginaFora).count()) === 0, "lá dentro, o diálogo já não oferece o canal oficial")
+await paginaFora.keyboard.press("Escape")
 await paginaFora.reload()
 await desbloquear(paginaFora)
 verificar(await ate(async () => (await naBarra(paginaFora)) > 0, 60_000), 'depois de recarregar, "Orwell" continua lá')
-await paginaFora.screenshot({ path: join(RAIZ, ".dev-data-scr", "canal-opcional-entrou-depois.png") })
 
-// ---------------------------------------------- 3. box checked: joins, as today
-console.log("\n3. Conta nova com a caixa marcada (a omissão)")
+// ---------------------------------------------- 3. box checked: joins
+console.log("\n3. Conta nova com a caixa marcada")
 const contextoDentro = await browser.newContext({ locale: "pt-PT" })
-const paginaDentro = await registar(contextoDentro, "dentro", undefined)
+const paginaDentro = await registar(contextoDentro, "dentro", true)
 const enderecoDentro = ultimaConta()
 console.log(`  conta ${enderecoDentro}`)
 verificar(await ate(async () => (await naBarra(paginaDentro)) > 0, 90_000), '"Orwell" aparece na barra lateral')
 verificar(await ate(() => membro(enderecoDentro), 30_000), "a fundadora vê a conta na sala comum")
-verificar((await botaoDeEntrar(paginaDentro).count()) === 0, 'não há botão "Entrar no canal Orwell"')
 await paginaDentro.screenshot({ path: join(RAIZ, ".dev-data-scr", "canal-opcional-marcada.png") })
 
 // ---------------------------------------------- 4. old account stays there
 console.log("\n4. A conta antiga continua no canal")
-verificar(antiga.querSalaComum(), "a conta antiga não tem escolha feita, e conta como querer")
+// Before 12/11/2026 an account in the room had no mark: we take it away to play one.
+delete antiga.vault.contents.preferencias?.["sala-comum"]
+verificar(!antiga.querSalaComum(), "sem escolha escrita, a conta antiga não conta como querer")
 antiga.disconnect()
 await pausa(1_000)
 await antiga.connect()
 await pausa(10_000)
 verificar(antiga.channels.includes(SALA), "depois de voltar a ligar, a conta antiga continua na sala comum")
 verificar(membro(String(antiga.identity.address)), "e a fundadora continua a vê-la lá")
+verificar(antiga.querSalaComum(), "e passa a ter o sim escrito")
+
+// ---------------------------------------------- 5. leave from the channel menu
+console.log('\n5. Sair do canal oficial pelo menu do canal')
+await linhaDoCanal(paginaDentro).first().click({ button: "right" })
+await paginaDentro.getByRole("menuitem", { name: "Sair do canal" }).click()
+await paginaDentro.getByRole("alertdialog").getByRole("button", { name: "Sair do canal" }).click()
+verificar(await ate(async () => (await naBarra(paginaDentro)) === 0, 30_000), '"Orwell" sai da barra lateral')
+verificar(await ate(() => !membro(enderecoDentro), 60_000), "a fundadora deixa de ver a conta na sala comum (saída verdadeira)")
+await paginaDentro.reload()
+await desbloquear(paginaDentro)
+await pausa(ESPERA_DE_FORA_MS / 2)
+verificar((await naBarra(paginaDentro)) === 0, "depois de recarregar, a app não volta a pôr a conta lá")
+verificar(!membro(enderecoDentro), "nem na árvore da sala comum")
 
 console.log(falhas.length ? `\n${falhas.length} FALHA(S)` : "\ntudo ok")
 await arrumar(falhas.length ? 1 : 0)

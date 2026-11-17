@@ -46,7 +46,7 @@ export function openRequestFrom(friendships: Friendships | undefined, who: strin
 /**
  * Whether this direct conversation allows writing in it, and why not when it does not.
  *
- * The owner rule, and it is a rule not a preference: *"it is only after accepted
+ * The product rule, and it is a rule not a preference: *"it is only after accepted
  * by the request target that it is possible to exchange private messages, not
  * before"*. What there was instead: `requestFriend` opens the direct conversation
  * BEFORE the request goes out, the message bar was not gated by anything, and
@@ -76,7 +76,7 @@ export function openRequestFrom(friendships: Friendships | undefined, who: strin
  *
  * It is not a cryptographic lock and does not claim to be: an altered client sends
  * what it wants, and the other side receives. What this closes is the product,
- * which is where the owner rule lives. The real lock belongs to the protocol, and that is
+ * which is where the product rule lives. The real lock belongs to the protocol, and that is
  * a decision that changes what goes encrypted on the wire.
  */
 export type EscritaNaDirecta =

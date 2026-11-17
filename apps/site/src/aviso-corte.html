@@ -2,9 +2,9 @@
   DRAFT. NOT PUBLISHED.
   
   The cutoff notice for 1.0 "Arca" (step 1 of
-  cutoff day): goes live on the site one week before the cutoff. The date is the
-  owner's, so it stays blank, and the block does not enter any page until they
-  give it.
+  cutoff day): goes live on the site one week before the cutoff. The date is not
+  set yet, so it stays blank, and the block does not enter any page until it
+  is set.
   
   Why it is in `src/` and not next to `index.html`: Vite only builds the four
   pages in `rollupOptions.input` (`vite.config.ts`), and the test in
@@ -16,7 +16,7 @@
   2. Copy the `<div class="aviso">` below to `apps/site/index.html`, right after
   `<main>` and before `<section class="heroi">`. It uses the `.aviso` class
   and the `#i-escudo` icon that the page already has: no new CSS.
-  3. `npm run build` in `apps/site` and deploy the site, with the owner's go-ahead.
+  3. `npm run build` in `apps/site` and deploy the site, once approved.
   4. On cutoff day, the block goes out again (or becomes "We left beta on …" in
   the past), in the same deploy as 1.0.
   

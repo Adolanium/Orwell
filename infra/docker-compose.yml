@@ -90,6 +90,14 @@ services:
       # (1-6).
       ENCLAVE_DENUNCIAS_DIAS: ${ENCLAVE_DENUNCIAS_DIAS:-90}
       ENCLAVE_DENUNCIA_ATRASO_HORAS: ${ENCLAVE_DENUNCIA_ATRASO_HORAS:-1-6}
+      # Web Push (apps/server/src/push.ts): wakes closed apps with an empty notice. Off unless
+      # `on`. The VAPID key is /data/push.key.json (0600, made on first start, in the volume
+      # and in the backup, like server.key.json); it is never an environment variable.
+      # ENCLAVE_PUSH_CONTACTO is the `sub` the push services see (mailto: or https:; empty is
+      # https://<domain>). ENCLAVE_PUSH_SERVICOS adds push service hosts to the known four.
+      ENCLAVE_PUSH: ${ENCLAVE_PUSH:-off}
+      ENCLAVE_PUSH_CONTACTO: ${ENCLAVE_PUSH_CONTACTO:-}
+      ENCLAVE_PUSH_SERVICOS: ${ENCLAVE_PUSH_SERVICOS:-}
       # Left OUT on purpose, not by oversight: the other two that the server reads. Putting
       # them in .env does nothing, just as it did nothing for the ones above; the difference is
       # that here that is the desired behavior:

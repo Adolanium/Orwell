@@ -829,7 +829,7 @@ describe("salas de um canal", () => {
       "the default room cannot be deleted",
     )
     /*
-      And closing remains possible, the owner asked for it.
+      And closing remains possible, by design.
 
       Without a connection, `send` breaks after the guards, because this is an
       offline session. What we check here is that the refusal is NOT from the
@@ -938,7 +938,7 @@ describe("salas de um canal", () => {
  * before this idea. Migration was spared because it was empty, and that is why
  * a slip here costs dearly.
  *
- * What is fixed here is what the owner asked for word for word: closing removes
+ * What is fixed here is the requirement, word for word: closing removes
  * it from the list, what was there stays in the vault, and reopening returns
  * it with everything.
  */

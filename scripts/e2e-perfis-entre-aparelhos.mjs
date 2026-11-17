@@ -3,7 +3,7 @@
  *
  *   node scripts/e2e-perfis-entre-aparelhos.mjs          (needs `npm run build` first)
  *
- * Owner report (29/10/2026): "after pairing on another pc via browser, all
+ * The bug: "after pairing on another pc via browser, all
  * users appear as 'unnamed'".
  *
  * What is proved: Ana creates an account on the computer (one browser). Bruno

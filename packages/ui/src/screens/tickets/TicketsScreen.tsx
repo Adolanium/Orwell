@@ -311,8 +311,8 @@ export function TicketsScreen({
         </ul>
       )}
 
-      {/* Only the phrase that all members read tickets (owner, 28 October
-          2026). The caveat about tickets from before joining is gone. */}
+      {/* Only the phrase that all members read tickets.
+          The caveat about tickets from before joining is gone. */}
       <footer className="tickets-notes">
         <p className="hint">{strings.tickets.note}</p>
       </footer>

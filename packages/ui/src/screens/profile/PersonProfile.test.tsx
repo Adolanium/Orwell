@@ -150,7 +150,7 @@ describe("PersonProfile — o que se sabe da pessoa", () => {
     expect(screen.getByText("faz fotografia")).toBeTruthy()
     expect(screen.getByText("por aí")).toBeTruthy()
     expect(screen.getByText(strings.people.presenceBusy)).toBeTruthy()
-    // "I do not want the ids exposed" (owner order on 27 October 2026).
+    // The requirement: "I do not want the ids exposed".
     expect(document.body.textContent).not.toContain("@ana:s")
     const copiar = screen.getByRole("button", { name: strings.copiarId.de("Ana") })
     expect(copiar.getAttribute("title")).toBe(strings.copiarId.de("Ana"))
@@ -594,7 +594,7 @@ describe("PersonProfile — cancelar, bloqueio, amigos e canais em comum", () =>
 
 /**
  * "When I tap someone's image in a room I go straight to their profile, I want
- * to come back" (owner, 27 October 2026). The button already existed, just with
+ * to come back". The button already existed, just with
  * the arrow.
  */
 describe('PersonProfile — "Voltar" à vista', () => {

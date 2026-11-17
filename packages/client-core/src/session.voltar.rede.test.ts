@@ -15,7 +15,7 @@ import { Session } from "@enclave/client-core"
 /**
  * Coming back to the foreground (1.3.15).
  *
- * The owner's Windows app froze for about 5 s when restored from minimized. The
+ * The Windows app froze for about 5 s when restored from minimized. The
  * return runs the catch-up (`retomar`: the sync pass, the history between
  * devices, a check of the socket), and the interface calls it twice
  * (`visibilitychange` and `focus`). Each vault write is the whole vault,

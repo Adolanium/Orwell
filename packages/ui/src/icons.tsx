@@ -33,7 +33,7 @@ function Svg({ size = 20, children }: IconProps & { children: React.ReactNode })
 /**
  * A filled icon with the "disconnected" bar cutting a path.
  *
- * The call icons are filled (owner, October 28, 2026: "I want the icons filled,
+ * The call icons are filled (the requirement: "I want the icons filled,
  * I don't want them empty inside"), like the call marker in the home grid
  * (`MarcaDeChamada`). In a stroke drawing the bar would cross the lines and
  * show; in a filled drawing it would match the form color and vanish. So the
@@ -417,20 +417,21 @@ export function SmileyIcon(props: IconProps): React.JSX.Element {
 }
 
 /**
- * The nudge: a frame being shaken.
+ * The nudge: a conversation window knocked off its place (12/11/2026: "an icon of its own for the nudge").
  *
- * What the button does is written in its own `title`, "shake the other person's screen", and that is what the drawing says: the frame in the middle is the screen, and the arcs on each side are the motion. No waving hand: a hand at 17 pixels is a blur, and the `👋` that was here was an emoji, which is the thing this product does not want.
+ * Drawn from scratch for this, not borrowed. A window with its title bar, tilted as if it had just been bumped, and a short jolt mark on each side, the comic-strip sign for "it shook". Each piece answers a confusion the old drawing invited: the title bar says WINDOW, not phone (a plain frame with arcs read as "vibrate"); the jolt marks are angular, not arcs, so it is never the `SpeakerIcon`; the tilt says it was pushed, which is what a nudge is.
  *
- * Symmetric on purpose. The `SpeakerIcon` also has arcs, but only on one side, one comes from a sound source, this one shakes on both. At the distance from which a 34-pixel button reads, it is the symmetry that tells them apart.
+ * The same 24-unit grid, the same 1.7 stroke and round ends as the family, and `currentColor`, so it follows the theme. The window is rotated with an SVG `transform`, not CSS, so it stays put when the button animates.
  */
 export function BuzzIcon(props: IconProps): React.JSX.Element {
   return (
     <Svg {...props}>
-      <rect x="8.2" y="7.4" width="7.6" height="9.2" rx="2" />
-      <path d="M5.6 10.2Q4 12 5.6 13.8" />
-      <path d="M2.9 8.4Q1.2 12 2.9 15.6" />
-      <path d="M18.4 10.2Q20 12 18.4 13.8" />
-      <path d="M21.1 8.4Q22.8 12 21.1 15.6" />
+      <g transform="rotate(-10 12 12)">
+        <rect x="6.8" y="6.2" width="10.4" height="11.6" rx="2.2" />
+        <path d="M6.8 9.6h10.4" />
+      </g>
+      <path d="M3.6 8.4 2.4 10.6l1.4 1.2-1.2 2.4" />
+      <path d="M20.4 9.8 21.6 12l-1.4 1.2 1.2 2.4" />
     </Svg>
   )
 }
@@ -535,6 +536,17 @@ export function DownloadIcon(props: IconProps): React.JSX.Element {
       <path d="M12 3.5v11" />
       <path d="M8 10.5 12 14.5l4-4" />
       <path d="M4.5 16.5v2a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-2" />
+    </Svg>
+  )
+}
+
+/** Polls: three bars of different length, the shape of a result. */
+export function VotacoesIcon(props: IconProps): React.JSX.Element {
+  return (
+    <Svg {...props}>
+      <path d="M4 6h10" />
+      <path d="M4 12h16" />
+      <path d="M4 18h7" />
     </Svg>
   )
 }
@@ -797,7 +809,7 @@ export function EnvelopeIcon(props: IconProps): React.JSX.Element {
   )
 }
 
-/* The four from the report sheet (4/11/2026): the summary of what comes out of the device has one icon per line, as in the design chosen by the owner. */
+/* The four from the report sheet: the summary of what comes out of the device has one icon per line, as in the chosen design. */
 
 /** A reason: the flag to mark. */
 export function BandeiraIcon(props: IconProps): React.JSX.Element {

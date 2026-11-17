@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { useNivelDeVoz } from "../../hooks/useNivelDeVoz.js"
 import { Call, type Participant } from "@enclave/client-core"
 import type { EnclaveBridge, Profile } from "../../bridge.js"
 import {
@@ -56,6 +57,7 @@ export function CallPanel({
   participants,
   localStream,
   screenStream = null,
+  semTransmitir = false,
   selfLabel,
   selfProfile,
   nameFor,
@@ -99,6 +101,11 @@ export function CallPanel({
    * bypasses every line in this file.
    */
   screenStream?: MediaStream | null | undefined
+  /**
+   * This account lacks `transmitir` in the call's room (12/11/2026): the screen
+   * button shows grey with the reason. A share already running keeps its stop button.
+   */
+  semTransmitir?: boolean | undefined
   selfLabel: string
   selfProfile: Profile
   nameFor: (sender: string) => string
@@ -187,7 +194,7 @@ export function CallPanel({
    * Who is in this room by presence (room announcements), with or without
    * connection to us. It is the list the sidebar already draws.
    *
-   * Owner request 27 October 2026: "during join stop showing them until the
+   * The bug: "during join stop showing them until the
    * connection is official". `participants` only brings people who already have
    * a connection; those who only announced stayed out of the panel. They enter
    * as "connecting" tiles. When the connection arrives, the person moves to
@@ -290,16 +297,21 @@ export function CallPanel({
   /* Music from someone we muted on this device: mutes only the music track. */
   const musicasCaladas = useMusicasCaladas()
   const [folhaDeAudio, setFolhaDeAudio] = useState(false)
+  /*
+    Only someone ELSE's screen goes to the stage (12/11/2026).
+    Whoever shares does not see their own screen in full, nor in full screen:
+    a screen showing itself inside itself is a hall of mirrors, and the stage was
+    taking the room from the faces. They get a small thumbnail with the stop
+    button instead (`MinhaPartilha`, below).
+  */
   const palco = outroAPartilhar
     ? { stream: outroAPartilhar.screen as MediaStream, label: strings.call.screenOf(nameFor(outroAPartilhar.address)) }
-    : screenStream
-      ? { stream: screenStream, label: strings.call.screenSelf }
-      : null
+    : null
 
   /**
    * Screens offered and pending.
    *
-   * Owner request 5 October 2026: *when someone shares the screen, others
+   * The requirement: *when someone shares the screen, others
    * must join the stream only if they want to.* The stage opened by itself
    * and brought 2.5 Mbps with it, no simulcast or layers, so no small version
    * to ask for, and nowhere to refuse.
@@ -352,6 +364,14 @@ export function CallPanel({
   const porServidor = tecto !== Call.LIMITE_DE_PARTILHA
   const pessoasNaChamada = participants.length + 1
   const cabeNaChamada = pessoasNaChamada <= tecto
+  const idDaDicaDoEcra = useId()
+  /** The tip of the grey screen button, open by a tap (the phone has no hover). Closes by itself. */
+  const [dicaDoEcra, setDicaDoEcra] = useState(false)
+  useEffect(() => {
+    if (!dicaDoEcra) return
+    const fechar = setTimeout(() => setDicaDoEcra(false), 4000)
+    return () => clearTimeout(fechar)
+  }, [dicaDoEcra])
   const porqueNaoPartilha = !call.podePartilharEcra
     ? strings.call.shareScreenBySfu
     : !cabeNaChamada
@@ -384,11 +404,6 @@ export function CallPanel({
       <CloseIcon size={14} />
       {strings.call.screenStopWatching}
     </button>
-  ) : aVerONosso !== null ? (
-    <span className="call-espectadores">
-      <OlhoIcon size={14} />
-      {strings.call.screenViewers(aVerONosso)}
-    </span>
   ) : null
 
   return (
@@ -469,7 +484,7 @@ export function CallPanel({
 
       {/*
         Screen offers lived here, one bar per offer, with the "Watch" button.
-        They moved to the sharer's tile (owner, 2 November 2026, "A with C"):
+        They moved to the sharer's tile (design "A with C"):
         the "LIVE" badge, and clicking the tile opens the share. The "Watch
         broadcast" button inside the tile is the keyboard door.
       */}
@@ -617,10 +632,47 @@ export function CallPanel({
             )
           })()}
 
+        {/* Our own share: a thumbnail, the sentence and "Stop". Never the stage. */}
+        {screenStream && (
+          <div className="call-minha-partilha">
+            <MiniaturaDoEcra stream={screenStream} />
+            <span className="call-minha-partilha-texto">
+              {strings.call.aPartilhar}
+              {/* How many are watching: zero is said, as it was on the stage. */}
+              {aVerONosso !== null && (
+                <span className="call-espectadores">
+                  <OlhoIcon size={14} />
+                  {strings.call.screenViewers(aVerONosso)}
+                </span>
+              )}
+            </span>
+            <button type="button" className="call-minha-partilha-parar" onClick={() => void call.stopScreenShare()}>
+              {strings.call.pararPartilha}
+            </button>
+          </div>
+        )}
+
         {/* The shared screen, in focus. */}
         {palco && (
           <div className="call-foco">
-            <ScreenStage stream={palco.stream} label={palco.label}>
+            <ScreenStage
+              stream={palco.stream}
+              label={palco.label}
+              sobreposicao={
+                <PresentesNoPalco
+                  pessoas={[
+                    { chave: "eu", nome: selfLabel, voz: localStream, calado: muted, semSom: soundOff },
+                    ...participants.map((participant) => ({
+                      chave: participant.address,
+                      nome: nameFor(participant.address),
+                      voz: participant.stream,
+                      calado: participant.micMuted,
+                      semSom: false,
+                    })),
+                  ]}
+                />
+              }
+            >
               {gestosDoPalco}
             </ScreenStage>
           </div>
@@ -630,7 +682,7 @@ export function CallPanel({
       {/* The audio boxes, always mounted and always hidden. Camera images go to the
           cards above. `muted` always on ours (echo), and `micCalado` per state. */}
       <div className={showingVideo ? "call-video com-imagem" : "call-video hidden"}>
-        <VideoTile stream={localStream} muted micCalado={muted} mostrarVoz={false} label={selfLabel} connected proprio />
+        <VideoTile stream={localStream} muted micCalado={muted} mostrarVoz={false} label={selfLabel} profile={selfProfile} connected proprio />
         {/* `muted` on the element, not `volume={0}`: per-person volume is a choice we
             want to keep intact when sound returns. See `VideoTile`. */}
         {participants.map((participant) => (
@@ -642,6 +694,7 @@ export function CallPanel({
             mostrarVoz={false}
             label={nameFor(participant.address)}
             endereco={participant.address}
+            profile={directory.get(participant.address)}
             connected={participant.connected}
             /* The same response this person's card gets. */
             estado={estadoDaPessoa({
@@ -703,7 +756,31 @@ export function CallPanel({
 
         {/* Share the screen. `data-ecra` because this button's position on the bar
             is not fixed: the camera next to it only exists with video capture. */}
-        {!porqueNaoPartilha && !semVoz && (
+        {/* Without `transmitir` (12/11/2026): the button stays, grey, and says why.
+            `aria-disabled` and not `disabled`, so it still takes focus and the tip shows on
+            hover, on keyboard focus and on tap (a disabled button receives none of these). */}
+        {!porqueNaoPartilha && !semVoz && semTransmitir && !screenStream && (
+          <>
+            <button
+              type="button"
+              data-ecra="1"
+              className={dicaDoEcra ? "call-btn bloqueado dica-aberta" : "call-btn bloqueado"}
+              data-tip={strings.call.semTransmitir}
+              data-tip-longa="1"
+              aria-label={strings.call.screenAria(false)}
+              aria-disabled="true"
+              aria-describedby={idDaDicaDoEcra}
+              onClick={() => setDicaDoEcra((aberta) => !aberta)}
+              onBlur={() => setDicaDoEcra(false)}
+            >
+              <ScreenShareIcon size={20} />
+            </button>
+            <span id={idDaDicaDoEcra} hidden>
+              {strings.call.semTransmitir}
+            </span>
+          </>
+        )}
+        {!porqueNaoPartilha && !semVoz && (!semTransmitir || screenStream) && (
           <button
             type="button"
             data-ecra="1"
@@ -799,4 +876,66 @@ function agenteDoBrowser(): string {
 /** The desktop app is Electron, and Electron says so in the user agent. Display text only. */
 function eAppDeSecretaria(): boolean {
   return /Electron\//.test(agenteDoBrowser())
+}
+
+/** The small, muted preview of our own shared screen. No controls, no full screen. */
+function MiniaturaDoEcra({ stream }: { stream: MediaStream }): React.JSX.Element {
+  const video = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    const elemento = video.current
+    if (!elemento) return
+    elemento.srcObject = stream
+    void elemento.play?.()?.catch(() => {})
+  }, [stream])
+  return <video ref={video} className="call-minha-partilha-video" muted playsInline autoPlay aria-hidden="true" />
+}
+
+/**
+ * Who is in the call, over the shared screen (12/11/2026, Discord parity): names
+ * only, small, stacked in the top-left corner, never over the controls below.
+ * Who speaks lights up by the voice level (`--voz`, the same meter as the cards).
+ * The mic and sound icons only when off.
+ */
+function PresentesNoPalco({
+  pessoas,
+}: {
+  pessoas: { chave: string; nome: string; voz: MediaStream | null; calado: boolean; semSom: boolean }[]
+}): React.JSX.Element {
+  return (
+    <ul className="call-presentes" aria-label={strings.call.presentesNoPalco}>
+      {pessoas.map((pessoa) => (
+        <LinhaDePresente key={pessoa.chave} {...pessoa} />
+      ))}
+    </ul>
+  )
+}
+
+function LinhaDePresente({
+  nome,
+  voz,
+  calado,
+  semSom,
+}: {
+  nome: string
+  voz: MediaStream | null
+  calado: boolean
+  semSom: boolean
+}): React.JSX.Element {
+  const linha = useRef<HTMLLIElement>(null)
+  useNivelDeVoz(linha, calado ? null : voz)
+  return (
+    <li ref={linha} className="call-presente">
+      <span className="call-presente-nome">{nome}</span>
+      {calado && (
+        <span role="img" aria-label={strings.call.presenteCalado}>
+          <MicIcon size={12} off />
+        </span>
+      )}
+      {semSom && (
+        <span role="img" aria-label={strings.call.presenteSemSom}>
+          <HeadphonesIcon size={12} off />
+        </span>
+      )}
+    </li>
+  )
 }

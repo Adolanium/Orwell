@@ -227,9 +227,13 @@ const Base64 = z.string().regex(/^[A-Za-z0-9_-]*$/, "expected unpadded base64url
  *   the box has two connections. The SAS is computed from both.
  * - `certificado`: from the computer to the phone, ONLY after the person
  *   confirms the words on both screens. It carries the address, the account
- *   PUBLIC key and the account's signature over the phone's device key. **There
- *   is no field for the account private key, on purpose: there is no way to
- *   write it in this payload.**
+ *   PUBLIC key and the account's signature over the phone's device key. Since
+ *   1.3.16 it also carries the account PRIVATE key (`accountPrivateKey`, owner
+ *   decision of 12/11/2026, "Erro 609"): the phone opens new direct
+ *   conversations by itself. It travels only inside this AEAD, after the SAS on
+ *   both screens, and the phone checks it against `accountKey` before writing
+ *   it. A 1.3.15 phone drops the field (zod strips unknown keys) and pairs as
+ *   before, without it.
  * - `confirmado`: from the phone to the computer when the person confirmed there
  *   that the words are the same. It is what the computer waits for before signing, and it is
  *   why a pairing abandoned halfway leaves nothing behind: without
@@ -261,6 +265,8 @@ export const PairPayload = z.discriminatedUnion("t", [
     address: z.string().min(3).max(255),
     accountKey: Base64.length(43),
     deviceCert: Base64.length(86),
+    /** The account private key (Ed25519 seed, 32 bytes). Absent: a host before 1.3.16. */
+    accountPrivateKey: Base64.length(43).optional(),
     /** How many `estado` parts come next. Absent: none (0.5.7 host). */
     estado: z.number().int().min(1).max(ESTADO_PARTES_MAX).optional(),
   }),

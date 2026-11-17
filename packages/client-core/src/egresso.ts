@@ -14,7 +14,7 @@
  *
  * **There is no gate for YouTube anymore.** Between August 12 and November 2,
  * 2026 the embedded player opened `youtube-nocookie.com`, `ytimg.com` and
- * `googlevideo.com`. The player is gone (owner request on November 2, 2026: a
+ * `googlevideo.com`. The player is gone (since November 2, 2026: a
  * click on the thumbnail opens the video in the system browser), and the gate
  * went with it. The thumbnail arrives inside the message, in bytes, and needs
  * no network.

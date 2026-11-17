@@ -11,7 +11,7 @@ import {
 } from "../testes/cliente-de-teste.js"
 
 /**
- * Voice and role moderation (owner request, 2/11/2026), with real accounts and
+ * Voice and role moderation, with real accounts and
  * server.
  *
  * Ana founds the channel and gives Bruno a role with only `mover`. Carla has no

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 /**
- * The presence ring (requested by the owner on October 27, 2026): new colors
+ * The presence ring: new colors
  * measured against the surfaces where faces appear.
  *
  * The ring is a graphic signal, not text: the WCAG minimum is 3:1 (1.4.11). The

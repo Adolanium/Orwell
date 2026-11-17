@@ -304,3 +304,29 @@ describe("o cofre numa base da 1.0.8", () => {
     outraVez.close()
   })
 })
+
+/**
+ * The `channel_activity.seq_floor` column in a 1.3.7 database (12/11/2026).
+ *
+ * The table existed without it; opening adds the column, old rows read NULL (no
+ * floor), numbering goes on from the stored events, and opening again does nothing.
+ */
+describe("a coluna channel_activity.seq_floor numa base da 1.3.7", () => {
+  it("aparece, as linhas antigas ficam sem piso, e o seq continua", () => {
+    const antiga = new DatabaseSync(caminho)
+    antiga.exec("CREATE TABLE IF NOT EXISTS channel_activity (channel TEXT PRIMARY KEY)")
+    antiga.exec("INSERT INTO channel_activity (channel) VALUES ('!sala:localhost')")
+    antiga.close()
+
+    const db = openDatabase(caminho)
+    const nomes = (db.prepare("PRAGMA table_info(channel_activity)").all() as { name: string }[]).map((c) => c.name)
+    expect(nomes).toContain("seq_floor")
+    expect((db.prepare("SELECT seq_floor FROM channel_activity").get() as { seq_floor: number | null }).seq_floor).toBeNull()
+    const store = new Store(db)
+    const primeiro = store.appendEvent({ channel: "!sala:localhost", kind: "application", ciphertext: new Uint8Array([1]) }, { refundavel: false }) as { event: { seq: number } }
+    expect(primeiro.event.seq).toBe(0)
+    db.close()
+    // Idempotent.
+    openDatabase(caminho).close()
+  })
+})

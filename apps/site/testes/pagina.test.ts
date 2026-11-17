@@ -227,7 +227,7 @@ describe("todas as páginas", () => {
 
   it.each(VERSOES)("a de entrada ($lingua) tem um só guião, desta origem, e nada em linha", (versao) => {
     /*
-      November 2, 2026: the owner asked for the main button to match the
+      The main button matches the
       visitor's system (Windows, macOS, mobile). It is the only thing that needs
       JavaScript, and it enters with a minimum: one file from this origin
       (`src/sistema.ts`), no `<script>` with content, no `on…=`.
@@ -399,7 +399,7 @@ describe.each(VERSOES)("a homepage ($lingua)", (versao) => {
     }
   })
 
-  // As of November 9, 2026, this section links to Ko-fi, not GoFundMe (owner decision).
+  // This section links to Ko-fi, not GoFundMe.
   it("leva ao Ko-fi, com a primeira meta", () => {
     const apoio = /<section class="seccao seccao-apoio" id="apoiar">[\s\S]*?<\/section>/.exec(html)?.[0] ?? ""
     expect(apoio).toContain('href="https://ko-fi.com/orwell_eu"')
@@ -412,7 +412,7 @@ describe.each(VERSOES)("a homepage ($lingua)", (versao) => {
  *
  * No app store. Users access it through the browser app pinned to the home
  * screen, and this section explains the steps and limitations before install.
- * Since November 3, 2026 it is a drawer, like the other two (owner request).
+ * It is a drawer, like the other two.
  */
 describe.each(VERSOES)("a secção do telemóvel ($lingua)", (versao) => {
   const html = ler(versao.entrada)
@@ -496,7 +496,7 @@ describe.each(VERSOES)("a secção do telemóvel ($lingua)", (versao) => {
 })
 
 /**
- * The main button for the visitor system. Owner request on November 2, 2026.
+ * The main button for the visitor system.
  */
 describe("o botão principal", () => {
   const folha = readFileSync(fileURLToPath(new URL("../src/estilo.css", import.meta.url)), "utf8")
@@ -533,7 +533,7 @@ describe("o botão principal", () => {
 
   it("na página de entrada só a faixa dos embaixadores e o medidor do apoio animam", () => {
     // November 3, 2026: the banner was the only thing animating. That same day we
-    // added the meter fill for the "Support" section (owner request). This test
+    // added the meter fill for the "Support" section. This test
     // ensures nothing else starts animating without notice.
     const bloco = folha.slice(folha.indexOf("/* ----------------------------------------------------- página de entrada */"))
     const semMovimentoReduzido = bloco.slice(0, bloco.indexOf("@media (prefers-reduced-motion")).replace(/\/\*[\s\S]*?\*\//g, "")
@@ -620,7 +620,7 @@ describe("o favicon", () => {
 
 /**
  * We seek ambassadors: the section on the landing page, the dedicated page,
- * and the tribute zone, in both languages. Owner request on October 27, 2026.
+ * and the tribute zone, in both languages.
  */
 describe.each(VERSOES)("os embaixadores ($lingua)", (versao) => {
   const html = ler(versao.entrada)
@@ -686,8 +686,8 @@ describe.each(VERSOES)("os embaixadores ($lingua)", (versao) => {
 })
 
 /**
- * The ambassador banner in the stylesheet. Owner request on November 3, 2026:
- * names in a loop with highlights, respecting his rule for reduced motion:
+ * The ambassador banner in the stylesheet:
+ * names in a loop with highlights, respecting the rule for reduced motion:
  * the banner does NOT pause, it just moves slower.
  */
 describe("a faixa dos embaixadores", () => {

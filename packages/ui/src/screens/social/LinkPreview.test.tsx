@@ -42,7 +42,7 @@ describe("LinkPreview — um vídeo do YouTube", () => {
   })
 
   /*
-    Owner request on November 2, 2026: "show YouTube thumbnails visually, but when
+    The requirement: "show YouTube thumbnails visually, but when
     the user clicks the thumbnail it opens a new window or tab with the link".
     The embedded player is gone; the thumbnail is just a link.
   */

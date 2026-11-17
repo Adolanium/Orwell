@@ -14,7 +14,7 @@ import {
 /**
  * The sound of screen sharing, in the mesh and in the browser request.
  *
- * The defect reported by the owner in 0.8.0: "screen shares are not
+ * The defect in 0.8.0: "screen shares are not
  * transmitting audio". It stopped at the FIRST step: `getDisplayMedia` asked for
  * `audio: false`, and sound never existed. Behind that, nothing knew how to
  * carry it: the SFU engine only produced the image, the server refused an audio

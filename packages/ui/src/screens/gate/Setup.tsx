@@ -12,6 +12,7 @@ import { OrwellWordmark } from "../../components/Logo.js"
 import { useToast } from "../../components/Toast.js"
 import { strings, traduzirErro } from "../../strings.js"
 import { ImportAccount } from "./ImportAccount.js"
+import { PassoDoFicheiroDaConta } from "../../components/FicheiroDaConta.js"
 import { FolhaComoFunciona } from "../settings/ComoFunciona.js"
 import { FraseDoMomento } from "../../components/FraseDoMomento.js"
 import { Enquadrar } from "../../components/Enquadrar.js"
@@ -44,9 +45,8 @@ type Passo = "nome" | "fotografia" | "chave" | "confirmar"
   someone (see `PrimeirosPassos`).
 */
 /*
-  The photo, right after the name: owner request on 27 October 2026,
-  when they also reaffirmed the interview tone of the other pages (the
-  proposal to swap them for direct titles was dropped). It's the only page
+  The photo, right after the name. The other pages keep the interview
+  tone (the proposal to swap them for direct titles was dropped). It's the only page
   you can skip: the button that advances says "Skip" until there's a photo,
   with the same weight as "Choose photo". Unlike color, the face changes what
   others see of who talks to them; but it's not a condition for anything, so it
@@ -80,7 +80,7 @@ const PASSOS_COM_SISTEMA: readonly Passo[] = ["nome", "fotografia", "chave"]
  * It opens the interface from a file (`file://`), which has no host. Until
  * 29 October 2026 that fell into the development branch, `localhost:8448`,
  * and creating an account in the installed app gave Error 201 ("could not reach
- * the server"), per the owner's report. On desktop the account is created on
+ * the server"). On desktop the account is created on
  * the public server.
  */
 export const SERVIDOR_DA_APP_DE_SECRETARIA = "orwell.pt"
@@ -99,12 +99,13 @@ export function defaultServer(
 }
 
 /**
- * The "Join the Orwell channel" checkbox on the last step comes checked.
+ * The "Join the official Orwell channel" checkbox on the last step comes unchecked.
  *
- * Owner decision on 3 November 2026: joining stays the path for those who
- * do nothing, and those who don't want it uncheck. Change it in this line.
+ * Since 12 November 2026, joining is opt-in. Whoever does nothing
+ * stays out; whoever wants it ticks the box, or joins later from "Join with a
+ * link". (It came checked from 3 November.) Change it in this line.
  */
-export const ENTRAR_NO_CANAL_OFICIAL_POR_OMISSAO = true
+export const ENTRAR_NO_CANAL_OFICIAL_POR_OMISSAO = false
 
 export function Setup({
   onDone,
@@ -159,6 +160,8 @@ export function Setup({
   const [aCriarConta, setACriarConta] = useState(() => ecraInicial({ podeEmparelhar: onJoinInstead !== undefined }) === "criar")
   /** The "How it works" page, open on top of the gate. */
   const [comoFunciona, setComoFunciona] = useState(false)
+  /** The address of the account just created: the account-file step shows. */
+  const [criada, setCriada] = useState<string | null>(null)
 
   // Refs, not state: the run spans awaits and StrictMode double-invokes
   // effects, so progress must be immune to re-renders and re-mount races.
@@ -246,12 +249,13 @@ export function Setup({
       }
       case "ligacao":
         /*
-          The choice BEFORE the connection: the account joins itself in the common
-          channel at the end of the handshake, and anyone who unchecked can't enter
-          not even for a moment. Retrying doesn't change anything. Checked, nothing
-          is written: no choice, the account enters, as always.
+          The choice BEFORE the connection, both ways: the account joins the
+          common channel at the end of the handshake only with "yes" written
+          (opt-in since 12/11/2026), and anyone who left it unchecked cannot
+          enter, not even for a moment. Written in the account, so it reaches
+          its other devices. Retrying doesn't change anything.
         */
-        if (!entrarNoCanalOficial) await bridge.session.escolherSalaComum?.(false)
+        await bridge.session.escolherSalaComum?.(entrarNoCanalOficial)
         await bridge.session.connect()
         return
       case "perfil":
@@ -288,7 +292,8 @@ export function Setup({
       step = firstIncomplete(progress.current)
     }
     setBusyStep(null)
-    if (addressRef.current) onDone(addressRef.current)
+    // The account exists: the file comes next, and only then the app. See `PassoDoFicheiroDaConta`.
+    if (addressRef.current) setCriada(addressRef.current)
   }
 
   /**
@@ -406,6 +411,8 @@ export function Setup({
     void run()
   }
 
+  if (criada) return <PassoDoFicheiroDaConta address={criada} onContinuar={() => onDone(criada)} />
+
   if (vaultExists) {
     return (
       <div className="gate">
@@ -426,7 +433,7 @@ export function Setup({
   /*
     The first question, before the account (phase 8.1).
 
-    Owner decision on 27 October 2026, replacing earlier choices about the
+    This replaces earlier choices about the
     gate order: creating an account is no longer the default path, and pairing
     is no longer the "third option" in a button below the name. Both answers
     carry equal weight, because neither is wrong; the wrong choice was to create
@@ -684,7 +691,7 @@ export function Setup({
               </>
             )}
 
-            {/* The common channel, on the last screen: owner request on 3/11/2026.
+            {/* The common channel, on the last screen, as an explicit choice.
                 Before this, every new account entered there without asking. */}
             {!aCriar && ultimo && (
               <div className="canal-oficial-escolha">
@@ -697,7 +704,6 @@ export function Setup({
                   />
                   {strings.gate.canalOficial}
                 </label>
-                <p className="field-note">{strings.gate.canalOficialNota}</p>
               </div>
             )}
 
@@ -792,8 +798,8 @@ export function Setup({
         {!aCriar && passo === "nome" && (
           <div className="setup-import">
             {/* The "Pair" button that was here (the "third option") moved up
-                to the first Setup question: phase 8.1, owner decision on
-                27 October 2026. Import remains, for those with the file. */}
+                to the first Setup question: phase 8.1.
+                Import remains, for those with the file. */}
             <p className="gate-lead">{strings.gate.importLead}</p>
             <ImportAccount replacing={false} onDone={onDone} />
           </div>

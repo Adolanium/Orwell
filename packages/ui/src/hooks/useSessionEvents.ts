@@ -86,6 +86,8 @@ export function useSessionEvents(bridge: EnclaveBridge, handlers: SessionEventHa
           ...(event.code === "denuncia-decidida" && (event.decisao === "suspensa" || event.decisao === "sem-accao")
             ? { decisao: event.decisao }
             : {}),
+          // The device was removed, with the proof the core checked (1.3.16): only the exact `true`.
+          ...(event.code === "device-revoked" && event.removido === true ? { removido: true as const } : {}),
         })
       }),
       bridge.on.epoch((raw) => handlers.onEpoch((raw as { channel?: string }).channel ?? "")),

@@ -60,7 +60,7 @@ interface Rascunho {
  * The channel roles: which roles exist, what they grant, and who has them.
  *
  * **Organized the way Discord organizes a role, since 27 October 2026.**
- * Owner request: "reorganize the menu exactly like Discord", and "abilities
+ * The requirement: "reorganize the menu exactly like Discord", and "abilities
  * must be split so they can be assigned as roles". When closed, the editor is
  * the card list. When a role opens, the list shrinks to the left (up on mobile)
  * and the role opens in three tabs: Appearance (name, color, and how it shows
@@ -69,14 +69,14 @@ interface Rascunho {
  *
  * **This replaces an earlier decision.** That screen showed which roles exist
  * but not who has them: assignment moved to the person's profile (`MemberRoles`),
- * so each screen answers one question. Discord puts both in the role, and the
- * owner asked for Discord. The profile still grants and revokes roles; here is
+ * so each screen answers one question. Discord puts both in the role, and this
+ * follows Discord. The profile still grants and revokes roles; here is
  * the second path to the same action, with the same bridge (`setRoles`). Until
  * the implementer delivers the member list (`membros` and `onSetMemberRole`), the
  * tab shows the path to the profile instead of an empty list.
  *
- * **The list order is the channel order, and changes here** (4/11/2026, owner
- * request: "the founder/admin should be able to reorder how the roles are
+ * **The list order is the channel order, and changes here** (the
+ * requirement: "the founder/admin should be able to reorder how the roles are
  * shown"). Since 1.2 a role has a place in the protocol: the `rank` (the
  * hierarchy, signed in `role.define`) and `position` to match, for clients
  * 1.1.x. The list comes via `compararCargos`, the same rule as the core, and
@@ -323,7 +323,7 @@ export function RoleEditor({
 /**
  * A role in the closed list: the name, what it grants, and what you can do with it.
  *
- * **The name changes in place** (2/11/2026, owner request: "the founder should
+ * **The name changes in place** (requirement: "the founder should
  * be able to change the role name"), like Discord: "Change name" swaps the label
  * for a field, Enter or leaving the field saves, Escape cancels. The built-in
  * one does too, as long as the core allows it: the name and color change,
@@ -715,8 +715,8 @@ function Permissoes({
                   data-poder={poder}
                 >
                   <div className="cargo-poder-linha">
-                    {/* Toggles, not checkboxes, ordered by the owner
-                        (October 27, 2026). The label is just the name: it is the
+                    {/* Toggles, not checkboxes, on purpose.
+                        The label is just the name: it is the
                         accessible name, and voice commands speak what they read. */}
                     <Interruptor
                       ligado={embutido || novo.powers.includes(poder)}

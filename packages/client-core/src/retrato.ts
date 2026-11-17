@@ -8,6 +8,7 @@ import {
   type RetratoPartido,
 } from "@enclave/protocol"
 import { normalizar, type QuemRelata } from "./sincronia/relato.js"
+import { apagadasDe, originalDasFixadas } from "./fixadas.js"
 import type { StoredPayload, VaultContents } from "./vault.js"
 
 /**
@@ -206,12 +207,39 @@ export function montarRetrato(fonte: FonteDoRetrato, geradoEm: number, tecto?: n
   for (const guardado of Object.values(conteudo.channelCategories?.[canal] ?? {})) {
     juntar(guardado.por ?? "", guardado.seq, guardado.payload, fonte.arruma)
   }
+  const apagadas = apagadasDe(conteudo, canal)
+  const semApagadas = (lista: unknown): unknown =>
+    Array.isArray(lista) ? lista.filter((fixada: { id?: unknown }) => typeof fixada.id !== "string" || !apagadas.has(fixada.id)) : lista
+  const nomeiaApagada = (payload: Record<string, unknown> | undefined): boolean =>
+    Array.isArray(payload?.["pinned"]) &&
+    (payload["pinned"] as { id?: unknown }[]).some((fixada) => typeof fixada.id === "string" && apagadas.has(fixada.id))
   for (const guardado of Object.values(conteudo.channelRooms[canal] ?? {})) {
-    juntar(guardado.por ?? "", guardado.seq, guardado.payload, fonte.arruma, () => {
-      // The pinned ones only from whoever has the pin permission: whoever receives would drop them anyway.
-      const { pinned, ...resto } = guardado.payload as Record<string, unknown>
-      return fonte.fixa && pinned !== undefined ? { ...resto, pinned } : resto
-    })
+    const autor = guardado.por ?? ""
+    const { pinned, ...semFixadas } = guardado.payload as Record<string, unknown>
+    /*
+      The room as its author signed it, and the pin list as ITS author signed it
+      (12/11/2026). A rename does not talk about pins, so the stored room is the
+      rename with the list merged in, and that verifies as neither. Before, such a
+      room went re-signed without pins, or not at all, and whoever joined never saw
+      what was pinned. Now: the room without the list, if that is what its author
+      signed, and the list's own declaration next to it. A list that names a deleted
+      message does not travel: it cannot be edited here.
+    */
+    const inteiro = nomeiaApagada(guardado.payload) ? null : verificado(canal, autor, guardado.payload)
+    const soASala = inteiro ? null : verificado(canal, autor, semFixadas as StoredPayload)
+    const assinado = inteiro ?? soASala
+    if (assinado) essenciais.push({ item: { s: guardado.seq !== undefined && guardado.seq >= 0 ? guardado.seq : -1, a: autor, p: assinado } })
+    else {
+      const comoFica = fonte.fixa && pinned !== undefined ? { ...semFixadas, pinned: semApagadas(pinned) } : semFixadas
+      const nosso = fonte.arruma ? assinadoPorNos(canal, eu, comoFica) : null
+      if (nosso) essenciais.push({ item: { s: -1, a: eu.address, p: nosso } })
+      else faltam += 1
+    }
+    const levaFixadas = inteiro !== null || (!assinado && fonte.arruma && fonte.fixa)
+    if (!levaFixadas && pinned !== undefined) {
+      const declaracao = originalDasFixadas(canal, guardado)
+      if (declaracao && !nomeiaApagada(declaracao.p)) essenciais.push({ item: declaracao })
+    }
   }
   const letreiro = conteudo.spaceMeta[canal]
   if (letreiro) juntar(letreiro.por ?? "", letreiro.seq, letreiro.payload, fonte.arruma)

@@ -140,6 +140,63 @@ function textoNoSitio(
 }
 
 /**
+ * Stage 1a, synchronous: serialize and lay the plaintext into the one buffer.
+ *
+ * This is the snapshot: whatever the contents are now is what the file will
+ * hold. It stays on the caller's thread and in the caller's task.
+ */
+export interface SeloPreparado {
+  buffer: Uint8Array
+  /** Where the plaintext starts, and its length in bytes. */
+  de: number
+  n: number
+  /** Where the base64 starts (the header and the envelope start are before it). */
+  inicio: number
+  /** The base64 length of the ciphertext. */
+  L: number
+  prefixo: string
+}
+
+export function prepararSelo(serializar: () => string, envelope: string, reserva: number): SeloPreparado {
+  const { prefixo } = partirEnvelope(envelope)
+  const cabeca = ascii(CABECALHO_DO_COFRE + prefixo)
+  const { buffer, de, n, L } = textoNoSitio(serializar(), cabeca.length, reserva)
+  buffer.set(cabeca, 0)
+  return { buffer, de, n, inicio: cabeca.length, L, prefixo }
+}
+
+/**
+ * Stage 1b: encrypt in place and write the base64, in the same buffer.
+ *
+ * Pure and self-contained, so it can run in a Worker (`selo-worker.ts`): it
+ * needs the buffer, the key and the nonce, nothing else.
+ */
+export function fecharSelo(p: SeloPreparado, key: Uint8Array, nonce: Uint8Array): SeloEmCurso {
+  // In place: the output is the plaintext's own bytes plus the 16 that follow for the tag.
+  xchacha20poly1305(key, nonce).encrypt(p.buffer.subarray(p.de, p.de + p.n), p.buffer.subarray(p.de, p.de + p.n + 16))
+  const fim = base64NoSitio(p.buffer, p.de, p.n + 16, p.inicio)
+  if (fim !== p.inicio + p.L) throw new Error("vault base64 length mismatch")
+  return { buffer: p.buffer, fim, prefixo: p.prefixo }
+}
+
+/**
+ * A write to seal elsewhere: the JSON text (the snapshot, already taken), the
+ * envelope with `ciphertext: ""`, and the room for the envelope end. A string
+ * crosses to a Worker as one copy; the UTF-8 sizing, the encoding, the cipher
+ * and the base64 all run there.
+ */
+export interface SeloPorFazer {
+  texto: string
+  envelope: string
+  reserva: number
+}
+
+/** Everything after the snapshot, for a Worker. See `SeloPorFazer`. */
+export function selarTexto(p: SeloPorFazer, key: Uint8Array, nonce: Uint8Array): SeloEmCurso {
+  return fecharSelo(prepararSelo(() => p.texto, p.envelope, p.reserva), key, nonce)
+}
+
+/**
  * Stage 1, synchronous: serialize, encrypt and write the base64, all in one buffer.
  *
  * `serializar` is called here, once, so whoever calls does not hold the JSON text.
@@ -154,15 +211,7 @@ export function comecarSelo(
   envelope: string,
   reserva: number,
 ): SeloEmCurso {
-  const { prefixo } = partirEnvelope(envelope)
-  const cabeca = ascii(CABECALHO_DO_COFRE + prefixo)
-  const { buffer, de, n, L } = textoNoSitio(serializar(), cabeca.length, reserva)
-  buffer.set(cabeca, 0)
-  // In place: the output is the plaintext's own bytes plus the 16 that follow for the tag.
-  xchacha20poly1305(key, nonce).encrypt(buffer.subarray(de, de + n), buffer.subarray(de, de + n + 16))
-  const fim = base64NoSitio(buffer, de, n + 16, cabeca.length)
-  if (fim !== cabeca.length + L) throw new Error("vault base64 length mismatch")
-  return { buffer, fim, prefixo }
+  return fecharSelo(prepararSelo(serializar, envelope, reserva), key, nonce)
 }
 
 /**

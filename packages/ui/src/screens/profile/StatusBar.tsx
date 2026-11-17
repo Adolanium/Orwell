@@ -9,7 +9,7 @@ import { strings } from "../../strings.js"
  * something you wrote, not something inferred from your activity.
  *
  * Up to 0.9 it was a fixed line on the account card, which became a field on
- * click. The banner the owner chose on 27 October 2026 is one line only, and
+ * click. The current banner is one line only, and
  * this line came out of it: it mounts only when the "Custom…" in the status menu
  * asks for it, and `onFim` unmounts it. The written text continues to show in
  * the profile and member list.

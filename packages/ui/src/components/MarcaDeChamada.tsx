@@ -33,19 +33,20 @@ import { strings } from "../strings.js"
  * The microphone stroke opens a band with a mask, as before; the speaker takes the cross
  * beside it, for the reason above; the screen takes the open arrow on it.
  *
- * ## Music (owner request October 27, 2026, 23:55)
+ * ## Music
  *
  * `musica`: two notes, filled balls, stems and the bar joining them at 1.7 stroke, on the
  * same grid. It serves the broadcast signal for voice rooms (`MarcaDeTransmissao`, below),
  * beside the `ecra`.
  */
-export type TipoDeMarca = "calado" | "silenciado" | "ecra" | "musica"
+export type TipoDeMarca = "calado" | "silenciado" | "ecra" | "musica" | "semSom"
 
 const ROTULO: Record<TipoDeMarca, (nome: string) => string> = {
   calado: (nome) => strings.call.micOffOf(nome),
   silenciado: (nome) => strings.call.silencedByYouOf(nome),
   ecra: (nome) => strings.call.sharingOf(nome),
   musica: (nome) => strings.transmissao.musicaDe(nome),
+  semSom: (nome) => strings.call.soundOffOf(nome),
 }
 
 /** The class each place already used to put the mark in place and give it color. */
@@ -105,6 +106,17 @@ function Glifo({ tipo, size }: { tipo: TipoDeMarca; size: number }): React.JSX.E
       </svg>
     )
   }
+  if (tipo === "semSom") {
+    // The headphones with the line through them: this person hears nothing (12/11/2026).
+    return (
+      <svg {...comum}>
+        <path d="M4 15v-3a8 8 0 0 1 16 0v3" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" />
+        <rect x={3} y={14} width={4.5} height={6} rx={1.5} fill="currentColor" />
+        <rect x={16.5} y={14} width={4.5} height={6} rx={1.5} fill="currentColor" />
+        <path d="M4 3l16 18" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" />
+      </svg>
+    )
+  }
   if (tipo === "silenciado") {
     return (
       <svg {...comum}>
@@ -139,8 +151,8 @@ const ROTULO_DA_TRANSMISSAO: Record<Transmissao, () => string> = {
 
 /**
  * The broadcast indicator next to the face of whoever is sharing the screen or
- * playing music in a voice room on the sidebar (owner request, October 27, 2026,
- * 23:55: "stream icon in the communities column").
+ * playing music in a voice room on the sidebar (requirement:
+ * "stream icon in the communities column").
  *
  * The glyphs for the call badges, not a written "LIVE": in a narrow list you
  * read the shape, and the screen and notes are already the icons the call uses

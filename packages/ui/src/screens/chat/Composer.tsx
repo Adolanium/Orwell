@@ -8,7 +8,7 @@ import { Button } from "../../components/Button.js"
 import { EmojiPicker } from "../../components/EmojiPicker.js"
 import { primeiroEndereco } from "../../components/RichText.js"
 import { useAtalhosDeFormatacao } from "../../hooks/useAtalhosDeFormatacao.js"
-import { CloseIcon, EnviarIcon, PlusIcon, SmileyIcon } from "../../icons.js"
+import { BuzzIcon, CloseIcon, EnviarIcon, PlusIcon, SmileyIcon } from "../../icons.js"
 import { colarImagens } from "../../lib/colar.js"
 import {
   comandosASugerir,
@@ -23,8 +23,7 @@ import { compressImage, IMAGE_BUDGETS, resumoDaReducao } from "../../lib/images.
 import {
   aplicarMencoesComTodos,
   inserirMencao,
-  mencaoEmCurso,
-  sugerirMencoesComTodos,
+  sugerirMencoes,
   type MentionCandidate,
   type MentionPick,
 } from "../../lib/mentions.js"
@@ -32,8 +31,10 @@ import { comResposta, type RespostaNaCaixa } from "../../lib/respostas.js"
 import { NomeDePessoa } from "../../components/NomeDePessoa.js"
 import { strings, traduzirErro } from "../../strings.js"
 import { ContextMenu } from "../overlays/ContextMenu.js"
+import { BuzzButton } from "./BuzzButton.js"
 import { LinkAttach } from "./LinkAttach.js"
 import { MentionPicker } from "./MentionPicker.js"
+import { etiquetaEmCurso, sugerirEtiquetas } from "../../lib/etiquetas.js"
 
 /**
  * How many images fit in a message, and why this number.
@@ -48,7 +49,7 @@ import { MentionPicker } from "./MentionPicker.js"
 /**
  * The character limit for a message, and where the counter shows up.
  *
- * Owner request from October 27, 2026: "a comfortable number for users".
+ * The requirement: "a comfortable number for users".
  * 2000 is Discord's, which is the reference for who uses this: it fits a long
  * paragraph, but not a document. The protocol can handle much more (the real
  * cap is on the encrypted payload, `PAYLOAD_MAX_CHARS`); this is a comfort
@@ -87,9 +88,9 @@ const FICHEIROS_MAX = 6
  * a photo to the wrong person.
  */
 /**
- * The buzz is back in view (October 28, 2026, owner request).
+ * The buzz is back in view.
  *
- * It was hidden since August 18, 2026, also by owner decision, with the entire
+ * It was hidden for a while, with the entire
  * path live and tested underneath: the `useBuzz`, the `buzz` sound, the shake
  * `.main.buzzing` and the protocol event. It came back with a new limit, one
  * per minute per conversation (`lib/limiteDaCotovelada.ts`), which is what sets
@@ -100,7 +101,7 @@ const FICHEIROS_MAX = 6
 const MOSTRAR_COTOVELADA = true
 
 /**
- * Polls are hidden, by owner decision from August 18, 2026.
+ * Polls are hidden, as a product decision.
  *
  * Hidden, not removed: the entire path stays live and tested. The `Poll` in
  * the protocol, the count, vote rebroadcast, the card. What is gone are the
@@ -124,6 +125,8 @@ export function Composer({
   onTyping,
   mentionable = [],
   podeMencionarTodos = false,
+  cargos = [],
+  salas = [],
   directory,
   presenceFor,
   emChamada,
@@ -163,6 +166,13 @@ export function Composer({
    * `@all` typed by hand comes through as plain text. Missing means "cannot".
    */
   podeMencionarTodos?: boolean | undefined
+  /**
+   * The roles `@` offers after people (12/11/2026), already filtered to the ones
+   * this writer may mention. See `lib/etiquetas.ts`.
+   */
+  cargos?: readonly MentionCandidate[] | undefined
+  /** The rooms `#` offers: only the ones this account sees. */
+  salas?: readonly MentionCandidate[] | undefined
   /** Just to show each person's photo next to their name in suggestions. */
   directory?: Map<string, Profile> | undefined
   /** The ring of photos in suggestions. See `MentionPicker`. */
@@ -303,14 +313,19 @@ export function Composer({
   // that is no longer written is not a mention.
   const [picks, setPicks] = useState<MentionPick[]>([])
   /** Where the @ starts being typed, and what already follows it. */
-  const [mencao, setMencao] = useState<{ inicio: number; procura: string } | null>(null)
+  const [mencao, setMencao] = useState<{ inicio: number; procura: string; sinal: "@" | "#" } | null>(null)
   const [escolhido, setEscolhido] = useState(0)
   /** An @ that the person closed with Escape. Does not reopen until they touch it. */
   const [dispensada, setDispensada] = useState<number | null>(null)
 
   const sugestoes = useMemo(
-    () => (mencao && mencao.inicio !== dispensada ? sugerirMencoesComTodos(mentionable, mencao.procura, podeMencionarTodos) : []),
-    [mencao, dispensada, mentionable, podeMencionarTodos],
+    () =>
+      !mencao || mencao.inicio === dispensada
+        ? []
+        : mencao.sinal === "#"
+          ? sugerirMencoes(salas, mencao.procura)
+          : sugerirEtiquetas(mentionable, cargos, mencao.procura, podeMencionarTodos),
+    [mencao, dispensada, mentionable, podeMencionarTodos, cargos, salas],
   )
   const aSugerir = sugestoes.length > 0
 
@@ -383,7 +398,7 @@ export function Composer({
 
   /** Re-evaluate the mention at each keystroke, starting from the cursor position. */
   const reavaliarMencao = (texto: string, cursor: number): void => {
-    const encontrada = mencaoEmCurso(texto, cursor)
+    const encontrada = etiquetaEmCurso(texto, cursor)
     setMencao(encontrada)
     setEscolhido(0)
     // Moved to a different mention: the one that was dismissed no longer counts.
@@ -840,7 +855,7 @@ export function Composer({
               event.target.value = ""
             }}
           />
-          {/* The attachment button, next to the photo icon, owner request, and in the right order:
+          {/* The attachment button, next to the photo icon, and in the right order:
               the image is the everyday gesture and goes first.
 
               NO `accept`: any file works, and a list of types here
@@ -868,8 +883,8 @@ export function Composer({
             The `+`, which brings together the three gestures that are not typing.
 
             At 390px the line had emoji, image, attachment, send and the box,
-            and it busted. Of the three layouts tested, the owner chose this one on
-            August 12, 2026: the box stays wide and the two buttons used
+            and it busted. Of the three layouts tested, this one was chosen:
+            the box stays wide and the two buttons used
             all the time stay out, and what is rarer moves to a click away.
 
             The menu is the standard `ContextMenu`, not a new design: it brings
@@ -1021,6 +1036,14 @@ export function Composer({
           >
             <SmileyIcon size={17} />
           </button>
+          {/*
+            The nudge with its own button and icon (12/11/2026: "an
+            icon of its own for the nudge, only for private messages"). Only where
+            `onBuzz` arrives, and it only arrives in a direct conversation. On a
+            narrow screen the button hides (`screens.css`) and the entry in the "+"
+            menu stays: the 390 px line is the choice of 12/08/2026.
+          */}
+          {onBuzz && MOSTRAR_COTOVELADA && <BuzzButton onBuzz={onBuzz} cooldown={buzzCooldown} />}
           {/* The counter, only near the limit: from 1800 it shows how many are left,
               and turns red when it goes over. See `MENSAGEM_MAX_CARACTERES`. */}
           {value.length >= CONTADOR_A_PARTIR_DE && (
@@ -1075,6 +1098,7 @@ export function Composer({
               ? [
                   {
                     label: buzzCooldown > 0 ? strings.chat.buzzMenuWait(buzzCooldown) : strings.chat.buzz,
+                    icon: <BuzzIcon size={16} />,
                     separatorBefore: true,
                     onSelect: onBuzz,
                   },

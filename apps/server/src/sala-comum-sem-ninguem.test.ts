@@ -58,6 +58,8 @@ async function conta(nome: string): Promise<Peer> {
   await vault.create("frase-passe-de-teste")
   const session = new Session(vault)
   const identity = await session.createIdentity(`localhost:${PORT}`)
+  // Joining the common room is opt-in since 12/11/2026: these accounts ticked the box.
+  await session.escolherSalaComum(true)
   await session.connect()
   await session.updateProfile({ displayName: nome, donations: [] })
   return { session, address: identity.address }

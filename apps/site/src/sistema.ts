@@ -1,7 +1,7 @@
 /**
  * The only script on the site: picks the main button based on the visitor's system.
  *
- * Requested by the owner on November 2, 2026. On Windows the button says "Download
+ * On Windows the button says "Download
  * for Windows", on Mac "Download for macOS", on mobile "Open in
  * browser". The other paths stay as text links below.
  *

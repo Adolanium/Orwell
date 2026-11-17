@@ -5,7 +5,7 @@ import type { ReactNode } from "react"
  *
  * It is a button with `role="switch"`, not a checkbox. The native checkbox measures 13 px,
  * draws differently on each system, and the checkmark never aligns with the label text;
- * the owner asked for a switch (October 20, 2026). The accessible name is the label text,
+ * a switch avoids all of that. The accessible name is the label text,
  * which is what you see: voice commands say what they read.
  *
  * The click target is the whole line and measures at least 24 px tall (WCAG 2.2, 2.5.8).

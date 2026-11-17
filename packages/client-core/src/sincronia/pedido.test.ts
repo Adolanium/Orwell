@@ -40,6 +40,10 @@ class Rede {
   seq = 1_000
   /** What is in flight: deliver in order, one by one, so the test can wait for silence. */
   emVoo = 0
+  /** The nodes' clock; `null` is the real one. */
+  relogio: number | null = null
+  /** Whether profiles go to third parties here (the common room). */
+  perfisATerceiros = false
 
   criar(nome: string, indice: number): No {
     const privada = new Uint8Array(32).fill(indice + 1)
@@ -81,7 +85,8 @@ class Rede {
       cadeiaDe: () => null,
       bloqueado: () => false,
       online: () => true,
-      agora: () => Date.now(),
+      agora: () => rede.relogio ?? Date.now(),
+      perfisATerceiros: () => rede.perfisATerceiros,
     }
     const no: No = { nome, eu, folha, contents, anti: new AntiEntropia(porta), lugar: -1, sinais: [] }
     this.nos.push(no)
@@ -517,5 +522,31 @@ describe("perfis relatados por um terceiro (3/11/2026, a sala comum)", () => {
     // The swapped name does not verify; David's device is not in the tree; ours does not accept itself from anyone.
     expect(carla.anti.estatisticas.relatosRecusados).toEqual({ autoria: 1, aparelho: 1, tipo: 1 })
     expect(carla.anti.estatisticas.perfisAplicados).toBe(1)
+  })
+})
+
+describe("quanto tempo uma conta pedida espera por outro pedido (revisão do 1.3.8, R4)", () => {
+  it("24 h só para quem um relato deu sem nome; 10 min para quem ficou sem resposta", async () => {
+    const rede = new Rede()
+    rede.perfisATerceiros = true
+    rede.relogio = 1_000_000
+    const ana = rede.criar("ana", 0)
+    const bruno = rede.criar("bruno", 1)
+    const carla = rede.criar("carla", 2)
+    const semResposta = "@dario:orwell.test"
+    expect(await ana.anti.pedirPerfis(CANAL, [bruno.eu.address, semResposta])).toBe(true)
+    const pedido = corpoDe(ana.sinais.at(-1)!)
+    expect(pedido["k"]).toBe("pp")
+
+    // Carla relays Bruno's signed profile, which has no name.
+    const semNome = comAutoria(CANAL, { t: "profile", displayName: "", donations: [], updatedAt: 5 } as never, bruno.eu) as unknown as Record<string, unknown>
+    await ana.anti.aoRelatos(CANAL, 100, { v: 1, q: `pf.${String(pedido["id"])}:1/1`, itens: [{ s: -1, a: bruno.eu.address, p: semNome }] }, carla.folha.aparelho)
+
+    expect(ana.anti.estatisticas.relatosRecusados).toEqual({})
+    expect(ana.anti.estatisticas.perfisAplicados).toBe(1)
+    rede.relogio += 11 * 60_000
+    expect(ana.anti.contasPorPedir(CANAL, [bruno.eu.address, semResposta])).toEqual([semResposta])
+    rede.relogio += 24 * 3_600_000
+    expect(ana.anti.contasPorPedir(CANAL, [bruno.eu.address, semResposta]).sort()).toEqual([bruno.eu.address, semResposta].sort())
   })
 })

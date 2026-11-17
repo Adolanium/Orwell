@@ -10,7 +10,7 @@ import { SettingsScreen } from "./SettingsScreen.js"
 /**
  * Delete the account when leaving channels fails.
  *
- * **The defect, reported by the owner:** "I deleted an account and it stays
+ * **The defect:** "I deleted an account and it stays
  * visible in the channel". Deleting wiped the local vault and nothing else,  * the leaf stayed in the MLS tree of each channel. The fix leaves all channels
  * first, and that part is network: it can fail for no connection or the server
  * refusing.

@@ -185,8 +185,8 @@ describe("compressImage", () => {
 })
 
 /**
- * The animated GIF in avatar and icon (phase 1c, owner decision on October 27,
- * 2026).
+ * The animated GIF in avatar and icon (phase 1c).
+ *
  *
  * A GIF up to 160 kB passes intact, even larger than 256 px: redrawing it would
  * recode it, and the animation would die. Above that it stops, and we say so. Other

@@ -26,7 +26,7 @@ type Separador = "publicacoes" | "amigos" | "comum"
  * and what we have in common. It takes up the entire main area, as on Instagram
  * and Discord.
  *
- * **A page and not a sheet, by owner decision on 21 October 2026:** "each user's
+ * **A page and not a sheet, by design:** "each user's
  * profile should be a dedicated page." The sheet fit where we were reading, but
  * had no room for the wall, tabs, or history. The page has all three. The
  * previous place is not lost: the shell hides it underneath without taking it
@@ -143,7 +143,7 @@ export function PersonProfile({
    * The list of friends this person chose to show, with names already resolved.
    * Null when they do not show it, or when we are not friends (the core only
    * gives it to friends). It never comes crossed with my list: no "mutual
-   * friends", by owner decision.
+   * friends", by design.
    */
   amigosMostrados?: readonly { address: string; nome: string }[] | null | undefined
   /** Open someone's profile from that list. */

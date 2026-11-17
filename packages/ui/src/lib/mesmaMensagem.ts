@@ -9,7 +9,7 @@ import type { ChatMessage } from "../types.js"
  * shows both copies to the interface: first the report, which goes without media bytes
  * on purpose (no card thumbnails and attachments as placeholders), then the server one,
  * with everything. Merging both would show the message twice, one without the video
- * thumbnail, with the same React `key` (report from owner with 1.1.0, "app still has no
+ * thumbnail, with the same React `key` (the bug in 1.1.0, "app still has no
  * YouTube thumbnails in communities").
  *
  * Becomes one line, at the spot of the first. Uses the payload with more media bytes;

@@ -4,9 +4,7 @@ import type { ConnectionState, EnclaveBridge } from "../bridge.js"
 import type { ChatMessage } from "../types.js"
 import { strings } from "../strings.js"
 import { outboxReducer, useOutbox, type OutboxEntry } from "./useOutbox.js"
-import { amplitudeDe, criarMotor, type EstadoDoSom, type Motor, type Saida } from "../sons/motor.js"
-import { PREFERENCIAS_DE_SOM_POR_OMISSAO } from "../sons/preferencias.js"
-import type { TipoDeSom } from "../sons/familia.js"
+import { motor } from "../sons/motor.js"
 
 afterEach(cleanup)
 
@@ -311,195 +309,20 @@ describe("useOutbox: um separador que deixou de escrever", () => {
 })
 
 /*
-  Send sound (owner request, November 3, 2026). Plays when the bridge confirms
+  Send sound. Plays when the bridge confirms
   a message that just left the outbox, and only then.
 */
-describe("o som ao enviar", () => {
-  const motorFalso = (): Pick<Motor, "tocar"> & { tocar: ReturnType<typeof vi.fn> } => ({
-    tocar: vi.fn(() => "tocou" as const),
-  })
-
-  it("toca uma vez quando o envio tem sucesso, e só depois da confirmação", async () => {
-    let resolve: (value: { ok: boolean }) => void = () => {}
-    const send = vi.fn(() => new Promise<{ ok: boolean }>((r) => (resolve = r)))
-    const som = motorFalso()
-    const { result } = renderHook(() => useOutbox(bridgeWith(send), "online", vi.fn(), som))
-
-    act(() => result.current.send("!geral:s", "olá"))
-    expect(som.tocar).not.toHaveBeenCalled()
-    await act(async () => {
-      resolve({ ok: true })
-      await Promise.resolve()
-    })
-    expect(som.tocar.mock.calls).toEqual([[{ tipo: "enviada" }]])
-  })
-
-  it("uma mensagem com anexos é um envio só, e faz um som só", async () => {
+describe("enviar não faz som (16/11/2026)", () => {
+  it("um envio com sucesso não pede som nenhum: é um acontecimento da própria conta", async () => {
+    const tocar = vi.spyOn(motor, "tocar")
     const send = vi.fn(async () => ({ ok: true }))
-    const som = motorFalso()
-    const { result } = renderHook(() => useOutbox(bridgeWith(send), "online", vi.fn(), som))
-
+    const { result } = renderHook(() => useOutbox(bridgeWith(send), "online", vi.fn()))
     await act(async () => {
-      result.current.send("!geral:s", "fotos", undefined, {
-        images: [
-          { name: "a.jpg", dataUrl: "data:image/jpeg;base64,AA" },
-          { name: "b.jpg", dataUrl: "data:image/jpeg;base64,AA" },
-        ],
-      } as never)
+      result.current.send("!geral:s", "olá")
       await Promise.resolve()
     })
     expect(send).toHaveBeenCalledTimes(1)
-    expect(som.tocar).toHaveBeenCalledTimes(1)
-  })
-
-  it("não toca quando o envio falha", async () => {
-    const send = vi.fn(() => Promise.reject(new Error("vault is locked")))
-    const som = motorFalso()
-    const { result } = renderHook(() => useOutbox(bridgeWith(send), "online", vi.fn(), som))
-
-    await act(async () => {
-      result.current.send("!geral:s", "olá")
-      await Promise.resolve()
-    })
-    expect(result.current.entries[0]?.state).toBe("failed")
-    expect(som.tocar).not.toHaveBeenCalled()
-  })
-
-  it("não toca quando a ligação cai a meio, nem quando a mensagem sai depois sozinha", async () => {
-    const send = vi
-      .fn<(channel: string, body: string) => Promise<{ ok: boolean }>>()
-      .mockRejectedValueOnce(new Error("the connection dropped"))
-      .mockResolvedValueOnce({ ok: true })
-    const som = motorFalso()
-    const { result, rerender } = renderHook(
-      ({ connection }: { connection: ConnectionState }) => useOutbox(bridgeWith(send), connection, vi.fn(), som),
-      { initialProps: { connection: "online" as ConnectionState } },
-    )
-
-    await act(async () => {
-      result.current.send("!geral:s", "olá")
-      await Promise.resolve()
-    })
-    expect(result.current.entries[0]?.state).toBe("waiting")
-    rerender({ connection: "reconnecting" as ConnectionState })
-    await act(async () => {
-      rerender({ connection: "online" })
-      await Promise.resolve()
-    })
-    expect(send).toHaveBeenCalledTimes(2)
-    expect(result.current.entries).toHaveLength(0)
-    expect(som.tocar).not.toHaveBeenCalled()
-  })
-
-  it('não toca no "Tentar outra vez": a mensagem já não sai da caixa de escrita', async () => {
-    const send = vi
-      .fn<(channel: string, body: string) => Promise<{ ok: boolean }>>()
-      .mockRejectedValueOnce(new Error("boom"))
-      .mockResolvedValueOnce({ ok: true })
-    const som = motorFalso()
-    const { result } = renderHook(() => useOutbox(bridgeWith(send), "online", vi.fn(), som))
-
-    await act(async () => {
-      result.current.send("!geral:s", "olá")
-      await Promise.resolve()
-    })
-    await act(async () => {
-      result.current.retry(result.current.entries[0]!.id)
-      await Promise.resolve()
-    })
-    expect(result.current.entries).toHaveLength(0)
-    expect(som.tocar).not.toHaveBeenCalled()
-  })
-
-  it("não toca ao receber: a mensagem própria vinda da sessão não é um envio", () => {
-    const send = vi.fn(() => new Promise<{ ok: boolean }>(() => {}))
-    const som = motorFalso()
-    const { result } = renderHook(() => useOutbox(bridgeWith(send), "online", vi.fn(), som))
-
-    act(() => result.current.noteOwnMessage(ownMessage("olá")))
-    expect(som.tocar).not.toHaveBeenCalled()
-  })
-
-  describe("com o motor a sério: o interruptor, o tipo e o volume", () => {
-    function montar(estado: Partial<EstadoDoSom>): { tocados: [TipoDeSom, number][]; motor: Motor } {
-      const tocados: [TipoDeSom, number][] = []
-      const saida: Saida = {
-        tocar: (tipo, amplitude) => {
-          tocados.push([tipo, amplitude])
-          return true
-        },
-        calar: () => {},
-        vibrar: () => {},
-        preparar: () => {},
-      }
-      const motor = criarMotor({
-        saida,
-        lerEstado: () => ({
-          ligado: true,
-          volume: 70,
-          actividade: "online",
-          som: PREFERENCIAS_DE_SOM_POR_OMISSAO,
-          ...estado,
-        }),
-        ambiente: { houveGesto: () => true, janelaAFrente: () => true, visivel: () => true },
-      })
-      return { tocados, motor }
-    }
-
-    async function enviarCom(motor: Motor): Promise<void> {
-      const send = vi.fn(async () => ({ ok: true }))
-      const { result } = renderHook(() => useOutbox(bridgeWith(send), "online", vi.fn(), motor))
-      await act(async () => {
-        result.current.send("!geral:s", "olá")
-        await Promise.resolve()
-      })
-    }
-
-    it("ligado de fábrica, no volume das definições", async () => {
-      expect(PREFERENCIAS_DE_SOM_POR_OMISSAO.porTipo.enviada).toBe(true)
-      const { tocados, motor } = montar({ volume: 40 })
-      await enviarCom(motor)
-      expect(tocados).toEqual([["enviada", amplitudeDe(40)]])
-    })
-
-    it('"Som ao enviar mensagens" desligado cala-o', async () => {
-      const som = { ...PREFERENCIAS_DE_SOM_POR_OMISSAO, porTipo: { ...PREFERENCIAS_DE_SOM_POR_OMISSAO.porTipo, enviada: false } }
-      const { tocados, motor } = montar({ som })
-      await enviarCom(motor)
-      expect(tocados).toEqual([])
-    })
-
-    it("o interruptor geral dos sons cala-o", async () => {
-      const { tocados, motor } = montar({ ligado: false })
-      await enviarCom(motor)
-      expect(tocados).toEqual([])
-    })
-
-    it("o volume zero cala-o", async () => {
-      const { tocados, motor } = montar({ volume: 0 })
-      await enviarCom(motor)
-      expect(tocados).toEqual([])
-    })
-
-    it("dois envios seguidos fazem dois sons", async () => {
-      const { tocados, motor } = montar({})
-      const send = vi.fn(async () => ({ ok: true }))
-      const { result } = renderHook(() => useOutbox(bridgeWith(send), "online", vi.fn(), motor))
-      await act(async () => {
-        result.current.send("!geral:s", "um")
-        await Promise.resolve()
-      })
-      const agora = Date.now()
-      const relogio = vi.spyOn(Date, "now").mockReturnValue(agora + 400)
-      try {
-        await act(async () => {
-          result.current.send("!geral:s", "dois")
-          await Promise.resolve()
-        })
-      } finally {
-        relogio.mockRestore()
-      }
-      expect(tocados.map(([tipo]) => tipo)).toEqual(["enviada", "enviada"])
-    })
+    expect(tocar).not.toHaveBeenCalled()
+    tocar.mockRestore()
   })
 })

@@ -15,7 +15,9 @@ import { afterEach, describe, expect, it } from "vitest"
 import { createChannel, rotateEpoch } from "@enclave/crypto"
 import { buildServer, type Enclave } from "./app.js"
 import { loadOrCreateServerKey, type ServerConfig } from "./config.js"
-import { currentSecond } from "./db.js"
+import { currentMinute, currentSecond } from "./db.js"
+import { SERVICOS_DE_PUSH } from "./config.js"
+import { ServicoDePushFalso } from "../testes/servico-de-push-falso.js"
 
 /**
  * The allowlist on the DELIVERY side: the forgotten sibling of the key package
@@ -64,7 +66,7 @@ function servidorRemoto(): ReturnType<typeof loadOrCreateServerKey> {
   return loadOrCreateServerKey(dir)
 }
 
-async function montar(allowlist: ServerName[]): Promise<void> {
+async function montar(allowlist: ServerName[], extra: Partial<ServerConfig> = {}): Promise<void> {
   dataDir = mkdtempSync(join(tmpdir(), "enclave-entrega-"))
   porLimpar.push(dataDir)
 
@@ -83,6 +85,7 @@ async function montar(allowlist: ServerName[]): Promise<void> {
     turnTtl: 600,
     communityMode: false,
     commonRoom: "",
+    ...extra,
   }
   enclave = await buildServer(config)
 }
@@ -246,4 +249,35 @@ describe("entregar um commit atrasado, com a federação LIGADA", () => {
     expect(rasto().eventos).toBe(1)
     expect(enclave.store.epochDoCanal(CANAL)).toBe(1)
   }, 30_000)
+})
+
+describe("Web Push e a federação", () => {
+  it("uma mensagem de um par acorda o aparelho fechado de uma conta daqui; um commit não", async () => {
+    const servico = new ServicoDePushFalso()
+    await servico.arrancar()
+    try {
+      await montar([PAR], { push: { contacto: "", servicos: [...SERVICOS_DE_PUSH, "push.test"], transporte: servico.transporte } })
+      servico.chaveDoServidor = enclave.push?.chavePublica ?? null
+      const local = generateIdentity(NOS)
+      const aparelho = servico.novoAparelho()
+      enclave.store.subscribe(CANAL, local.address)
+      enclave.store.putPushSubscription({
+        address: local.address,
+        deviceKey: local.deviceSigningPublicKey,
+        endpoint: aparelho.endpoint,
+        p256dh: aparelho.p256dh,
+        auth: aparelho.auth,
+        lingua: "en",
+        silenciados: [],
+        calarAteMinute: 0,
+        expiresMinute: currentMinute() + 60,
+      })
+
+      expect(await entregar(envelopeDe(PAR))).toBe(200)
+      await enclave.push?.carteiro.ocioso()
+      expect(servico.recebidos.map((r) => [r.id, r.texto])).toEqual([[aparelho.id, "en"]])
+    } finally {
+      await servico.parar()
+    }
+  })
 })

@@ -1,6 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { copiarTexto } from "./lib/copiar.js"
-import { marcarArranque, parseInviteLink, parseShortInviteLink, sameHomeserver, type Participant, type StoredChatMessage } from "@enclave/client-core"
+import {
+  dobrarReaccoes,
+  marcarArranque,
+  parseInviteLink,
+  parseShortInviteLink,
+  sameHomeserver,
+  type FichaDeReaccao,
+  type Participant,
+  type StoredChatMessage,
+} from "@enclave/client-core"
 import {
   canalAEsperaParaMostrar,
   canalParaMostrar,
@@ -13,7 +22,8 @@ import {
 } from "./lib/conviteDeArranque.js"
 import type { StartupPairing } from "./lib/emparelhamentoDeArranque.js"
 import { ConviteChegado } from "./screens/overlays/ConviteChegado.js"
-import { eMoradaOpaca, moradaDeSala, parseServerName, type AvisoDeSuspensao, type Power } from "@enclave/protocol"
+import { CARGO_TODOS, comSoLeitura, eMoradaOpaca, moradaDeSala, parseServerName, soLeituraDe, type AvisoDeSuspensao, type Power } from "@enclave/protocol"
+import { candidatoDeCargo, candidatoDeSala } from "./lib/etiquetas.js"
 import type { Activity, ChannelRoom, ConnectionState, EnclaveBridge, Profile, StartupFriend } from "./bridge.js"
 import type { ChatMessage, MessageExtras, SocialDraft, Stage, View } from "./types.js"
 import { ChatIcon, FeedIcon, FriendsIcon, GearIcon, MenuIcon, OrwellMark, PersonIcon } from "./icons.js"
@@ -22,6 +32,8 @@ import { useLacosDeAmizade } from "./hooks/useLacosDeAmizade.js"
 import { useSucessoes } from "./hooks/useSucessoes.js"
 import { chaveDaOferta, escondidasPorSucessao, ofertasDeSucessao, type OfertaDeSucessao } from "./lib/sucessoes.js"
 import { useBloqueioAutomatico } from "./hooks/useBloqueioAutomatico.js"
+import { useChamadaEmSegundoPlano } from "./hooks/useChamadaEmSegundoPlano.js"
+import { ehPwaDoIos } from "./lib/plataforma.js"
 import { useMarcaDaVolta } from "./hooks/useMarcaDaVolta.js"
 import { useEstavel } from "./hooks/useEstavel.js"
 import { useMesmoValor } from "./hooks/useMesmoValor.js"
@@ -43,6 +55,7 @@ import { prefsDeMediaParaONucleo } from "./lib/mediaPrefs.js"
 import { presencasVivas, quemEstaNaSala, semAPessoa } from "./lib/presenca.js"
 import { chaveDaSala, salaDaChamadaDe, salaUnicaDaChamadaDe } from "./lib/salaDaChamada.js"
 import { applyPrefs, estaEmPausa, marcarEsperasFeitas, readEsperasFeitas, readPrefs, usePrefs, writePrefs } from "./hooks/usePrefs.js"
+import { usePushFechada } from "./hooks/usePushFechada.js"
 import { useSessionEvents } from "./hooks/useSessionEvents.js"
 import { useSinoAvisa } from "./hooks/useSinoAvisa.js"
 import { useLatencia } from "./hooks/useLatencia.js"
@@ -53,12 +66,15 @@ import type { Achado } from "./lib/procura.js"
 import { NOME_POR_OMISSAO, nomeDaSala, useRooms } from "./hooks/useRooms.js"
 import { useSpaceMeta } from "./hooks/useSpaceMeta.js"
 import { countUnreads, useUnreads } from "./hooks/useUnreads.js"
-import { apurar, corpoDaVotacao, votacaoDe, votosDe, type Apuramento, type Votacao } from "./lib/votacoes.js"
+import { apurar, corpoDaVotacao, fechosDe, votacaoDe, votosDe, type Apuramento, type Votacao } from "./lib/votacoes.js"
 import { NovaVotacao } from "./screens/overlays/NovaVotacao.js"
+import { SalaDeVotacoes } from "./screens/chat/SalaDeVotacoes.js"
+import { EscolherSalaDeVotacoes } from "./screens/chat/EscolherSalaDeVotacoes.js"
+import { listarVotacoes, type VotacaoListada } from "./lib/listarVotacoes.js"
+import { useLigacaoDeMensagem } from "./hooks/useLigacaoDeMensagem.js"
 import {
   admiteAdministracao,
   comEmendas,
-  directaPorResolver,
   dmPeerAddress,
   feedChannelOf,
   feedOf,
@@ -78,7 +94,7 @@ import {
 import { citacaoDe as citacaoNoIndice, indiceDasCitacoes, type Citacao, type RespostaPendente } from "./lib/respostas.js"
 import { prefersReducedMotion } from "./lib/scroll.js"
 import { cacheDeMedia } from "./lib/cacheDeMedia.js"
-import { closeDirect, listDirects } from "./lib/directs.js"
+import { closeDirect, directasQueContam, listDirects } from "./lib/directs.js"
 import { arquivar, desarquivar, esquecerEstadoDoBrowser, ligarEstadoDaConta, marcarLido, useEstadoDaConta } from "./lib/estadoDaConta.js"
 import { aceitesAEspera, conviteDaMensagem, convitesDe } from "./lib/convites.js"
 import { nomeSeguro } from "./lib/ficheiros.js"
@@ -105,6 +121,7 @@ import { GateError } from "./screens/gate/GateError.js"
 import { Setup } from "./screens/gate/Setup.js"
 import { Emparelhar } from "./screens/gate/Emparelhar.js"
 import { Unlock } from "./screens/gate/Unlock.js"
+import { pagina } from "./screens/gate/MudarDeConta.js"
 import { ContaSuspensa } from "./screens/gate/ContaSuspensa.js"
 import { SaiuDeBeta } from "./screens/gate/SaiuDeBeta.js"
 import { CallDock } from "./screens/call/CallDock.js"
@@ -113,6 +130,8 @@ import { ChannelSidebar, type PresenteNaVoz } from "./screens/chat/ChannelSideba
 import { ChatScreen } from "./screens/chat/ChatScreen.js"
 import { PrimeirosPassos } from "./screens/chat/PrimeirosPassos.js"
 import { marcarPrimeirosPassos, usePrimeirosPassos } from "./hooks/usePrimeirosPassos.js"
+import { AvisoDoFicheiroDaConta } from "./components/FicheiroDaConta.js"
+import { ficheiroPorTratar, marcarFicheiroTratado } from "./lib/ficheiroDaConta.js"
 import { Social } from "./screens/social/Social.js"
 import { PeopleScreen } from "./screens/people/PeopleScreen.js"
 import { PeopleDestination } from "./screens/people/PeopleDestination.js"
@@ -136,6 +155,8 @@ import {
   markAllRead,
   markRead,
   notificationTextOf,
+  rotuloParaAviso,
+  salaParaAviso,
   retirarPedidoDe,
   AVISO_DO_AMIGO_MS,
   avisosDoSistemaLigados,
@@ -175,7 +196,7 @@ import {
   haOutraPessoa,
   paraDeChamar,
 } from "./sons/chamada.js"
-import { caladaPeloSilencio, salaDaMensagem, somDaMensagem, somDaNotificacao, somDoCanal, somDoSilencio, tocaOToque } from "./sons/acontecimentos.js"
+import { caladaPeloSilencio, daPropriaConta, salaDaMensagem, somDaMensagem, somDaNotificacao, somDoCanal, somDoSilencio, tocaOToque } from "./sons/acontecimentos.js"
 import { calarSalaComumUmaVez } from "./lib/salaComumCalada.js"
 import { ContextMenu, type MenuItem } from "./screens/overlays/ContextMenu.js"
 import { NotificationPanel } from "./screens/overlays/NotificationPanel.js"
@@ -196,6 +217,8 @@ import { TicketsScreen } from "./screens/tickets/TicketsScreen.js"
 import { useTickets } from "./hooks/useTickets.js"
 import { RoomProperties } from "./screens/overlays/RoomProperties.js"
 import { CargosEPermissoesLigado } from "./screens/overlays/CargosEPermissoesLigado.js"
+import { QuemEscreve } from "./screens/overlays/QuemEscreve.js"
+import { Button } from "./components/Button.js"
 import { podeOrdenarCargos } from "./components/OrdemDosCargos.js"
 import { SeccaoSalaAfk } from "./screens/overlays/SeccaoSalaAfk.js"
 import { SeccaoDenuncias } from "./screens/overlays/SeccaoDenuncias.js"
@@ -229,12 +252,49 @@ const DESTAQUE_MS = 2600
  */
 const DESTAQUE_LENTO_MS = 5200
 
-function keyOf(message: ChatMessage): string {
-  return `${message.channel}:${message.payload.id ?? message.seq}`
+/**
+ * The identity of a message in memory, to merge what the vault holds with what is
+ * already on screen.
+ *
+ * Without `id`, the `seq`, and with the `t`: our own sends without echo all have
+ * `seq` -1, and a bare `channel:-1` made every one of them the same message. A
+ * reaction of ours read from the vault after a reload was thrown away because some
+ * other send of ours was already in memory, and the chip was missing on the
+ * device that pressed it (12/11/2026). A reaction also carries what it acts on:
+ * two different acts never share a key; the same act twice (vault and live) does.
+ */
+export function keyOf(message: ChatMessage): string {
+  const { payload } = message
+  if (payload.id !== undefined) return `${message.channel}:${payload.id}`
+  if (payload.t === "reaction") {
+    return `${message.channel}:reaction:${message.seq}:${message.sender}:${payload.target ?? ""}:${payload.emoji ?? ""}:${payload.remove === true}`
+  }
+  return `${message.channel}:${payload.t}:${message.seq}`
 }
 
-function toChatMessage(channel: string, entry: StoredChatMessage): ChatMessage {
-  return { channel, seq: entry.seq, sender: entry.sender, payload: entry.payload as ChatMessage["payload"] }
+export function toChatMessage(channel: string, entry: StoredChatMessage): ChatMessage {
+  return {
+    channel,
+    seq: entry.seq,
+    sender: entry.sender,
+    // The order mark of a send without echo, so it folds where it was said (16/11/2026).
+    ...(entry.seq < 0 && entry.apos !== undefined ? { apos: entry.apos } : {}),
+    payload: entry.payload as ChatMessage["payload"],
+  }
+}
+
+/**
+ * A channel's reactions in memory, ready for `dobrarReaccoes`.
+ *
+ * A send of ours that is still in flight has no `seq` and no mark: it goes last,
+ * it is the newest thing on screen. One read from the vault keeps its own mark
+ * (`apos`). Putting that one last too made an old press win over a later
+ * removal, and the chip came back on reload (16/11/2026).
+ */
+export function reaccoesParaDobrar(messages: readonly ChatMessage[], channel: string): ChatMessage[] {
+  return messages
+    .filter((message) => message.channel === channel && message.payload.t === "reaction")
+    .map((message) => (message.seq < 0 && message.apos === undefined ? { ...message, apos: Number.MAX_SAFE_INTEGER } : message))
 }
 
 /** What is conversation on screen. Everything else (channels, roles, banner) is state the vault already stores. */
@@ -297,8 +357,14 @@ export function App({
   startupInvite,
   startupPairing,
   startupFriend,
+  lotePorQuadro = false,
 }: {
   bridge: EnclaveBridge
+  /**
+   * Live messages enter the list once per frame, not once per task. The web and the desktop pass it. Tests leave it off: there,
+   * what arrives in one task is on screen at the end of that task.
+   */
+  lotePorQuadro?: boolean
   /** The invite the page opened with. Only the web passes it: see `StartupInvite`. */
   startupInvite?: StartupInvite
   /** The friend link the page opened with. Only the web passes it: see `StartupFriend`. */
@@ -407,6 +473,7 @@ export function App({
         <ConfirmarProvider>
           <Shell
             key={generation}
+            lotePorQuadro={lotePorQuadro}
             onRelock={() => setGeneration((current) => current + 1)}
             conviteAEspera={conviteAEspera}
             conviteCurtoAEspera={conviteCurtoAEspera}
@@ -434,6 +501,7 @@ interface SitioDoAviso {
 }
 
 function Shell({
+  lotePorQuadro = false,
   onRelock,
   conviteAEspera,
   conviteCurtoAEspera = null,
@@ -445,6 +513,8 @@ function Shell({
   onAmigoResolvido,
   emparelhamentoDeArranque,
 }: {
+  /** See `App`'s `lotePorQuadro`. */
+  lotePorQuadro?: boolean
   onRelock: () => void
   conviteAEspera: ConviteLido | null
   /** The startup short link, waiting to be resolved on the server. */
@@ -477,6 +547,8 @@ function Shell({
    * (start over, try again) stops it.
    */
   const aparelhoRevogadoRef = useRef(false)
+  /** The removal came with the proof, and the vault is being erased (1.3.16): the stage is decided there. */
+  const aparelhoRemovidoRef = useRef(false)
   /**
    * The server suspended this account (`account-suspended`, reports §8). Unlike
    * revocation, the vault stays open: the review request goes signed by this
@@ -740,6 +812,8 @@ function Shell({
    * channel's tree.
    */
   const [visibilidadeDe, setVisibilidadeDe] = useState<string | null>(null)
+  /** The text room whose "who writes" sheet is open (read-only rooms, 12/11/2026). Always in the open channel. */
+  const [quemEscreveEm, setQuemEscreveEm] = useState<{ room: string; nome: string } | null>(null)
   /**
    * The removal waiting for confirmation: who, and from which channel.
    *
@@ -834,6 +908,19 @@ function Shell({
   const [respondendo, setRespondendo] = useState<string | null>(null)
   /** The in-app notification log, seeded from the vault after unlock. */
   const [notifications, setNotifications] = useState<AppNotification[]>([])
+  /**
+   * The ids already in the bell, read at event time (12/11/2026). An entry that
+   * is already there (the same message again, by recovery, a relay or a second
+   * path) does not ring or alert twice.
+   */
+  const idsNoSino = useRef(new Set<string>())
+  for (const entrada of notifications) idsNoSino.current.add(entrada.id)
+  // Bounded: the oldest leave first (a `Set` keeps insertion order).
+  while (idsNoSino.current.size > IDS_NO_SINO_MAX) {
+    const [primeiro] = idsNoSino.current
+    if (primeiro === undefined) break
+    idsNoSino.current.delete(primeiro)
+  }
   const [notifAt, setNotifAt] = useState<{ x: number; y: number } | null>(null)
   /** Where the activity menu is anchored, when open. */
   const [activityMenu, setActivityMenu] = useState<{ x: number; y: number } | null>(null)
@@ -885,6 +972,9 @@ function Shell({
   const pushToast = useToast()
   const confirmar = useConfirmar()
   const outbox = useOutbox(bridge, connection, pushToast)
+  // Notifications when the app is closed: renewed on each connect and settings change. See `usePushFechada`.
+  const avisarDoPush = useCallback((erro: Error) => pushToast(traduzirErro(erro), "error"), [pushToast])
+  usePushFechada(bridge, connection, avisarDoPush)
 
   /** The send sound plays inside the outbox, when the bridge confirms. See `useOutbox`. */
   const sendMessage = useCallback(
@@ -1315,7 +1405,11 @@ function Shell({
    * conversation IS the person's name, so what is said is the short identifier, as
    * it always was.
    */
+  /** The last real label of each channel, for an alert that comes before the name is decrypted again. Memory only. */
+  const rotulosConhecidos = useRef(new Map<string, string>())
   const avisarSistema = useCallback((entry: AppNotification): boolean => {
+    // Never a notice for what this account wrote, from any device (16/11/2026).
+    if (daPropriaConta(entry.actor, notifyRef.current.me)) return false
     const { pronto, labelFor: rotulo, abrir } = avisoRef.current
     const prefs = readPrefs()
     const verdict = systemNoticeVerdictOf(entry, {
@@ -1339,11 +1433,20 @@ function Shell({
       pausado: estaEmPausa(prefs),
     })
     if (verdict === "silent") return false
+    /*
+      The room's name, or the last one known, or nothing (12/11/2026). Never the
+      identifier: `labelFor` falls back to it while the name is not decrypted
+      yet (a direct whose peer arrives after the channel list, a channel whose
+      `space.meta` has not arrived), and outside the app `!abc…` reads as broken
+      encryption. The discreet body had it on purpose; it now says only that
+      there is a message.
+    */
+    const rotuloDoAviso = (canal: string): string | null => rotuloParaAviso(canal, rotulo(canal), rotulosConhecidos.current)
     const body =
       verdict === "detailed"
-        ? notificationTextOf(entry, notifyRef.current.nameFor, rotulo)
+        ? notificationTextOf(entry, notifyRef.current.nameFor, rotuloDoAviso)
         : entry.channel
-          ? strings.notifications.newMessage(shortName(entry.channel))
+          ? strings.notifications.novaMensagem
           : strings.notifications.newNotice
     const caminho = showSystemNotice(
       {
@@ -1368,7 +1471,7 @@ function Shell({
     if (!tipo) return
     if (caladaPeloSilencio(entry.kind, entry.channel !== undefined && estaSilenciado(readPrefs().silenciados, entry.channel))) return
     const { me } = notifyRef.current
-    motor.tocar({ tipo, canal: entry.channel ?? null, deMim: me !== null && entry.actor === me, avisoComSom, ...(sala !== undefined ? { sala } : {}) })
+    motor.tocar({ tipo, canal: entry.channel ?? null, deMim: daPropriaConta(entry.actor, me), avisoComSom, ...(sala !== undefined ? { sala } : {}) })
   }, [])
 
   /**
@@ -1379,7 +1482,8 @@ function Shell({
   const pedidoCabeRef = useRef<(quem: string) => boolean>(() => true)
   const pushNotification = useCallback(
     // `sala`: where the mention was written, so the engine knows if it is visible.
-    (entry: AppNotification, sala?: string) => {
+    // `aoVivo`: false for what came from history (recovery, reports): it goes into the bell, silent.
+    (entry: AppNotification, sala?: string, aoVivo = true) => {
       /*
         A request from someone who does not fit in "Who can send me friend
         requests" does nothing and does not alert. It goes into the bell already
@@ -1391,7 +1495,16 @@ function Shell({
         setNotifications((current) => appendNotification(current, { ...entry, read: true }))
         return
       }
-      tocarPelaEntrada(entry, avisarSistema(entry), sala)
+      /*
+        Once, and only for what happens now (12/11/2026). A mention read in a
+        recovery rang and alerted as if new, on every login that replayed it, and
+        the same message coming a second way rang again: "sounds and notices out
+        of time". The bell keeps it either way.
+      */
+      if (aoVivo && !idsNoSino.current.has(entry.id)) {
+        idsNoSino.current.add(entry.id)
+        tocarPelaEntrada(entry, avisarSistema(entry), sala)
+      }
       setNotifications((current) => appendNotification(current, entry))
     },
     [avisarSistema, tocarPelaEntrada],
@@ -1891,7 +2004,7 @@ function Shell({
    */
   const vigiaDosAmigos = useRef(criarVigiaDosAmigos())
   /**
-   * The other friend alerts (owner request, 3 November 2026): who enters a
+   * The other friend alerts: who enters a
    * voice room or starts sharing the screen (`vigiaDaVoz`), and who enters one
    * of our communities (`vigiaDasComunidades`). See `lib/avisosDeAmigos.ts`.
    */
@@ -2192,10 +2305,37 @@ function Shell({
     if (status.code === "device-revoked") {
       aparelhoRevogadoRef.current = true
       setAparelhoRevogado(true)
+      /*
+        Removed in Settings › Devices on another device, with the proof the core
+        checked (`removido`, 12/11/2026): the account becomes
+        unreachable here. Lock, then erase this device's vault (the messages and the
+        media live in it). With the vault locked `destroy` has no channel to leave,
+        so it runs offline. Then the same as "start over" at the gate: another
+        account on this device opens on reload; with none, sign up, with the phrase.
+        Without the proof (a copy replaced by an import, an older server) only the
+        lock, as before.
+      */
+      if (status.removido) {
+        // From here the vault is going away: the shell must not ask the session for anything,
+        // and a late `enter` from the gate must not bring the unlock back. See `enter`.
+        aparelhoRemovidoRef.current = true
+        setStage("loading")
+      }
       void bridge.vault
         .lock()
         .catch(() => {})
-        .finally(() => setStage("unlock"))
+        .then(async () => {
+          if (!status.removido) return "unlock" as const
+          await bridge.vault.destroy()
+          const restantes = bridge.contas ? (await bridge.contas.listar().catch(() => null))?.contas : null
+          if (restantes?.some((conta) => conta.temCofre)) {
+            pagina.recarregar()
+            return "loading" as const
+          }
+          return "setup" as const
+        })
+        .catch(() => "unlock" as const)
+        .then((proximo) => setStage(proximo))
     }
     const decision = routeStatus(status, {
       now: Date.now(),
@@ -2259,6 +2399,20 @@ function Shell({
   /** Live messages waiting for the next batch. See `juntarLote`. */
   const porJuntar = useRef<ChatMessage[]>([])
   const loteAgendado = useRef(false)
+  /** The batch waiting for its frame, if any: run now when the page hides. */
+  const juntarPendente = useRef<(() => void) | null>(null)
+  /*
+    A frame asked for just before the page hides does not run until it comes
+    back, and the batch, the unread counters with it, would wait the whole
+    absence. Hiding lets it in at once.
+  */
+  useEffect(() => {
+    const aoEsconder = (): void => {
+      if (document.visibilityState === "hidden") juntarPendente.current?.()
+    }
+    document.addEventListener("visibilitychange", aoEsconder)
+    return () => document.removeEventListener("visibilitychange", aoEsconder)
+  }, [])
   useSessionEvents(bridge, {
     onMessage: (message) => {
       // Kind and channel only. What was said never enters this log.
@@ -2292,16 +2446,44 @@ function Shell({
       porJuntar.current.push(message)
       if (!loteAgendado.current) {
         loteAgendado.current = true
-        queueMicrotask(() => {
+        const juntar = (): void => {
+          // Runs once: from its frame, its timer or the page hiding, whichever comes first.
+          if (juntarPendente.current !== juntar) return
+          juntarPendente.current = null
           loteAgendado.current = false
           const lote = porJuntar.current
           porJuntar.current = []
-          setMessages((current) => juntarLote(current, lote))
+          /*
+            Others' messages enter as a transition: after a return from a
+            minimized window, the backlog of an absence is hundreds of them,
+            and a click right after the return must not wait for that render.
+            React draws the click first and the backlog after, and drops a
+            backlog render that a click interrupts. Our own sends stay urgent:
+            the outbox entry leaves in the same render, or the line blinks.
+          */
+          const nossas = lote.some((m) => m.seq < 0 || (notifyRef.current.me !== null && m.sender === notifyRef.current.me))
+          if (lotePorQuadro && !nossas) startTransition(() => setMessages((current) => juntarLote(current, lote)))
+          else setMessages((current) => juntarLote(current, lote))
           // Our own sends come back through here (seq -1); the matching outbox
           // entry has served its purpose the moment the real message exists.
           // In the same tick as the list, or the message would blink out for one frame.
           for (const item of lote) outbox.noteOwnMessage(item)
-        })
+        }
+        /*
+          Once per frame: each server frame is a task, and
+          a burst of 200 events was 200 renders, each with a forced layout to stay
+          at the bottom. Now what arrives before the next frame enters in one
+          render. A hidden page has no frames: a zero timer, which the browser
+          already spaces out in the background, so it batches there too.
+        */
+        juntarPendente.current = juntar
+        if (lotePorQuadro && typeof requestAnimationFrame === "function" && document.visibilityState === "visible") {
+          requestAnimationFrame(juntar)
+        } else if (lotePorQuadro) {
+          setTimeout(juntar, 0)
+        } else {
+          queueMicrotask(juntar)
+        }
       }
       /**
        * The return slot is not given here.
@@ -2373,7 +2555,7 @@ function Shell({
             actor: message.sender,
             channel: message.channel,
             read: false,
-          }, isDirect(message.channel) ? undefined : salaDaMensagem(message))
+          }, isDirect(message.channel) ? undefined : salaDaMensagem(message), message.aoVivo === true)
         }
       }
       /*
@@ -2400,9 +2582,13 @@ function Shell({
         // Outside the state updater on purpose: React can run the updater more than
         // once, and a system notification is a side effect, not a calculation, inside
         // it, it would appear doubled.
-        const avisoComSom = avisarSistema(entrada)
-        // The mention wins: if it names me, the mention sound already played, above.
-        if (!mencionaMe(message.payload.mentions, me)) tocarPelaEntrada(entrada, avisoComSom)
+        // Only what happens now, and once: see `pushNotification`.
+        if (message.aoVivo === true && !idsNoSino.current.has(entrada.id)) {
+          idsNoSino.current.add(entrada.id)
+          const avisoComSom = avisarSistema(entrada)
+          // The mention wins: if it names me, the mention sound already played, above.
+          if (!mencionaMe(message.payload.mentions, me)) tocarPelaEntrada(entrada, avisoComSom)
+        }
         // One unread entry per conversation, not one per message.
         setNotifications((current) =>
           current.some(
@@ -2411,6 +2597,26 @@ function Shell({
             ? current
             : appendNotification(current, entrada),
         )
+      }
+      /*
+        A role given to me (12/11/2026): bell, system notice and sound, one entry for
+        all the roles given at once. The core only marks a live, accepted assignment
+        that ADDS roles: nothing on removal, nothing for history. See `cargosNovos`.
+      */
+      if (me && message.cargosNovos && message.cargosNovos.length > 0) {
+        const at = (message.payload as { assignedAt?: number }).assignedAt ?? Date.now()
+        pushNotification({
+          id: `cargo:${message.channel}:${at}`,
+          kind: "role-given",
+          at,
+          actor: message.sender,
+          channel: message.channel,
+          cargos: message.cargosNovos.map((cargo) => ({
+            nome: cargo.nome ?? (cargo.role === "admin" ? strings.cargos.adminName : cargo.role),
+            cor: cargo.cor,
+          })),
+          read: false,
+        })
       }
       if (message.payload.t === "friend.accept" && me && message.sender !== me) {
         pushNotification({
@@ -2552,48 +2758,29 @@ function Shell({
       // News is a channel that appeared after the initial seed and that this
       // device did not open itself.
       const previous = prevChannels.current
-      const me = notifyRef.current.me
-      /**
-       * A direct message from someone we don't know yet waits for the next pass.
-       *
-       * `dmPeerAddress` needs OUR address to know which of the two sides is the
-       * other, and the channel list arrives before the address is set. Without
-       * it `peer` comes null, and the direct message was announced as a channel:
-       * **"You were added to #Ana"** because of a friend request. Measured live
-       * on September 10, 2026, with the app closed when the request arrived,        * which is exactly when the address is not yet resolved and the
-       * notification comes out wrong.
-       *
-       * Two things broke with this, and the second is worse: the text lies about
-       * the nature of the thing, and the wrong `kind` escapes the rule that
-       * exists to prevent two notifications of the same event (see
-       * `appendNotification`, which silences a `dm-new` when there is already a
-       * `friend-request` from the same channel). The person got both.
-       *
-       * Defer and do not discard: the channel stays OUT of what we mark as seen,
-       * and so it gets considered again when the address arrives. Discarding it
-       * would silence the notification forever, which is trading a lie for
-       * silence.
-       */
-      const porResolver: string[] = []
       if (previous) {
         for (const channel of list) {
           if (previous.includes(channel) || isFeed(channel) || selfOpened.current.has(channel)) continue
-          const peer = dmPeerAddress(channel, me)
-          if (directaPorResolver(channel, peer)) {
-            porResolver.push(channel)
-            continue
-          }
-          pushNotification({
-            id: `chan:${channel}`,
-            kind: peer ? "dm-new" : "room-added",
-            at: Date.now(),
-            ...(peer ? { actor: peer } : {}),
-            channel,
-            read: false,
-          })
+          /*
+            A direct that appears is never news (12/11/2026: "when a
+            user opens the conversation with another, without friendship, the other
+            user is notified; I do not want that").
+
+            The channel arrives because the other side opened the conversation and
+            their device seated us, which is cryptography and says nothing to anyone.
+            Announcing it ("Ana opened a conversation with you", `dm-new`) rang, swung
+            the bell and raised a system notice for a click on the other side, and it
+            rang BEFORE the friend request that usually follows, so the request came
+            with two sounds. What reaches the person is what is SAID there, through
+            its own paths: a friend request (`friend-request`) or a message
+            (`dm-message`). This also retires the old wait for our address
+            (`directaPorResolver`), which existed only to name the `dm-new`.
+          */
+          if (isDirect(channel)) continue
+          pushNotification({ id: `chan:${channel}`, kind: "room-added", at: Date.now(), channel, read: false })
         }
       }
-      prevChannels.current = porResolver.length === 0 ? list : list.filter((channel) => !porResolver.includes(channel))
+      prevChannels.current = list
     },
     onPresence: (who, isOnline) => {
       setOnline((current) => {
@@ -2732,8 +2919,9 @@ function Shell({
       setCallChannel(event.channel)
       setCallRoom(event.room)
       setActiveRooms((actual) => ({ ...actual, [event.channel]: event.room }))
-      const sala = bridge.channels.rooms?.(event.channel)?.find((quarto) => quarto.room === event.room)
-      pushToast(strings.voiceMove.moved(notifyRef.current.nameFor(event.by), sala?.name ?? event.room))
+      const sala = salaParaAviso(event.room, bridge.channels.rooms?.(event.channel)?.find((quarto) => quarto.room === event.room))
+      // The room's name, or the word: never the room's identifier (16/11/2026).
+      pushToast(strings.voiceMove.moved(notifyRef.current.nameFor(event.by), sala ?? strings.voiceMove.outraSala))
     },
     onCallDesligado: (event) => {
       // I did not leave: it is a lost connection. The `ended` already came before.
@@ -2875,6 +3063,7 @@ function Shell({
     setBootError(null)
     setAvisoDeEmparelhamento(null)
     aparelhoRevogadoRef.current = false
+    aparelhoRemovidoRef.current = false
     setAparelhoRevogado(false)
     contaSuspensaRef.current = false
     setAvisoDeSuspensao(null)
@@ -3256,6 +3445,8 @@ function Shell({
       */
       if (aparelhoRevogadoRef.current) {
         setAparelhoRevogado(true)
+        // Erasing (removed with proof): `handleStatus` moves the stage when the vault is gone.
+        if (aparelhoRemovidoRef.current) return
         setVezDoPortao((vez) => vez + 1)
         setStage("unlock")
         return
@@ -3524,7 +3715,7 @@ function Shell({
    * A channel the vault knows NO rooms for (not open, not closed, not
    * category) is not a channel without rooms: it is a channel whose rooms are still
    * on the way. Every channel is born with rooms (`Session.SALAS_INICIAIS`), and whoever
-   * just joined only gets them when someone passes them along. Report from owner on
+   * just joined only gets them when someone passes them along.
    * Symptom: rooms appeared on the phone but were not visible, and the
    * column disappeared. Someone entered and tapped the common room, the drawer closed, and the
    * rooms arrived an instant later, already off screen.
@@ -3560,7 +3751,7 @@ function Shell({
    *
    * **Without this, hiding a category did not close anything for someone already in it.**
    * The room left the list and the conversation stayed open on screen, with the
-   * write box working: hidden for those not there, unchanged for those there. The owner asked for visible rooms AND usable ones, and the second half
+   * write box working: hidden for those not there, unchanged for those there. The requirement is visible rooms AND usable ones, and the second half
    * is decided here.
    *
    * The default room is the destination because it is the only one that never hides. As
@@ -3786,6 +3977,59 @@ function Shell({
   )
 
   /**
+   * Where the "Polls" row of a community leads.
+   *
+   * A polls room is a room like the others (`layout: "polls"`, see `SalaDeVotacoes`). The row goes
+   * straight to the community's polls room when there is one; with several it shows a list to choose
+   * from, and with none it shows how to create one (or says there are none). This state is the
+   * channel and the room that was open when the row was tapped: the list shows only while both
+   * still match, so choosing another room or channel leaves it without anyone closing it.
+   */
+  const [escolhaDeVotacoes, setEscolhaDeVotacoes] = useState<{ channel: string; room: string } | null>(null)
+  const escolhaNoEcra =
+    view === "chat" && active !== null && escolhaDeVotacoes?.channel === active && escolhaDeVotacoes.room === salaEscolhida
+  useEffect(() => {
+    if (escolhaDeVotacoes && !escolhaNoEcra) setEscolhaDeVotacoes(null)
+  }, [escolhaDeVotacoes, escolhaNoEcra])
+  /** The polls rooms of the open channel this account sees (the sidebar's own filter). */
+  const salasDeVotacoes = useMemo(
+    () =>
+      roomGroups
+        .flatMap((grupo) => grupo.rooms)
+        .filter((sala) => sala.kind === "text" && sala.layout === "polls")
+        .map((sala) => ({ room: sala.room, name: sala.name })),
+    [roomGroups],
+  )
+  useEffect(() => {
+    if (!escolhaNoEcra || !active || salasDeVotacoes.length !== 1) return
+    const unica = salasDeVotacoes[0]
+    if (!unica) return
+    setActiveRooms((actual) => ({ ...actual, [active]: unica.room }))
+    setEscolhaDeVotacoes(null)
+  }, [escolhaNoEcra, active, salasDeVotacoes])
+  /** The polls of the open polls room, folded like the conversation (see `listarVotacoes`). */
+  const votacoesDaSala = useMemo(
+    () =>
+      active && salaAberta?.layout === "polls"
+        ? listarVotacoes({
+            messages,
+            channel: active,
+            eu: address,
+            existentes: salasExistentes,
+            salas: [{ room: activeRoom, name: salaAberta.name, fechada: false }],
+            modera: (quem) => bridge.channels.mayModerate?.(active, quem) ?? false,
+          })
+        : [],
+    [active, salaAberta, messages, address, salasExistentes, activeRoom, bridge],
+  )
+  /** Open the polls of a channel: from the always-visible row in the sidebar and from the channel menu. */
+  const abrirVotacoes = (channel: string): void => {
+    abrirConversa(channel)
+    setEscolhaDeVotacoes({ channel, room: activeRooms[channel] ?? "" })
+    setSidebarOpen(false)
+  }
+
+  /**
    * The highlight fades on its own.
    *
    * It is a response to a gesture, not a state: once it has served to find the
@@ -3902,16 +4146,53 @@ function Shell({
   const apuramentosDoCanal = useMemo(() => {
     if (!active) return new Map<string, Apuramento>()
     const doCanal = messages.filter((message) => message.channel === active)
-    const escolhas = votosDe(doCanal)
+    const fechos = fechosDe(doCanal, (quem) => bridge.channels.mayModerate?.(active, quem) ?? false)
+    const escolhas = votosDe(doCanal, fechos)
     const porVotacao = new Map<string, Apuramento>()
     for (const message of doCanal) {
       const votacao = votacaoDe(message.payload)
       const id = message.payload.id
       if (!votacao || !id) continue
-      porVotacao.set(id, apurar(escolhas.get(id), votacao.options.length, address))
+      porVotacao.set(id, apurar(escolhas.get(id), votacao.options.length, address, fechos.get(id) ?? null))
     }
     return porVotacao
+  }, [messages, active, address, bridge])
+
+  /**
+   * The reaction chips of the open channel, by the id of the message.
+   *
+   * Up here for the reason votes are: a `reaction` has no room label. Our own
+   * sends still without echo (`seq` -1) go last, in the order they left: they are
+   * the newest acts of this device, and a reread of the vault can put entries with
+   * a real `seq` after them in the list.
+   *
+   * Each message keeps the SAME array while its chips do not change, so the
+   * memoized lines with reactions do not redraw on every arriving message.
+   */
+  const reaccoesAnteriores = useRef(new Map<string, FichaDeReaccao[]>())
+  const reaccoesDoCanal = useMemo(() => {
+    if (!active) return new Map<string, FichaDeReaccao[]>()
+    const novas = dobrarReaccoes(reaccoesParaDobrar(messages, active), address)
+    const antes = reaccoesAnteriores.current
+    for (const [alvo, fichas] of novas) {
+      const velhas = antes.get(alvo)
+      if (velhas && JSON.stringify(velhas) === JSON.stringify(fichas)) novas.set(alvo, velhas)
+    }
+    reaccoesAnteriores.current = novas
+    return novas
   }, [messages, active, address])
+
+  /** Press or release an emoji on a message: the opposite of what this account has now. */
+  const reagirNaConversa = useCallback(
+    (message: ChatMessage, emoji: string): void => {
+      const alvo = message.payload.id
+      const reagir = bridge.channels.react
+      if (!alvo || !reagir) return
+      const minha = reaccoesDoCanal.get(alvo)?.find((ficha) => ficha.emoji === emoji)?.minha === true
+      void reagir(message.channel, alvo, emoji, minha).catch((error: Error) => pushToast(traduzirErro(error), "error"))
+    },
+    [bridge, reaccoesDoCanal, pushToast],
+  )
 
   /** The channel where a vote is being created, or nothing. */
   const [votacaoNoCanal, setVotacaoNoCanal] = useState<string | null>(null)
@@ -4032,6 +4313,7 @@ function Shell({
     if (!active) return
     const sala = roomGroups.flatMap((grupo) => grupo.rooms).find((candidata) => candidata.room === room)
     setActiveRooms((actual) => ({ ...actual, [active]: room }))
+    setEscolhaDeVotacoes(null)
     /*
       Choosing a room ends the journey, and the drawer slides out.
       
@@ -4285,7 +4567,7 @@ function Shell({
       tombstone and nothing else. Here there was a `return` when there were no
       rooms to rewrite: the empty category (the one just created, the one most
       often deleted) never reached the tombstone, and the gesture did nothing,
-      even for admins. Report from the owner in 0.8.0.
+      even for admins. Bug seen in 0.8.0.
     */
     if (publicacoes.length === 0) {
       if (antiga && declarar) tirarDeclaracao()
@@ -4498,7 +4780,7 @@ function Shell({
   */
   /*
     With the session stored, or in an `os` vault, the session does not expire
-    (owner decision 3, F1). Closing the vault there was meant so the gate opens
+    (decision 3, F1). Closing the vault there was meant so the gate opens
     it again after: nothing was ending. Read on entry and when the "Session"
     card changes.
     */
@@ -4620,7 +4902,7 @@ function Shell({
   /**
    * The Communities badge: unread messages in all channels.
    *
-   * Owner request from 27 October 2026, replacing the old rule ("messages in
+   * This replaces the old rule ("messages in
    * a channel to the side don't show a number"): Communities sums unread room
    * content, the way Friends sums direct conversations. It counts the same as
    * the sidebar shows next to each channel, so the top number and the ones
@@ -4726,7 +5008,7 @@ function Shell({
   )
 
   /**
-   * Join the common channel later (owner request, 3/11/2026).
+   * Join the common channel later.
    *
    * For those who unchecked the box on signup, or who left the channel. The
    * core stores the choice and joins, or requests a slot and keeps trying. The
@@ -4880,6 +5162,24 @@ function Shell({
   )
 
   /**
+   * A link to a message (`lib/ligacaoDaMensagem.ts`): open its channel and room,
+   * light the line up and load the history that holds it. Only for channels this
+   * account is in; for any other the link does nothing and says nothing.
+   */
+  const abrirLigacaoDeMensagem = useCallback(
+    (alvo: { channel: string; room: string; id: string }): boolean => {
+      if (!rooms.includes(alvo.channel)) return false
+      abrirConversa(alvo.channel)
+      setActiveRooms((actual) => ({ ...actual, [alvo.channel]: alvo.room }))
+      setDestacada(alvo.id)
+      void trazerTudoDoCofre(alvo.channel).catch((error: Error) => pushToast(traduzirErro(error), "error"))
+      return true
+    },
+    [rooms, abrirConversa, trazerTudoDoCofre, pushToast],
+  )
+  useLigacaoDeMensagem(address !== null && rooms.length > 0, abrirLigacaoDeMensagem)
+
+  /**
    * The sidebar channels where the person on the page is also a member.
    *
    * From the member list this device already has for each channel (the group
@@ -5002,13 +5302,6 @@ function Shell({
   const sucessoes = useSucessoes(bridge, stage === "ready")
   const escondidas = useMemo(() => escondidasPorSucessao(sucessoes), [sucessoes])
   const membrosVisiveis = useMemo(() => members.filter((quem) => !escondidas.has(quem)), [members, escondidas])
-  const directs = useMemo(
-    () =>
-      listDirects(directChannels, messages, directasFechadas, address, directa).filter(
-        (entrada) => entrada.peer === null || !escondidas.has(entrada.peer),
-      ),
-    [directChannels, messages, directasFechadas, address, directa, escondidas],
-  )
 
   /**
    * The conversation screen is mounted on a destination that is visible.
@@ -5177,6 +5470,27 @@ function Shell({
     [channels, commonRoom],
   )
   const primeirosPassos = usePrimeirosPassos(address, temAlguem, salaComumLida && connection === "online")
+  /*
+    The account-file notice, once per account and browser (16/11/2026). Accounts
+    created before the account-file step never saw it. Not on a paired device
+    without the account key: its file would not be the account (see
+    `exportNeedsAccountKey`).
+  */
+  const [avisoDoFicheiro, setAvisoDoFicheiro] = useState(false)
+  useEffect(() => {
+    // A host that cannot export has no file to offer.
+    if (stage !== "ready" || !address || typeof bridge.vault.export !== "function") return
+    let vivo = true
+    void (async () => {
+      if (!(await ficheiroPorTratar(address))) return
+      const estado = await bridge.pairing?.status().catch(() => null)
+      if (estado?.temChaveDeConta === false) return
+      if (vivo) setAvisoDoFicheiro(true)
+    })()
+    return () => {
+      vivo = false
+    }
+  }, [stage, address, bridge])
   const copiarOMeuEndereco = useCallback(() => {
     if (!address) return
     void copiarTexto(address)
@@ -5342,8 +5656,45 @@ function Shell({
    * pessoas" is exactly the complaint that a friend "disappeared" while the
    * relationship was plainly still there.
    */
+  const lugaresDeFeed = useMemo(
+    () => lugaresDeFeedTrocados(channels, myFeedMembers, address),
+    [channels, myFeedMembers, address],
+  )
+  /**
+   * The direct conversations that reach the person, and the ones that do not.
+   *
+   * Someone who only OPENS a direct with us, without friendship and without a word,
+   * seats us in a group and nothing else (12/11/2026). Without this
+   * cut, that click put a row in the conversation column and the opener in the
+   * friends circle. See `directasQueContam`. The open conversation always stays.
+   */
+  const directasVisiveis = useMemo(
+    () =>
+      directasQueContam(
+        directChannels,
+        messages,
+        address,
+        (peer) => friendships.ties.has(peer) || community.has(peer) || lugaresDeFeed.has(peer),
+      ),
+    [directChannels, messages, address, friendships, community, lugaresDeFeed],
+  )
+  const directs = useMemo(
+    () =>
+      listDirects(
+        directChannels.filter((channel) => channel === directa || directasVisiveis.has(channel)),
+        messages,
+        directasFechadas,
+        address,
+        directa,
+      ).filter((entrada) => entrada.peer === null || !escondidas.has(entrada.peer)),
+    [directChannels, directasVisiveis, messages, directasFechadas, address, directa, escondidas],
+  )
   const friends = useMemo(() => {
-    const circulo = friendsOf(channels, myFeedMembers, address)
+    const circulo = friendsOf(
+      channels.filter((channel) => !isDirect(channel) || directasVisiveis.has(channel)),
+      myFeedMembers,
+      address,
+    )
     /**
      * Minus who is no longer.
      *
@@ -5359,7 +5710,7 @@ function Shell({
     // And who became another account (phase 8.2): that account no longer exists.
     for (const antiga of escondidas) circulo.delete(antiga)
     return circulo
-  }, [channels, myFeedMembers, address, friendships, escondidas])
+  }, [channels, directasVisiveis, myFeedMembers, address, friendships, escondidas])
 
   /**
    * And the HARD half of the same circle, which is another question.
@@ -5371,10 +5722,6 @@ function Shell({
    * stays one. This comes down to feed places, which are not given without
    * acceptance. See `lugaresDeFeedTrocados`.
    */
-  const lugaresDeFeed = useMemo(
-    () => lugaresDeFeedTrocados(channels, myFeedMembers, address),
-    [channels, myFeedMembers, address],
-  )
   /**
    * Friend for real: feed places exchanged, and the link not broken.
    *
@@ -5590,18 +5937,25 @@ function Shell({
     // "Busy" notifies the next time they arrive.
     if (!cabe || !vigiaDosAmigos.current.registar(quem, agora, tipo)) return
     const nome = nameFor(quem)
-    const comunidade = onde ? labelFor(onde.canal) : ""
+    // The names, or nothing: never an identifier in a notice (see `rotuloParaAviso`).
+    const comunidade = onde ? rotuloParaAviso(onde.canal, labelFor(onde.canal), rotulosConhecidos.current) : null
     const sala = onde?.sala
-      ? (bridge.channels.rooms?.(onde.canal)?.find((quarto) => quarto.room === onde.sala)?.name ?? onde.sala)
-      : ""
+      ? salaParaAviso(onde.sala, bridge.channels.rooms?.(onde.canal)?.find((quarto) => quarto.room === onde.sala))
+      : null
     const frase =
       tipo === "online"
         ? strings.notifications.amigoOnline(nome)
         : tipo === "voz"
-          ? strings.notifications.amigoNaVoz(nome, sala)
+          ? sala
+            ? strings.notifications.amigoNaVoz(nome, sala)
+            : strings.notifications.amigoNaVozSemSala(nome)
           : tipo === "ecra"
-            ? strings.notifications.amigoNoEcra(nome, sala)
-            : strings.notifications.amigoNaComunidade(nome, comunidade)
+            ? sala
+              ? strings.notifications.amigoNoEcra(nome, sala)
+              : strings.notifications.amigoNoEcraSemSala(nome)
+            : comunidade
+              ? strings.notifications.amigoNaComunidade(nome, comunidade)
+              : strings.notifications.amigoNaComunidadeSemNome(nome)
     const discreta =
       tipo === "online"
         ? strings.notifications.amigoOnlineDiscreto
@@ -5645,7 +5999,7 @@ function Shell({
       empurrarAvisoDeAmigo({
         tipo,
         texto: discreto ? discreta : frase,
-        onde: discreto || tipo === "online" ? undefined : comunidade,
+        onde: discreto || tipo === "online" ? undefined : (comunidade ?? undefined),
         cara: discreto ? undefined : perfil?.avatarDataUrl,
         iniciais: discreto ? "" : (nome.trim()[0] ?? "?").toUpperCase(),
         rotulo,
@@ -5700,11 +6054,45 @@ function Shell({
    * label.
    */
   const [papeisVersao, setPapeisVersao] = useState(0)
-  const papeis = useMemo(
-    () => (active ? (bridge.channels.roles?.(active) ?? []) : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `papeisVersao` and `messages` are the triggers for re-reading
-    [active, bridge, papeisVersao, messages],
+  /*
+    The same list keeps its identity while its contents are equal: every message re-reads it, and a new array made `roleFor` new,
+    and the member list of 400 people drew again for a message about nothing.
+  */
+  const papeis = useMesmoValor(
+    useMemo(
+      () => (active ? (bridge.channels.roles?.(active) ?? []) : []),
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- `papeisVersao` and `messages` are the triggers for re-reading
+      [active, bridge, papeisVersao, messages],
+    ),
   )
+  /*
+    Who holds authority in the open channel, read once and not once per person:
+    `roleFor` runs for every member, and the core computes the admins over every
+    assignment (`adminsOf`). Read again only when a role event of this channel
+    arrives (`sinalDosCargos`), not on every message. `sinal` goes in the object
+    so `roleFor`, which reads each person's roles live, changes with it.
+  */
+  const sinalDosCargos = useMemo(() => {
+    let n = 0
+    let ultima = -1
+    for (const m of messages) {
+      if (m.channel !== active || (m.payload.t !== "role.assign" && m.payload.t !== "role.define")) continue
+      n++
+      ultima = m.seq
+    }
+    return `${n}:${ultima}`
+  }, [messages, active])
+  const autoridade = useMemo(() => {
+    if (!active || !admiteAdministracao(active)) return null
+    const embutido = bridge.channels.adminRole?.(active) ?? null
+    return {
+      sinal: sinalDosCargos,
+      fundador: bridge.channels.founder?.(active) ?? null,
+      admins: new Set(bridge.channels.admins?.(active) ?? []),
+      adminNome: embutido?.name ?? null,
+      adminCor: embutido?.colour ?? null,
+    }
+  }, [active, bridge, papeisVersao, sinalDosCargos])
 
   /**
    * The roles of ANY channel, not just the one open.
@@ -5719,6 +6107,49 @@ function Shell({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `papeisVersao` is the trigger for re-reading
     [bridge, papeisVersao],
   )
+
+  /**
+   * Roles and rooms as tags in the open conversation (12/11/2026). See `lib/etiquetas.ts`.
+   *
+   * **Only rooms this account sees.** The text rooms of the visible groups (the
+   * same filter as the sidebar, `quemVe`) and the default room. A room outside
+   * that list is never suggested, and its chip reads "private room": the name
+   * stays with those who see it. Voice and AFK rooms stay out: opening them is
+   * joining a call, not reading.
+   *
+   * The roles `@` offers are the ones this writer may mention here: all with
+   * `mencionartodos`, otherwise only those marked `mencionavel`. The everyone
+   * role is `@all`, not a role.
+   */
+  const etiquetasDaConversa = useMemo(() => {
+    const salasVistas = new Map<string, string>()
+    if (active && !isDirect(active)) {
+      salasVistas.set("", nomeDaSalaDoCanal(""))
+      for (const sala of roomGroups.flatMap((grupo) => grupo.rooms)) {
+        if (sala.kind === "text" && sala.afk === undefined) salasVistas.set(sala.room, sala.name)
+      }
+    }
+    const cargosDoCanal = new Map(papeis.filter((papel) => papel.role !== CARGO_TODOS).map((papel) => [papel.role, papel]))
+    const podeTodos = active !== null && !isDirect(active) && (bridge.channels.mayMentionAll?.(active, activeRoom) ?? false)
+    return {
+      cargos: [...cargosDoCanal.values()]
+        .filter((papel) => podeTodos || papel.powers.includes("mencionavel"))
+        .map(candidatoDeCargo),
+      salas: [...salasVistas].map(([room, name]) => candidatoDeSala({ room, name })),
+      cargoDe: (role: string) => {
+        const papel = cargosDoCanal.get(role)
+        return papel ? { nome: papel.name, cor: hexDaCor(papel.colour) } : undefined
+      },
+      salaDe: (room: string) => {
+        const nome = salasVistas.get(room)
+        return nome === undefined ? null : { nome }
+      },
+      onSala: (room: string) => {
+        if (!active || !salasVistas.has(room)) return
+        setActiveRooms((actual) => ({ ...actual, [active]: room }))
+      },
+    }
+  }, [active, activeRoom, roomGroups, papeis, bridge, nomeDaSalaDoCanal])
 
   /**
    * Create a role and return the identifier assigned to it.
@@ -5899,10 +6330,12 @@ function Shell({
    * Reread each message: a nickname arrives as a message, and it is what makes the
    * question be asked again. Absent in the bridge is nobody having a nickname.
    */
-  const apelidos = useMemo(
-    () => (active ? (bridge.channels.nicknames?.(active) ?? {}) : {}),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `messages` is the trigger for re-reading
-    [active, bridge, messages],
+  const apelidos = useMesmoValor(
+    useMemo(
+      () => (active ? (bridge.channels.nicknames?.(active) ?? {}) : {}),
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- `messages` is the trigger for re-reading
+      [active, bridge, messages],
+    ),
   )
   const apelidoDe = useCallback((quem: string): string | undefined => apelidos[quem], [apelidos])
   /** The nickname sheet: who, and in which channel. */
@@ -5933,7 +6366,7 @@ function Shell({
         conversations. With no label at all, both sides see the same again, the
         address, as always.
         */
-      if (!active || !admiteAdministracao(active)) return null
+      if (!active || !autoridade) return null
       /*
         Founder and admin come without color, and it is for them that color must come
         from here and not from a separate function. Neither is a declared role: they
@@ -5952,19 +6385,18 @@ function Shell({
         the order of authority; declared roles follow, in channel order. See
         `agruparMembros`.
       */
-      if (bridge.channels.founder?.(active) === address) {
+      if (autoridade.fundador === address) {
         const label = strings.roomProperties.roleFounder
         return { label, grupo: { id: "fundador", nome: label, ordem: 0 } }
       }
-      if (bridge.channels.admins?.(active)?.includes(address)) {
+      if (autoridade.admins.has(address)) {
         /*
           The name that whoever manages roles gave to it, if they changed it (2/11/2026),
           and the color with it. Without a given name, the house word and no color, as
           always.
           */
-        const embutido = bridge.channels.adminRole?.(active) ?? null
-        const label = embutido?.name ?? strings.roomProperties.roleAdmin
-        const tinta = hexDaCor(embutido?.colour)
+        const label = autoridade.adminNome ?? strings.roomProperties.roleAdmin
+        const tinta = hexDaCor(autoridade.adminCor ?? undefined)
         return {
           label,
           ...(tinta ? { tint: tinta } : {}),
@@ -6007,7 +6439,7 @@ function Shell({
           : {}),
       }
     },
-    [active, bridge, papeis],
+    [active, bridge, autoridade, papeis],
   )
 
   /**
@@ -6171,6 +6603,28 @@ function Shell({
   }, [callChannel, callRoom, active, salasDoCanal, bridge])
 
   /*
+    A call with the screen locked: the system's mute and hang-up buttons, the
+    call audio session on Safari, and the screen kept on when the person asked
+    for it.
+  */
+  useChamadaEmSegundoPlano({
+    emChamada: callChannel !== null,
+    titulo: callChannel === null ? "" : (salaDaDoca ?? labelFor(callChannel)),
+    ecraLigado: prefsDoSilencio.ecraLigadoNaChamada,
+    aoAlternarMicrofone: alternarMicrofone,
+    aoSair: sairDaChamada,
+  })
+
+  /*
+    And the truth on the iPhone's installed app: iOS turns off its microphone
+    when the screen locks. Said on each call entry, until there is a native app.
+  */
+  const pwaDoIos = useMemo(() => ehPwaDoIos(), [])
+  useEffect(() => {
+    if (pwaDoIos && entradaNaChamada !== null) pushToast(strings.chamadaEcraBloqueado.avisoPwaIphone, "info")
+  }, [pwaDoIos, entradaNaChamada, pushToast])
+
+  /*
     The game overlay on the desktop app. The minimal summary of the voice room goes to the main process, which shows
     the pill on top of the game. The rules for when it appears and what it overlays are
     in `hooks/useOverlayDeJogo.ts` and `apps/client/src/main/overlay.ts`.
@@ -6219,7 +6673,7 @@ function Shell({
    * It lived glued to the line where the request arrived, inside the list that scrolls.
    * It took just two messages after it for the buttons to rise out of view: the person
    * read what they had been written without having a way to respond there, and that was
-   * the owner's report. Now it is a conversation card not a line of it, and it stays
+   * the bug. Now it is a conversation card not a line of it, and it stays
    * until the request is open.
    *
    * **It appears in both places because ChatScreen is one**: the same conversation opens
@@ -6269,7 +6723,7 @@ function Shell({
   /**
    * And the writing bar of this conversation, locked until there is friendship.
    *
-   * The owner's rule: only after the request is accepted do private messages get exchanged.
+   * The rule: only after the request is accepted do private messages get exchanged.
    * The card above shows what is happening; this is what makes it work,
    * because a card drawn on top of a working writing box does not prevent anything, and it really did not. See `escritaNaDirecta`, where the entire
    * rule lives and what was measured in real time before it.
@@ -6427,7 +6881,9 @@ function Shell({
     renders (`voicePresence`, `categoriaRestrita`, `salaDaChamadaEm`) uses
     `useCallback` with what it reads, so it changes when that changes.
   */
-  const editaOCanal = active !== null && (bridge.channels.mayEdit?.(active) ?? false)
+  // Only in the open app: this runs on every render, and with the vault locked or going
+  // away (a removed device) the session has no identity to answer with.
+  const editaOCanal = stage === "ready" && active !== null && (bridge.channels.mayEdit?.(active) ?? false)
   const esperaDaBarra = useMemo(
     () =>
       aEsperaDeEntrada.map((linha) => ({
@@ -6437,13 +6893,6 @@ function Shell({
         onCancelar: () => cancelarEspera(linha.canal, linha.deLink),
       })),
     [aEsperaDeEntrada, cancelarEspera],
-  )
-  const canalOficialDaBarra = useMemo(
-    () =>
-      commonRoom && !channels.includes(commonRoom) && bridge.session.escolherSalaComum
-        ? { aEntrar: aEntrarNoCanalOficial, onEntrar: entrarNoCanalOficial }
-        : undefined,
-    [commonRoom, channels, bridge, aEntrarNoCanalOficial, entrarNoCanalOficial],
   )
   /* A non-empty role list is a restriction, empty means "everyone", not
      a restriction on nobody. Same reading as `categoriaVisivel`, and
@@ -6499,13 +6948,14 @@ function Shell({
                 profile: directory.get(address),
                 presence: presenceFor(address),
                 ...(euTransmito ? { transmite: euTransmito } : {}),
+                calado: micMuted,
+                semSom: soundOff,
               },
             ]
           : []
         /* `naSalaDaChamada` and not just `participants`: whoever announced and
            still has no media up is also in the room, and that is the
-           window where the list stayed empty on entry (owner, October 27,
-           2026). The broadcast signal is only known for those with media
+           window where the list stayed empty on entry. The broadcast signal is only known for those with media
            already. */
         return [
           ...eu,
@@ -6520,6 +6970,7 @@ function Shell({
                 profile: directory.get(quem),
                 presence: presenceFor(quem),
                 ...(transmite ? { transmite } : {}),
+                ...(participante ? { calado: participante.micMuted } : {}),
               }
             }),
         ]
@@ -6544,7 +6995,7 @@ function Shell({
           }
         })
     },
-    [active, callChannel, callRoom, screenStream, minhaMusica, address, nameFor, directory, presenceFor, naSalaDaChamada, participants, vozPorSala, transmitePorSala],
+    [active, callChannel, callRoom, screenStream, minhaMusica, micMuted, soundOff, address, nameFor, directory, presenceFor, naSalaDaChamada, participants, vozPorSala, transmitePorSala],
   )
   const barra = {
     abrirSala: useEstavel((room: string) => {
@@ -6589,6 +7040,7 @@ function Shell({
       if (gavetaSaiAoTocar(channel)) setSidebarOpen(false)
     }),
     menuDoCanal: useEstavel((channel: string, at: { x: number; y: number }) => setMenu({ channel, at })),
+    votacoes: useEstavel((channel: string) => abrirVotacoes(channel)),
     editarPerfil: useEstavel(() => setEditingProfile(true)),
     menuDoMicrofone: useEstavel((at: { x: number; y: number }) => setAudioMenu({ qual: "mic", at })),
     menuDoSom: useEstavel((at: { x: number; y: number }) => setAudioMenu({ qual: "som", at })),
@@ -6658,7 +7110,13 @@ function Shell({
             linkInicial={emparelhamentoDeArranque?.link ?? null}
             onDone={(addr) => {
               emparelhamentoDeArranque?.forget()
-              enter(addr)
+              /*
+                A paired device joins an account that already lives on another
+                device: the account file is that device's to save, like an
+                imported account. Without this, the one-time notice opened on
+                every freshly paired phone, over the app.
+              */
+              void marcarFicheiroTratado(addr).finally(() => enter(addr))
             }}
             onBack={() => {
               emparelhamentoDeArranque?.forget()
@@ -6691,6 +7149,38 @@ function Shell({
    * and nobody would look for the cause here.
    */
 
+
+  /**
+   * The screen of a polls room (`layout: "polls"`): polls as cards and no conversation, in the slot of
+   * the chat. A layout this version does not know shows the chat, which is what an older client sees.
+   *
+   * Creating needs the same right as writing in the room (roles and "read only" included): the
+   * button is absent otherwise. Closing is the author's or a moderator's.
+   */
+  const ecraDasVotacoes =
+    active === null || salaAberta?.layout !== "polls" ? null : (
+      <SalaDeVotacoes
+        nome={salaAberta.name}
+        votacoes={votacoesDaSala}
+        nameFor={nameFor}
+        {...(bridge.votacoes ? { onVotar: votarNaConversa } : {})}
+        podeFechar={(votacao) =>
+          bridge.channels.editMessage !== undefined &&
+          (votacao.message.sender === address || (bridge.channels.mayModerate?.(active, address ?? "") ?? false))
+        }
+        onFechar={(votacao) => {
+          void bridge.channels
+            .editMessage?.(active, votacao.id, votacao.message.payload.body ?? "", { closePoll: true })
+            .then(() => pushToast(strings.votacao.fecharFeito))
+            .catch((error: Error) => pushToast(traduzirErro(error), "error"))
+        }}
+        {...(address !== null &&
+        (bridge.channels.permissoes?.em(active, address, { sala: activeRoom }).includes("escrever") ?? true) &&
+        bridge.votacoes
+          ? { onNova: () => setVotacaoNoCanal(active) }
+          : {})}
+      />
+    )
 
   /**
    * The ticket board, when the open room is a ticket room.
@@ -6753,7 +7243,7 @@ function Shell({
    * `conversaNoEcra`, which stays true with the board in front, and so it did not mount. The call
    * had no panel and no dock, that is, no single media element: the sound died, the cards
    * disappeared, and from inside that reads as having left the voice room.
-   * Reported by the owner on 13 September 2026.
+   * That was the bug report.
    *
    * Four conditions because four are what the panel requires: the destination
    * shows the conversation, the conversation is the one where the call is happening, the panel
@@ -6776,7 +7266,7 @@ function Shell({
           ? "sala"
           : null
   const painelDaChamadaNoEcra =
-    conversaNoEcra && vistaDaChamada !== null && !callPopup && ecraDosTickets === null
+    conversaNoEcra && vistaDaChamada !== null && !callPopup && ecraDosTickets === null && ecraDasVotacoes === null && !escolhaNoEcra
 
   /**
    * Save the written state, with real rollback.
@@ -6798,8 +7288,8 @@ function Shell({
     <ChatScreen
       active={active}
       /* The ones the room was already showing by presence: the call panel draws them
-         "connecting" until the media arrives, instead of hiding them (owner, 27
-         October 2026). See `aLigar` in ChatScreen. */
+         "connecting" until the media arrives, instead of hiding them.
+         See `aLigar` in ChatScreen. */
       presentesNaSala={naSalaDaChamada}
       primeirosPassos={
         primeirosPassos.visivel ? (
@@ -6812,6 +7302,10 @@ function Shell({
         ) : undefined
       }
       callChannel={callChannel}
+      /* Screen sharing is a role power (12/11/2026). Read on each render, like the
+         read-only bar: a role given mid-call frees the button without reload. An
+         older host without the permissions model keeps the button as it was. */
+      semTransmitir={callChannel !== null && bridge.channels.mayTransmit?.(callChannel, callRoom) === false}
       setCallChannel={setCallChannel}
       setCallRoom={setCallRoom}
       ringing={ringing}
@@ -6896,6 +7390,9 @@ function Shell({
       onUserMenu={(who, at) => setUserMenu({ address: who, channel: active, at })}
       apuramentos={apuramentosDoCanal}
       onVotar={votarNaConversa}
+      reaccoes={reaccoesDoCanal}
+      etiquetas={etiquetasDaConversa}
+      {...(bridge.channels.react ? { onReagir: reagirNaConversa } : {})}
       onVotacao={() => active && setVotacaoNoCanal(active)}
       meuNome={profile.displayName || undefined}
       onSaveStatus={guardarEstado}
@@ -7086,7 +7583,7 @@ function Shell({
     // from here. See `LigacaoContext`. Left the rest indented as is, so the diff
     // shows only this.
     <LigacaoContext.Provider value={ligacaoDaFaixa}>
-    <ErrorBoundary>
+    <ErrorBoundary bridge={bridge} connection={connection}>
       {/* Without the channel bar the grid has two columns instead of three: auto
           placement fills them in order, and the destination would end up in the
           236px column with the `1fr` one empty next to it. See `.app.sem-barra`. */}
@@ -7193,7 +7690,6 @@ function Shell({
           view={view}
           rooms={rooms}
           aEsperaDeEntrada={esperaDaBarra}
-          canalOficialPorEntrar={canalOficialDaBarra}
           labelFor={labelFor}
           iconFor={iconFor}
           oficialFor={oficialFor}
@@ -7218,6 +7714,7 @@ function Shell({
           onRoomMenu={barra.menuDaSala}
           {...(editaOCanal ? { onCategoryMenu: barra.menuDaCategoria } : {})}
           onNewRoom={editaOCanal ? barra.novaSala : undefined}
+          onVotacoes={barra.votacoes}
           presenceForChannel={presenceForChannel}
           presenceHint={presenceHint}
           active={active}
@@ -7400,7 +7897,23 @@ function Shell({
             )}
           </PeopleDestination>
         ) : view === "chat" ? (
-          (ecraDosTickets ?? ecraDaConversa)
+          escolhaNoEcra && active ? (
+            <EscolherSalaDeVotacoes
+              salas={salasDeVotacoes}
+              podeCriar={bridge.channels.mayEdit?.(active) ?? false}
+              onAbrir={(room) => {
+                setActiveRooms((actual) => ({ ...actual, [active]: room }))
+                setEscolhaDeVotacoes(null)
+              }}
+              onCriar={() => {
+                setEscolhaDeVotacoes(null)
+                setNovaSalaEm(active)
+              }}
+              onVoltar={() => setEscolhaDeVotacoes(null)}
+            />
+          ) : (
+            (ecraDasVotacoes ?? ecraDosTickets ?? ecraDaConversa)
+          )
         ) : (
           <Social
             feed={feed}
@@ -7583,6 +8096,7 @@ function Shell({
                       sairDaChamada: () => leaveCall(),
                       marcarLido: () => darPorLido(menu.channel),
                       propriedades: () => setPropriedades(menu.channel),
+                      votacoes: () => abrirVotacoes(menu.channel),
                       novaSala: () => setNovaSalaEm(menu.channel),
                       // Own sheet: creating a category and creating something to file are
                       // two separate gestures. See `NewCategory`.
@@ -7747,6 +8261,8 @@ function Shell({
         )}
 
 
+        {avisoDoFicheiro && address && <AvisoDoFicheiroDaConta address={address} onFechar={() => setAvisoDoFicheiro(false)} />}
+
         {verifying && (
           <VerifyModal
             name={nameFor(verifying.address)}
@@ -7797,6 +8313,29 @@ function Shell({
             label={strings.prompts.joinLabel}
             placeholder={strings.prompts.joinPlaceholder}
             hint={strings.prompts.joinHint}
+            /*
+              The official channel, for whoever is not in it (12/11/2026): the same
+              dialog as any other community, and no longer a button in the column.
+              One door in: `escolherSalaComum(true)`, however the room is encrypted.
+            */
+            {...(commonRoom && !channels.includes(commonRoom) && bridge.session.escolherSalaComum
+              ? {
+                  extra: (
+                    <Button
+                      variant="ghost"
+                      type="button"
+                      className="wide join-link"
+                      disabled={aEntrarNoCanalOficial}
+                      onClick={() => {
+                        entrarNoCanalOficial()
+                        setPrompt(null)
+                      }}
+                    >
+                      {aEntrarNoCanalOficial ? strings.sidebar.aEntrarNoCanalOficial : strings.sidebar.entrarNoCanalOficial}
+                    </Button>
+                  ),
+                }
+              : {})}
             onCancel={() => setPrompt(null)}
             onSubmit={(link) => {
               // Parse before redeeming: a malformed link is a local mistake,
@@ -7981,6 +8520,12 @@ function Shell({
                   accoes: {
                     abrir: () => abrirSala(roomMenu.room),
                     renomear: () => setARenomear({ tipo: "sala", canal: active, room: sala.room, nome: sala.name }),
+                    // Text rooms only, and only for whoever can change this room's overrides.
+                    ...(sala.kind === "text" &&
+                    (!sala.layout || sala.layout === "polls") &&
+                    (bridge.channels.permissoes?.maySetSobreposicoes(active, { sala: sala.room }) ?? false)
+                      ? { quemEscreve: () => setQuemEscreveEm({ room: sala.room, nome: sala.name }) }
+                      : {}),
                     fechar: () => {
                       /*
                         No confirmation: closing undoes itself. The notice says what
@@ -8157,6 +8702,30 @@ function Shell({
           />
         )}
 
+        {/* Who writes in a text room (read-only rooms). See `QuemEscreve`. */}
+        {quemEscreveEm &&
+          active &&
+          bridge.channels.permissoes &&
+          (() => {
+            const p = bridge.channels.permissoes
+            const lugar = { sala: quemEscreveEm.room }
+            return (
+              <QuemEscreve
+                roles={papeis}
+                initial={soLeituraDe(p.sobreposicoes(active, lugar))}
+                onCancel={() => setQuemEscreveEm(null)}
+                onSubmit={async (escolha) => {
+                  // Re-read now: someone may have changed the other overrides while the sheet was open.
+                  await p.setSobreposicoes(active, lugar, comSoLeitura(p.sobreposicoes(active, lugar), escolha))
+                  refreshRooms()
+                  setPapeisVersao((n) => n + 1)
+                  setQuemEscreveEm(null)
+                  pushToast(strings.soLeitura.saved(quemEscreveEm.nome))
+                }}
+              />
+            )
+          })()}
+
         {novaSalaEm && (
           <NewRoom
             categorias={roomGroups.map((grupo) => grupo.category).filter(Boolean)}
@@ -8164,9 +8733,18 @@ function Shell({
             {...((bridge.channels.mayEdit?.(novaSalaEm) ?? false)
               ? { minutosAfk: bridge.channels.rooms(novaSalaEm).find((sala) => sala.afk)?.afk?.minutos ?? 15 }
               : {})}
+            /* The read-only choice, for whoever can set room overrides. See `QuemEscreve`. */
+            {...(bridge.channels.permissoes && (bridge.channels.mayEdit?.(novaSalaEm) ?? false)
+              ? { cargos: papeisDe(novaSalaEm) }
+              : {})}
             onCancel={() => setNovaSalaEm(null)}
-            onSubmit={async (next) => {
-              await bridge.channels.setRoom(novaSalaEm, { ...next, position: Date.now() })
+            onSubmit={async ({ soLeitura, ...next }) => {
+              await bridge.channels.setRoom(novaSalaEm, {
+                ...next,
+                position: Date.now(),
+                // In the same publish: two would leave the room open to everyone in between.
+                ...(soLeitura ? { perms: comSoLeitura(undefined, soLeitura) } : {}),
+              })
               refreshRooms()
               setNovaSalaEm(null)
               pushToast(strings.newRoom.created)
@@ -8346,3 +8924,6 @@ function Cracha({ id, quantas }: { id: string; quantas: number }): React.JSX.Ele
 function descritoPor(id: string, quantas: number): string | undefined {
   return quantas > 0 ? id : undefined
 }
+
+/** How many alerted ids `idsNoSino` remembers. The bell holds 50; a day of messages fits. */
+const IDS_NO_SINO_MAX = 2_000

@@ -38,8 +38,8 @@ const FILA_MAXIMA = 4
  * Animation durations.
  *
  * With reduced motion, nothing stops: the ring and alert keep moving, slower
- * and with less shift. This is the project rule (the owner's Windows has
- * reduced motion on), and a ring that lights up suddenly reads as a flicker.
+ * and with less shift. This is the project rule (Windows with animation
+ * effects off reports reduced motion), and a ring that lights up suddenly reads as a flicker.
  */
 export function duracoes(reduzido: boolean): { anelMs: number; avisoMs: number; deslocamentoPx: number } {
   return reduzido ? { anelMs: 420, avisoMs: 700, deslocamentoPx: 3 } : { anelMs: 140, avisoMs: 240, deslocamentoPx: 8 }

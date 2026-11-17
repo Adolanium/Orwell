@@ -1,7 +1,7 @@
 /* ----------------------------------------------------------------- tokens */
 
 /*
-  The "Tokyo Rain, midnight" skin, approved by the owner on October 20, 2026
+  The "Tokyo Rain, midnight" skin, the approved one
   (boards `ChuvaMidnight`, `ChamadaVoz`, `ChamadaEcra`).
   
   Two layers of names, and the rule between them:
@@ -89,7 +89,7 @@
   --ok: var(--presenca);
   /* Presence states, in the order a person meets them.
 
-The map is Discord's, requested by the owner on 27 October 2026: green
+The map is Discord's: green
 online, yellow away, red busy ("do not disturb"), gray offline or invisible.
 Busy was amber (#ffb86c) and changed to red so the ring and dot say the same.
 Red is not the `--rosa` of "no connection": one is the person's choice, the
@@ -116,8 +116,8 @@ pulses. Both measure 3:1 or better against all surfaces (`aneisDePresenca.contra
 
   /*
     Ink color for surfaces above the aurora (see `paineis.css`). Until 0.8.3
-    it was liquid glass (ink at 64% over a blur); the owner asked to remove it
-    on 26 October 2026 and keep the aurora. Now inks are nearly solid and there
+    it was liquid glass (ink at 64% over a blur); it was removed
+    and the aurora kept. Now inks are nearly solid and there
     is no filter: the aurora shows through below, and text is measured as if on
     a solid surface.
 

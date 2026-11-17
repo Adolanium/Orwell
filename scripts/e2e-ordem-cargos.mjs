@@ -1,5 +1,5 @@
 /**
- * The order of roles live (4/11/2026, owner request: "the founder/admin
+ * The order of roles live (the requirement: "the founder/admin
  * must be able to reorganize the order in which roles are displayed"), with
  * two accounts and two browsers.
  *

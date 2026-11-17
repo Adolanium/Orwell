@@ -71,6 +71,8 @@ describe("sala comum: reentrada por cartão de quem já tem subscrição duráve
     await cofreDoBrowser.create(frase)
     const browser = new Session(cofreDoBrowser)
     const { address } = await browser.createIdentity(servidor.casa)
+    // Joining the common room is opt-in since 12/11/2026: these accounts ticked the box.
+    await browser.escolherSalaComum(true)
     await cofreDoBrowser.gravarAdiada()
     const ficheiroDeConta = await cofreDoBrowser.exportVault()
     await browser.connect()

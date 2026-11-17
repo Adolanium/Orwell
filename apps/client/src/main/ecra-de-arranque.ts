@@ -70,8 +70,8 @@ export function codigoDoEstado(estado: EstadoDoEcra): string {
 const MARCA_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true">${TARJAS_DO_ARRANQUE.map((d) => `<path d="${d}"/>`).join("")}</svg>`
 
 /**
- * The page as a `data:` URL. Direction B ("Banners"), chosen by the owner on
- * 3/11/2026: illustration at the top, wordmark, text and bar below.
+ * The page as a `data:` URL. Direction B ("Banners"):
+ * illustration at the top, wordmark, text and bar below.
  *
  * Art and font are embedded in the page, also as `data:`, and policy only
  * opens this: `img-src data:` and `font-src data:`. Nothing goes to the

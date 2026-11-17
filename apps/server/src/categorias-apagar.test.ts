@@ -12,7 +12,7 @@ import {
 /**
  * Delete a category, with real accounts.
  *
- * Report from the owner on 0.8.0: "deleting a category does not delete it, even as
+ * The bug in 0.8.0: "deleting a category does not delete it, even as
  * administrator". Here we prove the core's half: the tombstone (`removed: true`)
  * from an administrator who is NOT the founder reaches everyone and beats the
  * stored declaration, and the category leaves `categoriesOf` in all three vaults.

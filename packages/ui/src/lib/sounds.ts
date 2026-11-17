@@ -72,7 +72,7 @@ export function callSoundOf(input: CallSoundInput): SoundKind | null {
  * How long after connecting to the server entries to calls still represent what
  * was already running, not new calls starting.
  *
- * Owner complaint on October 27, 2026: "when a user joins the platform, they
+ * The bug: "when a user joins the platform, they
  * hear the ring tone early, during loading". When connecting, presences from
  * voice rooms arrive as entries, one per active call, and `callSoundOf` had no
  * way to know they were already there: the list of who is ringing (`ringing`)
@@ -194,7 +194,7 @@ export interface VoiceRoomWatcher {
    * someone closes the app, loses the network, or shuts their laptop, they send
    * no goodbye: on our end their card stays until ICE gives up, then vanishes
    * with no event. `hear` never runs, and the room would empty in silence, that
-   * is exactly what the owner reported on August 14, 2026.
+   * is exactly the bug that was reported.
    *
    * This compares who was here against who is here now and returns the sound for
    * whoever left. The roster is the source of truth: if someone left by saying
@@ -211,9 +211,9 @@ export interface VoiceRoomWatcher {
  * a lot of noise, and these four rules separate them:
  *
  * - **Only for us, once.** Our entry plays once, and so does our exit: it is
- *   confirmation that the action happened, like in Discord. Before October 27,
- *   2026 it was "never for us"; the owner would enter a room and hear nothing,
- *   and asked for the sound. Our own announcement repeats every five seconds when
+ *   confirmation that the action happened, like in Discord. Before,
+ *   it was "never for us": entering a room made no sound at all,
+ *   and that read as broken. Our own announcement repeats every five seconds when
  *   alone, so there is a gate on entry.
  * - **Only in the room we are in.** If someone entered a different room, that is
  *   the sidebar's concern, not the ears of whoever is talking.
@@ -226,7 +226,7 @@ export interface VoiceRoomWatcher {
  * And a fifth rule, about what we do NOT hear: **the roster decides, not the
  * delay.** This paragraph used to say the opposite, that only explicit goodbye
  * made sound, and whoever vanished went silent. That was the description of a
- * bug, and it is what the owner reported on August 14, 2026: closing the tab
+ * bug, and it is the bug that was reported: closing the tab
  * sends no `voice.leave`, so the most common exit of all was the only one with
  * no sound. `vePresentes` is the answer, and what it compares is who was here
  * against who is here, not who said goodbye.

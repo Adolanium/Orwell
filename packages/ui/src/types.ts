@@ -38,8 +38,12 @@ export interface ChatMessage {
   channel: string
   seq: number
   sender: string
+  /** A send of ours without echo, read from the vault: the highest `seq` seen when it left. See `apos` in the core vault. */
+  apos?: number
   /** Just arrived, live, not in recovery or in a report. See `ReceivedMessage.aoVivo`. */
   aoVivo?: boolean
+  /** Roles this account just got (a live, accepted assignment). See `ReceivedMessage.cargosNovos`. */
+  cargosNovos?: { role: string; nome?: string; cor?: string }[]
   payload: {
     t: string
     body?: string
@@ -86,7 +90,9 @@ export interface ChatMessage {
      * Options arrive as they come: whoever reads discounts what they cannot
      * draw, because this may have been written by a newer version.
      */
-    poll?: { question: string; options: string[] }
+    poll?: { question: string; options: string[]; closesAt?: number }
+    /** In an "edit": this edit closes the poll `target`, and changes no text. */
+    closePoll?: boolean
     editedAt?: number
     redactedAt?: number
     /**

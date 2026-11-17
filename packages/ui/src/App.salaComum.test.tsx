@@ -211,7 +211,7 @@ describe("e não o diz antes de o saber", () => {
   })
 })
 
-describe('"Entrar no canal Orwell", para quem está de fora (3/11/2026)', () => {
+describe('"Entrar no canal oficial do Orwell", para quem está de fora (12/11/2026: no diálogo de entrar)', () => {
   /** The top bridge, with the channel list and the choice that fits. */
   function ponteCom(canais: string[], escolher?: (entrar: boolean) => Promise<{ ok: boolean }>): EnclaveBridge {
     const base = ponte()
@@ -229,23 +229,34 @@ describe('"Entrar no canal Orwell", para quem está de fora (3/11/2026)', () => 
     })
   }
 
-  it("fora do canal comum, o botão está na coluna e entra com a escolha", async () => {
+  /** The "Join with a link" dialog, the door to any community. */
+  async function abrirEntrada(): Promise<void> {
+    await screen.findAllByText(/lagar/)
+    await userEvent.setup().click(screen.getByRole("button", { name: strings.sidebar.joinWithLink }))
+    await screen.findByRole("heading", { name: strings.prompts.joinTitle })
+  }
+
+  it("fora do canal comum, a coluna não tem o botão; o diálogo de entrar tem, e entra com a escolha", async () => {
     const escolher = vi.fn(async () => ({ ok: true }))
     await abrir(ponteCom([LAGAR], escolher))
-    const botao = await screen.findByRole("button", { name: strings.sidebar.entrarNoCanalOficial })
-    await userEvent.setup().click(botao)
+    await screen.findAllByText(/lagar/)
+    expect(screen.queryByRole("button", { name: strings.sidebar.entrarNoCanalOficial })).toBeNull()
+    await abrirEntrada()
+    await userEvent.setup().click(screen.getByRole("button", { name: strings.sidebar.entrarNoCanalOficial }))
     expect(escolher).toHaveBeenCalledWith(true)
+    // The dialog closes: the channel shows in the list when the entry succeeds.
+    expect(screen.queryByRole("heading", { name: strings.prompts.joinTitle })).toBeNull()
   })
 
   it("dentro do canal comum, não há botão", async () => {
     await abrir(ponteCom([COMUM, LAGAR], vi.fn(async () => ({ ok: true }))))
-    await screen.findAllByText(/lagar/)
+    await abrirEntrada()
     expect(screen.queryByRole("button", { name: strings.sidebar.entrarNoCanalOficial })).toBeNull()
   })
 
   it("um anfitrião sem a escolha não mostra o botão", async () => {
     await abrir(ponteCom([LAGAR]))
-    await screen.findAllByText(/lagar/)
+    await abrirEntrada()
     expect(screen.queryByRole("button", { name: strings.sidebar.entrarNoCanalOficial })).toBeNull()
   })
 })

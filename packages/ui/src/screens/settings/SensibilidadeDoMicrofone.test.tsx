@@ -11,7 +11,7 @@ import { SensibilidadeDoMicrofone } from "./SensibilidadeDoMicrofone.js"
 import { SettingsScreen } from "./SettingsScreen.js"
 
 /**
- * Settings › Voice › "Microphone sensitivity" (owner, 2/11/2026).
+ * Settings › Voice › "Microphone sensitivity".
  *
  * The critical part: factory default is automatic and opens nothing; in manual it
  * shows the line above a meter that reads the gate level, opens the microphone only

@@ -1,7 +1,11 @@
 import { Fragment } from "react"
 import { analisarFormatacao, ENDERECO_FONTE, type Pedaco } from "../lib/formatacao.js"
 import { MENTION_ADDRESS } from "../lib/mentions.js"
+import { cargoDoToken, salaDoToken, TOKENS_DE_ETIQUETA } from "../lib/etiquetas.js"
+import { mencaoDeCargo } from "@enclave/protocol"
+import { tintaDoPapel } from "../lib/roleColours.js"
 import { Spoiler } from "./Spoiler.js"
+import { strings } from "../strings.js"
 import { NomeDePessoa } from "./NomeDePessoa.js"
 
 /**
@@ -56,7 +60,25 @@ const ENDERECOS = new RegExp(`(${ENDERECO_FONTE})`, "gi")
  */
 // `ENDERECOS` already brings its own group; wrapping it in another gave two
 // groups for the same chunk and `split` returned each URL in duplicate.
-const PEDACOS = new RegExp(`${ENDERECOS.source}|(${MENTION_ADDRESS.source})`, "gi")
+const PEDACOS = new RegExp(`${ENDERECOS.source}|(${MENTION_ADDRESS.source})|(${TOKENS_DE_ETIQUETA})`, "gi")
+
+/**
+ * How role and room tags read on this device (12/11/2026). See `lib/etiquetas.ts`.
+ *
+ * - `cargoDe`: the role's current name and colour, or nothing if it is unknown here.
+ * - `mencoes`: the message's `mentions`, already checked by the core. A role chip
+ *   only where the role is in there: a role written by someone without the
+ *   permission reads as plain text, as the receiver judged it.
+ * - `salaDe`: the room's current name, or `null` when this account does not see it
+ *   (or it no longer exists): then the chip says "private room", never the name.
+ * - `onSala`: open the room. Absent: the chip is not a button.
+ */
+export interface Etiquetas {
+  cargoDe?: ((role: string) => { nome: string; cor?: string | undefined } | undefined) | undefined
+  mencoes?: readonly string[] | undefined
+  salaDe?: ((room: string) => { nome: string } | null) | undefined
+  onSala?: ((room: string) => void) | undefined
+}
 
 /** End punctuation is not part of the URL. See the usage, same reason. */
 const PONTUACAO_FINAL = /[.,;:!?]+$/
@@ -83,6 +105,7 @@ export function RichText({
   children,
   nameFor,
   onMention,
+  etiquetas,
 }: {
   children: string
   /**
@@ -93,8 +116,10 @@ export function RichText({
   nameFor?: ((address: string) => string) | undefined
   /** Click a mention. Without this the mention renders, but does not open anything. */
   onMention?: ((address: string) => void) | undefined
+  /** Roles and rooms. Absent: tags read as their raw text, as in a 1.3.7. */
+  etiquetas?: Etiquetas | undefined
 }): React.JSX.Element {
-  return <>{desenharArvore(analisarFormatacao(children), nameFor, onMention)}</>
+  return <>{desenharArvore(analisarFormatacao(children), nameFor, onMention, etiquetas)}</>
 }
 
 /** The formatting tree as elements. Text leaves go to the URL and mention
@@ -103,6 +128,7 @@ function desenharArvore(
   pedacos: Pedaco[],
   nameFor: ((address: string) => string) | undefined,
   onMention: ((address: string) => void) | undefined,
+  etiquetas: Etiquetas | undefined,
 ): React.ReactNode {
   return pedacos.map((pedaco, indice) => {
     if (pedaco.tipo === "codigo") {
@@ -115,21 +141,21 @@ function desenharArvore(
       )
     }
     if (pedaco.tipo === "forte") {
-      return <strong key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention)}</strong>
+      return <strong key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention, etiquetas)}</strong>
     }
     if (pedaco.tipo === "enfase") {
-      return <em key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention)}</em>
+      return <em key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention, etiquetas)}</em>
     }
     if (pedaco.tipo === "rasurado") {
       // `<s>` not `<del>`: `del` says this was removed from a document, and what
       // the person meant was "this no longer applies". These are different things and
       // screen readers announce them differently.
-      return <s key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention)}</s>
+      return <s key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention, etiquetas)}</s>
     }
     if (pedaco.tipo === "spoiler") {
-      return <Spoiler key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention)}</Spoiler>
+      return <Spoiler key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention, etiquetas)}</Spoiler>
     }
-    return <Fragment key={indice}>{desenharTexto(pedaco.texto, nameFor, onMention)}</Fragment>
+    return <Fragment key={indice}>{desenharTexto(pedaco.texto, nameFor, onMention, etiquetas)}</Fragment>
   })
 }
 
@@ -137,6 +163,7 @@ function desenharTexto(
   children: string,
   nameFor: ((address: string) => string) | undefined,
   onMention: ((address: string) => void) | undefined,
+  etiquetas: Etiquetas | undefined,
 ): React.ReactNode {
   // `split` with groups also returns the separators, and groups that did not
   // participate come as `undefined`, hence the filter, not a direct `map`.
@@ -145,6 +172,8 @@ function desenharTexto(
   return (
     <>
       {pedacos.map((pedaco, indice) => {
+        const etiqueta = etiquetas ? desenharEtiqueta(pedaco, indice, etiquetas) : null
+        if (etiqueta) return etiqueta
         MENTION_ADDRESS.lastIndex = 0
         if (MENTION_ADDRESS.test(pedaco)) {
           MENTION_ADDRESS.lastIndex = 0
@@ -197,5 +226,50 @@ function desenharTexto(
         )
       })}
     </>
+  )
+}
+
+/** A role or room token as its chip, or `null` if this piece is not one. */
+function desenharEtiqueta(pedaco: string, indice: number, etiquetas: Etiquetas): React.ReactNode {
+  const cargo = cargoDoToken(pedaco)
+  if (cargo !== null) {
+    const conhecido = etiquetas.cargoDe?.(cargo)
+    const nome = `@${conhecido?.nome ?? cargo}`
+    // Not checked by the receiver, or unknown here: plain text, no chip.
+    if (!conhecido || !etiquetas.mencoes?.includes(mencaoDeCargo(cargo))) return <span key={indice}>{nome}</span>
+    return (
+      <span key={indice} className="mention mention-cargo" style={tintaDoPapel(conhecido.cor)}>
+        {nome}
+      </span>
+    )
+  }
+  const sala = salaDoToken(pedaco)
+  if (sala === null) return null
+  const vista = etiquetas.salaDe?.(sala) ?? null
+  if (!vista) {
+    return (
+      <span key={indice} className="mention mention-sala mention-sala-privada">
+        #{strings.etiquetas.salaPrivada}
+      </span>
+    )
+  }
+  if (!etiquetas.onSala) {
+    return (
+      <span key={indice} className="mention mention-sala">
+        #{vista.nome}
+      </span>
+    )
+  }
+  const abrir = etiquetas.onSala
+  return (
+    <button
+      key={indice}
+      type="button"
+      className="mention mention-sala"
+      aria-label={strings.etiquetas.irParaSala(vista.nome)}
+      onClick={() => abrir(sala)}
+    >
+      #{vista.nome}
+    </button>
   )
 }

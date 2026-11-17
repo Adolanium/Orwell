@@ -139,6 +139,8 @@ export const TECTOS_DO_FIO_DO_HISTORICO = {
    * screen. Before this, "402 of 420" could stand still forever.
    */
   desistirAposMs: 3 * 60_000,
+  /** A freshly paired device that asks nothing for this long is no longer getting history from here: "Keep this device on" closes. */
+  envioCaladoMs: 2 * 60_000,
   /** After giving up, a new try this often, quiet (the first progress brings the notice back). */
   retomarParadoMs: 5 * 60_000,
   /** Stored responses to request missing parts: up to this many bytes, for this long. */
@@ -175,6 +177,12 @@ export interface PortaDoHistorico {
   agora(): number
   /** The media store, through the session: the wire between siblings carries `inline` or `evicted`, and the vault keeps references. */
   armazem: PortaDoArmazemDoHistorico
+  /**
+   * A signal of the account channel that opened but is not of this module (another
+   * first byte): the account key passing (`chaveDaConta.ts`, 1.3.16). Given the
+   * opened bytes, so the signal is not decrypted twice. `true` if it was taken.
+   */
+  outroSinal?(aberto: Uint8Array, remetente: string, epoca: bigint): Promise<boolean>
 }
 
 /** What the history between siblings needs from the media store. */
@@ -218,6 +226,19 @@ export interface EventoDoHistorico {
   inicial: boolean
   /** Profiles arrived with avatars: the interface reloads the directory. */
   perfis?: true
+  /**
+   * THIS device is sending the history to a device that just paired (16/11/2026).
+   * The interface shows "Keep this device on" with these counts until the new
+   * device has everything, or stops asking. `fotografias` is `null` until the
+   * new device asks for the media list (after the text).
+   */
+  envio?: EnvioDoHistorico
+}
+
+/** What this device sent to a freshly paired one: entries of conversation, and media items. */
+export interface EnvioDoHistorico {
+  mensagens: { feitas: number; total: number }
+  fotografias: { feitas: number; total: number } | null
 }
 
 interface Cabecalho {
@@ -232,6 +253,8 @@ interface Cabecalho {
   n?: number
   x?: string
   f?: number[]
+  /** On `hi` (16/11/2026): the requester is a freshly paired device. The responder then shows "Keep this device on". */
+  ini?: 1
 }
 
 type Pedido =
@@ -270,6 +293,8 @@ interface SessaoDeQuemResponde {
   chave: Uint8Array
   para: string
   ultimo: number
+  /** Only for a freshly paired requester (`ini` on `hi`): what went, against the inventory. */
+  envio?: EnvioDoHistorico
 }
 
 const MAGIA = 0x48
@@ -392,6 +417,8 @@ export class HistoricoEntreAparelhos {
   #progressoEm = 0
   /** A sibling answered on this connection: tells `irmao-calado` from `sem-irmao`. */
   #irmaoRespondeu = false
+  /** The "Keep this device on" counts last told to the interface, to tell only changes. */
+  #envioDito = "null"
   /** Entries lost on the way in the plan that just finished, for the last event. */
   #perdidasNoFim = 0
   /** For tests: signal count sent and received. */
@@ -426,8 +453,11 @@ export class HistoricoEntreAparelhos {
     if (this.#bomba !== undefined) clearTimeout(this.#bomba)
     this.#bomba = undefined
     this.#pedinte = null
+    const enviava = this.#envioEmCurso() !== undefined
     this.#respostas.clear()
     this.#guardadas.clear()
+    // "Keep this device on" closes with the connection: the new device cannot ask here now.
+    if (enviava || this.#envioDito !== "null") this.#dizer([])
     this.#fila.length = 0
     this.#noAr.clear()
   }
@@ -535,6 +565,9 @@ export class HistoricoEntreAparelhos {
   }
 
   async #passoAgora(): Promise<void> {
+    // "Keep this device on" closes by itself when the new device goes quiet: the
+    // event repeats only when something changed (`#dizer`).
+    if (JSON.stringify(this.#envioEmCurso() ?? null) !== this.#envioDito) this.#dizer([])
     if (!this.#porta.podeSinalizar()) return
     const contents = this.#porta.conteudo()
     if (!contents || !this.#porta.canalDaConta()) return
@@ -638,7 +671,11 @@ export class HistoricoEntreAparelhos {
     const sessao: SessaoDeQuemPede = { s: novoId(), par: novoParDoHistorico(), aberta: agora }
     this.#pedinte = sessao
     this.#ultimoHi = agora
-    await this.#enviar({ v: 1, k: "hi", s: sessao.s, ap: this.#meuAparelho(), x: toBase64(sessao.par.publica) }, new Uint8Array(0))
+    const inicial = this.#porta.conteudo()?.historico?.inicial !== undefined
+    await this.#enviar(
+      { v: 1, k: "hi", s: sessao.s, ap: this.#meuAparelho(), x: toBase64(sessao.par.publica), ...(inicial ? { ini: 1 as const } : {}) },
+      new Uint8Array(0),
+    )
   }
 
   async #talvezRepetir(pedinte: SessaoDeQuemPede, agora: number): Promise<void> {
@@ -1035,7 +1072,12 @@ export class HistoricoEntreAparelhos {
     if (!contents) return
     this.#irmaoLigado()
     // One session per device: a new `hi` from the same device replaces the previous one.
-    for (const [s, sessao] of this.#respostas) if (sessao.para === cabecalho.ap) this.#respostas.delete(s)
+    let envioAnterior: EnvioDoHistorico | undefined
+    for (const [s, sessao] of this.#respostas) {
+      if (sessao.para !== cabecalho.ap) continue
+      envioAnterior ??= sessao.envio
+      this.#respostas.delete(s)
+    }
     const par = novoParDoHistorico()
     let chave: Uint8Array
     try {
@@ -1050,8 +1092,18 @@ export class HistoricoEntreAparelhos {
       return
     }
     const agora = this.#porta.agora()
-    this.#respostas.set(cabecalho.s, { chave, para: cabecalho.ap, ultimo: agora })
     const inventario = inventarioDe(contents, this.#contexto())
+    // A freshly paired device: count what goes, for "Keep this device on" here.
+    // The same device opening another session (it resumes from its cursor) keeps the counts.
+    const total = inventario.canais.reduce((soma, canal) => soma + canal.n, 0)
+    const envio: EnvioDoHistorico | undefined =
+      cabecalho.ini !== 1
+        ? undefined
+        : envioAnterior
+          ? { ...envioAnterior, mensagens: { ...envioAnterior.mensagens, total: Math.max(total, envioAnterior.mensagens.feitas) } }
+          : { mensagens: { feitas: 0, total }, fotografias: null }
+    this.#respostas.set(cabecalho.s, { chave, para: cabecalho.ap, ultimo: agora, ...(envio ? { envio } : {}) })
+    if (envio) this.#dizer([])
     await this.#responder(cabecalho.s, "hn", cabecalho.ap, "inv", inventario, toBase64(par.publica))
   }
 
@@ -1106,6 +1158,42 @@ export class HistoricoEntreAparelhos {
       return
     }
     await this.#responder(cabecalho.s, "hr", cabecalho.ap, cabecalho.id, resposta)
+    if (sessao.envio) {
+      this.#contarEnvio(sessao.envio, pedido.t, resposta)
+      this.#dizer([])
+    }
+  }
+
+  /** What one response carried, into the counts of "Keep this device on". */
+  #contarEnvio(envio: EnvioDoHistorico, tipo: Pedido["t"], resposta: unknown): void {
+    if (tipo === "pagina") {
+      const pagina = resposta as PaginaDoHistorico
+      const m = envio.mensagens
+      m.feitas = Math.min(m.total, m.feitas + pagina.e.length + (pagina.p ?? 0))
+    } else if (tipo === "media?") {
+      envio.fotografias = { feitas: 0, total: (resposta as { itens: unknown[] }).itens.length }
+    } else if (envio.fotografias) {
+      const f = envio.fotografias
+      f.feitas = Math.min(f.total, f.feitas + ((resposta as { itens?: unknown[] }).itens?.length ?? 0))
+    }
+  }
+
+  /**
+   * The transfer this device is sending to a freshly paired one, while it runs.
+   * Ends when the new device has every entry and every media item, or when it has
+   * not asked for anything in `envioCaladoMs` (closed, gone to the background).
+   */
+  #envioEmCurso(): EnvioDoHistorico | undefined {
+    const agora = this.#porta.agora()
+    let escolhido: SessaoDeQuemResponde | undefined
+    for (const sessao of this.#respostas.values()) {
+      const envio = sessao.envio
+      if (!envio || agora - sessao.ultimo > TECTOS_DO_FIO_DO_HISTORICO.envioCaladoMs) continue
+      const acabou = envio.mensagens.feitas >= envio.mensagens.total && envio.fotografias !== null && envio.fotografias.feitas >= envio.fotografias.total
+      if (acabou) continue
+      if (!escolhido || sessao.ultimo > escolhido.ultimo) escolhido = sessao
+    }
+    return escolhido?.envio ? structuredClone(escolhido.envio) : undefined
   }
 
   async #responder(s: string, k: "hn" | "hr", para: string, id: string, resposta: unknown, x?: string): Promise<void> {
@@ -1171,6 +1259,8 @@ export class HistoricoEntreAparelhos {
     const aberto = abrirSinal(chave, canal, bytes)
     const lido = aberto ? desembrulhar(aberto) : null
     if (!lido) {
+      // The account key passing (1.3.16) rides the same signals with its own first byte.
+      if (aberto && (await this.#porta.outroSinal?.(aberto, frame.from, chave.epoca))) return
       // A signal not from this module (future version, something else): dropped silently.
       this.estatisticas.ilegiveis += 1
       return
@@ -1288,6 +1378,12 @@ export class HistoricoEntreAparelhos {
   // ------------------------------------------------------------ a interface
 
   #evento(canais: string[]): EventoDoHistorico {
+    const evento = this.#eventoDeQuemPede(canais)
+    const envio = this.#envioEmCurso()
+    return envio ? { ...evento, envio } : evento
+  }
+
+  #eventoDeQuemPede(canais: string[]): EventoDoHistorico {
     const h = this.#porta.conteudo()?.historico
     const plano = h?.plano
     const inicial = h?.inicial !== undefined
@@ -1318,6 +1414,7 @@ export class HistoricoEntreAparelhos {
 
   #dizer(canais: string[], perfis = false): void {
     const evento = this.#evento(canais)
+    this.#envioDito = JSON.stringify(evento.envio ?? null)
     const assinatura = JSON.stringify({ ...evento, perfis })
     if (canais.length === 0 && !perfis && assinatura === this.#ultimoEvento) return
     this.#ultimoEvento = assinatura

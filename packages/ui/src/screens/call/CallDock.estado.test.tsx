@@ -16,7 +16,7 @@ vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
 /**
  * The "Connected · voice room" card reads in full, in Portuguese and English.
  *
- * Owner report: on the bottom-left card "connected" did not read in full. The cause
+ * The bug: on the bottom-left card "connected" did not read in full. The cause
  * was in the sheet: the state line was `display: flex` with `white-space: nowrap` and
  * `overflow: hidden`. Loose text in a flex is an anonymous item that does not shrink
  * below its width, ellipsis never appeared, and "Connected · voice room" was cut off
@@ -69,7 +69,7 @@ describe("CallDock lateral — o ping em cima, o sítio em baixo", () => {
     expect(texto?.textContent).toBe(strings.callDock.ligado)
     expect(texto?.textContent).toBe(lingua === "en" ? "Connected" : "Ligado")
     expect(doca.querySelector(".call-dock-state .call-dock-count")?.textContent).toBe(strings.call.people(2))
-    // Owner request (October 27, 2026): the bottom line is only "Channel · Room".
+    // The bottom line is only "Channel · Room".
     const baixo = doca.querySelector(".call-dock-where")
     expect(baixo?.textContent).toBe("nexo · voz")
     expect(baixo?.getAttribute("title")).toBe("nexo · voz")
@@ -114,7 +114,7 @@ describe("CallDock lateral — o ping em cima, o sítio em baixo", () => {
 
   it("um botão só, o de voltar: o microfone e o desligar estão na fila do painel (P1, 28 de Outubro)", () => {
     const doca = cartao()
-    // Until P1, it was back and hang up (owner, October 27, 2026). Hang up moved
+    // Until P1, it was back and hang up. Hang up moved
     // to the fifth button in the panel queue (`CartaoDaConta`); its rules are in
     // `styles/painel.test.ts`.
     expect(doca.querySelectorAll("button")).toHaveLength(1)

@@ -245,7 +245,7 @@ export function itensDaPessoa(ctx: {
   }
 
   /**
-   * "Move to", ONE entry that opens the room ladder (2/11/2026, owner request:
+   * "Move to", ONE entry that opens the room ladder (requirement:
    * "I do not want a name in the menu for each voice room I can move the user
    * to; I want a 'move to room' and then the rooms in a ladder").
    *

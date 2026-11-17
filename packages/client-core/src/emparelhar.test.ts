@@ -5,7 +5,7 @@ import { adoptarPerfil, aplicarEstadoDeConta, newVaultContents } from "./vault.j
 /**
  * The profile in the pairing snapshot (phase 1e).
  *
- * Owner report (27/10/2026): "I log in to the app: I do not have the same
+ * The bug: "I log in to the app: I do not have the same
  * profile photo I had in the browser". The new device was born with an empty
  * profile, because the snapshot carried reads, the vault, the block list and
  * preferences, but not the profile. Here we measure the snapshot part: the

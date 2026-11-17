@@ -77,6 +77,10 @@ function sessaoFalsa(): SessaoDeCanais & { rebentar: boolean } {
       feito.push("fichasDosCanais:")
       return { "!opaca:servidor": { tipo: "directa" as const, par: "@par:servidor" } }
     },
+    mayTransmit(channel, room) {
+      feito.push(`mayTransmit:${channel}:${room}`)
+      return room !== "palco-fechado"
+    },
     mayEditChannel(channel) {
       feito.push(`mayEditChannel:${channel}`)
       return true
@@ -216,6 +220,9 @@ function sessaoFalsa(): SessaoDeCanais & { rebentar: boolean } {
     async deleteMessage(channel, target) {
       feito.push(`deleteMessage:${channel}:${target}`)
     },
+    async reactToMessage(channel, target, emoji, remove) {
+      feito.push(`reactToMessage:${channel}:${target}:${emoji}:${String(remove)}`)
+    },
     async deleteChannel(channel) {
       feito.push(`deleteChannel:${channel}`)
     },
@@ -253,7 +260,7 @@ function montar(): {
 const CANAL = "!geral:servidor"
 
 describe("o processo principal expõe as operações de canal todas", () => {
-  it("regista os 47 nomes, e nenhum fica por registar", () => {
+  it("regista os 48 nomes, e nenhum fica por registar", () => {
     const { leituras, pedidos } = montar()
 
     for (const nome of Object.values(LEITURAS_DE_CANAL)) expect(leituras.has(nome)).toBe(true)
@@ -282,9 +289,12 @@ describe("o processo principal expõe as operações de canal todas", () => {
 
       Role order (4/11/2026): one request, `reorderRoles` (drag and arrows in
       the role editor). 24 reads and 23 requests.
+
+      Reactions (12/11/2026): one request, `react`. 24 reads and 24 requests.
     */
-    expect(leituras.size).toBe(24)
-    expect(pedidos.size).toBe(23)
+    // Plus `mayTransmit` (screen sharing as a role power, 12/11/2026).
+    expect(leituras.size).toBe(25)
+    expect(pedidos.size).toBe(24)
   })
 
   it("nenhuma leitura responde com uma promessa", () => {
@@ -333,6 +343,8 @@ describe("cada leitura chama o método certo, com os argumentos por ordem", () =
     [LEITURAS_DE_CANAL.podeMover, [CANAL], `may:${CANAL}:mover`, true],
     [LEITURAS_DE_CANAL.podeConvidar, [CANAL], `may:${CANAL}:convidar`, true],
     [LEITURAS_DE_CANAL.podeExpulsar, [CANAL], `may:${CANAL}:expulsar`, true],
+    [LEITURAS_DE_CANAL.podeTransmitir, [CANAL, "palco", "@ana:servidor"], `mayTransmit:${CANAL}:palco`, true],
+    [LEITURAS_DE_CANAL.podeTransmitir, [CANAL, "palco-fechado"], `mayTransmit:${CANAL}:palco-fechado`, false],
   ]
 
   for (const [canal, argumentos, esperado, valor] of casos) {
@@ -458,6 +470,8 @@ describe("cada pedido chama o método certo, com os argumentos por ordem", () =>
     ],
     [CANAIS_DE_CANAL.emendarMensagem, [CANAL, "m1", "assim é que é"], `editMessage:${CANAL}:m1:assim é que é`],
     [CANAIS_DE_CANAL.apagarMensagem, [CANAL, "m1"], `deleteMessage:${CANAL}:m1`],
+    [CANAIS_DE_CANAL.reagir, [CANAL, "m1", "👍"], `reactToMessage:${CANAL}:m1:👍:false`],
+    [CANAIS_DE_CANAL.reagir, [CANAL, "m1", "👍", true], `reactToMessage:${CANAL}:m1:👍:true`],
     [CANAIS_DE_CANAL.eliminarCanal, [CANAL], `deleteChannel:${CANAL}`],
   ]
 

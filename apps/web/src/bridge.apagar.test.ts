@@ -45,6 +45,9 @@ vi.mock("@enclave/client-core", () => ({
       feito.push("sair-dos-canais")
       if (saidaFalha) throw saidaFalha
     }
+    async cancelarPush(): Promise<void> {
+      feito.push("cancelar-push-no-servidor")
+    }
     disconnect(): void {
       feito.push("desligar")
     }
@@ -60,6 +63,12 @@ vi.mock("@enclave/client-core", () => ({
 }))
 
 vi.mock("@enclave/crypto", () => ({ kindOf: () => "application" }))
+vi.mock("./push.js", async (original) => ({
+  ...(await original<typeof import("./push.js")>()),
+  cancelarNoBrowser: async () => {
+    feito.push("cancelar-push-no-browser")
+  },
+}))
 // The media store is born with the bridge; like the vault, without IndexedDB here.
 vi.mock("./armazem-backend.js", () => ({ BrowserArmazemBackend: class {} }))
 vi.mock("./vault-backend.js", () => ({ BrowserVaultBackend: class {} }))
@@ -79,7 +88,15 @@ describe("a ponte do browser não apaga uma conta que continua nos canais", () =
 
     // The order is the entire fix: destroying first throws away the keys that the
     // leave request would need to encrypt with.
-    expect(feito).toEqual(["sair-dos-canais", "desligar", "esquecer", "destruir-cofre"])
+    expect(feito).toEqual(["sair-dos-canais", "cancelar-push-no-servidor", "cancelar-push-no-browser", "desligar", "esquecer", "destruir-cofre"])
+  })
+
+  it("a subscrição de push sai com a conta: no servidor, com a ligação ainda aberta, e no browser", async () => {
+    // A subscription left behind would keep waking this browser for an account that no longer exists.
+    const bridge = createBrowserBridge()
+    await bridge.vault.destroy()
+    expect(feito.indexOf("cancelar-push-no-servidor")).toBeLessThan(feito.indexOf("desligar"))
+    expect(feito).toContain("cancelar-push-no-browser")
   })
 
   it("se a saída falhar, NÃO destrói o cofre e deixa o erro subir ao ecrã", async () => {

@@ -161,6 +161,48 @@ function peerOf(channel: string, me: string | null): string | null {
 }
 
 /**
+ * The direct conversations the other side is allowed to see (12/11/2026).
+ *
+ * Opening a direct creates the MLS group and seats the peer, and the peer's device
+ * learns the channel from the Welcome. That is cryptography, and it has to happen:
+ * the conversation must exist before anything can travel through it. What must NOT
+ * happen is that the act of opening reaches the person: "someone who just opens
+ * the conversation with me, without being my friend, must not notify me".
+ *
+ * So a direct counts (in the conversation column and in the friends circle) only
+ * when it carries something said: a message or a friend request, the same gate as
+ * `listDirects`. A profile alone does not count, because that is exactly what
+ * the opener publishes on opening. Or when the peer is already someone we know
+ * (`conhecido`: a friendship tie, community, exchanged feed seats), because an
+ * empty conversation with a friend is a conversation, not a notice.
+ *
+ * The open conversation is not decided here: the caller keeps it on screen.
+ */
+export function directasQueContam(
+  channels: string[],
+  messages: ChatMessage[],
+  me: string | null,
+  conhecido: (peer: string) => boolean,
+): Set<string> {
+  const comFala = new Set<string>()
+  for (const message of messages) {
+    if (message.payload.t !== "message" && message.payload.t !== "friend.request") continue
+    if (isDirect(message.channel)) comFala.add(message.channel)
+  }
+  const contam = new Set<string>()
+  for (const channel of channels) {
+    if (!isDirect(channel)) continue
+    if (comFala.has(channel)) {
+      contam.add(channel)
+      continue
+    }
+    const peer = dmPeerAddress(channel, me)
+    if (peer !== null && conhecido(peer)) contam.add(channel)
+  }
+  return contam
+}
+
+/**
  * Close a conversation: mark it with the instant it closed.
  *
  * The stamp is the most recent message's, or now if that is later, the same

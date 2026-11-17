@@ -32,7 +32,7 @@ describe("a família: uma escala, uma duração, uma régua", () => {
   })
 
   /*
-    11/3/2026, owner request: more inspired by MSN. D4, E6, and F#6
+    More inspired by MSN. D4, E6, and F#6
     entered the scale with the new figures, and stay in the D pentatonic.
   */
   it("a escala é Ré maior pentatónica: Ré, Mi, Fá#, Lá e Si, e mais nenhuma", () => {
@@ -115,7 +115,7 @@ describe("o contorno diz o que é", () => {
   })
 
   /*
-    11/3/2026, owner request: the direct message now descends (E6 → B5) and the
+    The direct message now descends (E6 → B5) and the
     mention rises over three notes up to F#6.
   */
   it("a directa é um «tlim-tlão» a descer no topo da escala: Mi6 → Si5", () => {
@@ -152,7 +152,7 @@ describe("o contorno diz o que é", () => {
   })
 
   /*
-    Owner request (2 November 2026, point 3): one sound when muting and
+    Point 3: one sound when muting and
     another when unmuting, like Discord. Two pairs: for the microphone and for
     "mute all", lower pitched, to tell them apart with eyes closed.
   */
@@ -320,8 +320,8 @@ function contextoFalso() {
 }
 
 /*
-  The timbre is a marimba (3/11/2026, owner request: more inspired by MSN).
-  The fixed numbers here are from the test the owner heard and chose.
+  The timbre is a marimba (more inspired by MSN).
+  The fixed numbers here are from the listening test that chose it.
 */
 describe("o timbre: a mesma marimba em todos os sons", () => {
   it("os parciais da lâmina: a fundamental, 3,93× e 9,2×, cada um a calar-se mais depressa", () => {

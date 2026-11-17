@@ -167,6 +167,7 @@ function anfitriao(): Record<string, never> & {
       releaseTicket: (channel: string, room: string, ticket: string) => pedir("releaseTicket", [channel, room, ticket]),
       editMessage: (channel: string, alvo: string, body: string) => pedir("editMessage", [channel, alvo, body]),
       deleteMessage: (channel: string, alvo: string) => pedir("deleteMessage", [channel, alvo]),
+      react: (channel: string, alvo: string, emoji: string, remove?: boolean) => pedir("react", [channel, alvo, emoji, remove]),
     },
     on: {
       message: inscrever("message"),
@@ -256,6 +257,7 @@ describe("a interface recebe as operações de canal todas", () => {
       "releaseTicket",
       "editMessage",
       "deleteMessage",
+      "react",
     ]) {
       expect(typeof canais[nome], nome).toBe("function")
     }

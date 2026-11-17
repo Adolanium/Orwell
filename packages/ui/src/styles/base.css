@@ -94,49 +94,25 @@ html {
   }
 
   /**
-   * The two exceptions of the buzz, and why they live HERE.
+   * The exception of the nudge echo, and why it lives HERE.
    *
-   * `screens.css` swaps the buzz animation for a motion-free version when this
-   * preference is on-but the universal rule above is `!important` and would win
-   * over its duration, leaving both animations to run 0.01 ms. That is: the
-   * alternative existed, was written, and could not be seen. The original
-   * complaint ("only plays a sound") stayed right there for whoever this
-   * preference should protect.
+   * The universal rule above is `!important` and would zero the duration of
+   * `buzz-eco`, leaving the receipt on the button invisible to the people who
+   * asked for less motion. The patch must be `!important` in the same place, and
+   * two class selectors beat `*`. It is color fading once, nothing moves.
    *
-   * The exception lives here and not there because this is where the rule that
-   * erased it is: the patch must be `!important` in the same place, and two
-   * class selectors beat `*`.
-   *
-   * And they are legitimate exceptions: neither `buzz-flash` nor `buzz-eco`
-   * move or resize anything-it is color lighting up and going out once.
-   * `prefers-reduced-motion` is about vestibular movement, not still pixels;
-   * it is exactly this that it lets through.
+   * The shake itself (`.main.buzzing`) is not here: its calm version in
+   * `screens.css` carries its own duration with `!important` (12/11/2026).
    */
-  .main.buzzing {
-    animation-duration: 0.82s !important;
-  }
-
   .composer-buzz.buzzed {
     animation-duration: 620ms !important;
   }
 
-  /**
-   * And the bell, for the exact same reason.
-   *
-   * `screens.css` swaps the bell swing for a highlight when this preference is
-   * on. Without this line, the universal rule above would zero its duration and
-   * the highlight would be written and invisible-which is, letter for letter,
-   * the flaw the two exceptions above exist to fix. Do not commit it twice.
-   *
-   * And it is a legitimate exception for the same reason: `sino-realce` does
-   * not move or spin anything, only changes color.
-   */
-  .me-bell.avisa {
-    animation-duration: 520ms !important;
-  }
+  /* The bell is not here either: its calm swing in `screens.css` carries its own
+     duration with `!important` (12/11/2026). */
 
   /**
-   * And the dot of the "LIVE" badge, by owner rule (November 2, 2026): with
+   * And the dot of the "LIVE" badge, by the same rule: with
    * reduced motion it keeps pulsing, slower. Without this line the universal
    * rule above would stop it, which is the flaw of the exceptions above.
    * The animation for this preference (`ao-vivo-respira`, in `screens.css`)

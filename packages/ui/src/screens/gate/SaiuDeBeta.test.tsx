@@ -6,7 +6,7 @@ import { SaiuDeBeta } from "./SaiuDeBeta.js"
 afterEach(cleanup)
 
 /**
- * The 1.0 cutoff screen. The text is D3 approved by the owner: the test fixes
+ * The 1.0 cutoff screen. The text is the approved D3: the test fixes
  * it word for word, so no style revision changes it without decision.
  */
 describe('o ecrã "O Orwell saiu de beta"', () => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { ChatMessage } from "../types.js"
 import { marcaDeEntradaDe } from "./useUnreads.js"
 import { lerEstadoDaConta } from "../lib/estadoDaConta.js"
@@ -49,6 +49,20 @@ import { lerEstadoDaConta } from "../lib/estadoDaConta.js"
  * this visit's line: the frozen value is from this visit and lives as long as
  * it does.
  */
+/**
+ * "Mark as read" on a channel, said to whoever has it open (12/11/2026).
+ *
+ * The frozen mark does not move on its own, on purpose (see above). An explicit
+ * "mark as read" is the one thing that must move it: the line and the "unread"
+ * bar go, as in Discord. Module-level, because the menu that marks lives far from
+ * the conversation, and the gesture is the same on every screen of this device.
+ */
+const aoDarPorLido = new Set<(channel: string) => void>()
+
+export function avisarDadoPorLido(channel: string): void {
+  for (const ouvir of aoDarPorLido) ouvir(channel)
+}
+
 export function usePorLer(
   channel: string,
   messages: ChatMessage[],
@@ -72,6 +86,17 @@ export function usePorLer(
     setCongelado({ channel, marca: marcaDe(channel) })
   }
   const marca = congelado.channel === channel ? congelado.marca : null
+
+  // Marked read while open: freeze again at now, so nothing before it is unread.
+  useEffect(() => {
+    const ouvir = (lido: string): void => {
+      if (lido === channel) setCongelado({ channel, marca: Date.now() })
+    }
+    aoDarPorLido.add(ouvir)
+    return () => {
+      aoDarPorLido.delete(ouvir)
+    }
+  }, [channel])
 
   return useMemo(() => {
     // Never been here: everything that exists is new, and a line above the very

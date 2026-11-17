@@ -8,7 +8,7 @@ import { tocarSomDeActualizacao } from "../sons/motor.js"
  *
  * ## When, and why after login and not at startup
  *
- * The owner asked "notify those who already have the system installed, or check at login".
+ * The requirement: "notify those who already have the system installed, or check at login".
  * It is at login, for three reasons that all point to the same place:
  *
  *  - **someone unlocking the vault does not want to read about versions.** A card

@@ -58,7 +58,7 @@ const ANA = "@ana:casa.pt"
 const LAGAR = "!lagar:casa.pt"
 const DM = moradaDeTeste("directa ana eu", "casa.pt")
 
-type Mensagem = { channel: string; sender: string; seq: number; payload: Record<string, unknown> }
+type Mensagem = { channel: string; sender: string; seq: number; aoVivo?: boolean; payload: Record<string, unknown> }
 let onMessage: ((message: Mensagem) => void) | null = null
 let onCallActivity: ((event: { channel: string; from: string; joined: boolean; room: string }) => void) | null = null
 let onConnection: ((payload: { state: string }) => void) | null = null
@@ -162,10 +162,11 @@ async function abrir(bridge: EnclaveBridge = ponte()): Promise<void> {
 }
 
 let seq = 0
-async function chega(channel: string, sender: string, payload: Record<string, unknown>): Promise<void> {
+async function chega(channel: string, sender: string, payload: Record<string, unknown>, aoVivo = false): Promise<void> {
   seq += 1
   await act(async () => {
-    onMessage?.({ channel, sender, seq, payload: { id: `m${seq}`, sentAt: Date.now(), ...payload } })
+    // `aoVivo`: as from the socket. What comes from history is silent (12/11/2026).
+    onMessage?.({ channel, sender, seq, ...(aoVivo ? { aoVivo } : {}), payload: { id: `m${seq}`, sentAt: Date.now(), ...payload } } as Mensagem)
     await Promise.resolve()
   })
 }
@@ -175,7 +176,7 @@ const tipos = (): string[] => vi.mocked(motor.tocar).mock.calls.map(([acontecime
 describe("cada acontecimento chega ao motor com o seu som", () => {
   it('uma mensagem directa toca "directa", no canal dela', async () => {
     await abrir()
-    await chega(DM, ANA, { t: "message", body: "olá" })
+    await chega(DM, ANA, { t: "message", body: "olá" }, true)
     expect(vi.mocked(motor.tocar).mock.calls).toEqual([
       [{ tipo: "directa", canal: DM, deMim: false, avisoComSom: false }],
     ])
@@ -189,7 +190,21 @@ describe("cada acontecimento chega ao motor com o seu som", () => {
 
   it('uma menção numa sala toca "mencao", uma vez', async () => {
     await abrir()
-    await chega(LAGAR, ANA, { t: "message", body: "@Vera vê isto", mentions: [EU] })
+    await chega(LAGAR, ANA, { t: "message", body: "@Vera vê isto", mentions: [EU] }, true)
+    expect(tipos()).toEqual(["mencao"])
+  })
+
+  it("uma menção que chega pelo histórico não toca, e a mesma menção ao vivo duas vezes toca uma (12/11/2026)", async () => {
+    await abrir()
+    seq += 1
+    await act(async () => {
+      // Recovery: no `aoVivo`.
+      onMessage?.({ channel: LAGAR, sender: ANA, seq, payload: { t: "message", id: "m-ontem", sentAt: Date.now() - 86_400_000, body: "@Vera", mentions: [EU] } } as Mensagem)
+      await Promise.resolve()
+    })
+    expect(tipos()).toEqual([])
+    await chega(LAGAR, ANA, { t: "message", id: "m-agora", body: "@Vera", mentions: [EU] }, true)
+    await chega(LAGAR, ANA, { t: "message", id: "m-agora", body: "@Vera", mentions: [EU] }, true)
     expect(tipos()).toEqual(["mencao"])
   })
 
@@ -205,6 +220,23 @@ describe("cada acontecimento chega ao motor com o seu som", () => {
     await chega(DM, EU, { t: "message", body: "eu" })
     await chega(LAGAR, EU, { t: "message", body: "eu", mentions: [EU] })
     expect(tipos()).toEqual([])
+  })
+
+  it("o que a minha conta escreve noutro aparelho, ao vivo, não toca nem entra no sino (16/11/2026)", async () => {
+    await abrir()
+    await ligar()
+    // The same account on the phone: author EU, live, with a real `seq`.
+    await chega(DM, EU, { t: "message", body: "do telemóvel" }, true)
+    await chega(LAGAR, EU, { t: "message", body: "do telemóvel" }, true)
+    await chega(LAGAR, EU, { t: "message", body: "@todos", mentions: [EU] }, true)
+    await chega(LAGAR, EU, { t: "message", body: "um ticket", room: "suporte", ticket: { id: "t1", subject: "Ajuda" } }, true)
+    await chega(MEU_FEED, EU, { t: "post", postedAt: Date.now(), body: "foto" }, true)
+    await chega(LAGAR, EU, { t: "reaction", target: "m1", emoji: "👍", remove: false }, true)
+    await chega(DM, EU, { t: "friend.accept", acceptedAt: Date.now() }, true)
+    await chega(DM, EU, { t: "friend.request" }, true)
+    expect(tipos()).toEqual([])
+    expect(motor.tocarChamada).not.toHaveBeenCalled()
+    expect(screen.queryByText(strings.notifCenter.dmMessage("Vera"))).toBeNull()
   })
 
   it("uma publicação no mural de um amigo pede o som da publicação", async () => {
@@ -260,7 +292,7 @@ describe("a chamada a entrar", () => {
   })
 
   /*
-    Complaint from the owner on 27 October 2026: "when a user enters the
+    The bug: "when a user enters the
     platform, they hear the call sound ahead of time, during loading". The
     presence announcements from calls already in progress arrive right after the connection.
   */
@@ -317,11 +349,11 @@ describe("o som ao enviar", () => {
     })
   }
 
-  it('enviar uma mensagem pela caixa de escrita toca "enviada", uma vez', async () => {
+  it("enviar uma mensagem pela caixa de escrita não toca nada: é um acontecimento da própria conta (16/11/2026)", async () => {
     await abrir()
     await ligar()
     await escrever("bom dia")
-    expect(tipos()).toEqual(["enviada"])
+    expect(tipos()).toEqual([])
   })
 
   it("um envio recusado não toca", async () => {
@@ -339,7 +371,7 @@ describe("o som ao enviar", () => {
     await abrir()
     await ligar()
     await chega(LAGAR, ANA, { t: "message", body: "bom dia a todos" })
-    await chega(DM, ANA, { t: "message", body: "olá" })
+    await chega(DM, ANA, { t: "message", body: "olá" }, true)
     await chega(DM, EU, { t: "message", body: "a minha, vinda da sessão" })
     expect(tipos()).not.toContain("enviada")
     expect(tipos()).toEqual(["directa"])

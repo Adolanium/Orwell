@@ -368,6 +368,8 @@ async function conta(nome: string, backend = new MemoryBackend(), ligar = true):
     if (evento.payload.t === "message") ditas.push(`${evento.channel}|${evento.payload.body}`)
   })
   const address = vault.contents.signingPrivateKey ? session.loadIdentity().address : (await session.createIdentity(CASA)).address
+  // Joining the common room is opt-in since 12/11/2026: these accounts ticked the box.
+  if (!session.querSalaComum()) await session.escolherSalaComum(true)
   if (ligar) await session.connect()
   return { nome, session, address, vault, backend, estados, ditas }
 }

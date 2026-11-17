@@ -99,7 +99,7 @@ describe("translateError", () => {
 })
 
 /**
- * The role editor with three tabs (owner request on October 27, 2026: "just
+ * The role editor with three tabs (requirement: "just
  * like Discord"). Each protocol responsibility must reach the screen with a
  * sentence in both languages: a switch without a sentence is a responsibility
  * given without knowing what it gives.

@@ -97,6 +97,9 @@ export function PinnedPanel({
           {[...pins].reverse().map((fixada) => {
             const original = corpoDe(fixada.id)
             const corpo = original ?? fixada.body
+            const anexos = fixada.attachments ?? []
+            // A message with only a picture is not "(no text)": the picture says what it was.
+            const texto = corpo || (anexos.length > 0 ? "" : strings.chat.pinnedNoText)
             return (
               <li key={fixada.id} className="pinned-row">
                 <Avatar profile={directory.get(fixada.sender)} fallback={fixada.sender[1] ?? "?"} />
@@ -110,10 +113,25 @@ export function PinnedPanel({
                       signals that the app is broken. */}
                   {onAbrir && original !== undefined ? (
                     <button type="button" className="pinned-texto" onClick={() => onAbrir(fixada.id)}>
-                      {corpo || strings.chat.pinnedNoText}
+                      {texto || anexos.map((anexo) => anexo.name).join(", ")}
                     </button>
                   ) : (
-                    <p className="pinned-texto">{corpo || strings.chat.pinnedNoText}</p>
+                    texto && <p className="pinned-texto">{texto}</p>
+                  )}
+                  {/* The attachments as the copy keeps them: a small image of the first
+                      picture and the names of the files. Never the files themselves. */}
+                  {anexos.length > 0 && (
+                    <span className="pinned-anexos">
+                      {anexos.map((anexo, indice) =>
+                        anexo.thumbnail ? (
+                          <img key={indice} className="pinned-miniatura" src={anexo.thumbnail} alt={anexo.name} title={anexo.name} />
+                        ) : (
+                          <span key={indice} className="pinned-anexo">
+                            {anexo.name}
+                          </span>
+                        ),
+                      )}
+                    </span>
                   )}
                   <span className="pinned-quem">{strings.chat.pinnedBy(nameFor(fixada.pinnedBy))}</span>
                 </div>

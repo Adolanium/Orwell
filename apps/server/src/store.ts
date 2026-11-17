@@ -123,6 +123,67 @@ const WELCOMES_GUARDADOS = 5
  */
 const SUSPENSA_AGORA = "activa = 1 AND (ate_second IS NULL OR ate_second > ?)"
 
+/** A push subscription as `push.subscribe` gives it. See `push_subscriptions`. */
+export interface NovaSubscricaoDePush {
+  address: string
+  deviceKey: Uint8Array
+  endpoint: string
+  p256dh: Uint8Array
+  auth: Uint8Array
+  lingua: "pt" | "en"
+  silenciados: string[]
+  calarAteMinute: number
+  expiresMinute: number | null
+}
+
+export interface SubscricaoDePush extends NovaSubscricaoDePush {
+  renewedMinute: number
+  lastPushMinute: number
+  pushesDia: number
+  dia: number
+}
+
+interface LinhaDePush {
+  address: string
+  device_key: Uint8Array
+  endpoint: string
+  p256dh: Uint8Array
+  auth: Uint8Array
+  lingua: string
+  silenciados: string
+  calar_ate_minute: number
+  expires_minute: number | null
+  renewed_minute: number
+  last_push_minute: number
+  pushes_dia: number
+  dia: number
+}
+
+function daLinhaDePush(linha: LinhaDePush): SubscricaoDePush {
+  let silenciados: string[] = []
+  try {
+    const lidos = JSON.parse(linha.silenciados) as unknown
+    if (Array.isArray(lidos)) silenciados = lidos.filter((x): x is string => typeof x === "string")
+  } catch {
+    // A damaged list mutes nothing: waking too often is better than never.
+  }
+  return {
+    address: linha.address,
+    deviceKey: new Uint8Array(linha.device_key),
+    endpoint: linha.endpoint,
+    p256dh: new Uint8Array(linha.p256dh),
+    auth: new Uint8Array(linha.auth),
+    lingua: linha.lingua === "pt" ? "pt" : "en",
+    silenciados,
+    calarAteMinute: linha.calar_ate_minute,
+    expiresMinute: linha.expires_minute,
+    renewedMinute: linha.renewed_minute,
+    lastPushMinute: linha.last_push_minute,
+    pushesDia: linha.pushes_dia,
+    dia: linha.dia,
+  }
+}
+
 export class Store {
   #db: DatabaseSync
 
@@ -290,6 +351,10 @@ export class Store {
           .run(wire.address, chave, minuto)
         this.#db
           .prepare("DELETE FROM key_packages WHERE address = ? AND device = ? AND claimed = 0")
+          .run(wire.address, fromBase64(chave))
+        // A revoked device is never woken again: its push subscription goes in the same step.
+        this.#db
+          .prepare("DELETE FROM push_subscriptions WHERE address = ? AND device_key = ?")
           .run(wire.address, fromBase64(chave))
       }
       this.#db
@@ -473,9 +538,16 @@ export class Store {
         this.#descartarCartaoVencido(input.channel, proxima)
       }
 
+      // Never below the floor retention left behind (`expireEvents`): a `seq` that
+      // went back would read as old to every client that already passed it.
       const row = this.#db
-        .prepare("SELECT COALESCE(MAX(seq), -1) + 1 AS next FROM events WHERE channel = ?")
-        .get(input.channel) as { next: number } | undefined
+        .prepare(
+          `SELECT MAX(
+             (SELECT COALESCE(MAX(seq), -1) + 1 FROM events WHERE channel = ?),
+             COALESCE((SELECT seq_floor FROM channel_activity WHERE channel = ?), 0)
+           ) AS next`,
+        )
+        .get(input.channel, input.channel) as { next: number } | undefined
 
       const seq = row?.next ?? 0
       const minute = currentMinute()
@@ -808,12 +880,131 @@ export class Store {
    * for a relay to hold ciphertext it has already delivered.
    */
   expireEvents(retentionDays: number): number {
-    if (retentionDays <= 0) {
-      return this.#db.prepare("DELETE FROM events").run().changes as number
-    }
-    const cutoff = currentMinute() - retentionDays * 24 * 60
-    return this.#db.prepare("DELETE FROM events WHERE received_minute < ?").run(cutoff).changes as number
+    const cutoff = retentionDays <= 0 ? Number.MAX_SAFE_INTEGER : currentMinute() - retentionDays * 24 * 60
+    return this.#transaction(() => {
+      this.#guardarPisoDoSeq(cutoff)
+      return this.#db.prepare("DELETE FROM events WHERE received_minute < ?").run(cutoff).changes as number
+    })
   }
+
+  /**
+   * How far numbering goes in a channel retention is about to empty.
+   *
+   * Only for channels that lose EVERY event: while one remains, `MAX(seq)` still
+   * holds the height. Rounded UP to a multiple of `Store.SEQ_FLOOR_STEP`, so what
+   * stays after the ciphertext is gone is an order of magnitude, not the exact
+   * number of events the channel ever carried. The floor only grows.
+   */
+  #guardarPisoDoSeq(cutoff: number): void {
+    const passo = Store.SEQ_FLOOR_STEP
+    this.#db
+      .prepare(
+        `INSERT INTO channel_activity (channel, seq_floor)
+           SELECT channel, ((MAX(seq) + 1 + ${passo - 1}) / ${passo}) * ${passo}
+             FROM events WHERE true GROUP BY channel HAVING MAX(received_minute) < ?
+         ON CONFLICT (channel) DO UPDATE SET seq_floor = MAX(COALESCE(seq_floor, 0), excluded.seq_floor)`,
+      )
+      .run(cutoff)
+  }
+
+  /** The rounding of the `seq` floor. See `#guardarPisoDoSeq`. */
+  static readonly SEQ_FLOOR_STEP = 4096
+
+  // ------------------------------------------------------------- web push
+
+  /**
+   * Store this device's push subscription, replacing the one it had.
+   *
+   * The send counters (`last_push_minute`, `pushes_dia`, `dia`) survive the
+   * replacement on purpose: the client renews on every connect, and a renewal
+   * that reset them would open the 2-minute window and the daily cap each time.
+   * An endpoint held by ANOTHER row (the same browser, now signed in to another
+   * account or with another device key) moves here: one browser subscription
+   * wakes one device.
+   */
+  putPushSubscription(sub: NovaSubscricaoDePush, agoraMinuto = currentMinute()): void {
+    this.#transaction(() => {
+      this.#db
+        .prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND NOT (address = ? AND device_key = ?)")
+        .run(sub.endpoint, sub.address, sub.deviceKey)
+      this.#db
+        .prepare(
+          `INSERT INTO push_subscriptions
+             (address, device_key, endpoint, p256dh, auth, lingua, silenciados, calar_ate_minute, expires_minute, renewed_minute)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (address, device_key) DO UPDATE SET
+             endpoint = excluded.endpoint, p256dh = excluded.p256dh, auth = excluded.auth,
+             lingua = excluded.lingua, silenciados = excluded.silenciados,
+             calar_ate_minute = excluded.calar_ate_minute, expires_minute = excluded.expires_minute,
+             renewed_minute = excluded.renewed_minute`,
+        )
+        .run(
+          sub.address,
+          sub.deviceKey,
+          sub.endpoint,
+          sub.p256dh,
+          sub.auth,
+          sub.lingua,
+          JSON.stringify(sub.silenciados),
+          sub.calarAteMinute,
+          sub.expiresMinute,
+          agoraMinuto,
+        )
+    })
+  }
+
+  deletePushSubscription(address: string, deviceKey: Uint8Array): void {
+    this.#db.prepare("DELETE FROM push_subscriptions WHERE address = ? AND device_key = ?").run(address, deviceKey)
+  }
+
+  /** The push service said this endpoint no longer exists (404, 410). */
+  deletePushEndpoint(endpoint: string): void {
+    this.#db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint)
+  }
+
+  pushSubscriptionsDaConta(address: string): SubscricaoDePush[] {
+    const linhas = this.#db.prepare("SELECT * FROM push_subscriptions WHERE address = ? ORDER BY rowid").all(address)
+    return (linhas as unknown as LinhaDePush[]).map(daLinhaDePush)
+  }
+
+  /**
+   * The push subscriptions of every account subscribed to `channel`, except
+   * `excluir` (the sender's account). Whether each one is woken is the
+   * gateway's call: see `Gateway.acordarAparelhos`.
+   */
+  pushSubscriptionsDoCanal(channel: string, excluir: string | null): SubscricaoDePush[] {
+    const linhas = this.#db
+      .prepare(
+        `SELECT p.* FROM push_subscriptions p JOIN subscriptions s ON s.address = p.address
+          WHERE s.channel = ? AND p.address IS NOT ?`,
+      )
+      .all(channel, excluir)
+    return (linhas as unknown as LinhaDePush[]).map(daLinhaDePush)
+  }
+
+  /** One push went to this device at `minuto`: the window and the day's count move. */
+  marcarPush(address: string, deviceKey: Uint8Array, minuto: number, dia = Math.floor(minuto / 1440)): void {
+    this.#db
+      .prepare(
+        `UPDATE push_subscriptions
+            SET last_push_minute = ?, pushes_dia = CASE WHEN dia = ? THEN pushes_dia + 1 ELSE 1 END, dia = ?
+          WHERE address = ? AND device_key = ?`,
+      )
+      .run(minuto, dia, dia, address, deviceKey)
+  }
+
+  /** Subscriptions past the browser's expiry, or not renewed for `Store.PUSH_SEM_RENOVAR_DIAS`. */
+  sweepPush(agoraMinuto = currentMinute()): number {
+    return this.#db
+      .prepare(
+        `DELETE FROM push_subscriptions
+          WHERE (expires_minute IS NOT NULL AND expires_minute < ?) OR renewed_minute < ?`,
+      )
+      .run(agoraMinuto, agoraMinuto - Store.PUSH_SEM_RENOVAR_DIAS * 1440).changes as number
+  }
+
+  /** A live device renews on every connect; one silent this long is gone. */
+  static readonly PUSH_SEM_RENOVAR_DIAS = 90
 
   // ------------------------------------------------------------- subscriptions
 

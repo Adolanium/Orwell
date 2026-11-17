@@ -63,6 +63,11 @@ const TOLERADAS: Readonly<Record<string, string>> = {
   "packages/client-core/src/seloDoCofre.ts::vault plaintext length does not match its encoding": "invariante interna da gravação, vai ao log",
   "packages/client-core/src/seloDoCofre.ts::vault base64 length mismatch": "invariante interna da gravação, vai ao log",
   "packages/client-core/src/seloDoCofre.ts::vault envelope changed between the two stages": "invariante interna da gravação, vai ao log",
+  // The vault sealer in a Worker: a failed seal is a failed write, which the session writes again (`#falhaAoGravar`).
+  "packages/client-core/src/selo-worker.ts::motivo": "falha do selador do cofre (o Worker parou); é uma gravação falhada, que a sessão repete e regista",
+  "packages/client-core/src/selo-worker.ts::vault sealer answered something else": "invariante interna do selador, vai ao log como gravação falhada",
+  "packages/client-core/src/selo-worker.ts::erro": "a mensagem do decifrador de media no Worker; o armazém troca-a por \"media blob is damaged\", que a interface já trata",
+  "packages/client-core/src/selo-worker.ts::data.erro": "a mensagem de uma invariante do selo (`seloDoCofre.ts`) que falhou no Worker; é uma gravação falhada, que a sessão repete e regista",
   // Windows update: startup catches both and logs "instalador-falhou"; the app runs the version it has.
   "apps/client/src/main/actualizacao-windows.ts::argumento recusado": "apanhado no arranque, vira diagnóstico",
   "apps/client/src/main/actualizacao-windows.ts::powershell saiu sem sucesso": "apanhado no arranque, vira diagnóstico",

@@ -1,13 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { StrictMode, useState } from "react"
 import { Composer } from "./Composer.js"
+import { loadEmojiCatalog } from "../../components/EmojiPicker.js"
 import type { ConnectionState, EnclaveBridge } from "../../bridge.js"
 import { BridgeContext } from "../../App.js"
 import { readPrefs } from "../../hooks/usePrefs.js"
 import { strings } from "../../strings.js"
 
+// The picker loads its catalog on first open; these tests are not about that wait.
+beforeAll(loadEmojiCatalog)
 beforeEach(() => localStorage.clear())
 afterEach(cleanup)
 
@@ -285,7 +288,7 @@ describe("Composer — pré-visualização de link", () => {
  * The three gestures that are not typing live in a menu, not in the input bar.
  *
  * At 390px the bar broke with emojis, image, clip, buzz, and the input box.
- * Of three measured layouts, the owner chose this one on August 12, 2026: keep
+ * Of three measured layouts, this one was chosen: keep
  * the box wide and put the rarest action one click away. File fields stay in
  * the form, hidden, and the menu opens them.
  */
@@ -591,7 +594,7 @@ describe("Composer — colar imagens", () => {
  * button is in BuzzButton. This test is what fills that gap.
  */
 /*
-  Was HIDDEN from August 18 to October 28, 2026, by the owner's choice, with
+  Was HIDDEN for a while, with
   this block in `describe.skip`. It came back (`MOSTRAR_COTOVELADA` in
   `Composer.tsx`), and here we confirm it came back whole: without submitting
   the form, without sending the half-written message, and with the wait time in
@@ -646,12 +649,46 @@ describe("Composer — a cotovelada", () => {
     expect(entradaDaCotovelada().textContent).toContain("5")
   })
 
+  it("numa conversa que a admite, tem botão próprio na linha, com o ícone desenhado", async () => {
+    // 12/11/2026: "an icon of its own for the nudge, only for
+    // private messages". The button follows `onBuzz`, which only a direct gives.
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    const onBuzz = vi.fn()
+    render(<Harness onSend={onSend} onBuzz={onBuzz} initial="frase a meio" />)
+    const linha = document.querySelector(".composer-line") as HTMLElement
+    const botao = screen.getByTitle(strings.chat.buzzTitle)
+    expect(linha.contains(botao)).toBe(true)
+    expect(botao.querySelector("svg")).toBeTruthy()
+    await user.click(botao)
+    expect(onBuzz).toHaveBeenCalledTimes(1)
+    expect(onSend).not.toHaveBeenCalled()
+    expect(box().value).toBe("frase a meio")
+  })
+
+  it("num canal de grupo não há botão de cotovelada na linha", () => {
+    render(<Harness />)
+    expect(screen.queryByTitle(strings.chat.buzzTitle)).toBeNull()
+    expect(document.querySelector(".composer-buzz")).toBeNull()
+  })
+
+  it("a entrada do menu leva o mesmo ícone desenhado", async () => {
+    const user = userEvent.setup()
+    render(<Harness onBuzz={vi.fn()} />)
+    await abrirMais(user)
+    expect(entradaDaCotovelada().querySelector("svg")).toBeTruthy()
+  })
+
   it("os botões da linha são ícones desenhados, sem um símbolo à vista", () => {
     render(<Harness onBuzz={vi.fn()} />)
     const linha = document.querySelector(".composer-line") as HTMLElement
-    // Two left in the bar after attachments and buzz moved to the menu. The rule
-    // is the same for both that stayed.
-    const botoes = [screen.getByLabelText(strings.emoji.open), screen.getByTitle(strings.chat.moreActions)]
+    // Emoji, "+" and, in a direct, the nudge (hidden by CSS on a narrow screen).
+    // The rule is the same for all of them.
+    const botoes = [
+      screen.getByLabelText(strings.emoji.open),
+      screen.getByTitle(strings.chat.moreActions),
+      screen.getByTitle(strings.chat.buzzTitle),
+    ]
     for (const botao of botoes) {
       expect(linha.contains(botao)).toBe(true)
       expect(botao.querySelector("svg")).toBeTruthy()
@@ -844,7 +881,7 @@ describe("Composer: um separador que já não escreve", () => {
 })
 
 /**
- * Slash commands, IRC-style (owner request from 28 October 2026).
+ * Slash commands, IRC-style.
  *
  * How they work: `/me` sends as TEXT in italics with the name in front, and
  * nothing else (the protocol doesn't know a command ran); `/away` and

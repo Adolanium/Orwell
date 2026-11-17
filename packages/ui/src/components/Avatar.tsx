@@ -14,7 +14,7 @@ export function estadoDoAnel(presence: "active" | "away" | "busy" | "idle" | und
   if (presence === "active") return "online"
   if (presence === "away") return "ausente"
   if (presence === "busy") return "ocupado"
-  // No known state is gray: the owner wants the ring on all faces, and
+  // No known state is gray: the ring shows on all faces, and
   // the color that asserts nothing is the one for no signal.
   return "offline"
 }

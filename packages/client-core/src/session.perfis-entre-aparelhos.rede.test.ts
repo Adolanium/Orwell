@@ -17,7 +17,7 @@ import {
 /**
  * Profiles of other people across devices on the same account (1.0 "Arca").
  *
- * Owner's report (29/10/2026): "after pairing on another PC via browser,
+ * The bug: "after pairing on another PC via browser,
  * all users appear as 'no name'". Pairing brought the person's own profile,
  * not others'; and a profile only reaches those in the channel when the person
  * publishes it. Anyone who was offline stayed "no name".

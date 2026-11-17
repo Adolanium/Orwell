@@ -52,7 +52,7 @@ const DIST = join(SITE, "dist")
 // to 44.7 kB; the full page comes in at 66.5 kB. Dropping to 1.5× or quality 50
 // would save about 15 kB at the cost of soft images on retina screens.
 // 100 not 70 as of November 2, 2026: point 02 went from a 10 kB screenshot to a
-// drawn diagram of the post-quantum cipher (owner's choice), with labels that
+// drawn diagram of the post-quantum cipher, with labels that
 // only read at 720 px width. At 1200 px and quality 50 it weighs 29.3 kB, and
 // the page runs close to 88 kB. This is the "large art piece" the clause above
 // foresaw, in a lower cap than the 150.

@@ -606,7 +606,7 @@ describe("Timeline — votações", () => {
         messages: [mensagem],
         onVotar: noop,
         nameFor: (sender) => (sender === "@bento:s" ? "Bento" : sender),
-        apuramentos: new Map([["votacao-1", { porOpcao: [["@bento:s"], []], total: 1, minha: null }]]),
+        apuramentos: new Map([["votacao-1", { porOpcao: [["@bento:s"], []], total: 1, minha: null, fechoEm: null }]]),
       }),
     )
     expect(screen.getByText(strings.votacao.total(1))).toBeTruthy()

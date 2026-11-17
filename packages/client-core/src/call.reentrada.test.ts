@@ -5,7 +5,7 @@ import { Call, type CallBridge, type MediaKeyMaterial } from "./call.js"
 /**
  * Leave a voice room and rejoin with three people.
  *
- * Report from the owner on August 13, 2026: "I leave and rejoin a room and always
+ * The bug: "I leave and rejoin a room and always
  * lose the connection with one of the users". One of three, always, is the signature of one
  * of the two paths in the negotiation, the offerer decides by comparing
  * addresses, and in a group of three the person who returns typically has one peer on each
@@ -82,7 +82,7 @@ class FakePeerConnection {
    * An answer only gets set after it's been prepared.
    *
    * It's the browser's rule, and without it this double would accept any order: the
-   * bug the owner saw ("cannot set local answer when createAnswer has not
+   * reported bug ("cannot set local answer when createAnswer has not
    * been called") couldn't happen here, and the guard that fixes it went untested.
    *
    * `setRemoteDescription` of an offer puts the connection back to waiting for a
@@ -487,7 +487,7 @@ describe("a mesma reentrada, com a rede a portar-se como rede", () => {
 
 describe("uma oferta que se perde, numa chamada de três", () => {
   /**
-   * The hole the owner described as "whenever there are 3+ members, it doesn't connect
+   * The hole reported as "whenever there are 3+ members, it doesn't connect
    * so seamlessly".
    *
    * Whoever returns to a room announces themselves, and then only acts in half the cases: to
@@ -714,7 +714,7 @@ describe("rekey com a árvore meio passo atrasada", () => {
 /**
  * Two offers for the same pair at the same time.
  *
- * Reported by the owner on August 14, 2026, with the full error message: "cannot set
+ * The bug, with the full error message: "cannot set
  * local answer when createAnswer has not been called", on the second connection, and in
  * both directions. On the third attempt it works, because by then the second offer
  * arrives after the first one is done.
@@ -762,7 +762,7 @@ describe("duas ofertas do mesmo par, ao mesmo tempo", () => {
 /**
  * The microphone state announced more than once.
  *
- * Report from the owner on August 14, 2026: "I'm hearing a user whose mute icon is
+ * The bug: "I'm hearing a user whose mute icon is
  * active... it's unpredictable". Unpredictable is the right word for a frame that gets
  * lost sometimes and not others: the state was announced ONCE, at the instant it
  * changed, and that was the only delivery. Lose that frame and the icon stays wrong
@@ -821,7 +821,7 @@ describe("o estado do microfone", () => {
 /**
  * Two in the call, the third joins.
  *
- * Report from the owner on August 14, 2026: "two users connect, when the
+ * The bug: "two users connect, when the
  * third joins it keeps connecting until it drops".
  *
  * Those already there build the pair for one of them, and that build would turn off
@@ -862,7 +862,7 @@ describe("o terceiro a entrar numa chamada de dois", () => {
  * consent checks. The engine does not always scale that to `failed` in useful time.
  *
  * In that state the person had no timer, did not enter `#perdidos` and got no
- * re-announcement: "connecting" forever, which is what the owner reported.
+ * re-announcement: "connecting" forever, which is the reported bug.
  */
 describe("uma ligação que cai para disconnected", () => {
   it("volta a ter prazo, e a pessoa acaba por ser procurada outra vez", async () => {
@@ -993,7 +993,7 @@ describe("uma resposta que chega tarde", () => {
  * (`scripts/e2e-chamada-epoch.mjs`, then a directed script): "each one tried
  * exactly two connections -- 2, 2, 3". The extra connection is born and dies in
  * milliseconds, with no description from either side, and the pattern is always the
- * same, whoever joins LAST with the SMALLEST address. It is the case the owner
+ * same, whoever joins LAST with the SMALLEST address. It is the case
  * reported live: "two users connect, when the third joins it keeps connecting until
  * it drops".
  *

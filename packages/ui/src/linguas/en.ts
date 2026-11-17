@@ -69,6 +69,18 @@ export const en: Traducao = {
     trazer: "Fetch",
     aTrazer: "Fetching...",
     ninguemTem: "No device of this account and no connected member has this image. Try again later.",
+    // Copy and save what a message carries: one short verb per button; the numbered forms say which picture.
+    copiarImagem: "Copy image",
+    copiarImagemN: (numero: number): string => `Copy image ${numero}`,
+    descarregar: "Download",
+    descarregarN: (numero: number): string => `Download image ${numero}`,
+    descarregarFicheiro: (nome: string): string => `Download ${nome}`,
+    copiarLigacao: "Copy message link",
+    imagemCopiada: "Image copied.",
+    imagemSemSuporte: "This browser cannot copy images.",
+    imagemRecusada: "The browser did not allow the copy.",
+    ligacaoCopiada: "Link copied.",
+    semBytes: "This image is no longer on this device.",
   },
 
   connection: {
@@ -88,6 +100,24 @@ export const en: Traducao = {
     composerEspera: "Sends later",
     separadorParado: "This tab no longer connects to the server. Close the other tabs or reload.",
     anexosOffline: "Images and files need a connection.",
+  },
+
+  ficheiroDaConta: {
+    titulo: "Save your account file",
+    texto:
+      "Orwell has no email and no phone number, so we can't send you a reset link. Your account lives on this device. If you lose the device, or clear the browser's data, the only way back in is this file. The file holds your account key, locked with your password. Without your password, nobody can use it, not even us. Keep it somewhere other than this device: a USB drive, a password manager, or another computer you trust.",
+    descarregar: "Download account file",
+    partilhar: "Share",
+    aDescarregar: "Preparing the file…",
+    guardei: "I saved the file somewhere safe.",
+    continuar: "Continue",
+    nota: 'Lost your device? On the sign-in screen, choose "Import account", pick this file and type your password.',
+    fraseLabel: "Password for the file",
+    fraseNota: "This account has no password. Choose one for the file only, 8 characters or more.",
+    aviso: "You haven't saved your account file yet",
+    fechar: "Close",
+    guardado: "Account file downloaded.",
+    nomeDoFicheiro: "account.enclave",
   },
 
   /** See the Portuguese note. The word "update" does not appear on a button on
@@ -214,8 +244,7 @@ export const en: Traducao = {
     memorizarNota: "Next time, Orwell opens without asking for the password. Anyone using this unlocked device gets into your account.",
     memorizarNotaIos: "On iPhone, seven days without opening Orwell can erase the session and the account on this device.",
     memorizarFalhou: "You are in, but the session could not be remembered on this device.",
-    canalOficial: "Join the Orwell channel, the community of all users",
-    canalOficialNota: "It has the Release notes, help and other people. You can join or leave later.",
+    canalOficial: "Join the official Orwell channel",
     revogadoSemFrase: "This account has no password on this device. To use Orwell here again, start over.",
     comecarDeNovo: "Start over",
     open: "Sign in",
@@ -259,8 +288,8 @@ export const en: Traducao = {
     profileMissing: "Your profile did not arrive from the main device yet. It arrives when the two devices are connected.",
     doneTitle: "This device now belongs to the account",
     doneBody: "This device gets new messages now. The old conversations come from the other device while both are online.",
-    doneGuestNote: "Add or remove devices on the main device of the account.",
-    doneHostBody: "The new device gets messages from now on. Earlier messages stay on the other devices.",
+    doneGuestNote: "You can manage devices from any of your devices.",
+    doneHostBody: "The new device gets messages now. The old conversations go from here to it. Keep this device on until the history arrives.",
     doneAction: "Enter",
     hostTitle: "Add device",
     hostLead: "On the other device, select \"Yes, pair this device\". Then scan this code with its camera, or paste the link into it.",
@@ -305,8 +334,8 @@ export const en: Traducao = {
     newRoom: "New room",
     editProfile: "Edit profile",
     joinWithLink: "Join with a link",
-    entrarNoCanalOficial: "Join the Orwell channel",
-    aEntrarNoCanalOficial: "Joining the Orwell channel…",
+    entrarNoCanalOficial: "Join the official Orwell channel",
+    aEntrarNoCanalOficial: "Joining the official Orwell channel…",
     noRoomsBefore: "You have no channels yet. Create one with the ",
     noRoomsAfter: " beside it.",
     addFriend: "Add friend",
@@ -393,7 +422,7 @@ export const en: Traducao = {
       if (nomes.length === 1) return `${nomes[0] ?? ""} is typing…`
       if (nomes.length === 2) return `${nomes[0] ?? ""} and ${nomes[1] ?? ""} are typing…`
       if (nomes.length === 3) return `${nomes[0] ?? ""}, ${nomes[1] ?? ""} and ${nomes[2] ?? ""} are typing…`
-      // More than three (owner, 12/11/2026): no names and no count.
+      // More than three: no names and no count.
       return "Several people are typing…"
     },
     unreadMark: "unread",
@@ -421,6 +450,8 @@ export const en: Traducao = {
     buzz: "Nudge",
     moreActions: "Attach or nudge",
     editedMark: "(edited)",
+    editada: "edited",
+    editadaAs: (hora: string): string => `edited at ${hora}`,
     messageEdit: "Edit",
     messageEditLabel: "What you meant to say",
     messageEditSave: "Save",
@@ -439,7 +470,7 @@ export const en: Traducao = {
     pinnedTitle: "Pinned in this room",
     pinnedToggle: "See what is pinned in this room",
     pinnedNote:
-      "A pinned message stays visible after it goes out of the history.",
+      "A pinned message stays visible until someone unpins it or deletes it.",
     /* Two sentences for one emptiness: see the Portuguese note. Whoever cannot
        pin is not told about a door that is not there for them. */
     pinnedEmpty: "Nothing pinned in this room.",
@@ -507,6 +538,9 @@ export const en: Traducao = {
     groupOnline: "Online",
     groupOffline: "Offline",
     groupHeading: (titulo: string, n: number): string => `${titulo} · ${n}`,
+    // A big channel shows only who is online (12/11/2026). This line opens the rest.
+    maisPessoas: (n: number): string => (n === 1 ? "+1 person on this server" : `+${n} people on this server`),
+    esconderMaisPessoas: "Hide people who are offline",
     loading: "Loading…",
     empty: "Nobody here yet.",
     inviteSomeone: "Invite…",
@@ -557,11 +591,13 @@ export const en: Traducao = {
       escrever: "write",
       anexar: "attach files",
       reagir: "react",
-      mencionartodos: "mention everyone",
+      mencionartodos: "mention everyone and roles",
+      mencionavel: "anyone can mention this role",
       ligar: "join voice",
       falar: "speak",
       video: "turn on video",
       ecra: "share the screen",
+      transmitir: "share the screen",
       musica: "play music",
       silenciarvoz: "mute in voice",
       ensurdecer: "deafen",
@@ -692,11 +728,13 @@ export const en: Traducao = {
       escrever: "Write messages in the rooms.",
       anexar: "Attach files to messages.",
       reagir: "React to messages.",
-      mencionartodos: "Write @all to mention everyone in the channel. In a muted room, @all does not notify.",
+      mencionartodos: "Write @all to mention everyone in the channel, and mention any role. In a muted room, @all does not notify.",
+      mencionavel: "Anyone can write @ and the name of this role to notify the people who have it.",
       ligar: "Join the voice rooms.",
       falar: "Speak in a voice room.",
       video: "Turn on the camera in a voice room.",
       ecra: "Share the screen in a voice room.",
+      transmitir: "Share the screen in a voice room. Administrators always have it. The everyone role does not have it by default.",
       musica: "Play music in a voice room.",
       silenciarvoz: "Mute the microphone of a different person in voice.",
       ensurdecer: "Remove the sound for a different person in voice.",
@@ -731,6 +769,7 @@ export const en: Traducao = {
   },
 
   call: {
+    semTransmitir: "Screen sharing is limited to some roles here. Ask a channel admin to give you this permission.",
     waiting: "waiting for somebody to join",
     people: (n: number): string => `${n} ${n === 1 ? "person" : "people"}`,
     micOn: "Turn microphone on",
@@ -748,6 +787,11 @@ export const en: Traducao = {
     sharingOf: (name: string): string => `${name} is sharing their screen`,
     screenOf: (name: string): string => `${name}'s screen`,
     screenSelf: "Your screen",
+    aPartilhar: "You are sharing your screen",
+    presentesNoPalco: "Who is in the call",
+    presenteCalado: "Microphone off",
+    presenteSemSom: "Sound off",
+    pararPartilha: "Stop",
     screenSoundVolume: "Screen sound volume",
     ecraInteiro: "View full screen",
     sairDoEcraInteiro: "Exit full screen",
@@ -794,6 +838,7 @@ export const en: Traducao = {
     silenced: "muted by you",
     micOffOf: (name: string): string => `${name} muted their own microphone`,
     silencedByYouOf: (name: string): string => `You muted ${name}: their volume is at zero on your side`,
+    soundOffOf: (name: string): string => `${name} has the sound off`,
     volumeOf: (label: string): string => `${label}'s volume`,
     menuSection: "In this call",
     menuSilence: "Silence for me",
@@ -1091,6 +1136,13 @@ export const en: Traducao = {
         ? "1 older message did not come: the main device could not send it."
         : `${perdidas} older messages did not come: the main device could not send them.`,
     historicoFechar: "Close the history notice",
+    /* On the device that sends the history to a freshly paired one. Approved text. */
+    envioTitulo: "Keep this device on",
+    envioCorpo: "Your phone is getting your message history from this device. Do not close Orwell here until it is done.",
+    envioProgresso: (m: number, mTotal: number, f: number, fTotal: number | null): string =>
+      fTotal === null
+        ? `Sent: ${m} of ${mTotal} messages`
+        : `Sent: ${m} of ${mTotal} messages · ${f} of ${fTotal} photos`,
     parte: (nome: string, recebidos: number, esperados: number): string => `${nome}: ${recebidos} of ${esperados}`,
     tipos: {
       fundador: "Founding",
@@ -1118,8 +1170,10 @@ export const en: Traducao = {
     feedDe: (nome: string): string => `${nome}'s feed`,
     anexoPedir: "Ask the other members",
     anexoAPedir: "Asking…",
-    anexoNinguem: "No member with this image is connected now. Try again later.",
-    anexoFicheiroNinguem: "No member with this file is connected now. Try again later.",
+    anexoNinguem: "No one connected has this image. It appears when someone who has it connects.",
+    anexoFicheiroNinguem: "No one connected has this file. Try again when someone who has it connects.",
+    anexoAutorDesligado: "The sender of this image is not connected. It appears when someone who has it connects.",
+    anexoFicheiroAutorDesligado: "The sender of this file is not connected. Try again when someone who has it connects.",
     anexoRecusado: "What came is not the original. It is not shown.",
     anexoSemLigacao: "No connection to the server. Try again.",
     anexoTentarOutraVez: "Try again",
@@ -1165,7 +1219,16 @@ export const en: Traducao = {
     friendAccept: (name: string): string => `${name} accepted your request`,
     dmMessage: (name: string): string => `New message from ${name}`,
     joinedByInvite: (name: string, room: string): string => `${name} joined #${room} through your link`,
+    cargoAtribuido: {
+      um: "You now have the role ",
+      varios: "You now have the roles ",
+      e: " and ",
+      em: (comunidade: string): string => ` in ${comunidade}.`,
+    },
     mention: (name: string, room: string): string => `${name} mentioned you in #${room}`,
+    /** The same, when the room name is not known yet: never the identifier in its place. */
+    mentionSemSala: (name: string): string => `${name} mentioned you`,
+    roomAddedSemNome: "You were added to a channel",
     friendRequestClosed: (name: string): string => `Request from ${name}: answered`,
   },
 
@@ -1228,8 +1291,7 @@ export const en: Traducao = {
     aPartilharEcra: "Sharing screen",
     /**
      * «Canal · Sala», in the order of whoever is looking: first where, then the
-     * room. It was «canal / sala»; the owner asked for the dot on 27 October
-     * 2026, and the same line serves the side card, which scrolls it when it
+     * room. It was «canal / sala»; now it is the dot, and the same line serves the side card, which scrolls it when it
      * does not fit (see `Andante`).
      */
     ondeComSala: (canal: string, sala: string): string => `${canal} · ${sala}`,
@@ -1453,7 +1515,6 @@ export const en: Traducao = {
     seccoesDoEcra: "Settings sections",
     voltarAsSeccoes: "Back to sections",
     language: "Language",
-    languageAuto: "Automatic",
     languageNote:
       "Changes the language of the app. Messages are not translated.",
     account: "Account",
@@ -1462,7 +1523,12 @@ export const en: Traducao = {
     notifSystem: "System notifications",
     notifBlocked: "Blocked by the browser. To use them, allow notifications in the site settings.",
     notifUnsupported: "Notifications do not work here.",
-    notifPreview: "Show the content",
+    notifPreview: "Show names and text in notifications",
+    pushFechada: "Notifications when the app is closed",
+    pushFechadaNota: "The notice has no name and no text. Open the app to read it.",
+    pushIosNota: "To get notifications when the app is closed, add Orwell to the Home Screen.",
+    pushCorpo: "New message in Orwell",
+    pushSalaNota: "Muting a room does not stop this notice. Only muting a whole channel does.",
     avisarAmigosOnline: "When a friend comes online",
     avisarAmigosOnlineNota: "A notice and a sound, at most once every 30 minutes per friend and per type.",
     avisosDeAmigos: "Friend notices",
@@ -1491,8 +1557,8 @@ export const en: Traducao = {
     revoke: "Revoke",
     revokeTitle: "Revoke this device?",
     revokeBody:
-      "The device leaves the account and every channel. Revoking stops reading from the next epoch. What the device already had, it keeps.",
-    revokeHonest: "Revoking stops reading from the next epoch. What the device already had, it keeps.",
+      "The device leaves the account and every channel. Revoking stops reading from the next epoch. The device keeps what it already had until it connects again. Then it signs out and deletes its data.",
+    revokeHonest: "Revoking stops reading from the next epoch. The device keeps what it already had until it connects again. Then it signs out and deletes its data.",
     revoking: "Revoking the device…",
     revoked: "The device was revoked.",
     revokePending: "being revoked",
@@ -1581,7 +1647,6 @@ export const en: Traducao = {
       "tudo-ligado": "Unmute all (microphone and sound)",
       "amigo-online": "A friend comes online",
       "sala-afk": "Moving to the AFK room",
-      enviada: "Sound when sending messages",
       "a-chamar": "Outgoing call, waiting for an answer",
       "voz-perdida": "The connection to the call drops",
       movido: "A moderator moves you to another room",
@@ -1603,6 +1668,8 @@ export const en: Traducao = {
       decisao === "suspensa" ? "We reviewed your report: account suspended." : "We reviewed your report: no action.",
     reportDecisionVias: "If you disagree, write to orwell.eu@proton.me, go to the courts, or complain to ANACOM.",
     newMessage: (room: string): string => `New message in ${room}`,
+    // With "Show names and text" off, or a room whose name is not known yet: no identifier, ever (12/11/2026).
+    novaMensagem: "You have a new message",
     newNotice: "You have a new notification",
     amigoOnline: (nome: string): string => `${nome} is online`,
     amigoOnlineDiscreto: "A friend is online",
@@ -1613,6 +1680,10 @@ export const en: Traducao = {
     amigoNoEcraDiscreto: "A friend started to share the screen",
     amigoNaComunidade: (nome: string, canal: string): string => `${nome} joined the channel ${canal}`,
     amigoNaComunidadeDiscreto: "A friend joined a channel",
+    // The room or channel name is not decrypted yet: the person, never the identifier (16/11/2026).
+    amigoNaVozSemSala: (nome: string): string => `${nome} joined a voice room`,
+    amigoNoEcraSemSala: (nome: string): string => `${nome} started to share the screen`,
+    amigoNaComunidadeSemNome: (nome: string): string => `${nome} joined one of your channels`,
     juntarMe: "Join",
     ver: "Watch",
     abrir: "Open",
@@ -1713,6 +1784,8 @@ export const en: Traducao = {
     kindText: "Text",
     kindVoice: "Voice",
     kindTickets: "Tickets",
+    kindPolls: "Polls",
+    pollsNote: "This room has polls only, with no chat. People who can write in the room create polls.",
     ticketsNote:
       "Each request for help is a ticket, with its own status.",
     note: "Hiding a room only tidies the list. All members of the channel can read it.",
@@ -1722,6 +1795,23 @@ export const en: Traducao = {
     created: "Room created.",
     afkLabel: "AFK room",
     afkNote: "People who stay muted in a voice room come here by themselves. A channel has one AFK room only.",
+  },
+
+  soLeitura: {
+    menu: "Who writes",
+    title: "Who writes in this room",
+    lead: "Every member of the channel reads this room. Choose who writes.",
+    note: "This rule belongs to the apps, not to the encryption. An altered app can still send messages. The apps of the other members do not show them.",
+    label: "Read-only",
+    rolesLabel: "Roles that write",
+    adminNote: "Channel administrators always write.",
+    noRoles: "This channel has no roles yet. Only administrators write.",
+    open: "Every member writes in this room.",
+    closed: "Only administrators and the chosen roles write. The other members read and react.",
+    semEscrita: "Only some roles can write in this room.",
+    save: "Save",
+    saving: "Saving…",
+    saved: (sala: string): string => `Saved who writes in ${sala}.`,
   },
 
   tickets: {
@@ -1966,6 +2056,7 @@ export const en: Traducao = {
     to: (sala: string): string => `Move to ${sala}`,
     sent: (nome: string, sala: string): string => `You moved ${nome} to ${sala}.`,
     moved: (quem: string, sala: string): string => `${quem} moved you to ${sala}.`,
+    outraSala: "another voice room",
   },
 
   emoji: {
@@ -2020,6 +2111,48 @@ export const en: Traducao = {
     deafNote: (name: string): string => `This device cannot read the posts of ${name}.`,
   },
 
+
+  salaDeVotacoes: {
+    nova: "New poll",
+    semAbertas: "There are no open polls.",
+    semFechadas: "There are no closed polls.",
+    separadores: "State of the polls",
+    abertas: "Open",
+    fechadas: "Closed",
+    deQuem: (nome: string, quando: string): string => `${nome}, ${quando}`,
+    soLeitura: "You can only vote in this room. People with the right role create polls.",
+    escolherTitulo: "Polls",
+    escolher: "Choose a polls room.",
+    criarSala: "Create a polls room",
+    semSalas: "There are no polls in this channel yet.",
+    semSalasLead: "People who organize the channel can create a polls room.",
+    voltar: "Back to the conversation",
+  },
+
+  /*
+    The polls page of a community. "Closed" means the room of the
+    poll is closed: a poll has no deadline of its own.
+  */
+  paginaVotacoes: {
+    menu: "Polls",
+    titulo: "Polls",
+    abertas: "Open",
+    fechadas: "Closed",
+    separadores: "State of the polls",
+    filtroDeSala: "Room",
+    todasAsSalas: "All rooms",
+    semAbertas: "There are no open polls.",
+    semFechadas: "There are no closed polls.",
+    semPrazo: "No deadline. It stays open.",
+    fechouEm: (quando: string): string => `Closed on ${quando}.`,
+    fechaEm: (quando: string): string => `Closes on ${quando}.`,
+    naSala: (sala: string): string => `In room ${sala}`,
+    deQuem: (nome: string, quando: string): string => `${nome}, ${quando}`,
+    verMensagem: "See the message",
+    verMensagemDe: (pergunta: string): string => `See the message of the poll: ${pergunta}`,
+    voltar: "Back to the conversation",
+  },
+
   votacao: {
     criar: "Create poll",
     titulo: "New poll",
@@ -2031,7 +2164,7 @@ export const en: Traducao = {
     retirarOpcao: (numero: number): string => `Remove option ${numero}`,
     opcoesCheias: (maximo: number): string => `No more than ${maximo} options fit.`,
     confirmar: "Create",
-    nota: "All people here can see the votes. The poll stays open, with no deadline.",
+    nota: "All people here can see the votes. You set the deadline, and the poll closes by itself when it ends.",
     votosVisiveis: "the votes are visible",
     votosVisiveisAjuda:
       "All members of the channel can see the vote of each person.",
@@ -2056,8 +2189,46 @@ export const en: Traducao = {
     },
     votoFalhou: "could not record the vote",
     linhaDeOpcao: (numero: number, texto: string): string => `${numero}. ${texto}`,
+    linhaDoPrazo: (quando: string): string => `The poll closes on ${quando}.`,
+    prazoLabel: "Deadline",
+    prazoSem: "No deadline",
+    prazoDuracao: "Duration",
+    prazoData: "Date and time",
+    duracaoLabel: "How long it stays open",
+    unidadeHoras: "hours",
+    unidadeDias: "days",
+    dataLabel: "Closes on",
+    prazoPassado: "Choose a time that has not passed yet.",
+    prazoLongo: (dias: number): string => `The deadline cannot be more than ${dias} days away.`,
+    fechaEm: (quando: string): string => `Closes on ${quando}`,
+    fechouEm: (quando: string): string => `Closed on ${quando}`,
+    fechada: "Poll closed",
+    fechar: "Close poll",
+    fecharFeito: "The poll is closed.",
   },
 
+  comunicarErro: {
+    botao: "Report a bug",
+    titulo: "Report a bug",
+    descricao: "What happened?",
+    descricaoAjuda: "Say what you did and what you saw. Do not write passwords.",
+    detalhes: "Include technical details",
+    oQueVai: "This goes, and only this:",
+    versao: (v: string): string => `App version: ${v}`,
+    plataforma: (p: string): string => `Type: ${p === "electron" ? "desktop app" : p === "pwa" ? "installed app (PWA)" : "web"}`,
+    sistema: (s: string, b: string): string => `System and browser: ${s}, ${b}`,
+    lingua: (l: string): string => `Language: ${l}`,
+    erros: (n: number): string => (n === 0 ? "Error codes: none" : `Error codes (last ${n}):`),
+    ligacao: (l: string): string => `Connection: ${l}`,
+    sincronia: (s: string): string => `Sync: ${s}`,
+    nuncaVai: "Never sent: message text, channel names, other people's addresses, keys, vault content.",
+    contacto: "Let us contact you",
+    contactoAjuda: "With this checked, your address goes too, so we can answer you.",
+    enviar: "Send",
+    aEnviar: "Sending…",
+    enviado: "We received the report. Thank you. We read all reports.",
+    fechar: "Close",
+  },
   comoFunciona: {
     titulo: "How Orwell works",
     link: "How it works",
@@ -2150,10 +2321,10 @@ export const en: Traducao = {
       titulo: "One account, many devices",
       resumo: "Each device has its own key, and the account key signs it.",
       mais: [
-        "The main device has the account key. Only the main device exports the account, adds devices and revokes devices.",
+        "All active devices of the account have the account key. Any of them adds and revokes devices. A removed device cannot do this.",
         "To add a device, pair it. The secret goes from a screen to a camera, by QR or link, and never through the server. The two screens show six words. If they are the same, nobody got in the middle.",
         "Importing the file on another machine does not add a device. It moves the account. To have two devices, pair them. Do not create another account.",
-        "Revoking a device stops it from reading from the next epoch. The device keeps what it already had.",
+        "Revoking a device stops it from reading from the next epoch. The device keeps what it already had until it connects again. Then it signs out and deletes its data.",
       ],
       desenho: "The account key, on the main device, signs the keys of the other devices. Pairing goes through the server in a temporary vault that the server does not open. The two devices compare six words.",
       principal: "main device",
@@ -2285,6 +2456,8 @@ export const en: Traducao = {
       amanha ? `Paused until tomorrow at ${hora}. Only calls ring.` : `Paused until ${hora}. Only calls ring.`,
     retomar: "Resume",
     entrarSilenciado: "Join calls with the microphone muted",
+    ecraLigadoNaChamada: "Keep the screen on during calls",
+    ecraLigadoNaChamadaNota: "Only with Orwell in front. It uses more battery.",
     camaraAparelho: "Device",
     camaraDoSistema: "System default",
     camarasNenhuma: "This device has no camera connected.",
@@ -2347,6 +2520,24 @@ export const en: Traducao = {
     apagada: "The original message was deleted.",
     ausente: "The original message is not on this device.",
     porCarregar: "Load the original message",
+  },
+  etiquetas: {
+    cargo: "role",
+    salaPrivada: "private room",
+    irParaSala: (nome: string) => `Open the room ${nome}`,
+  },
+  reaccoes: {
+    reagir: "React",
+    outra: "Add another reaction",
+    quem: (nomes: readonly string[], emoji: string) =>
+      nomes.length === 1
+        ? `${nomes[0]} reacted with ${emoji}`
+        : nomes.length <= 3
+          ? `${Array.from(nomes).slice(0, -1).join(", ")} and ${nomes[nomes.length - 1]} reacted with ${emoji}`
+        : `${Array.from(nomes).slice(0, 3).join(", ")} and ${nomes.length - 3} more reacted with ${emoji}`,
+    rotulo: (emoji: string, n: number, minha: boolean) =>
+      `${emoji}: ${n} ${n === 1 ? "reaction" : "reactions"}${minha ? ", including yours. Tap to remove." : ". Tap to add yours."}`,
+    falhou: "The reaction did not go out. Try again.",
   },
   transmissao: {
     ecra: "Sharing the screen",
@@ -2477,6 +2668,11 @@ export const en: Traducao = {
     enviada: "Report sent.",
   },
 
+  chamadaEcraBloqueado: {
+    avisoPwaIphone:
+      "On iPhone, the installed app turns off the microphone when you lock the screen. The others stop hearing you. When you unlock, the microphone comes back. To talk with the screen locked, open Orwell in Safari.",
+  },
+
   contaSuspensa: {
     titulo: "Account suspended",
     medida: "Measure: suspension of the account.",
@@ -2539,6 +2735,12 @@ export const errosEn: Record<string, FraseDeErro> = {
   "too many logs sent": "You already sent 10 logs in this hour. Try again later, or copy the log.",
   "the server did not take the report": "The server did not take the report. Try again later.",
   "too many reports sent": "You sent too many reports. Try again later.",
+  "the bug report is not valid": "The description is missing or too long. Correct it and send again.",
+  "too many bug reports sent": "You already sent 5 bug reports today. Try again tomorrow.",
+  "the server did not take the bug report": "The server did not take the bug report. Try again later.",
+  "this server does not send notifications when the app is closed": "This server does not send notifications when the app is closed.",
+  "the browser refused the notification subscription": "The browser refused notifications when the app is closed. Check the site permissions.",
+  "the server refused the notification subscription": "The server refused notifications for this device. Try again later.",
   "the device clock is off": "The clock of this device is wrong. Set the time and try again.",
   "could not read the report inbox": "The server sent an answer we cannot read. Try again later.",
   "account-suspended": "Your account is suspended on this server. Read the reason and ask for a review.",
@@ -2611,6 +2813,8 @@ export const errosEn: Record<string, FraseDeErro> = {
   "to leave the call, leave it": 'To leave the call, use "Leave the call".',
   "the everyone role is built in": 'The "Everyone" role comes with the channel. You cannot delete it or give it to a person.',
   "you may not change the permissions of this room": "You cannot change the permissions of this place.",
+  "you may not write in this room": "You cannot write in this room. Only some roles write here.",
+  "you may not share your screen in this room": "Screen sharing is limited to some roles here. Ask a channel admin to give you this permission.",
   "you may not move people in this channel": "Your role does not let you move people in this channel.",
   "you already administer this channel": "You already administer this channel.",
   "this channel already has an administrator": "This channel already has an administrator.",
@@ -2640,6 +2844,9 @@ export const errosEn: Record<string, FraseDeErro> = {
   "you may not delete this channel": "Your role does not let you delete this channel.",
   "only the author or a moderator may delete this message":
     "Only the author of the message, or a moderator of the channel, can delete it.",
+  "only the author or a moderator may close this poll":
+    "Only the person who created the poll, or a moderator of the channel, can close it.",
+  "the reaction emoji is not valid": "This reaction is not valid. Choose another emoji.",
   "only a closed ticket can be deleted": "You can delete only a closed ticket. Close it first.",
   "you may not moderate in this channel": "Your role does not let you moderate this channel.",
   "the nickname is too long": (detalhe) => {

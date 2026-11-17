@@ -5,8 +5,8 @@
  * multi-tier panel, and the tests for "single line only" here below no longer apply.
  * The panel is measured in `scripts/retratar-painel-de-controlo.mjs`.
  *
- * The banner is alternative B ("Discord-style banner") that the owner chose on October 27,
- * 2026. Its tests run in jsdom, which does not apply stylesheets: they say the buttons
+ * The banner is alternative B ("Discord-style banner").
+ * Its tests run in jsdom, which does not apply stylesheets: they say the buttons
  * exist, they do not say whether the banner is a single line, whether a target has the
  * 24 px that WCAG 2.2 requires, or whether a long name pushes the buttons outside the column.
  * This builds the real `CartaoDaConta` in a real `aside.sidebar`, with the real stylesheet,

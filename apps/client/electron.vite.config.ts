@@ -14,7 +14,8 @@ export default defineConfig({
     build: {
       outDir: resolve("out/main"),
       rollupOptions: {
-        input: { index: resolve("src/main/index.ts") },
+        // `selo`: the vault seal's worker thread (see `src/main/selo-worker.ts`).
+        input: { index: resolve("src/main/index.ts"), selo: resolve("src/main/selo-worker.ts") },
         // CommonJS, deliberately. Electron's ESM main entry never resolves
         // `app.whenReady()` in this build — the process starts, evaluates the
         // module, and then sits there with no window and no error. A CJS entry

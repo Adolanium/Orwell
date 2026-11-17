@@ -82,8 +82,15 @@ export const TECTOS_DOS_ANEXOS = {
    * which takes 13 minutes, arrives without the request timing out midway.
    */
   janelaMs: 60_000,
-  /** At most three sheets per attachment, like in a request (§4.4). */
+  /** At most three silent sheets per attachment, like in a request (§4.4). A quick "no" does not count here. */
   tentativas: 3,
+  /**
+   * At most this many sheets asked per attachment, silent or not (12/11/2026).
+   * Each request is a signal copied to every connected member of the channel:
+   * eight keeps a request in a 400-member room well inside the signal caps,
+   * and reaches the author, who is asked first (`#quemPerguntar` in `pedido.ts`).
+   */
+  folhasPorPedido: 8,
   /**
    * An attachment that was sent is not sent again to the same channel during this
    * window (`canal|c|i`). Without it, a dishonest member would put sheets serving

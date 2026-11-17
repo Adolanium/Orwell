@@ -1,8 +1,8 @@
 /**
  * The Orwell site, in the "Tokyo Rain, midnight" skin.
  *
- * It has been the app's skin since 0.7.0, and the site wears the same by owner's
- * request of October 20, 2026. When someone clicks "Enter", they land in the app
+ * It has been the app's skin since 0.7.0, and the site wears the same since
+ * October 2026. When someone clicks "Enter", they land in the app
  * a second later, and must land in the same place: midnight background, glass
  * panels with 14 px corners, cyan as accent, pink only for error, fine still rain
  * over the background, Space Grotesk.
@@ -866,7 +866,7 @@ svg {
  * unstyled list under a styled header.
  */
 /**
- * The installers are buttons (owner request on 3 November 2026): the main
+ * The installers are buttons: the main
  * draw of the site, at large scale, with the version, size and checksum below.
  *
  * With the script (`src/sistema.ts`), the visitor's system button moves to
@@ -1032,11 +1032,11 @@ svg {
 /**
  * The language picker, "EN · PT", in the footer of all pages.
  *
- * Owner request on 3 November 2026: the site goes English first, with
+ * The site goes English first, with
  * Portuguese at `/pt/`. Two plain links to the same page in the other
  * language, no JavaScript and no cookie. The page language gets
- * `aria-current`. It was also at the top until the end of that day; the owner removed it
- * ("footer only"). The top is the brand and "Sign in", nothing else.
+ * `aria-current`. It was also at the top for a short time; it moved to the
+ * footer only. The top is the brand and "Sign in", nothing else.
  */
 .linguas {
   display: flex;
@@ -1274,7 +1274,7 @@ svg {
 }
 
 /*
-  Point 04 is a diagram, not a screenshot (owner choice, 2/11/2026): it has
+  Point 04 is a diagram, not a screenshot: it has
   small labels that would not read at 280 px height. It spans the full line
   below the text, up to 720 px wide, with no height cap like the screenshots.
 */
@@ -1542,13 +1542,13 @@ svg {
 /**
  * The ambassador banner: names in a loop, right to left.
  *
- * Owner request on 3 November 2026. It is the ONLY thing that animates on the
+ * It is the ONLY thing that animates on the
  * entry page. CSS only: the track holds the list twice (`src/tributo.ts`) and moves
  * half its length, and the restart lands on the seam. The `overflow: hidden` on
  * the banner prevents horizontal scroll at 390 px.
  *
  * Stops on hover and on focus (the `tabindex` is in the markup). With reduced motion
- * it does NOT stop: it moves three times slower (owner rule; see the end of the sheet,
+ * it does NOT stop: it moves three times slower (the rule; see the end of the sheet,
  * where the general rule takes everything to 0.01 ms and this one wins).
  */
 .tributo-linha {
@@ -1898,7 +1898,7 @@ svg {
 
 /**
  * The legal pages, in the same style (3 November 2026). Style only: the legal
- * text is the owner's. Large title, date as label, a reading column, and each
+ * text does not change here. Large title, date as label, a reading column, and each
  * section opened by a thin line.
  */
 .editorial .legal {
@@ -2201,8 +2201,8 @@ svg {
     display: none;
   }
 
-  /* The ambassador banner does NOT stop: it moves slower (owner rule, 3 November
-     2026). The class beats the `*` above by specificity, and both use `!important`. */
+  /* The ambassador banner does NOT stop: it moves slower (reduced motion
+     never stops it). The class beats the `*` above by specificity, and both use `!important`. */
   .faixa-pista {
     animation-duration: 210s !important;
     animation-iteration-count: infinite !important;
@@ -2244,7 +2244,7 @@ svg {
   flex: none;
 }
 
-/* The "Support us" at the top, next to "Sign in" (owner request, 9/11/2026). */
+/* The "Support us" at the top, next to "Sign in". */
 .topo-apoio {
   margin-left: auto;
   padding: 5px 12px;

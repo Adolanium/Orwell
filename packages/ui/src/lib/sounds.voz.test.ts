@@ -4,7 +4,7 @@ import { createVoiceRoomWatcher } from "./sounds.js"
 /**
  * Who enters and exits the room we are in.
  *
- * Owner complaint, August 14, 2026: "there is no sound when a user disconnects
+ * The bug: "there is no sound when a user disconnects
  * from a room". The sound exists in the engine (`voice-leave`, G5 down to D5) and
  * the logic that picks it also exists, but the watcher only plays the exit of
  * people it KNOWS, and the way to know someone was too narrow.
@@ -127,7 +127,7 @@ describe("o som de quem sai da sala", () => {
  * Those who close the app, lose the network, or close the laptop send no
  * goodbye. On our side the card stays until ICE gives up, then disappears
  * without a single event. The `hear` is never called. The room emptied in
- * silence, and that is what the owner reported: "there is no sound when a
+ * silence, and that is the bug: "there is no sound when a
  * user disconnects from the room".
  */
 describe("a saída que não se anuncia", () => {

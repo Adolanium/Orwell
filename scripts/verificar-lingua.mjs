@@ -129,11 +129,13 @@ const naoDiz = (texto, frases) => frases.every((frase) => !texto.includes(frase)
 }
 
 // ---------------------------------------------------- 2. browser in Portuguese
+// Since 1.3.9 (12/11/2026): English until the person chooses. The
+// browser and the system language no longer count.
 {
   const { lang, texto } = await abrir({ locale: "pt-PT" })
-  check("browser em português: a interface fala português", diz(texto, EM_PORTUGUES), `lang=${lang}`)
-  check("e não sobra inglês no ecrã", naoDiz(texto, EM_INGLES))
-  check("o <html lang> acompanha", lang === "pt", `lang=${lang}`)
+  check("browser em português, sem escolha: a interface fala inglês", diz(texto, EM_INGLES), `lang=${lang}`)
+  check("e não sobra português no ecrã", naoDiz(texto, EM_PORTUGUES))
+  check("o <html lang> acompanha", lang === "en", `lang=${lang}`)
 }
 
 // ------------------------------- 3. the URL decides, and it locks the tests
@@ -143,11 +145,16 @@ const naoDiz = (texto, frases) => frases.every((frase) => !texto.includes(frase)
   check("é esta a tranca que segura os 35 guiões", naoDiz(texto, EM_INGLES))
 }
 
-// ---------------------- 4. saved choice wins the system: it's the selector
+// ---------------------- 4. the saved choice decides: it's the selector
 {
   const { lang, texto } = await abrir({ locale: "pt-PT", guardada: "en" })
   check("a escolha guardada ganha ao sistema", diz(texto, EM_INGLES), `lang=${lang}`)
   check("e o sistema não a desfaz ao recarregar", naoDiz(texto, EM_PORTUGUES))
+}
+{
+  const { lang, texto } = await abrir({ locale: "en-US", guardada: "pt" })
+  check("português escolhido abre em português, num browser inglês", diz(texto, EM_PORTUGUES), `lang=${lang}`)
+  check("e o <html lang> acompanha", lang === "pt", `lang=${lang}`)
 }
 
 // ------------- 5. a language that does not exist here falls back to English (1.3.6)

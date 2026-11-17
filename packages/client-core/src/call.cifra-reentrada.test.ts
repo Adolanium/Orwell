@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 /**
  * Connected and silent.
  *
- * Report from the owner on 13 August 2026, minutes after the first: "it appears
+ * The second bug, found minutes after the first: "it appears
  * connected but I stop hearing and vice versa". Connected and soundless is not
  * signaling, it is misaligned media encryption. One side speaks in clear, the
  * other only knows how to listen encrypted, and what arrives is noise that no

@@ -1,5 +1,5 @@
 /**
- * Constant bitrate for voice (owner, 3/11/2026): while speaking, all voice packets
+ * Constant bitrate for voice: while speaking, all voice packets
  * have the same size; in silence DTX keeps cutting transmission.
  *
  * ```

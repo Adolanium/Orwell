@@ -5,7 +5,7 @@ import { DESTINOS, RAIZ, gerarAvisos } from "../../../scripts/gerar-avisos-de-te
 
 /**
  * Orwell's license and third-party notices. In 1.2.1 (11/4/2026) Orwell
- * became proprietary; on 11/9/2026 the owner chose a dual model: AGPL-3.0-only
+ * became proprietary; it later moved to a dual model: AGPL-3.0-only
  * for everyone, and a commercial license for those who do not want to comply
  * (`NOTICE`, `COMMERCIAL.md`). Third-party code included keeps its own licenses,
  * and those require the notice to travel with each copy: in the installer and

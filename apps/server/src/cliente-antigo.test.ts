@@ -306,3 +306,31 @@ describe("o cofre cifrado e um cliente antigo (fase 3a)", () => {
     novo.fechar()
   }, 30_000)
 })
+
+describe("Web Push e um cliente antigo", () => {
+  it("o servidor com push anuncia web-push, e quem não manda push.* nunca recebe push.*", async () => {
+    const comPush = await levantarServidor({ push: { contacto: "", servicos: ["push.test"] } })
+    try {
+      const a = generateIdentity(comPush.casa)
+      const b = generateIdentity(comPush.casa)
+      const canal = `!antigo-push:${comPush.casa}`
+      comPush.enclave.store.subscribe(canal, a.address)
+      comPush.enclave.store.subscribe(canal, b.address)
+      // `hello` without capabilities, the way a 1.3.15 bundle sends it.
+      const antigoA = await Cliente.ligar(comPush.url, a, { capacidades: null })
+      const antigoB = await Cliente.ligar(comPush.url, b, { capacidades: null })
+      antigoA.enviar({ t: "channel.subscribe", channels: [canal] })
+      antigoB.enviar({ t: "channel.subscribe", channels: [canal] })
+      await antigoB.ateAoPong()
+      antigoA.enviar({ t: "channel.send", channel: canal, kind: "application", ciphertext: toBase64(randomBytes(32)) })
+      expect((await antigoB.proximoDe("channel.event")).channel).toBe(canal)
+      const tipos = (frames: ServerFrame[]) => frames.map((f) => f.t).filter((t) => t.startsWith("push."))
+      expect(tipos(await antigoA.ateAoPong())).toEqual([])
+      expect(tipos(await antigoB.ateAoPong())).toEqual([])
+      antigoA.fechar()
+      antigoB.fechar()
+    } finally {
+      await comPush.fechar()
+    }
+  }, 30_000)
+})

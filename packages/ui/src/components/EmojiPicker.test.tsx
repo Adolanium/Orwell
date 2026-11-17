@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { EmojiPicker } from "./EmojiPicker.js"
+import { EmojiPicker, loadEmojiCatalog } from "./EmojiPicker.js"
 import { PREFS_KEY, readPrefs } from "../hooks/usePrefs.js"
 import { strings } from "../strings.js"
 
+// Catalog already loaded; the wait for it has its own file (EmojiPicker.carga.test.tsx).
+beforeAll(loadEmojiCatalog)
 beforeEach(() => localStorage.clear())
 afterEach(cleanup)
 

@@ -99,8 +99,12 @@ const ASSUNTO: Partial<Record<Power, Exclude<GrupoDePermissoes, "cifra" | "outra
   moderar: "mensagens",
   // `@all`: it is about what is said in the channel, like in Discord ("Mention @everyone").
   mencionartodos: "mensagens",
+  // A property of the role (anyone may mention it), next to the power to mention everyone.
+  mencionavel: "mensagens",
   mover: "voz",
   desligar: "voz",
+  // Share the screen in a voice room (12/11/2026).
+  transmitir: "voz",
 }
 
 const ORDEM_DOS_GRUPOS: readonly GrupoDePermissoes[] = ["cifra", "gerir", "membros", "mensagens", "voz", "outras"]

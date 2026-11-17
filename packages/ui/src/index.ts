@@ -16,6 +16,7 @@ export type { StartupPairing } from "./lib/emparelhamentoDeArranque.js"
 export { eCaminhoDeAmigo, lerLigacaoDeAmigo } from "./lib/ligacaoDeAmigo.js"
 export type {
   ConnectionState,
+  DefinicoesDoPush,
   DonationLink,
   EnclaveBridge,
   // The global shortcuts, which only the desktop host fills in.

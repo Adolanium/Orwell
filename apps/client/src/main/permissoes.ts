@@ -8,12 +8,12 @@
  * - **Clipboard write** (`clipboard-sanitized-write`): always. This is what
  *   copy buttons use (`navigator.clipboard.writeText`): the add device link,
  *   invites, the address. Until October 28, 2026 it fell under the blanket
- *   denial and everyone saw "unable to copy" on the desktop app (owner report
+ *   denial and everyone saw "unable to copy" on the desktop app (seen
  *   when pairing the browser). Writing is a user gesture and reads nothing.
  *   **Reading** the clipboard (`clipboard-read`) stays denied: the app never
  *   needs to see what users copy elsewhere, and paste happens via keyboard.
- * - `fullscreen`: full screen for screen sharing (owner request, November 2,
- *   2026). Only after a user gesture (Chromium doesn't allow a page to go
+ * - `fullscreen`: full screen for screen sharing.
+ *   Only after a user gesture (Chromium doesn't allow a page to go
  *   fullscreen on its own), reads nothing, and Esc always exits. Without this,
  *   the stage button did nothing on the desktop app.
  */

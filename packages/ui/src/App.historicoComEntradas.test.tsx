@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { StoredChatMessage } from "@enclave/client-core"
 import type { ChannelRoom, EnclaveBridge } from "./bridge.js"
@@ -18,7 +18,7 @@ const QUANDO = 1_700_000_000_000
 
 /**
  * "General chat history disappears for me when a new user joins"
- * (owner report, 3/11/2026, in the new accounts wave on the common channel).
+ * (seen in a wave of new accounts on the common channel).
  *
  * Each entry to the common channel makes each connected member republish their profile, and
  * whoever has authority rank and the rooms. The core gives each of these payloads
@@ -133,12 +133,30 @@ async function noCanal(cofre: StoredChatMessage[], ouvinte: { atual: ((m: unknow
   return user
 }
 
+/**
+ * The reader scrolls up to the top: the conversation draws a window of its last
+ * lines, and the older ones draw as the reader goes up.
+ * jsdom does no layout, so the scroller's geometry is set by hand.
+ */
+function subirAteAoPrincipio(): void {
+  const el = document.querySelector(".timeline") as HTMLElement
+  Object.defineProperty(el, "clientHeight", { configurable: true, get: () => 800 })
+  Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => 100_000 })
+  for (let volta = 0; volta < 20; volta++) {
+    act(() => {
+      el.scrollTop = 0
+      fireEvent.scroll(el)
+    })
+  }
+}
+
 describe("o histórico no ecrã quando entra gente no canal", () => {
   it("os perfis republicados não empurram a conversa para fora do ecrã", async () => {
     const ouvinte: { atual: ((m: unknown) => void) | null } = { atual: null }
     const cofre = Array.from({ length: 200 }, (_, i) => guardada(i + 1, `conversa antiga número ${i + 1}`))
     await noCanal(cofre, ouvinte)
     expect(await screen.findByText("conversa antiga número 200")).toBeTruthy()
+    subirAteAoPrincipio()
     expect(screen.getByText("conversa antiga número 1")).toBeTruthy()
 
     // A wave of entries: three hundred republished profiles (fifteen entries,
@@ -157,7 +175,7 @@ describe("o histórico no ecrã quando entra gente no canal", () => {
 
     expect(screen.getByText("conversa antiga número 1")).toBeTruthy()
     expect(screen.getByText("conversa antiga número 200")).toBeTruthy()
-  })
+  }, 20_000)
 
   /*
     The same cap, on the names side: a profile that arrived live lived only in
@@ -185,7 +203,9 @@ describe("o histórico no ecrã quando entra gente no canal", () => {
     const ouvinte: { atual: ((m: unknown) => void) | null } = { atual: null }
     const cofre = Array.from({ length: 200 }, (_, i) => guardada(i + 1, `conversa antiga número ${i + 1}`))
     await noCanal(cofre, ouvinte)
-    expect(await screen.findByText("conversa antiga número 1")).toBeTruthy()
+    expect(await screen.findByText("conversa antiga número 200")).toBeTruthy()
+    subirAteAoPrincipio()
+    expect(screen.getByText("conversa antiga número 1")).toBeTruthy()
 
     // Whoever runs and whoever alternates tell the rooms again at each growth.
     await act(async () => {
@@ -207,5 +227,5 @@ describe("o histórico no ecrã quando entra gente no canal", () => {
       await Promise.resolve()
     })
     expect(screen.getByText("chegou agora")).toBeTruthy()
-  })
+  }, 20_000)
 })

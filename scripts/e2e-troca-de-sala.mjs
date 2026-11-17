@@ -4,10 +4,10 @@
  *   npm run build && node scripts/e2e-troca-de-sala.mjs
  *   node scripts/e2e-troca-de-sala.mjs --ida-e-volta 1500      # interval between the two clicks, in ms
  *
- * Owner report (log from 4/11/2026, 14:14 to 14:16 UTC, 1.3.0): switched
- * to AFK room and back to voice room in about 3 s. "Sound goes through (he sees
- * his own level), but doesn't reach the other user." No sender line
- * (`sfu-emissor-*`, 448) in his log.
+ * The bug (log from 1.3.0): the user switched
+ * to AFK room and back to voice room in about 3 s. "Sound goes through (the user sees
+ * their own level), but doesn't reach the other user." No sender line
+ * (`sfu-emissor-*`, 448) in that log.
  *
  * Two real accounts (built web, disposable server and SFU, as in
  * `e2e-audio-quem-entra-tarde.mjs`), each in Chromium: Ana creates the
@@ -28,9 +28,9 @@ import { levantarServidor } from "./servidor-descartavel.mjs"
 const arg = (nome) => (process.argv.includes(nome) ? process.argv[process.argv.indexOf(nome) + 1] : null)
 const IDA_E_VOLTA = Number(arg("--ida-e-volta") ?? 2600)
 /**
- * `--sem-afk`: "Dormir" is a normal voice room. In the owner's log the room he
+ * `--sem-afk`: "Dormir" is a normal voice room. In the reported log the room the user
  * joined was set up by the SFU (`call-sfu-ligado X-Km39…`), which the AFK room
- * does not do (`#entrarSemVoz`): either his room wasn't marked AFK, or the app
+ * does not do (`#entrarSemVoz`): either that room wasn't marked AFK, or the app
  * didn't recognize it as such. Both variants run.
  */
 const SEM_AFK = process.argv.includes("--sem-afk")

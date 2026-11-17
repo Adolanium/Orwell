@@ -1,8 +1,8 @@
 /**
  * Keyboard shortcuts for voice commands, configurable by the user.
  *
- * Until October 19, 2026 there was only one, fixed (Ctrl or Cmd + Shift + M
- * for the microphone). The owner asked that voice commands could have the key
+ * There used to be only one, fixed (Ctrl or Cmd + Shift + M
+ * for the microphone). Now voice commands can have the key
  * each person wants, like in Discord, and that it would live in Settings.
  *
  * The combination is stored as text, in one form only, so the preferences vault

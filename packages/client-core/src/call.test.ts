@@ -778,7 +778,7 @@ describe("entrada quase simultânea", () => {
  *
  * The fix existed and worked only for two-person calls: whoever fell to zero connections would announce again. With three, whoever loses one connection and keeps the other has one pair-does not re-announce, and never tries again. The other side, for the exact same reason, does not either. Both give up in silence while they keep hearing the third person.
  *
- * This is the owner's report from August 12th, word for word: in a three-person call, only two hear each other and the third stays "calling" forever. And it does not fix itself, because nobody is trying.
+ * This is the bug, word for word: in a three-person call, only two hear each other and the third stays "calling" forever. And it does not fix itself, because nobody is trying.
  *
  * The test bites: without `#perdidos`, the retransmitter stops at the first tick (there is a live pair) and no announcement goes out after the drop.
  */
@@ -1556,7 +1556,7 @@ describe("mover alguém de sala de voz", () => {
 /**
  * Presence in a voice room, for those outside looking in.
  *
- * Report from the owner, August 18, 2026: "when they enter, they don't see me
+ * The bug: "when they enter, they don't see me
  * in a call either" and "no call appears, users enter as if everything were
  * empty".
  *
@@ -1797,7 +1797,7 @@ describe("a imagem que sai cortada, na malha", () => {
 /**
  * The click that asked for nothing, and yet brought down the call.
  *
- * Owner report on September 10, 2026: in a voice room, clicking on it again
+ * The bug: in a voice room, clicking on it again
  * "reconnects to the room". Nothing should happen, and what happened was the entire entry:
  * `#leave(true)` first, which sends a `voice.leave`, kills the producers in the router
  * and stops capture, and only then entry from scratch. Seen from the other side,

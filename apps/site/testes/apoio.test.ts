@@ -14,8 +14,8 @@ import {
 } from "../src/apoio.js"
 
 /**
- * The support meter for the "Support" section (`src/apoio.ts`), requested by the owner
- * on November 3, 2026. Visitors never request anything from GoFundMe: the script reads
+ * The support meter for the "Support" section (`src/apoio.ts`).
+ * Visitors never request anything from GoFundMe: the script reads
  * only the JSON from our server, on this origin, and without it the section looks as before.
  */
 const pasta = fileURLToPath(new URL("..", import.meta.url))
@@ -198,8 +198,8 @@ describe("as páginas", () => {
 })
 
 /**
- * The top banner and Ko-fi (requested by the owner on November 9, 2026: "put it at the
- * start and end, I really need donations"). On the same day the owner decided that new
+ * The top banner and Ko-fi (the requirement: "put it at the
+ * start and end, I really need donations"). At the same time, new
  * locations link only to Ko-fi: GoFundMe leaves the banner and section, staying only in
  * the footer. The GoFundMe meter is turned off, pending confirmation.
  */

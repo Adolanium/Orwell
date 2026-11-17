@@ -21,7 +21,7 @@ import { strings } from "./strings.js"
 
 const renders = { sidebar: 0, membros: 0, conversa: 0 }
 /** The sidebar's own renders, after its `memo`: what the parent's stable props save. */
-const dentro = { sidebar: 0, props: [] as Record<string, unknown>[] }
+const dentro = { sidebar: 0, props: [] as Record<string, unknown>[], membros: 0, mudouNosMembros: [] as string[] }
 
 vi.mock("./screens/chat/ChannelSidebar.js", async (original) => {
   const modulo = await original<typeof import("./screens/chat/ChannelSidebar.js")>()
@@ -47,11 +47,20 @@ vi.mock("./screens/chat/ChannelSidebar.js", async (original) => {
 vi.mock("./screens/chat/MemberPanel.js", async (original) => {
   const modulo = await original<typeof import("./screens/chat/MemberPanel.js")>()
   const Real = modulo.MemberPanel
+  const Inteira = (Real as unknown as { type: FC<ComponentProps<typeof Real>> }).type
+  const ContadoMembros = memo((props: ComponentProps<typeof Real>) => {
+    dentro.membros++
+    return Inteira(props)
+  }, (a, b) => {
+    const mudou = Object.keys({ ...a, ...b }).filter((k) => (a as Record<string, unknown>)[k] !== (b as Record<string, unknown>)[k])
+    if (mudou.length) dentro.mudouNosMembros.push(...mudou)
+    return mudou.length === 0
+  })
   return {
     ...modulo,
     MemberPanel: (props: ComponentProps<typeof Real>) => {
       renders.membros++
-      return createElement(Real, props)
+      return createElement(ContadoMembros, props)
     },
   }
 })
@@ -187,7 +196,7 @@ interface Medida {
 }
 
 /** Opens the account on the first channel, connected, and returns the profiler counters. */
-async function abrir(): Promise<{ user: ReturnType<typeof userEvent.setup>; medida: Medida }> {
+async function abrir(opcoes: { lotePorQuadro?: boolean } = {}): Promise<{ user: ReturnType<typeof userEvent.setup>; medida: Medida }> {
   const ligar: { current: ((estado: unknown) => void) | null } = { current: null }
   const medida: Medida = { commits: 0, ms: 0 }
   const user = userEvent.setup()
@@ -199,7 +208,7 @@ async function abrir(): Promise<{ user: ReturnType<typeof userEvent.setup>; medi
         medida.ms += duracao
       }}
     >
-      <App bridge={ponte(ligar)} />
+      <App bridge={ponte(ligar)} {...(opcoes.lotePorQuadro ? { lotePorQuadro: true } : {})} />
     </Profiler>,
   )
   await screen.findByRole("button", { name: strings.rail.chat })
@@ -209,7 +218,9 @@ async function abrir(): Promise<{ user: ReturnType<typeof userEvent.setup>; medi
     await Promise.resolve()
   })
   await screen.findByText(`mensagem 299 em ${CANAIS[0]}`, undefined, { timeout: 20_000 })
-  await screen.findAllByText("Rita 5")
+  // The member panel is up. Above 50 members it lists who is online and a "+N" row
+  // for the rest, so an offline name is not on screen: the row is.
+  await screen.findByText((texto) => /^\+\d+ /.test(texto) && texto === strings.members.maisPessoas(Number(texto.slice(1).split(" ")[0])))
   return { user, medida }
 }
 
@@ -286,6 +297,117 @@ describe("escrever numa conta grande", { timeout: 60_000 }, () => {
     expect(renders.sidebar).toBeGreaterThan(0)
     // ...all equal: the memo skipped it.
     expect(dentro.sidebar).toBe(0)
+  })
+
+  /*
+    Fluidity: each live message re-read the roles and rebuilt
+    `roleFor`, and the member list (400 people) drew again, asking the core for
+    the admins once per person. A message that is not about roles changes none
+    of that.
+  */
+  it("uma mensagem nova na conversa aberta não desenha o painel de membros outra vez", async () => {
+    await abrir()
+    dentro.membros = 0
+    dentro.mudouNosMembros = []
+    await act(async () => {
+      emitir.current?.({
+        channel: CANAIS[0],
+        sender: MEMBROS[3],
+        seq: 10_001,
+        payload: { t: "message", id: "nova-0002", sentAt: QUANDO + 400_000, body: "outra que chegou" },
+      })
+      await Promise.resolve()
+    })
+    await screen.findByText("outra que chegou")
+    expect(dentro.mudouNosMembros).toEqual([])
+    expect(dentro.membros).toBe(0)
+  })
+
+  /*
+    Fluidity: each frame from the server is a task of its own, and
+    each one put its messages on screen in its own render (and its own forced
+    layout to stay at the bottom). A burst of 200 events was 200 renders. With
+    `lotePorQuadro` (the web and the desktop pass it) what arrives before the
+    next frame enters in one render.
+  */
+  let medidaRajada: Medida | null = null
+  it("mensagens que chegam em tarefas separadas, antes do próximo quadro, entram num só desenho", async () => {
+    const quadros: FrameRequestCallback[] = []
+    const original = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = (f: FrameRequestCallback) => (quadros.push(f), quadros.length)
+    try {
+      const { medida } = await abrir({ lotePorQuadro: true })
+      medidaRajada = medida
+      medida.commits = 0
+      renders.conversa = 0
+      await act(async () => {
+        for (let i = 0; i < 5; i++) {
+          emitir.current?.({
+            channel: CANAIS[0],
+            sender: MEMBROS[3],
+            seq: 20_000 + i,
+            payload: { t: "message", id: `rajada-${i}`, sentAt: QUANDO + 500_000 + i, body: `rajada ${i}` },
+          })
+          // A task of its own, as each WebSocket frame is.
+          await new Promise((r) => setTimeout(r, 0))
+        }
+      })
+      expect(screen.queryByText("rajada 0")).toBeNull()
+      await act(async () => {
+        for (const f of quadros.splice(0)) f(performance.now())
+        await Promise.resolve()
+      })
+      for (let i = 0; i < 5; i++) expect(screen.getByText(`rajada ${i}`)).toBeTruthy()
+      // One render for the batch, and at most one more for what its effects set: never one per message.
+      expect(renders.conversa).toBeLessThanOrEqual(2)
+      expect(medidaRajada?.commits).toBeLessThanOrEqual(2)
+    } finally {
+      globalThis.requestAnimationFrame = original
+    }
+  })
+
+  /*
+    A frame asked for just before the page hides does not run until it comes
+    back: what arrived waited in the queue, and the unread counters stood still
+    for the whole absence. Hiding the page lets the batch in at once.
+  */
+  it("um lote à espera do quadro entra quando a página se esconde, sem esperar pela volta", async () => {
+    const quadros: FrameRequestCallback[] = []
+    const original = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = (f: FrameRequestCallback) => (quadros.push(f), quadros.length)
+    let visibilidade: DocumentVisibilityState = "visible"
+    const descritor = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState")
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibilidade })
+    try {
+      await abrir({ lotePorQuadro: true })
+      await act(async () => {
+        emitir.current?.({
+          channel: CANAIS[0],
+          sender: MEMBROS[3],
+          seq: 30_000,
+          payload: { t: "message", id: "antes-de-esconder", sentAt: QUANDO + 600_000, body: "antes de esconder" },
+        })
+        await new Promise((r) => setTimeout(r, 0))
+      })
+      expect(screen.queryByText("antes de esconder")).toBeNull()
+      await act(async () => {
+        visibilidade = "hidden"
+        document.dispatchEvent(new Event("visibilitychange"))
+        await Promise.resolve()
+      })
+      expect(screen.getByText("antes de esconder")).toBeTruthy()
+      // The frame that finally runs on return adds nothing twice.
+      await act(async () => {
+        visibilidade = "visible"
+        for (const f of quadros.splice(0)) f(performance.now())
+        await Promise.resolve()
+      })
+      expect(screen.getAllByText("antes de esconder")).toHaveLength(1)
+    } finally {
+      globalThis.requestAnimationFrame = original
+      delete (document as unknown as Record<string, unknown>).visibilityState
+      if (descritor) Object.defineProperty(Document.prototype, "visibilityState", descritor)
+    }
   })
 
   it("o rascunho sobrevive à mudança de canal, e enviar apaga-o", async () => {

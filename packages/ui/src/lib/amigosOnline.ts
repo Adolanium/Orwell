@@ -1,6 +1,6 @@
 /**
- * MSN-style notifications: "Ana is online" (requested by the owner and community, 2 November
- * 2026, item 6).
+ * MSN-style notifications: "Ana is online" (item 6).
+ *
  *
  * When a friend comes online, a notification shows their picture and name, plays a short
  * sound (`amigo-online`), and tapping opens the private conversation with that person.
@@ -27,7 +27,7 @@
 export const INTERVALO_DO_AVISO_MS = 30 * 60_000
 
 /**
- * Friend notifications, one per event (requested by the owner, 3 November 2026): came
+ * Friend notifications, one per event: came
  * online, joined a voice room, started screen sharing, joined a community. The 30-minute
  * window counts per friend AND per type: Ana coming online does not silence Ana in a voice
  * room a minute later.

@@ -1,5 +1,6 @@
 import { moradaDeSala } from "@enclave/protocol"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
+import { PassagemDaChaveDaConta } from "./chaveDaConta.js"
 import type { FichaDoCanal } from "./tipoDoCanal.js"
 // The harness server's server, for real, on an ephemeral port.
 import {
@@ -14,7 +15,7 @@ import {
 
 /**
  * A private conversation on a paired device, with the main device offline
- * (owner report, 2/11/2026: "there are users whose private messages are in
+ * (the bug: "there are users whose private messages are in
  * the 'communities' tab instead of 'friends'").
  *
  * Only the device with the account key deduces a direct (the address comes
@@ -30,6 +31,9 @@ const abertas: ContaDeTeste[] = []
 
 beforeAll(async () => {
   servidor = await levantarServidor()
+  // The paired device here is one from before 1.3.16, without the account key, and
+  // it stays so (since 1.3.16 pairing passes the key, see `session.chave-da-conta.rede.test.ts`).
+  PassagemDaChaveDaConta.ligada = false
 }, 30_000)
 
 afterEach(() => {
@@ -37,6 +41,7 @@ afterEach(() => {
 })
 
 afterAll(async () => {
+  PassagemDaChaveDaConta.ligada = true
   await servidor?.fechar()
 })
 
@@ -60,7 +65,7 @@ const espera = (ms: number): Promise<void> => new Promise((resolve) => setTimeou
 describe("a directa num aparelho emparelhado sem o principal", () => {
   it("é uma directa logo, sem o principal; a ficha do principal fica no cofre quando ele volta", async () => {
     const [ana, carla] = await contas("Ana", "Carla")
-    const telemovel = await emparelharAparelho(ana!)
+    const telemovel = await emparelharAparelho(ana!, "Ana (telemóvel)", { semChaveDaConta: true })
     abertas.push(telemovel)
     const interface_ = fichasDaInterface(telemovel)
     ana!.session.disconnect()
@@ -80,7 +85,7 @@ describe("a directa num aparelho emparelhado sem o principal", () => {
 
   it("uma comunidade de duas pessoas continua comunidade no emparelhado", async () => {
     const [ana, carla] = await contas("Ana", "Carla")
-    const telemovel = await emparelharAparelho(ana!)
+    const telemovel = await emparelharAparelho(ana!, "Ana (telemóvel)", { semChaveDaConta: true })
     abertas.push(telemovel)
     const interface_ = fichasDaInterface(telemovel)
     ana!.session.disconnect()

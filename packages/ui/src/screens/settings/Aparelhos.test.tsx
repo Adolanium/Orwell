@@ -103,7 +103,7 @@ describe("a secção Aparelhos", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^Revogar/ }))
     const dialogo = await screen.findByRole("alertdialog")
     expect(dialogo.textContent).toContain(strings.settings.revokeBody)
-    expect(dialogo.textContent).toContain("O que o aparelho já tinha, continua a ter.")
+    expect(dialogo.textContent).toContain("O aparelho fica com o que já tinha até se voltar a ligar. Nessa altura sai da conta e apaga os dados.")
     fireEvent.click(screen.getByRole("button", { name: strings.common.cancel }))
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(revoke).not.toHaveBeenCalled()
@@ -191,6 +191,6 @@ describe("a secção Aparelhos", () => {
       expect(frase).not.toMatch(/[—–]/)
     }
     expect(strings.pairing.doneBody).toBe("Este aparelho já recebe as mensagens novas. As conversas antigas chegam do outro aparelho enquanto os dois estiverem ligados.")
-    expect(strings.pairing.doneGuestNote).toBe("Acrescenta ou tira aparelhos no aparelho principal da conta.")
+    expect(strings.pairing.doneGuestNote).toBe("Podes gerir os aparelhos a partir de qualquer um dos teus aparelhos.")
   })
 })

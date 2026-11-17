@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 /**
  * The caller needs to know that a call is in progress.
  *
- * Report from the owner on August 18, 2026: *"call does not show, users enter
+ * The bug: *"call does not show, users enter
  * as if everything is empty"*. The list of who is in each voice room is built
  * from the `voice.join` events the device HEARS, and voice signals don't recover
  * in the snapshot (`aoVivo`, in `session.ts`). Someone who opens the app arrived

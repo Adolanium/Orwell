@@ -2,6 +2,8 @@ import { Avatar } from "../../components/Avatar.js"
 import type { Profile } from "../../bridge.js"
 import { MENCAO_TODOS, type MentionCandidate } from "../../lib/mentions.js"
 import { strings } from "../../strings.js"
+import { HashIcon } from "../../icons.js"
+import { tintaDoPapel } from "../../lib/roleColours.js"
 
 /**
  * The people suggested when typing an at-mention.
@@ -64,7 +66,22 @@ export function MentionPicker({
             {/* Hidden from who listens: without a published profile, the face is the name's
                 initial, and a screen reader would say "A, Ana". The image adds
                 nothing to the name that comes next. */}
-            {candidato.address === MENCAO_TODOS ? (
+            {candidato.tipo === "sala" ? (
+              // A room: the hash, the name, and no face.
+              <>
+                <span className="mention-sinal" aria-hidden="true">
+                  <HashIcon size={14} />
+                </span>
+                <span className="mention-name">{candidato.name}</span>
+              </>
+            ) : candidato.tipo === "cargo" ? (
+              // A role: its colour, the name with `@`, and what it is.
+              <>
+                <span className="mention-cor-do-cargo" aria-hidden="true" style={tintaDoPapel(candidato.cor)} />
+                <span className="mention-name">@{candidato.name}</span>
+                <span className="mention-hint">{strings.etiquetas.cargo}</span>
+              </>
+            ) : candidato.address === MENCAO_TODOS ? (
               // `@all` is not a person: no face, and with what it does written next to it.
               <>
                 <span className="mention-name">@{candidato.name}</span>

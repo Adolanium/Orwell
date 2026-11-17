@@ -1,8 +1,8 @@
 /**
  * The speaker halo, measured from the other side, with the real voice chain.
  *
- * Owner request on October 26, 2026: "sound coming in with no animation". The
- * halo scale changed that day (`packages/ui/src/lib/medidorDeDb.ts`), and our
+ * The bug: "sound coming in with no animation". The
+ * halo scale changed at that point (`packages/ui/src/lib/medidorDeDb.ts`), and our
  * card started measuring before the gate. OTHERS keep being measured on the
  * received track, which already passed through the speaker's gate. With manual
  * sensitivity (1.0.9) the doubt arose: do others' halos depend on the

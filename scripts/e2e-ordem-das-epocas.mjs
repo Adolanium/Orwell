@@ -3,7 +3,7 @@
  *
  *   node scripts/e2e-ordem-das-epocas.mjs      (needs `npm run build` first)
  *
- * Report from the owner to 5 October 2026: real messages gone missing on a
+ * The bug: real messages gone missing on a
  * laptop that was closed for days. Not a history bug, an ORDER bug, and here's
  * the chain:
  *

@@ -240,8 +240,16 @@ const SO_NO_BROWSER: Record<string, string> = {
   "channels.permissoes": "idem",
   pararDeEscrever:
     "a posse entre separadores (`posse-do-separador.ts`): o browser tem vários separadores sobre o mesmo cofre e só um escreve; a aplicação instalada tem uma janela só e o cofre é dela",
+  push: "avisos com a app fechada (Web Push): a aplicação instalada fecha a janela para a bandeja com o socket vivo, e os avisos saem do processo principal; não há serviço de push no Electron",
+  "push.estado": "idem",
+  "push.ligar": "idem",
+  "push.renovar": "idem",
+  "push.desligar": "idem",
+  "push.fecharAvisos": "idem",
   assumirPosse:
     "a ficha de posse no IndexedDB (fencing, `vault-backend.ts`): trava as escritas de um separador que perdeu a posse; na aplicação instalada `requestSingleInstanceLock` garante uma instância só",
+  emChamada:
+    "o `pagehide` com `persisted` (`pagina-escondida.ts`): o separador que vai para a cache de navegação larga a posse, menos com uma chamada aberta; a aplicação instalada não tem cache de navegação nem posse entre separadores",
 }
 const SO_NO_BROWSER_NO_CALL: Record<string, string> = {}
 

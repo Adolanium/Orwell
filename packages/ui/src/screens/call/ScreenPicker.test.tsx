@@ -197,7 +197,7 @@ describe("ScreenPicker — a escolha", () => {
 })
 
 describe("ScreenPicker — o som do sistema vai sempre", () => {
-  /* Owner request from 2/11/2026: sound is not an option, it goes by default. */
+  /* Sound is not an option, it goes by default. */
   function ArnesComSom({ somDisponivel }: { somDisponivel: boolean }): React.JSX.Element {
     const [saida, setSaida] = useState<string | null>(null)
     if (saida !== null) return <p>saiu: {saida}</p>

@@ -1,5 +1,5 @@
 /**
- * Live voice and role moderation (owner request, 2/11/2026), with three
+ * Live voice and role moderation, with three
  * accounts and two browsers.
  *
  *   npm run build && node scripts/e2e-moderacao.mjs

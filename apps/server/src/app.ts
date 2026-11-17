@@ -4,13 +4,15 @@ import Fastify, { type FastifyInstance } from "fastify"
 import { join } from "node:path"
 import { CACHE_DO_JSON_S, VigiaDaCampanha } from "./apoio.js"
 import { currentSecond, openDatabase } from "./db.js"
-import { ehSalaComum, loadOrCreateServerKey, type ServerConfig } from "./config.js"
+import { ehSalaComum, loadOrCreatePushKey, loadOrCreateServerKey, type ServerConfig } from "./config.js"
 import { Federation } from "./federation.js"
-import { Gateway, MAX_FRAME_BYTES } from "./gateway.js"
+import { Gateway, MAX_FRAME_BYTES, type PushDoGateway } from "./gateway.js"
+import { CarteiroDoPush } from "./push.js"
 import { MotorDeMedia } from "./media.js"
 import { ORCAMENTO_DE_VIDEO_MBPS, linhaDaSaida } from "./orcamento-de-saida.js"
 import { VigiaDaQuota } from "./quota-mensal.js"
 import { registarDenuncias } from "./denuncia.js"
+import { registarBugs } from "./bugs.js"
 import { NoncesVistos } from "./pedido-assinado.js"
 import { registarRelatos } from "./relato.js"
 import { Store } from "./store.js"
@@ -22,6 +24,8 @@ export interface Enclave {
   federation: Federation
   /** The media engine, when the operator configured a port for it. */
   media: MotorDeMedia | undefined
+  /** Web Push, when the operator turned it on (`ENCLAVE_PUSH=on`). */
+  push: PushDoGateway | undefined
   /** Nonces of the signed report requests (tests read the size). */
   nonces: NoncesVistos
   close: () => Promise<void>
@@ -53,6 +57,27 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
   const gateway = new Gateway(store, config)
   const federation = new Federation(store, config, key, gateway)
   gateway.attachFederation(federation)
+
+  /*
+    Web Push. The VAPID key is made on the first start with push on, next to
+    the federation key. With push off there is no key, no capability, and the
+    table never grows.
+  */
+  let push: PushDoGateway | undefined
+  if (config.push) {
+    const chave = loadOrCreatePushKey(config.dataDir)
+    push = {
+      carteiro: new CarteiroDoPush({
+        chave,
+        contacto: config.push.contacto || `https://${config.serverName}`,
+        transporte: config.push.transporte,
+        aoExpirar: (endpoint) => store.deletePushEndpoint(endpoint),
+      }),
+      chavePublica: chave.publicKey,
+      servicos: config.push.servicos,
+    }
+    gateway.attachPush(push)
+  }
 
   /**
    * The media engine, if the operator gave it a port.
@@ -232,6 +257,7 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
 
   // Reports (`denuncia.ts`): files in `<dados>/denuncias/`, outside the database.
   const pararDenuncias = registarDenuncias(app, { store, config, nonces })
+  const pararBugs = registarBugs(app, { store, config, nonces })
 
   // Supersedeen welcomes are dead weight that used to be re-delivered for
   // ever; clear them at boot and hourly.
@@ -298,8 +324,10 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
     gateway,
     federation,
     media,
+    push,
     nonces,
     close: async () => {
+      push?.carteiro.parar()
       clearInterval(outboxTimer)
       clearInterval(suspensasTimer)
       if (saidaTimer) clearInterval(saidaTimer)
@@ -309,6 +337,7 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
       if (cofreSweep) clearInterval(cofreSweep)
       pararRelatos()
       pararDenuncias()
+      pararBugs()
       await app.close()
       // The worker is a SUBPROCESS, and a subprocess nobody closes stays alive.
       // In a test suite that's dozens of dangling processes until the machine says no;

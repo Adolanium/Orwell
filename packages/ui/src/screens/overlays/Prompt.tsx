@@ -1,4 +1,4 @@
-import { useId, useState } from "react"
+import { useId, useState, type ReactNode } from "react"
 import { Button } from "../../components/Button.js"
 import { Field } from "../../components/Field.js"
 import { Modal } from "../../components/Modal.js"
@@ -11,6 +11,7 @@ export function Prompt({
   hint,
   initialValue = "",
   confirmLabel,
+  extra,
   onSubmit,
   onCancel,
 }: {
@@ -22,6 +23,8 @@ export function Prompt({
   initialValue?: string
   /** The button verb, when "Confirm" does not say what happens. */
   confirmLabel?: string
+  /** Another way to do the same thing, under the field (the official channel, in "Join with a link"). */
+  extra?: ReactNode
   onSubmit: (value: string) => void
   onCancel: () => void
 }): React.JSX.Element {
@@ -50,6 +53,7 @@ export function Prompt({
         />
       </Field>
       {hint && <p className="field-note">{hint}</p>}
+      {extra}
       <div className="prompt-actions">
         <Button variant="ghost" type="button" onClick={onCancel}>
           {strings.prompts.cancel}

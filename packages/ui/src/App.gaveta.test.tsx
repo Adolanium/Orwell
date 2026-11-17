@@ -19,7 +19,7 @@ const ADEGA = "!adega:casa.pt"
 /**
  * A channel from which no room has arrived yet: the vault has no declaration of
  * it. It is the common room for someone who just entered, before someone passes
- * the rooms to them (owner report, 2/11/2026).
+ * the rooms to them.
  */
 const VINHA = "!vinha:casa.pt"
 
@@ -206,7 +206,7 @@ describe("a gaveta dos canais, ao dedo", () => {
 
   it("tocar num canal cujas salas ainda não chegaram deixa a gaveta aberta", async () => {
     /*
-      Owner report on 2/11/2026: "rooms show on the phone but are not
+      The bug: "rooms show on the phone but are not
       visually visible.. the column disappears". Someone enters the common room and taps
       it before the rooms arrive. The vault knows no room yet, and the
       rule reads this as "channel with no rooms" and closed the drawer. The rooms arrived

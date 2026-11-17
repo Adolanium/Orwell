@@ -192,11 +192,11 @@ export function useTyping(
     const agora = Date.now()
     if (inicioDaRajada.current === 0) inicioDaRajada.current = agora
     if (agora - inicioDaRajada.current > TYPING_BURST_MS) return
-    // With more than three people already typing here, the line no longer shows names: space our own signal (owner, 12/11/2026).
+    // With more than three people already typing here, the line no longer shows names: space our own signal.
     /*
       With more than three people already typing here, the line says "several
-      people" and nobody reads our name in it: our own signal does not go out
-      (owner, 12/11/2026). In the common room it goes out less often.
+      people" and nobody reads our name in it: our own signal does not go out.
+      In the common room it goes out less often.
     */
     if (typistsRef.current > MUITOS_A_ESCREVER) return
     const intervalo = salaGrande ? TYPING_INTERVAL_SALA_GRANDE_MS : TYPING_INTERVAL_MS

@@ -3,7 +3,7 @@
  *
  *   node scripts/e2e-miniaturas-comunidades.mjs      (requires `npm run build` first)
  *
- * Report from the owner on 3 November 2026: "YouTube thumbnails appear in
+ * The bug: "YouTube thumbnails appear in
  * direct messages, but not in community rooms".
  *
  * Root cause: rooms are tags within a single MLS channel, and the vault stored

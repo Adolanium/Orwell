@@ -29,8 +29,8 @@ import { Emitter } from "./emitter.js"
  *                                     └→ ganho local → altifalantes (o DJ ouve)
  * ```
  *
- * The send gain is the DJ's "Send volume" (owner, 27 October of
- * 2026): it affects what GOES OUT, before it reaches listeners, not what the DJ hears.
+ * The send gain is the DJ's "Send volume": it affects what GOES OUT,
+ * before it reaches listeners, not what the DJ hears.
  * Each listener still has their own volume for the music on top of this.
  *
  * The DJ hears through the SAME node that feeds the track, not through the call: the music

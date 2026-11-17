@@ -367,8 +367,8 @@ describe("Shell — visitar o perfil de outra pessoa", () => {
     })
 
     // Without a profile, the remaining name is the first word of the address, "Ana", never
-    // the full address. It was "No name" from 27 October to 4 November
-    // 2026; the owner ordered it changed, because "No name" does not distinguish anyone.
+    // the full address. It was "No name" before; it changed
+    // because "No name" does not distinguish anyone.
     await user.click(await screen.findByRole("button", { name: "Ana" }))
 
     const folha = await paginaDaPessoa()
@@ -499,7 +499,7 @@ describe("Shell — centro de notificações", () => {
    * Phase 1d: a crossed request with inverted arrival order shows a single
    * state, "friends", in the bell and in Friends.
    *
-   * The owner's report: both requested in the same second, and saw "accepted" and
+   * The bug: both requested in the same second, and saw "accepted" and
    * "pending" at the same time. Here Ana's accept arrives live BEFORE her
    * request (which comes later, from recovery), and our request already left the
    * capped list. The old UI fold read `messages` in this order,
@@ -1076,7 +1076,7 @@ describe("Shell — Amigos: conversas na coluna, pedidos na faixa", () => {
   /**
    * THE FRIENDSHIP REQUEST CARD, taken from the messages list.
    *
-   * Owner's report: *"I want the card in the messages"*. It was already answered in the
+   * The requirement: *"I want the card in the messages"*. It was already answered in the
    * conversation, but the card was a LINE of it, stuck where the request arrived, and
    * just swapping two sentences pushed the buttons off screen. The person
    * read what was written to them with no way to answer.
@@ -1426,7 +1426,7 @@ describe("Shell — renomear uma categoria não lhe perde a restrição", () => 
   })
 
   /*
-    Report from the owner in 0.8.0: "deleting a category does not delete, even
+    The bug in 0.8.0: "deleting a category does not delete, even
     as admin". The empty category (with no rooms) never reached the tombstone:
     the action exited first, because there were no rooms to rewrite.
   */
@@ -1703,6 +1703,9 @@ describe("Shell — a partilha de ecrã da aplicação instalada", () => {
         sender: ANA,
         payload: { t: "profile", displayName: "Ana", updatedAt: 1 },
       })
+      // Something said: an empty direct with a stranger no longer shows in the
+      // column (12/11/2026, see `directasQueContam`).
+      emitRef.current?.({ channel: CONVERSA, seq: 2, sender: ANA, payload: { t: "message", body: "olá", sentAt: Date.now() } })
     })
 
     await user.click(screen.getByRole("button", { name: strings.rail.people }))
@@ -1752,7 +1755,7 @@ describe("Shell — a partilha de ecrã da aplicação instalada", () => {
 /**
  * The direct conversation only opens after friendship exists.
  *
- * The owner's rule, word for word: "only after the target accepts the request
+ * The rule, word for word: "only after the target accepts the request
  * is it possible to exchange private messages, not before that". What we had
  * was the opposite, and not from a missed condition, from no condition at all:
  * `requestFriend` opens the direct conversation BEFORE the request goes out, and

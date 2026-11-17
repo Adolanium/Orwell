@@ -43,7 +43,8 @@ const pode = (e: EstadoDePermissoes, quem: string, sala?: string): boolean =>
 
 describe("a permissão mencionartodos", () => {
   it("é cumprida nesta versão, no canal e por sala, sem gastar um lugar de POWERS", () => {
-    expect(POWERS).toHaveLength(30)
+    // 32 since `transmitir` and `mencionavel` (12/11/2026); `mencionartodos` itself took no slot.
+    expect(POWERS).toHaveLength(32)
     expect(PODERES_CUMPRIDOS).toContain("mencionartodos")
     expect(PODERES_POR_SALA).toContain("mencionartodos")
     expect(PODERES_POR_SALA_CUMPRIDOS).toContain("mencionartodos")

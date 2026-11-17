@@ -1,4 +1,6 @@
 import { strings } from "../strings.js"
+import { useAgora } from "../hooks/useAgora.js"
+import { formatarDataEHora } from "../lib/format.js"
 import type { Apuramento, Votacao as VotacaoDados } from "../lib/votacoes.js"
 
 /** How many names fit in a line before the rest becomes "and N more". */
@@ -46,7 +48,13 @@ export function Votacao({
    */
   onVote?: ((opcao: number) => void) | undefined
 }): React.JSX.Element {
-  const { porOpcao, total, minha } = apuramento
+  const { porOpcao, total, minha, fechoEm } = apuramento
+  // Closed by the reader's clock against the instant the votes were judged by: the count
+  // does not depend on the clock, only this label and the buttons do.
+  const agora = useAgora([fechoEm])
+  const fechada = fechoEm !== null && fechoEm <= agora
+  // A closed poll reads and does not vote: the same shape as an old host without `onVote`.
+  const aVotar = fechada ? undefined : onVote
 
   return (
     <section className="votacao">
@@ -76,14 +84,14 @@ export function Votacao({
 
           return (
             <li key={indice}>
-              {onVote ? (
+              {aVotar ? (
                 <button
                   type="button"
                   className={escolhida ? "votacao-opcao escolhida" : "votacao-opcao"}
                   aria-pressed={escolhida}
                   aria-label={rotulo}
                   title={rotulo}
-                  onClick={() => onVote(indice)}
+                  onClick={() => aVotar(indice)}
                 >
                   {conteudo}
                 </button>
@@ -109,6 +117,18 @@ export function Votacao({
 
       <p className="votacao-rodape">
         <span>{total === 0 ? strings.votacao.semVotos : strings.votacao.total(total)}</span>
+        {fechoEm !== null && (
+          <>
+            <span className="sep" aria-hidden="true">
+              ·
+            </span>
+            <span className={fechada ? "votacao-fechada" : "votacao-prazo"}>
+              {fechada
+                ? strings.votacao.fechouEm(formatarDataEHora(fechoEm))
+                : strings.votacao.fechaEm(formatarDataEHora(fechoEm))}
+            </span>
+          </>
+        )}
         <span className="sep" aria-hidden="true">
           ·
         </span>

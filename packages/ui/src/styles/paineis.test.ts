@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest"
 /**
  * The surfaces above the dawn (`paineis.css`), without liquid glass.
  *
- * Version 0.8.3 put a `backdrop-filter` on all surfaces; the owner had it
- * removed on 26 October 2026 and kept the dawn. This pins down the new state:
+ * Version 0.8.3 put a `backdrop-filter` on all surfaces; it was
+ * removed and the dawn was kept. This pins down the new state:
  * no filter anywhere, dawn at the root, and colors almost solid, with text
  * passing AA over the lighter smudge of the dawn.
  *
@@ -118,8 +118,8 @@ describe("as superfícies, sem vidro líquido", () => {
     }
   })
 
-  // The outline that spun around the account card disappeared with it: the owner
-  // chose the Discord-style banner on 27 October 2026, without card or frame.
+  // The outline that spun around the account card disappeared with it: the
+  // Discord-style banner replaced it, without card or frame.
   it("a faixa da conta já não tem o contorno que gira", () => {
     for (const [nome, css] of Object.entries(folhas)) {
       expect(css, nome).not.toMatch(/conic-gradient\(from var\(--ang\)/)
@@ -132,7 +132,7 @@ describe("as superfícies, sem vidro líquido", () => {
     for (const [nome, css] of Object.entries(folhas)) {
       if (nome !== "fundo.css") expect(css, nome).not.toMatch(/@keyframes\s+aurora/i)
     }
-    // The owner's rule: with reduced motion nothing stops (`movimentoReduzido.test.ts`).
+    // The rule: with reduced motion nothing stops (`movimentoReduzido.test.ts`).
     expect(fundoCss).toMatch(/prefers-reduced-motion: reduce\) and \(min-width: 601px\)\s*\{\s*body::before\s*\{\s*animation:\s*aurora-calma/)
     expect(fundoCss).toMatch(/max-width:\s*600px\)\s*\{\s*body::before\s*\{\s*animation:\s*none/)
   })

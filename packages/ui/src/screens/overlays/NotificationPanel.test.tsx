@@ -245,7 +245,7 @@ describe("as ofertas de uma conta que passou a ser outra (fase 8.2)", () => {
 })
 
 /*
-  The timeline (mockup picked by the owner on 3 November 2026): a window at
+  The timeline (the chosen mockup): a window at
   center, filters as pills, groups by day, one icon per type.
 */
 describe("o sino como linha do tempo", () => {

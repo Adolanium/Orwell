@@ -351,8 +351,8 @@ try {
   const caixa = () => vesna.page.locator(".chat-composer input:not([type=file])").first()
   await caixa().waitFor({ timeout: 60_000 })
   /*
-    A normal conversation between friends, nothing about the app itself. Owner
-    request on November 2, 2026: "I tested it with shared screen and it didn't
+    A normal conversation between friends, nothing about the app itself. The
+    old line, "I tested it with shared screen and it didn't
     crash" made the app look fragile in the website screenshot.
   */
   const dizer = async (frase) => {
@@ -882,7 +882,7 @@ try {
   await retratar(vesna.page, "voz")
 
   // ------------------- Settings › Voice and Microphone with live call
-  // Owner report: "you drop the call when you go to settings, or you stop hearing
+  // The bug: "you drop the call when you go to settings, or you stop hearing
   // others". At each step, measure on both sides the sound coming through the call
   // boxes: the first box is ours (muted on purpose), the others are from other
   // people. The level is measured on a clone of the strip, with an audio context

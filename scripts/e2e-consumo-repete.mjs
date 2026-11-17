@@ -4,7 +4,7 @@
  *   npm run build && node scripts/e2e-consumo-repete.mjs
  *   node scripts/e2e-consumo-repete.mjs --dist <folder>     # web from another version (the earlier one, to make the proof bite)
  *
- * Owner report (logged 4/11/2026, 16:42:21 UTC, 1.3.0, #984): "the user hears me but I don't hear them". In the middle of a stuck thread, an `sfu.consume` received from the server "the call server refused the request", and 1.3.0 never asked again: the owner didn't hear the person until leaving and rejoining.
+ * The bug (1.3.0, #984): "the user hears me but I don't hear them". In the middle of a stuck thread, an `sfu.consume` received from the server "the call server refused the request", and 1.3.0 never asked again: the user didn't hear the person until leaving and rejoining.
  *
  * Two real accounts (built web, throwaway server and SFU, like in `e2e-troca-de-sala.mjs`), each in Chromium. Ana speaks in "voice".
  *

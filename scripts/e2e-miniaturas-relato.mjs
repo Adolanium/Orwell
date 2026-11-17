@@ -3,7 +3,7 @@
  *
  *   node scripts/e2e-miniaturas-relato.mjs      (requires `npm run build` first)
  *
- * Report from the owner on 1.1.0: "the app still has no YouTube thumbnails in
+ * The bug in 1.1.0: "the app still has no YouTube thumbnails in
  * communities". The card appears, with the title and "play", but no image.
  *
  * The suspicion: a report (S4) carries the card WITHOUT the thumbnail, on

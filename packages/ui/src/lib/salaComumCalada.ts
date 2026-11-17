@@ -3,8 +3,8 @@ import { definirPreferenciaDaConta, lerEstadoDaConta } from "./estadoDaConta.js"
 import { alternarSilencio } from "./silenciados.js"
 
 /**
- * The common channel comes muted out of the box, once (owner decision, November 3,
- * 2026).
+ * The common channel comes muted out of the box, once.
+ *
  *
  * The common channel ("Orwell") has everyone on the server. With message sound in
  * channels (`somDoCanal`), a lively conversation there would play nonstop. So the

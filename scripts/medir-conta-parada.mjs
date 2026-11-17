@@ -4,7 +4,7 @@
  *   npx tsc -b && (cd apps/web && npx vite build --minify false)   (readable names in the profile)
  *   node --max-old-space-size=6144 scripts/medir-conta-parada.mjs --minutos 15 --rotulo antes
  *
- * Owner report on 1.3.13 (Windows app, 20 MB vault, admin): "every 5 minutes or
+ * The bug in 1.3.13 (Windows app, 20 MB vault, admin): "every 5 minutes or
  * so the app does not respond", also with no traffic. This finds what runs on a
  * clock and what it costs.
  *

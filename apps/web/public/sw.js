@@ -16,9 +16,10 @@
     · it does not store anything. Assets already carry the hash in the name and
       the server already tells them to keep them for a year; a second copy here only
       added persistent code that nobody audits;
-    · it does not receive remote notifications. Notifications are born on the
-      page, from what arrived over the socket; no Apple or Google in the way, and
-      that privacy decision is still to make (`docs/PLANO_MOVEL.md`, section 4);
+    · it reads nothing from a push but the language. A push from the
+      homeserver (Web Push) wakes a closed app with a fixed sentence; the
+      notices with names and text are still born on the page, from what
+      arrived over the socket;
     · it does not load any other script or talk to any other origin.
 
   Whoever wants to add any of these things here will find the test red, and the
@@ -84,4 +85,21 @@ self.addEventListener("notificationclick", (event) => {
       }
     })(),
   )
+})
+
+/*
+  A push from the homeserver (Web Push), with the app closed or the screen locked.
+
+  It carries only the device language, encrypted for this device; the browser
+  has already decrypted it. The notice is one of two fixed sentences, the same
+  as `settings.pushCorpo` in the catalogs (the test holds them equal): no name,
+  no text, no channel. It is ALWAYS shown: Safari drops a subscription that
+  pushes without a notice, and Chrome shows its own. The tag folds repeats into
+  one, and the page closes it when it connects again. No `data`: a tap brings
+  the app forward, and the app reads the rest the usual way.
+*/
+self.addEventListener("push", (event) => {
+  const lingua = event.data ? event.data.text() : ""
+  const corpo = lingua === "pt" ? "Nova mensagem no Orwell" : "New message in Orwell"
+  event.waitUntil(self.registration.showNotification("Orwell", { body: corpo, tag: "orwell-push" }))
 })

@@ -43,6 +43,7 @@ function bridgeDeTeste(): EnclaveBridge {
     vault: {
       status: async () => ({ exists: false, supportsOsProtection: false }),
       create: async () => ({ ok: true }),
+      export: async () => ({ data: "ficheiro" }),
     },
     identity: { create: async () => ({ address: "@abc:localhost:8448", accountId: "abc" }) },
     session: { connect: async () => ({ ok: true }) },
@@ -202,7 +203,19 @@ describe("Setup — uma pergunta de cada vez", () => {
     await pessoa.keyboard("frase-comprida-o-suficiente{Enter}")
     await pessoa.keyboard("frase-comprida-o-suficiente{Enter}")
 
-    await waitFor(() => expect(onDone).toHaveBeenCalledWith("@abc:localhost:8448"))
+    // The account exists; the app opens only after the account file (16/11/2026).
+    await screen.findByRole("heading", { name: strings.ficheiroDaConta.titulo })
+    expect(onDone).not.toHaveBeenCalled()
+    URL.createObjectURL = vi.fn(() => "blob:conta")
+    URL.revokeObjectURL = vi.fn()
+    const clique = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    await waitFor(() => expect((screen.getByRole("button", { name: strings.ficheiroDaConta.descarregar }) as HTMLButtonElement).disabled).toBe(false))
+    await pessoa.click(screen.getByRole("button", { name: strings.ficheiroDaConta.descarregar }))
+    await pessoa.click(screen.getByRole("checkbox", { name: strings.ficheiroDaConta.guardei }))
+    await pessoa.click(screen.getByRole("button", { name: strings.ficheiroDaConta.continuar }))
+    expect(onDone).toHaveBeenCalledWith("@abc:localhost:8448")
+    expect(clique).toHaveBeenCalledTimes(1)
+    clique.mockRestore()
   })
 })
 
@@ -248,7 +261,7 @@ describe("Setup — sem a pergunta da cor", () => {
     await pessoa.keyboard("{Enter}") // the photo: we skip it
     await pessoa.keyboard("frase-comprida-o-suficiente{Enter}")
     await pessoa.keyboard("frase-comprida-o-suficiente{Enter}")
-    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    await screen.findByRole("heading", { name: strings.ficheiroDaConta.titulo })
     expect(localStorage.getItem(PREFS_KEY)).toBeNull()
     expect(readPrefs().accent).toBe(4)
     expect(ACCENTS[readPrefs().accent]).toBeTruthy()
@@ -305,7 +318,7 @@ describe('Setup: "Queres pôr uma fotografia?", a seguir ao nome', () => {
     await pessoa.keyboard("frase-comprida-o-suficiente{Enter}")
     await pessoa.keyboard("frase-comprida-o-suficiente{Enter}")
 
-    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    await screen.findByRole("heading", { name: strings.ficheiroDaConta.titulo })
     expect(perfisGuardados).toEqual([{ displayName: "Duarte", donations: [] }])
   })
 
@@ -324,7 +337,7 @@ describe('Setup: "Queres pôr uma fotografia?", a seguir ao nome', () => {
     await pessoa.keyboard("frase-comprida-o-suficiente{Enter}")
     await pessoa.keyboard("frase-comprida-o-suficiente{Enter}")
 
-    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    await screen.findByRole("heading", { name: strings.ficheiroDaConta.titulo })
     expect(perfisGuardados).toEqual([
       { displayName: "Duarte", donations: [], avatarDataUrl: "data:image/webp;base64,CARA" },
     ])

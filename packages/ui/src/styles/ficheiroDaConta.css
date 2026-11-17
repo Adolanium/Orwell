@@ -1,0 +1,35 @@
+/*
+  The account file (.enclave): the step after creating the account, and the
+  one-time notice (16/11/2026). One column, the buttons full width at 390 px.
+*/
+.ficheiro-da-conta {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ficheiro-da-conta h1 {
+  margin: 0;
+  font-size: var(--font-xl);
+}
+
+.ficheiro-da-conta .gate-lead {
+  margin: 0;
+}
+
+.ficheiro-da-conta-botoes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ficheiro-da-conta-botoes button,
+.ficheiro-da-conta > button {
+  width: 100%;
+}
+
+.ficheiro-da-conta-aviso .sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

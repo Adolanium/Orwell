@@ -90,7 +90,7 @@ class SinalizacaoFalsa implements SinalizacaoSfu {
   /**
    * SERVER refusals that may be timing-related (4/11/2026, #984): the code and
    * how many times MORE it refuses. After that it accepts. This is the case of the
-   * owner's login, a `sfu.consume` that reaches the server out of time.
+   * reported log, a `sfu.consume` that reaches the server out of time.
    */
   recusasTransitorias = new Map<string, { codigo: string; vezes: number }>()
   /** The same, in `sfu.resume` (the consumer the server doesn't know yet). */
@@ -771,9 +771,9 @@ describe("um pedido de consumo que se perde na rede", () => {
 // ---------------------------------------------------------------------------
 
 /**
- * **The refusal that is timing, and the owner who stops hearing someone (4/11/2026, #984).**
+ * **The refusal that is timing, and the user who stops hearing someone (#984).**
  *
- * Log entry from the owner (1.3.0, 16:42:21.769), in the middle of a burst of
+ * Log entry from a real call (1.3.0), in the middle of a burst of
  * `channel.meta` with the thread stuck: `sfu-consumo-falhou d7ac2adb-… · the call
  * server refused the request`. The policy said that a response from the server
  * does not repeat, and the consumer of that producer was never called again: "the user

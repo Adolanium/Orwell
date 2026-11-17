@@ -2,7 +2,7 @@
  * The microphone that dies silently comes back on its own, without leaving the
  * call (4/11/2026).
  *
- * The owner's report: "I stopped hearing a user. Looks like Orwell stopped
+ * The bug: "I stopped hearing a user. Looks like Orwell stopped
  * capturing my mic. I left and came back and it fixed it." Measured on real
  * Chromium (`scripts/mic-recupera-evidencia/`): when capture dies (raw track
  * ended, `AudioContext` suspended, worklet crashed), the track that the sender
@@ -312,6 +312,69 @@ describe("o microfone que morre calado", () => {
     expect(pedidos).toHaveLength(5)
     expect(erros).toEqual(["the microphone keeps stopping"])
     expect(diagnosticos).toContain("call-microfone-em-ciclo:5 em 60 s")
+  })
+
+  it("com o ecrã bloqueado, o microfone calado pelo sistema não se reabre; ao voltar, reabre uma vez", async () => {
+    const pagina = { visibilityState: "visible" as DocumentVisibilityState }
+    vi.stubGlobal("document", pagina)
+    // A phone: a touch screen, where the system does suspend capture in the background.
+    vi.stubGlobal("matchMedia", (consulta: string) => ({ matches: consulta === "(pointer: coarse)" }))
+    const { call, voz, erros, diagnosticos } = await naChamada()
+    // iOS, installed web app: the screen locks and the system mutes the capture.
+    pagina.visibilityState = "hidden"
+    capturas[0]!.muted = true
+    await vi.advanceTimersByTimeAsync(15 * 60_000)
+    expect(pedidos).toHaveLength(1)
+    expect(erros).toEqual([])
+
+    pagina.visibilityState = "visible"
+    await vi.advanceTimersByTimeAsync(VigiaDoMicrofone.PERIODO_MS + 10)
+    expect(pedidos).toHaveLength(2)
+    expect(voz.emissor.trocas).toEqual([capturas[1]])
+    expect(diagnosticos).toContain("call-microfone-calado:ao voltar")
+    expect(erros).toEqual([])
+    expect(call.channel).toBe(CHANNEL)
+  })
+
+  /*
+    The computer does not suspend capture in a minimized window or a background
+    tab: a microphone that dies there (device swapped, audio service restarted)
+    is a real death, and the person would stay mute until they open the window.
+  */
+  it("no computador, com a janela minimizada, o microfone calado reabre-se sem esperar pela volta", async () => {
+    const pagina = { visibilityState: "visible" as DocumentVisibilityState }
+    vi.stubGlobal("document", pagina)
+    vi.stubGlobal("matchMedia", () => ({ matches: false }))
+    const { call, voz, erros, diagnosticos } = await naChamada()
+    pagina.visibilityState = "hidden"
+    capturas[0]!.muted = true
+    await vi.advanceTimersByTimeAsync(VigiaDoMicrofone.CALADO_MS + 2 * VigiaDoMicrofone.PERIODO_MS)
+    expect(pedidos).toHaveLength(2)
+    expect(voz.emissor.trocas).toEqual([capturas[1]])
+    expect(diagnosticos.some((d) => d.startsWith("call-microfone-calado"))).toBe(true)
+    expect(erros).toEqual([])
+    expect(call.channel).toBe(CHANNEL)
+  })
+
+  it("no telemóvel com o ecrã bloqueado, uma faixa que terminou espera pela volta, e reabre-se logo ao voltar", async () => {
+    // Reopening in the background fails on a locked iPhone, and the watchdog would give up for good.
+    const pagina = { visibilityState: "visible" as DocumentVisibilityState }
+    vi.stubGlobal("document", pagina)
+    vi.stubGlobal("matchMedia", (consulta: string) => ({ matches: consulta === "(pointer: coarse)" }))
+    const { call, voz, erros, diagnosticos } = await naChamada()
+    pagina.visibilityState = "hidden"
+    capturas[0]!.readyState = "ended"
+    await vi.advanceTimersByTimeAsync(15 * 60_000)
+    expect(pedidos).toHaveLength(1)
+    expect(erros).toEqual([])
+
+    pagina.visibilityState = "visible"
+    await vi.advanceTimersByTimeAsync(VigiaDoMicrofone.PERIODO_MS + 10)
+    expect(pedidos).toHaveLength(2)
+    expect(voz.emissor.trocas).toEqual([capturas[1]])
+    expect(diagnosticos).toContain("call-microfone-terminou:ao voltar")
+    expect(erros).toEqual([])
+    expect(call.channel).toBe(CHANNEL)
   })
 
   it("sair da chamada desliga a vigia: uma faixa parada por nós não é uma morte", async () => {

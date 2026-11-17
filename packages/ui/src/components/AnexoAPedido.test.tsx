@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { BridgeContext } from "../App.js"
-import type { DesfechoDoAnexo, EnclaveBridge } from "../bridge.js"
+import type { DesfechoDoAnexo, DesfechoDoTrazer, EnclaveBridge } from "../bridge.js"
 import { strings } from "../strings.js"
 import type { MediaItem } from "../types.js"
 import { AnexosDoItem } from "./AnexoAPedido.js"
@@ -77,10 +77,10 @@ describe("ImagemAPedido", () => {
     expect(screen.getByRole("status").textContent).toBe(strings.sincronia.anexoRecusado)
   })
 
-  it('a frase de "ninguém" diz que nenhum membro com a imagem está ligado, e há "Tentar outra vez"', async () => {
+  it('a frase de "ninguém" diz que nenhum utilizador com a imagem está online, e há "Tentar outra vez"', async () => {
     const { pedir } = montar({ ok: false, motivo: "ninguem" })
     await carregar()
-    expect(strings.sincronia.anexoNinguem).toMatch(/ligado/)
+    expect(strings.sincronia.anexoNinguem).toMatch(/online/)
     expect(screen.getByRole("status").textContent).toBe(strings.sincronia.anexoNinguem)
     pedir.mockResolvedValueOnce({ ok: true, anexo: { name: "b.png", mediaType: "image/png", inline: IMAGEM } })
     await act(async () => {
@@ -90,6 +90,81 @@ describe("ImagemAPedido", () => {
     })
     expect(pedir).toHaveBeenCalledTimes(2)
     expect(screen.getAllByRole("img").filter((img) => img.getAttribute("src") === IMAGEM)).toHaveLength(2)
+  })
+
+  it("o autor desligado diz-se assim; o autor ligado sem a imagem diz-se de outra maneira (12/11/2026)", async () => {
+    montar({ ok: false, motivo: "ninguem", autorLigado: false, autor: "@ana:s" })
+    await carregar()
+    expect(screen.getByRole("status").textContent).toBe(strings.sincronia.anexoAutorDesligado)
+    cleanup()
+    montar({ ok: false, motivo: "ninguem", autorLigado: true, autor: "@ana:s" })
+    await carregar()
+    expect(screen.getByRole("status").textContent).toBe(strings.sincronia.anexoNinguem)
+    expect(strings.sincronia.anexoAutorDesligado).not.toBe(strings.sincronia.anexoNinguem)
+  })
+
+  describe("volta a pedir sozinha quando alguém se liga", () => {
+    afterEach(() => vi.useRealTimers())
+
+    function comPresenca(desfecho: DesfechoDoAnexo): { pedir: ReturnType<typeof vi.fn>; ligar: (address: string) => void } {
+      const ouvintes = new Set<(evento: { address: string; online: boolean }) => void>()
+      const pedir = vi.fn(async () => desfecho)
+      const lista: MediaItem[] = [{ evicted: true, name: "b.png", mediaType: "image/png" }]
+      const bridge = {
+        anexo: { pedir },
+        on: {
+          presence: (ouvinte: (evento: { address: string; online: boolean }) => void) => {
+            ouvintes.add(ouvinte)
+            return () => ouvintes.delete(ouvinte)
+          },
+        },
+      } as unknown as EnclaveBridge
+      render(
+        <BridgeContext.Provider value={bridge}>
+          <AnexosDoItem.Provider value={{ channel: "!lagar:s", alvo: "post-1", lista }}>
+            <PostImages media={lista} />
+          </AnexosDoItem.Provider>
+        </BridgeContext.Provider>,
+      )
+      return { pedir, ligar: (address) => act(() => ouvintes.forEach((ouvinte) => ouvinte({ address, online: true }))) }
+    }
+
+    it("o autor liga-se: pede outra vez, e a imagem aparece", async () => {
+      vi.useFakeTimers()
+      const { pedir, ligar } = comPresenca({ ok: false, motivo: "ninguem", autorLigado: false, autor: "@ana:s" })
+      await carregar()
+      expect(pedir).toHaveBeenCalledTimes(1)
+      pedir.mockResolvedValueOnce({ ok: true, anexo: { name: "b.png", mediaType: "image/png", inline: IMAGEM } })
+      ligar("@ana:s")
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000)
+      })
+      expect(pedir).toHaveBeenCalledTimes(2)
+      expect(screen.getAllByRole("img").filter((img) => img.getAttribute("src") === IMAGEM)).toHaveLength(1)
+    })
+
+    it("outra pessoa liga-se: pede outra vez, mas no máximo uma vez a cada dois minutos", async () => {
+      vi.useFakeTimers()
+      const { pedir, ligar } = comPresenca({ ok: false, motivo: "ninguem", autorLigado: true, autor: "@ana:s" })
+      await carregar()
+      ligar("@bruno:s")
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000)
+      })
+      expect(pedir).toHaveBeenCalledTimes(1)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120_000)
+      })
+      expect(pedir).toHaveBeenCalledTimes(2)
+      // Still nobody: the phrase stays, without going back to "Asking…" in between.
+      expect(screen.getByRole("status").textContent).toBe(strings.sincronia.anexoNinguem)
+      ligar("@carla:s")
+      ligar("@duarte:s")
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000)
+      })
+      expect(pedir).toHaveBeenCalledTimes(2)
+    })
   })
 
   it("a pedir, deixa cancelar; cancelado, volta o botão de pedir", async () => {
@@ -129,5 +204,43 @@ describe("ImagemAPedido", () => {
     montar({ ok: true, anexo: {} }, false)
     expect(screen.queryByRole("button")).toBeNull()
     expect(screen.getByRole("img", { name: strings.media.noutroAparelho })).toBeTruthy()
+  })
+})
+
+describe("com o armazém (Trazer): a frase sabe do autor (16/11/2026)", () => {
+  function comArmazem(desfecho: DesfechoDoTrazer): void {
+    const lista: MediaItem[] = [{ evicted: true, name: "b.png", mediaType: "image/png" }]
+    const bridge = {
+      media: { trazer: vi.fn(async () => desfecho) },
+      anexo: { pedir: vi.fn(async () => ({ ok: false, motivo: "ninguem" })) },
+      channels: { history: vi.fn(async () => []) },
+    } as unknown as EnclaveBridge
+    render(
+      <BridgeContext.Provider value={bridge}>
+        <AnexosDoItem.Provider value={{ channel: "!lagar:s", alvo: "post-1", lista }}>
+          <PostImages media={lista} />
+        </AnexosDoItem.Provider>
+      </BridgeContext.Provider>,
+    )
+  }
+
+  async function trazer(): Promise<void> {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(strings.media.trazer) }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  }
+
+  it("o autor desligado diz-se como tal, e não como \"ninguém a tem\"", async () => {
+    comArmazem({ ok: false, motivo: "ninguem", autorLigado: false, autor: "@ze:s" })
+    await trazer()
+    expect(screen.getByRole("status").textContent).toBe(strings.sincronia.anexoAutorDesligado)
+  })
+
+  it("sem saber do autor, a frase do armazém", async () => {
+    comArmazem({ ok: false, motivo: "sem-irmao" })
+    await trazer()
+    expect(screen.getByRole("status").textContent).toBe(strings.media.ninguemTem)
   })
 })

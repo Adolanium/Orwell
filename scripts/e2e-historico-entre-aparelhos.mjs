@@ -3,7 +3,7 @@
  *
  *   node scripts/e2e-historico-entre-aparelhos.mjs          (needs `npm run build` first)
  *
- * Owner request (29/10/2026): all history and all media move to the new device
+ * The requirement: all history and all media move to the new device
  * on pairing, no questions ("I want out").
  *
  * What we prove: Ana creates an account on desktop (one browser). Bruno is a
@@ -45,6 +45,7 @@ const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
 const SERVIDOR_JS = join(RAIZ, "apps/server/dist/main.js")
 // Ports change by env var, so two scripts do not fight over them.
+const LARGO = process.env.E2E_LARGO === "1"
 const PORTA_DA_FRENTE = Number(process.env.E2E_PORTA_DA_FRENTE ?? 8484)
 const PORTA_DO_SERVIDOR = Number(process.env.E2E_PORTA_DO_SERVIDOR ?? 8485)
 const NOME = `localhost:${PORTA_DA_FRENTE}`
@@ -425,7 +426,16 @@ try {
 
   browserTel = await chromium.launch({ headless: true })
   const redeTel = []
-  const ctxTel = await browserTel.newContext({ ...CONTEXTO, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
+  /*
+    `E2E_LARGO=1` pairs a WIDE device instead (1280 px, mouse): the history
+    progress then sits in the channel top bar (12/11/2026), and the capture is
+    the 1280 one. Without it, the phone at 390 px, as always.
+  */
+  const ctxTel = await browserTel.newContext(
+    LARGO
+      ? { ...CONTEXTO, viewport: { width: 1280, height: 860 } }
+      : { ...CONTEXTO, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+  )
   escutar(ctxTel, redeTel)
   const tel = await ctxTel.newPage()
   await tel.goto(APP, { waitUntil: "domcontentloaded" })
@@ -463,9 +473,17 @@ try {
   // The banner sits above the chat: open any chat.
   await tel.getByRole("button", { name: "Comunidades", exact: true }).first().click().catch(() => {})
   await tel.locator(".channel-list .channel-name").first().click().catch(() => {})
-  const barraVista = await ate(async () => (await tel.locator(".barra-historico").count()) > 0, 90_000, 200)
-  check("o telemóvel mostra a barra do histórico", barraVista, barraVista ? await tel.locator(".barra-historico").first().innerText() : "")
-  if (barraVista) await tel.screenshot({ path: join(RAIZ, "capturas/historico-barra-telemovel.png") })
+  const BARRA = LARGO ? ".topbar .barra-historico-no-topo" : ".barra-historico"
+  const barraVista = await ate(async () => (await tel.locator(BARRA).count()) > 0, 90_000, 200)
+  check(
+    LARGO ? "o aparelho largo mostra o histórico na barra de topo do canal" : "o telemóvel mostra a barra do histórico",
+    barraVista,
+    barraVista ? await tel.locator(BARRA).first().innerText() : "",
+  )
+  if (barraVista) {
+    await tel.screenshot({ path: join(RAIZ, LARGO ? "capturas/historico-barra-1280.png" : "capturas/historico-barra-telemovel.png") })
+    if (LARGO) check("e não há barra própria a empurrar a conversa", (await tel.locator(".barra-historico").count()) === 0)
+  }
 
   // The connection drops midway (the plan is in the vault), and comes back.
   let planoAMeio = null

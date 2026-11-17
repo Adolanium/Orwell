@@ -103,6 +103,8 @@ async function contaNoNode(nome) {
   await vault.create("frase-de-teste-do-no")
   const session = new Session(vault)
   const id = await session.createIdentity(NOME)
+  // The common room is opt-in since 12/11/2026: these accounts tick the box, as the harness does.
+  await session.escolherSalaComum(true)
   await session.connect()
   await session.updateProfile({ displayName: nome, donations: [] })
   const conta = { nome, session, vault, address: id.address }
@@ -206,8 +208,18 @@ try {
   }
   const dm = await bruno.session.openDirect(ana)
   await ate(async () => bruno.session.channels.includes(dm), 30_000, 300)
+  // Direct chats are between friends: Bruno asks, Ana accepts on the computer.
+  await bruno.session.sendFriendRequest(dm)
+  await pc.getByRole("button", { name: "Amigos", exact: true }).first().click()
+  await pc.locator(".people-tabs").getByRole("button", { name: /^Recebidos/ }).click()
+  const aceitar = pc.locator(".people-requests").getByRole("button", { name: "Aceitar" }).first()
+  check("a Ana aceita a amizade do Bruno no computador", (await ate(() => aceitar.isVisible(), 60_000)) >= 0)
+  await aceitar.click()
+  check("são amigos", (await ate(async () => bruno.session.friendTies().get(ana)?.link === "amigos", 60_000)) >= 0)
   for (const [i, canal] of canais.entries()) for (let k = 1; k <= MENSAGENS; k++) await bruno.session.send(canal, mensagem(`${k} antes no ${i + 1}`))
   for (let k = 1; k <= MENSAGENS; k++) await bruno.session.send(dm, mensagem(`${k} antes na directa`))
+  // The channel list lives in "Comunidades"; the friendship step left the computer in "Amigos".
+  await pc.getByRole("button", { name: "Comunidades", exact: true }).first().click().catch(() => {})
   check("o computador vê os três canais", (await ate(async () => (await pc.locator(".channel-name").count()) >= 4, 90_000)) >= 0)
   await wait(3_000)
 
@@ -237,11 +249,25 @@ try {
   await tel.getByRole("button", { name: "Continuar" }).click()
   await tel.locator(".sas-palavras").waitFor({ timeout: 30_000 })
   await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
+  /*
+    "Deixa este aparelho ligado" (16/11/2026): on the computer, in the sheet where
+    the pairing ends, while the history goes to the phone. Watched from the yes to
+    the end of the transfer: what it said, and whether it closed by itself.
+  */
+  const avisoNoPc = { visto: "", fechou: false, parar: false }
+  const vigiaDoPc = (async () => {
+    while (!avisoNoPc.parar) {
+      const textos = await pc.locator(".barra-envio").allInnerTexts().catch(() => [])
+      if (textos.length > 0) avisoNoPc.visto = textos[0]
+      else if (avisoNoPc.visto) avisoNoPc.fechou = true
+      await wait(100)
+    }
+  })()
   await tel.getByRole("button", { name: "São as mesmas" }).click()
   await folha.getByRole("button", { name: "São as mesmas" }).click()
   const tPar = Date.now()
   await tel.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 })
-  await folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
+  // The sheet stays open on the computer: that is where "Keep this device on" shows.
   await tel.getByRole("button", { name: "Entrar", exact: true }).click()
   await tel.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
   const msDentro = Date.now() - tPar
@@ -256,6 +282,15 @@ try {
     return canais.every((c, i) => corposNoCofre(cofreTel, c).includes(`1 antes no ${i + 1}`)) && corposNoCofre(cofreTel, dm).includes("1 antes na directa")
   }, 300_000, 3_000)
   check("o cofre do telemóvel tem o histórico de todos os canais", msTudo >= 0, `${Math.round((Date.now() - tPar) / 100) / 10} s depois do sim`)
+  // The computer's notice: it showed the approved text with the progress, and it closes once the phone has it all.
+  check(
+    'o computador mostrou "Deixa este aparelho ligado" com o progresso, durante a passagem',
+    avisoNoPc.visto.includes("Deixa este aparelho ligado") && /Enviado: \d+ de \d+ mensagens/.test(avisoNoPc.visto),
+    avisoNoPc.visto.replace(/\n/g, " | ").slice(0, 200),
+  )
+  check("e o aviso fecha sozinho quando o telemóvel tem tudo", (await ate(async () => avisoNoPc.fechou, 180_000, 500)) >= 0)
+  avisoNoPc.parar = true
+  await vigiaDoPc
   const naSala = corposNoCofre(cofreTel, sala).filter((b) => b.startsWith("sala ")).length
   console.log(`  ..  mensagens da sala comum no cofre do telemóvel: ${naSala}`)
 
@@ -314,6 +349,8 @@ try {
   check("nenhum erro de página", erros.length === 0, erros.slice(0, 2).join(" | "))
 } catch (erro) {
   check("o guião chegou ao fim", false, String(erro?.message ?? erro).split("\n")[0])
+  // What the phone showed when it stopped, for whoever reads the failure.
+  for (const p of browserTel?.contexts().flatMap((c) => c.pages()) ?? []) await p.screenshot({ path: join(RAIZ, "capturas/paridade-falha.png") }).catch(() => {})
   console.error(casa.registo().slice(-1500))
 }
 console.log("")

@@ -1,3 +1,4 @@
+import { marcarArranque } from "./marcasDeArranque.js"
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js"
 import { argon2id } from "@noble/hashes/argon2.js"
 import { fromBase64, toBase64, type CorpoDaDenuncia, type Motivo } from "@enclave/protocol"
@@ -5,7 +6,7 @@ import { chavesDeOrdem, chaveDoEvento, venceCarimbo } from "./dobras.js"
 import { carriesBytes, entryMediaBytes, LINK_KEY, MEDIA_KEYS, thumbnailBytes } from "./medidaDeMedia.js"
 import { comCabecalho, semCabecalho, versaoDoFicheiro, type VersaoDoFicheiroDoCofre } from "./cabecalhoDoCofre.js"
 import { registarFicha, type FichaDoCanal, type FichaQueChega } from "./tipoDoCanal.js"
-import { acabarSelo, comecarSelo, comprimentoDoFim } from "./seloDoCofre.js"
+import { acabarSelo, comecarSelo, comprimentoDoFim, type SeloEmCurso, type SeloPorFazer } from "./seloDoCofre.js"
 import type { ArmazemDeMedia } from "./armazem/armazem.js"
 import { decifrarBlob } from "./armazem/blob.js"
 import {
@@ -123,6 +124,17 @@ export interface StoredPeerProfile {
    * version or higher (`upsertDirectory` replaces the entry).
    */
   parcial?: true
+  /**
+   * Rooms only (12/11/2026): the declaration the current pin list came from.
+   *
+   * The pin list has its own stamp, apart from the room's: a rename that does not
+   * talk about pins replaces the room and keeps the list, so the room's stamp no
+   * longer says how old the list is. `payload` is the ORIGINAL `channel.meta`, with
+   * the authorship of `por`, kept so a member without `fixar` can pass the list on
+   * (`pinnedProof`) and the Welcome snapshot can carry it. Absent in an older vault:
+   * the room's own stamp counts for the list. See `fixadas.ts`.
+   */
+  fixadas?: { at: number; seq?: number; por: string; payload?: StoredPayload }
 }
 
 /**
@@ -474,7 +486,7 @@ export interface VaultContents {
    * has already left behind won't open, persistent secrecy, and until 5 de
    * October 2026 `"lido"` was the rule: the anchor would skip over it and it
    * was never requested again, with the bytes still on the server. A message
-   * lost in silence, and that's how the owner lost his.
+   * lost in silence, and that's how real messages were lost.
    *
    * The anchor keeps moving forward, and must keep moving: stopping at it
    * puts recovery in a loop on the same event, which is the old defect. What
@@ -650,6 +662,14 @@ export interface VaultContents {
    * before the connection opens. Foreign key is the channel, internal key is the room id.
    */
   channelRooms: Record<string, Record<string, StoredPeerProfile>>
+  /**
+   * Pinned messages whose message was deleted (12/11/2026): channel, then message id, then
+   * when. The copy of a pinned message must leave with the message, and the list
+   * that declared it is signed by whoever pinned it, so it cannot be edited by
+   * whoever deletes: it is filtered on read (`pinnedOf`) and on every republish, and
+   * whoever has `fixar` publishes the unpin. Capped per channel (`TECTO_DE_APAGADAS`).
+   */
+  fixadasApagadas?: Record<string, Record<string, number>>
   /**
    * The categories declared in each channel. The internal key is the name, which is also
    * the identity here, see `channel.category` in the protocol.
@@ -1051,6 +1071,22 @@ export function deviceManifestSeen(contents: VaultContents, address: string): nu
 /** How long before the same (person, channel) repair may be tried again. */
 export const REPAIR_COOLDOWN_MS = 6 * 3_600_000
 
+/**
+ * How long before seating a device of THIS account in a channel may be tried
+ * again (12/11/2026).
+ *
+ * It used the six hours of `REPAIR_COOLDOWN_MS`. When a seat failed after the
+ * claim (a commit that lost the epoch race, a Welcome that did not go out),
+ * the phone stayed out of that channel for six hours: it held the history the
+ * computer passed it, but the channel was not on its list, and it could not
+ * send there. That is the "no history for four to five hours" the users
+ * reported. The six hours guard someone else's key packages from a device that
+ * never connects; for our own devices that case already has its own clock
+ * (`Session.SEM_CHAVES_VOLTA_MS`), and five minutes costs at most twelve
+ * packages an hour in a channel that keeps failing.
+ */
+export const ASSENTO_PROPRIO_MS = 5 * 60_000
+
 /** Pure: may this repair run now? Unknown pairs always may. */
 export function mayRepair(
   attempts: Record<string, number>,
@@ -1242,6 +1278,9 @@ export function tipoDoEstado(entry: StoredChatMessage): TipoDoEstado | null {
     case "post.comment":
       return "comentario"
     case "post.reaction":
+    // A chat reaction is state about a message, not conversation: in the chat cap
+    // it would push real messages out of the vault, one per tap.
+    case "reaction":
       return "gosto"
     case "edit":
     case "redact":
@@ -1505,6 +1544,36 @@ function entradaComSeq(contents: VaultContents, channel: string, seq: number): S
   )
 }
 
+/**
+ * Whether a report brings an event this vault already holds at that `seq`
+ * (16/11/2026). For events without `id` only: those with `id` are found by key
+ * (`jaGuardada`). A report of a reaction whose `seq` was taken by the same
+ * reaction was stored again with -1 and an order mark, and the interface, which
+ * sorts by `seq`, put that press after a later removal: the chip came back on
+ * reload. Same author, same `seq`, same payload (the signature aside, and in any
+ * key order) is the same event.
+ */
+export function relatoJaGuardado(contents: VaultContents, channel: string, seq: number, sender: string, payload: StoredPayload): boolean {
+  if (seq < 0 || chaveDoEvento({ sender, payload }) !== null) return false
+  const ocupada = entradaComSeq(contents, channel, seq)
+  return ocupada !== undefined && ocupada.sender === sender && semAutoria(ocupada.payload) === semAutoria(payload)
+}
+
+/** A payload as canonical JSON (keys sorted), without `autoria`. */
+function semAutoria(payload: StoredPayload): string {
+  const ordenar = (valor: unknown): unknown => {
+    if (Array.isArray(valor)) return valor.map(ordenar)
+    if (valor === null || typeof valor !== "object") return valor
+    return Object.fromEntries(
+      Object.keys(valor)
+        .sort()
+        .map((chave) => [chave, ordenar((valor as Record<string, unknown>)[chave])]),
+    )
+  }
+  const { autoria: _autoria, ...resto } = payload as Record<string, unknown>
+  return JSON.stringify(ordenar(resto))
+}
+
 /** Whether this channel's `seq` is already in either list. */
 function seqGuardado(contents: VaultContents, channel: string, seq: number): boolean {
   return entradaComSeq(contents, channel, seq) !== undefined
@@ -1560,7 +1629,7 @@ interface PesoDaCopia {
  * thumbnail, which authorship does not sign, and with attachments as markers.
  * In a community the report might arrive before the server event, and keeping it
  * meant staying forever without the video thumbnail, which no one sends on request
- * (owner report with 1.1.0: "the app still has no YouTube thumbnails in
+ * (bug in 1.1.0: "the app still has no YouTube thumbnails in
  * communities"). The server copy is the original, from the sender authenticated
  * by MLS, and is the same message (the key has the author): the whole payload
  * swaps. Still one entry.
@@ -2137,6 +2206,13 @@ export function upsertSpaceMeta(contents: VaultContents, channel: string, payloa
 }
 
 /** Where the ciphertext lives, and whether the platform can hold a key for us. */
+/**
+ * Seals a vault write off the caller's thread (a Worker in the web app): gets
+ * the JSON text already taken (the snapshot) and a copy of the key, and gives
+ * back the file buffer. See `selarTexto` in `seloDoCofre.ts`.
+ */
+export type SeladorDoCofre = (porFazer: SeloPorFazer, key: Uint8Array, nonce: Uint8Array) => Promise<SeloEmCurso>
+
 export interface VaultBackend {
   read(): Promise<Uint8Array | null>
   write(bytes: Uint8Array): Promise<void>
@@ -2458,10 +2534,24 @@ export class Vault {
    * No `derivar` means derivation on this thread, which is what has always been
    * done and what the desktop app still does. See `DerivarChaveDoCofre`.
    */
-  constructor(backend: VaultBackend, derivar: DerivarChaveDoCofre = derivarAqui) {
+  constructor(backend: VaultBackend, derivar: DerivarChaveDoCofre = derivarAqui, selador?: SeladorDoCofre) {
     this.#backend = backend
     this.#derivar = derivar
+    this.#selador = selador ?? null
   }
+
+  #selador: SeladorDoCofre | null
+
+  /**
+   * Seal every write on this thread, at once, synchronous to the disk.
+   *
+   * The host sets it where the write must be born in the same task: `pagehide`
+   * (the transaction must start in the handler) and the tab handoff (the
+   * backend is sealed right after). A seal still in flight in the Worker is
+   * then overtaken: the synchronous write starts now, and the older one, when
+   * it comes back, finds it is old and never reaches the disk.
+   */
+  semFundo = false
 
   get supportsOsProtection(): boolean {
     return this.#backend.supportsOsProtection
@@ -2779,9 +2869,12 @@ export class Vault {
       this.#key = await this.#derivar(passphrase, this.#salt, KDF)
     }
 
+    // Startup marks (`marcasDeArranque.ts`): read, decrypted, parsed. The size goes in the name's measure.
+    marcarArranque("cofre-lido")
     let plaintext: Uint8Array
     try {
       plaintext = xchacha20poly1305(this.#key, fromBase64(file.nonce)).decrypt(base64ParaBytes(file.ciphertext))
+      marcarArranque("cofre-decifrado")
     } catch {
       // Wipe the derived key before reporting failure, so a wrong passphrase
       // does not leave usable material behind.
@@ -2791,6 +2884,7 @@ export class Vault {
     }
 
     this.#adopt(JSON.parse(new TextDecoder().decode(plaintext)) as Partial<VaultContents>, versao)
+    marcarArranque("cofre-lido-json")
   }
 
   /** Merge decrypted contents over defaults, so a vault written before a
@@ -2864,15 +2958,19 @@ export class Vault {
     this.#protection = file.protection
     this.#key = key
 
+    // Startup marks (`marcasDeArranque.ts`): read, decrypted, parsed. The size goes in the name's measure.
+    marcarArranque("cofre-lido")
     let plaintext: Uint8Array
     try {
       plaintext = xchacha20poly1305(this.#key, fromBase64(file.nonce)).decrypt(base64ParaBytes(file.ciphertext))
+      marcarArranque("cofre-decifrado")
     } catch {
       this.#key.fill(0)
       this.#key = null
       throw new Error("wrong passphrase, or the vault is damaged")
     }
     this.#adopt(JSON.parse(new TextDecoder().decode(plaintext)) as Partial<VaultContents>, versao)
+    marcarArranque("cofre-lido-json")
   }
 
   /**
@@ -2905,6 +3003,13 @@ export class Vault {
    * `#gruposAdiados` in `session.ts`). It must not await anything.
    */
   aoSerializar: ((contents: VaultContents) => void) | null = null
+
+  /**
+   * Awaited before a deferred write leaves on its timer, and only then. The
+   * session exports its changed groups there, a group at a time, so the write's
+   * snapshot (one task) only reuses them. Nothing that writes at once waits for it.
+   */
+  antesDaGravacaoAdiada: (() => Promise<void>) | null = null
 
   async update(mutate: (contents: VaultContents) => void): Promise<void> {
     if (!this.#key) throw new Error("vault is locked")
@@ -2942,7 +3047,7 @@ export class Vault {
    * SFrame counters, key packages, unconfirmed commits) still uses `update`, which
    * writes now and carries what is deferred.
    */
-  updateEmBreve(mutate: (contents: VaultContents) => void, janelaMs: number = Vault.JANELA_DA_GRAVACAO_MS): Promise<void> {
+  updateEmBreve(mutate: (contents: VaultContents) => void, janelaMs: number = this.#janelaDaGravacao()): Promise<void> {
     if (!this.#key) return Promise.reject(new Error("vault is locked"))
     mutate(this.#contents)
     // One deferred write at a time: a later caller rides the one already armed, whatever its window.
@@ -2961,7 +3066,11 @@ export class Vault {
         this.#atrasosDaAdiada.n++
         this.#atrasosDaAdiada.maiorMs = Math.max(this.#atrasosDaAdiada.maiorMs, atraso)
       }
-      void this.gravarAdiada().catch(() => {})
+      // The owner prepares the heavy part in slices first (the session exports its groups). See `antesDaGravacaoAdiada`.
+      void (this.antesDaGravacaoAdiada?.() ?? Promise.resolve())
+        .catch(() => {})
+        .then(() => this.gravarAdiada())
+        .catch(() => {})
     }, janelaMs)
     this.#adiada = { promessa, resolver, rejeitar, temporizador }
     return promessa
@@ -2969,6 +3078,28 @@ export class Vault {
 
   /** The limit on wait time for a deferred write. See `updateEmBreve`. */
   static JANELA_DA_GRAVACAO_MS = 1_000
+  /** The widest the window grows when the JSON is slow. See `#janelaDaGravacao`. */
+  static JANELA_MAXIMA_DA_GRAVACAO_MS = 5_000
+
+  /**
+   * The window of a deferred write: 1 s, or 20 times the last snapshot of the
+   * vault (the groups and the JSON), up to 5 s. The JSON runs on the thread that
+   * draws (the snapshot must be taken at once), and on a big vault on a slow
+   * laptop it is ~100 ms: with a 1 s window that was a tenth of the time while
+   * messages arrive. This keeps it at most a twentieth. What a deferred write
+   * carries is only what the server gives back, so a wider window loses nothing.
+   */
+  #janelaDaGravacao(): number {
+    return Math.min(Vault.JANELA_MAXIMA_DA_GRAVACAO_MS, Math.max(Vault.JANELA_DA_GRAVACAO_MS, Math.round(this.#ultimoJsonMs * 20)))
+  }
+
+  /** The current window of a deferred write, for the session's own batch timer. See `#janelaDaGravacao`. */
+  get janelaDaGravacao(): number {
+    return this.#janelaDaGravacao()
+  }
+
+  /** How long the last snapshot (the groups and the JSON of the whole vault) took. */
+  #ultimoJsonMs = 0
 
   /** There is a deferred write to do. */
   get gravacaoAdiada(): boolean {
@@ -3016,6 +3147,18 @@ export class Vault {
    * `confirmarProvisorio`) keep their own write and their own undo.
    */
   #gravarPartilhada(): Promise<void> {
+    /*
+      Synchronous now, and the write in flight is still sealing in the Worker:
+      it has not touched the disk, so this one does not wait for it. Whoever was
+      waiting rides this write, which takes their change too.
+    */
+    if (this.semFundo && this.#escritaEmVoo && this.#seladoNoFundo) {
+      const espera = this.#escritaEmEspera
+      this.#escritaEmEspera = null
+      const escrita = this.#arrancarEscrita()
+      if (espera) escrita.then(espera.resolver, espera.rejeitar)
+      return escrita
+    }
     if (this.#escritaEmEspera) return this.#escritaEmEspera.promessa
     const emVoo = this.#escritaEmVoo
     if (!emVoo) return this.#arrancarEscrita()
@@ -3035,17 +3178,17 @@ export class Vault {
    * `lock`, so a change already made is not lost because the key went away
    * while it waited: the snapshot is taken here, with the key still present.
    */
-  #soltarEscritaEmEspera(): void {
+  #soltarEscritaEmEspera(fundo = !this.semFundo): void {
     const espera = this.#escritaEmEspera
     if (!espera) return
     // Cleared BEFORE it starts: whoever arrives from here on changed what this snapshot will not see.
     this.#escritaEmEspera = null
-    this.#arrancarEscrita().then(espera.resolver, espera.rejeitar)
+    this.#arrancarEscrita(fundo).then(espera.resolver, espera.rejeitar)
   }
 
-  #arrancarEscrita(): Promise<void> {
+  #arrancarEscrita(fundo = !this.semFundo): Promise<void> {
     // `#persist` takes its snapshot synchronously, before its first `await`.
-    const escrita = this.#persist()
+    const escrita = this.#persist(fundo)
     this.#escritaEmVoo = escrita
     const largar = (): void => {
       if (this.#escritaEmVoo === escrita) this.#escritaEmVoo = null
@@ -3057,12 +3200,40 @@ export class Vault {
   #escritaEmVoo: Promise<void> | null = null
   #escritaEmEspera: { promessa: Promise<void>; resolver: () => void; rejeitar: (erro: unknown) => void } | null = null
 
-  async #persist(): Promise<void> {
+  /** The last write started, by number: a seal that comes back older than it does not write. */
+  #geracao = 0
+  #ultimaEscrita: Promise<void> = Promise.resolve()
+  /** The write in flight is still in the Worker, and has not touched the disk. */
+  #seladoNoFundo = false
+
+  /**
+   * The whole vault as JSON, timed for `#janelaDaGravacao` with what came
+   * before it in the same snapshot (the session's groups, `aoSerializar`): in a
+   * room of 400 the groups weigh as much as the JSON.
+   */
+  #json(contents: VaultContents): string {
+    const texto = JSON.stringify(contents)
+    this.#ultimoJsonMs = performance.now() - this.#inicioDoInstantaneo
+    return texto
+  }
+
+  #inicioDoInstantaneo = 0
+
+  #persist(fundo = false): Promise<void> {
+    const geracao = ++this.#geracao
+    const escrita = this.#persistir(geracao, fundo && this.#selador !== null)
+    this.#ultimaEscrita = escrita
+    return escrita
+  }
+
+  async #persistir(geracao: number, fundo: boolean): Promise<void> {
     if (!this.#key) throw new Error("vault is locked")
     // Temporary: memory is the vault, and disk holds the old account until
     // `confirmarProvisorio`. See `criarProvisorio`.
     if (this.#provisorio) return
     const nonce = crypto.getRandomValues(new Uint8Array(24))
+    // The snapshot's cost on this thread starts here: the session's groups go in, then the JSON.
+    this.#inicioDoInstantaneo = performance.now()
     this.aoSerializar?.(this.#contents)
     /*
       Synchronous until `backend.write`, on purpose, and it stays so. The tab handoff
@@ -3087,7 +3258,35 @@ export class Vault {
     }
     const envelope = JSON.stringify(inicio)
     const embrulha = this.#protection === "os" && this.#backend.wrapKey !== undefined
-    const selo = comecarSelo(() => JSON.stringify(contents), key, nonce, envelope, embrulha ? 0 : comprimentoDoFim(envelope))
+    const reserva = embrulha ? 0 : comprimentoDoFim(envelope)
+    let selo: SeloEmCurso
+    if (fundo && this.#selador) {
+      /*
+        The snapshot (the JSON) is taken here, now; the encoding, the cipher
+        and the base64 go to the sealer, with a COPY of the key (`lock` zeroes
+        ours). The file buffer comes back.
+      */
+      const porFazer: SeloPorFazer = { texto: this.#json(contents), envelope, reserva }
+      this.#seladoNoFundo = true
+      try {
+        selo = await this.#selador(porFazer, key.slice(), nonce)
+      } finally {
+        if (this.#geracao === geracao) this.#seladoNoFundo = false
+      }
+      /*
+        A newer write started while this one was sealing (a synchronous write,
+        a key change, a destroy). Its snapshot holds this one's changes, and the
+        disk must never go back to this older one: this write ends when the newer
+        one ends.
+      */
+      if (this.#geracao !== geracao) {
+        await this.#ultimaEscrita
+        return
+      }
+    } else {
+      this.#seladoNoFundo = false
+      selo = comecarSelo(() => this.#json(contents), key, nonce, envelope, reserva)
+    }
     const final =
       embrulha && this.#backend.wrapKey
         ? JSON.stringify({ ...inicio, wrappedKey: toBase64(await this.#backend.wrapKey(key)) } satisfies VaultFile)
@@ -3336,8 +3535,27 @@ export class Vault {
     // server restores (see `updateEmBreve`), and whoever was waiting for it does not
     // hang.
     this.#tirarAdiada()?.resolver()
-    // A write that waited for the one in flight takes its snapshot now, while there is a key.
-    this.#soltarEscritaEmEspera()
+    /*
+      A seal still in the Worker: write now, synchronously, with the key still
+      here, and let the old seal be overtaken. The desktop backend reads the
+      account folder at the call, and a seal that came back after the lock (and
+      an account switch) would land in the other account. Whoever waited rides
+      this write, which holds their change too.
+    */
+    if (this.#escritaEmVoo && this.#seladoNoFundo) {
+      const espera = this.#escritaEmEspera
+      this.#escritaEmEspera = null
+      const escrita = this.#persist(false)
+      this.#escritaEmVoo = escrita
+      escrita.then(
+        () => espera?.resolver(),
+        (erro) => espera?.rejeitar(erro),
+      )
+      escrita.catch(() => {})
+    }
+    // A write that waited for the one in flight takes its snapshot now, while there is a key,
+    // and writes synchronously: a seal that came back after the lock would land after it.
+    this.#soltarEscritaEmEspera(false)
     // Overwrite before dropping the reference. JS cannot guarantee the page was
     // not already copied, but leaving a live key in a long-running process is
     // strictly worse than trying.
@@ -3353,6 +3571,9 @@ export class Vault {
   /** Irreversibly discard the account. There is no server-side copy. */
   async destroy(): Promise<void> {
     this.lock()
+    // A seal still in the Worker is now older than the destroy: it must not bring the vault back.
+    this.#geracao++
+    this.#ultimaEscrita = Promise.resolve()
     // Memory first: if `clear` fails halfway, no key from a
     // vault that the person asked to delete stays behind.
     await this.#largarMemoria()
@@ -3585,8 +3806,8 @@ export function aplicarEstadoDeConta(
   },
 ): void {
   /*
-    The history comes next, from device to device, without asking (owner's
-    decision on 29/10/2026, "I want it out"): the mark tells the session to ask the
+    The history comes next, from device to device, without asking
+    (the requirement: "I want it out"): the mark tells the session to ask the
     sibling for it as soon as it enters the account channel. See `historico/historico.ts`.
   */
   contents.historico = { ...contents.historico, inicial: { desde: Date.now() } }

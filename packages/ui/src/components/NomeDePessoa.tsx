@@ -6,7 +6,7 @@ import { strings } from "../strings.js"
  *
  * A chosen name comes out as is. A name derived from the address (`nomeEmFalta`)
  * comes out in italics and in secondary color, with the title "From the address",
- * so no one reads it as a name the person chose. Owner order of November 4, 2026.
+ * so no one reads it as a name the person chose.
  *
  * Only the drawing changes: the text is the same, and so sentences, `aria-label`
  * and system notices continue to use `nameFor` directly.

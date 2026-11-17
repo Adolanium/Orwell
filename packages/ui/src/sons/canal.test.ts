@@ -17,8 +17,8 @@ import {
 import { CHAVE_DOS_SONS, PREFERENCIAS_DE_SOM_POR_OMISSAO, lerPreferenciasDeSom } from "./preferencias.js"
 
 /**
- * The sounds of messages in channels, and the mention (owner request, November 3,
- * 2026). Each rule with both sides: the case that mutes and the neighbor case that plays.
+ * The sounds of messages in channels, and the mention.
+ * Each rule with both sides: the case that mutes and the neighbor case that plays.
  */
 
 const EU = "@eu:casa.pt"
@@ -271,17 +271,15 @@ describe("os sons: o do canal e o da menção", () => {
     expect(SONS.canal.presenca).toBeGreaterThan(SONS.publicacao.presenca)
   })
 
-  it("o do canal não se confunde com o da directa nem com o de enviar: mais grave do que os dois", () => {
+  it("o do canal não se confunde com o da directa: mais grave", () => {
     expect(Math.max(...notasDe("canal"))).toBeLessThan(Math.min(...notasDe("directa")))
-    expect(Math.max(...notasDe("canal"))).toBeLessThan(Math.min(...notasDe("enviada")))
     expect(notasDe("canal")).not.toEqual(notasDe("directa"))
-    expect(notasDe("canal")).not.toEqual(notasDe("enviada"))
   })
 
   it("a menção tem três notas e a directa duas: ritmos diferentes", () => {
     expect(SONS.mencao.notas).toHaveLength(3)
     expect(SONS.directa.notas).toHaveLength(2)
-    // Since 3/11/2026 (owner request: more inspired by MSN) the mention goes up
+    // To be more inspired by MSN, the mention goes up
     // in three notes and the private message goes down in two: different directions too.
     const [a, b, c] = notasDe("mencao")
     expect(b).toBeGreaterThan(a ?? 0)

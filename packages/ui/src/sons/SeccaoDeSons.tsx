@@ -86,7 +86,7 @@ export function SeccaoDeSons({
                         mudar({ tipo: [tipo, event.target.checked] })
                         // Like the main switch: turning on responds with whichever sound was
                         // left on. Without this, turning on a type made no sound, and it
-                        // looked like it hadn't turned on (owner report, 4/11/2026).
+                        // looked like it hadn't turned on.
                         if (event.target.checked) motor.ouvir(tipo, volume)
                       }}
                     />

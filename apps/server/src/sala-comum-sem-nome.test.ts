@@ -56,6 +56,8 @@ async function conta(nome: string): Promise<Peer> {
   const session = new Session(vault)
   abertas.push(session)
   const identity = await session.createIdentity(`localhost:${PORT}`)
+  // Joining the common room is opt-in since 12/11/2026: these accounts ticked the box.
+  await session.escolherSalaComum(true)
   await session.connect()
   await session.updateProfile({ displayName: nome, donations: [] })
   await session.ensureCommonRoom()
@@ -74,12 +76,17 @@ async function until(predicate: () => boolean, label: string, timeoutMs = 30_000
 
 const nomeQueVe = (quem: Peer, de: Peer): unknown => quem.vault.contents.directory[de.address]?.payload["displayName"]
 
-/** The profile report frames that went out (all sessions in this process). */
+/** The profile report frames that went out (all sessions in this process), and who sent each, per request. */
 let respostasDePerfis = 0
+const quemRespondeu = new Map<string, Set<Session>>()
 const enviar = Session.prototype.send
 Session.prototype.send = function (this: Session, canal, payload) {
   const relatos = (payload as { relatos?: { q?: string } }).relatos
-  if (payload.t === "typing" && relatos?.q?.startsWith("pf.")) respostasDePerfis += 1
+  if (payload.t === "typing" && relatos?.q?.startsWith("pf.")) {
+    respostasDePerfis += 1
+    const pedido = relatos.q.slice(0, relatos.q.lastIndexOf(":"))
+    quemRespondeu.set(pedido, (quemRespondeu.get(pedido) ?? new Set()).add(this))
+  }
   return enviar.call(this, canal, payload)
 }
 
@@ -139,15 +146,23 @@ describe("os nomes na sala comum, para quem entra", () => {
     await new Promise((resolve) => setTimeout(resolve, 3_000))
 
     const antes = respostasDePerfis
+    quemRespondeu.clear()
     // Carla arrives with Bruno offline: nobody there would tell her his name.
     const carla = await conta("Carla")
     await until(() => nomeQueVe(carla, ana) === "Ana" && nomeQueVe(carla, marta) === "Marta", "a Carla sabe os nomes de quem está ligado")
-    await until(() => nomeQueVe(carla, bruno) === "Bruno", "a Carla sabe o nome do Bruno, desligado", 20_000)
+    // Since 1.3.9 the login request asks only for those online; an offline
+    // member's name is asked for when someone needs it (`pedirPerfisDe`). One
+    // request a minute per channel: it may wait for the login request's minute.
+    carla.session.pedirPerfisDe(COMUM, [bruno.address])
+    await until(() => nomeQueVe(carla, bruno) === "Bruno", "a Carla sabe o nome do Bruno, desligado", 90_000)
 
     // Two could answer (Ana and Marta), and one did: the other stayed quiet.
+    // Since 1.3.9 Carla may send two requests (the online names, then Bruno's):
+    // each one is answered by one member only.
     await new Promise((resolve) => setTimeout(resolve, 6_000))
-    expect(respostasDePerfis - antes).toBe(1)
-  }, 120_000)
+    expect(respostasDePerfis - antes).toBeGreaterThanOrEqual(1)
+    expect([...quemRespondeu.values()].every((quem) => quem.size === 1)).toBe(true)
+  }, 180_000)
 
   it("uma conta que já estava sem nome cura-se ao ligar outra vez", async () => {
     const ana = await conta("Ana")
@@ -165,6 +180,9 @@ describe("os nomes na sala comum, para quem entra", () => {
     await until(() => nomeQueVe(carla, ana) === "Ana", "a Carla sabe o nome da Ana, que voltou")
     carla.session.disconnect()
     await carla.session.connect()
-    await until(() => nomeQueVe(carla, bruno) === "Bruno", "a Carla sabe o nome do Bruno depois de ligar", 20_000)
-  }, 120_000)
+    // Bruno is offline: since 1.3.9 his name is asked for when someone needs it.
+    await until(() => carla.session.connection === "online", "a Carla liga")
+    carla.session.pedirPerfisDe(COMUM, [bruno.address])
+    await until(() => nomeQueVe(carla, bruno) === "Bruno", "a Carla sabe o nome do Bruno depois de ligar", 90_000)
+  }, 180_000)
 })

@@ -2,7 +2,7 @@
  * The 1.3.7 proof, reduced motion: with `reducedMotion: "reduce"`, the three
  * continuous animations (the aurora, the pulse of a voice room with people in
  * it and the ring pulse of whoever is on a call) stay in
- * `document.getAnimations()`, slower. The owner's rule: nothing stops, it just
+ * `document.getAnimations()`, slower. The rule: nothing stops, it just
  * moves slower.
  *
  *   node scripts/prova-1.3.7-movimento.mjs chromium|firefox|webkit   (needs `npm run build` first)

@@ -3,9 +3,9 @@ import { renderizar, TIPOS_DE_SOM, type CriarContextoOffline, type TipoDeSom } f
 import { criarMotor, criarSaidaWebAudio, estadoDoAparelho, type Motivo } from "./motor.js"
 
 /**
- * All 27 sounds play for real, through the app's path (4/11/2026).
+ * All 26 sounds play for real (27 until 16/11/2026, when the send sound left), through the app's path (4/11/2026).
  *
- * Owner report in 1.3.0: "Sounds are not turning on. All of them. I hear
+ * The bug in 1.3.0: "Sounds are not turning on. All of them. I hear
  * nothing. Only private messages." This test walks through each type with the
  * real engine (`criarMotor`, with rules), real output (`criarSaidaWebAudio`),
  * and real synthesis (`renderizar` and `montarSom`), reading preferences from
@@ -42,7 +42,6 @@ const SONS_DA_111 = {
     "tudo-ligado": true,
     "amigo-online": true,
     "sala-afk": true,
-    enviada: true,
   },
   vibrar: true,
   chamadaComOcupado: true,
@@ -148,9 +147,9 @@ beforeEach(() => {
 })
 afterEach(() => localStorage.clear())
 
-describe("os 27 sons tocam pelo motor real, com as preferências de uma 1.1.1", () => {
-  it("são 27", () => {
-    expect(TIPOS_DE_SOM).toHaveLength(27)
+describe("os 26 sons tocam pelo motor real, com as preferências de uma 1.1.1", () => {
+  it("são 26", () => {
+    expect(TIPOS_DE_SOM).toHaveLength(26)
   })
 
   for (const tipo of TIPOS_DE_SOM) {

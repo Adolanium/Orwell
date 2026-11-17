@@ -40,13 +40,28 @@ export function useHistoricoDosIrmaos(): HistoricoDosIrmaos | null {
  * the reason and what happens next, with a button to close it. Closed, it stays
  * closed for this reason until the reason changes.
  */
-export function BarraDoHistorico({ estado }: { estado: HistoricoDosIrmaos | null }): React.JSX.Element | null {
+export function BarraDoHistorico({
+  estado,
+  noTopo = false,
+}: {
+  estado: HistoricoDosIrmaos | null
+  /**
+   * In the channel's top bar, next to the name and image (wide screen
+   * 12/11/2026): one line, the text and the progress, and nothing pushed down in
+   * the conversation. On the phone it stays its own bar, as before.
+   */
+  noTopo?: boolean
+}): React.JSX.Element | null {
   const [fechada, setFechada] = useState<string | null>(null)
   const aviso = avisoDoHistorico(estado)
   if (aviso) {
     if (fechada === aviso) return null
     return (
-      <div className="barra-sincronia barra-historico barra-historico-aviso" role="status" aria-live="polite">
+      <div
+        className={noTopo ? "barra-historico-no-topo barra-historico-aviso" : "barra-sincronia barra-historico barra-historico-aviso"}
+        role="status"
+        aria-live="polite"
+      >
         <span className="barra-sincronia-texto">{aviso}</span>
         <button type="button" className="barra-historico-fechar" aria-label={strings.sincronia.historicoFechar} onClick={() => setFechada(aviso)}>
           ×
@@ -62,7 +77,7 @@ export function BarraDoHistorico({ estado }: { estado: HistoricoDosIrmaos | null
     ? strings.sincronia.historico(estado.feitas, estado.total)
     : strings.sincronia.historicoMedia(media?.feitas ?? 0, media?.total ?? 0)
   return (
-    <div className="barra-sincronia barra-historico" role="status" aria-live="polite">
+    <div className={noTopo ? "barra-historico-no-topo" : "barra-sincronia barra-historico"} role="status" aria-live="polite">
       <span className="barra-sincronia-texto">{texto}</span>
       <progress
         className="barra-sincronia-progresso"
@@ -81,4 +96,37 @@ export function avisoDoHistorico(estado: HistoricoDosIrmaos | null): string | nu
   const perdidas = estado.perdidas ?? 0
   if (perdidas === 0) return null
   return estado.razao === "irmao-calado" ? strings.sincronia.historicoParado(perdidas) : strings.sincronia.historicoPerdidas(perdidas)
+}
+
+/**
+ * "Keep this device on": on THIS device, while it sends the
+ * history to a device that just paired. The title, the approved line, and the
+ * progress. No button: it closes when the new device has everything, or stops
+ * asking (the core's `envioCaladoMs`). The photo count joins the line when the
+ * new device asks for the media list, after the text.
+ */
+export function AvisoDoEnvio({ estado }: { estado: HistoricoDosIrmaos | null }): React.JSX.Element | null {
+  const envio = estado?.envio
+  if (!envio) return null
+  const { mensagens, fotografias } = envio
+  const texto = strings.sincronia.envioProgresso(
+    mensagens.feitas,
+    mensagens.total,
+    fotografias?.feitas ?? 0,
+    fotografias ? fotografias.total : null,
+  )
+  const nasMensagens = mensagens.feitas < mensagens.total || fotografias === null
+  return (
+    <div className="barra-sincronia barra-envio" role="status" aria-live="polite">
+      <strong className="barra-envio-titulo">{strings.sincronia.envioTitulo}</strong>
+      <span className="barra-sincronia-texto">{strings.sincronia.envioCorpo}</span>
+      <span className="barra-sincronia-texto barra-envio-progresso">{texto}</span>
+      <progress
+        className="barra-sincronia-progresso"
+        max={nasMensagens ? Math.max(1, mensagens.total) : Math.max(1, fotografias?.total ?? 1)}
+        value={nasMensagens ? mensagens.feitas : (fotografias?.feitas ?? 0)}
+        aria-label={texto}
+      />
+    </div>
+  )
 }

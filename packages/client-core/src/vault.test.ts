@@ -15,6 +15,7 @@ import {
   mergeOlderHistory,
   noteDeviceManifest,
   REPAIR_COOLDOWN_MS,
+  ASSENTO_PROPRIO_MS,
   entradasDoCanal,
   faltaMediaDaEntrada,
   newVaultContents,
@@ -1203,6 +1204,18 @@ describe("travão da reparação", () => {
     expect(mayRepair(attempts, "@ana:s", MURAL_ME, now + REPAIR_COOLDOWN_MS)).toBe(true)
     // One pair is not blocked by another.
     expect(mayRepair(attempts, "@rui:s", MURAL_ME, now)).toBe(true)
+  })
+})
+
+describe("travão de assentar um aparelho da própria conta (12/11/2026)", () => {
+  it("volta a tentar em minutos, não em seis horas: um telemóvel sem lugar num canal não vê nem envia lá", () => {
+    const now = 1_000_000_000
+    const chave = `${MURAL_ME}|aparelho`
+    const attempts = { [`@ana:s|${chave}`]: now - 60_000 }
+    expect(mayRepair(attempts, "@ana:s", chave, now, ASSENTO_PROPRIO_MS)).toBe(false)
+    expect(mayRepair(attempts, "@ana:s", chave, now - 60_000 + ASSENTO_PROPRIO_MS)).toBe(false)
+    expect(mayRepair(attempts, "@ana:s", chave, now - 60_000 + ASSENTO_PROPRIO_MS, ASSENTO_PROPRIO_MS)).toBe(true)
+    expect(ASSENTO_PROPRIO_MS).toBeLessThanOrEqual(10 * 60_000)
   })
 })
 
