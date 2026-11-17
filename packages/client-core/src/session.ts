@@ -17602,7 +17602,15 @@ What was left behind:
     // And with a hole already open too: a readable live frame says nothing about
     // what stayed between the anchor and it. Only a recovery, which reads everything in
     // order, can move the anchor past a hole.
-    return this.#recuperacoesPorFazer.has(channel) || this.#recuperacoes.has(channel) || this.#buracos.has(channel)
+    // And between two passes of a long recovery (`#continuarRecuperacao`): the gate is
+    // open there, and a live frame that moved the anchor made the next pass start after
+    // it, over everything still unread (review of 1.3.18: 273 of 1 000 messages).
+    return (
+      this.#recuperacoesPorFazer.has(channel) ||
+      this.#recuperacoes.has(channel) ||
+      this.#continuacoes.has(channel) ||
+      this.#buracos.has(channel)
+    )
   }
 
   /**

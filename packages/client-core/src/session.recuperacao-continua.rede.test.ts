@@ -24,6 +24,7 @@ let servidor: ServidorDeTeste
 const abertas: ContaDeTeste[] = []
 const paginas = Session.PAGINAS_POR_PASSAGEM
 const eventos = Session.EVENTOS_POR_PAGINA
+const pausa = Session.PAUSA_ENTRE_PASSAGENS_MS
 
 beforeEach(async () => {
   servidor = await levantarServidor()
@@ -32,6 +33,7 @@ beforeEach(async () => {
 afterEach(async () => {
   Session.PAGINAS_POR_PASSAGEM = paginas
   Session.EVENTOS_POR_PAGINA = eventos
+  Session.PAUSA_ENTRE_PASSAGENS_MS = pausa
   desligarContas(abertas.splice(0))
   await servidor?.fechar()
 })
@@ -55,5 +57,38 @@ describe("recuperação em várias passagens", () => {
       (bruno!.vault.contents.history[canal] ?? []).map((m) => String((m.payload as { body?: unknown }).body ?? "")).filter((t) => t.startsWith("atrasada-"))
     await ate(() => textos().length === N, "o Bruno lê as 30 na mesma ligação", 30_000)
     expect(new Set(textos()).size).toBe(N)
+  }, 90_000)
+
+  /*
+    Between two passes the gate is open, and a live frame used to move the
+    anchor over everything the next pass had still to read: that pass started
+    after the live frame, and what lay between was never asked for again. In
+    session.conversa-longa.rede, three live frames in the 2 s pause put the
+    anchor from 8 006 to 11 012, and 273 of the 1 000 messages never came.
+  */
+  it("uma mensagem ao vivo entre duas passagens não faz saltar o que falta ler", async () => {
+    const [ana, bruno, carla] = await contasDeTeste(servidor, ["Ana", "Bruno", "Carla"])
+    abertas.push(ana!, bruno!, carla!)
+    const canal = await canalComTodos(servidor, ana!, [bruno!, carla!])
+    await new Promise((resolve) => setTimeout(resolve, 2_000))
+    bruno!.session.disconnect()
+    const N = 30
+    for (let i = 0; i < N; i++) {
+      await ana!.session.send(canal, { t: "message", id: `m-atrasada-${i}`, sentAt: Date.now(), body: `atrasada-${i}`, attachments: [], mentions: [], links: [] })
+    }
+    // Ana leaves: nobody can hand Bruno what his recovery skips, only the server's backlog.
+    ana!.session.disconnect()
+    // One pass reads 2 pages of 5, and the next one waits long enough for a live message to land between them.
+    Session.PAGINAS_POR_PASSAGEM = 2
+    Session.EVENTOS_POR_PAGINA = 5
+    Session.PAUSA_ENTRE_PASSAGENS_MS = 3_000
+    const textos = (): string[] =>
+      (bruno!.vault.contents.history[canal] ?? []).map((m) => String((m.payload as { body?: unknown }).body ?? "")).filter((t) => t.startsWith("atrasada-") || t === "ao-vivo")
+    await bruno!.session.connect()
+    await ate(() => textos().length > 0, "a primeira passagem do Bruno", 30_000, 20)
+    await carla!.session.send(canal, { t: "message", id: "m-ao-vivo", sentAt: Date.now(), body: "ao-vivo", attachments: [], mentions: [], links: [] })
+    await ate(() => textos().includes("ao-vivo"), "a mensagem ao vivo chega", 30_000)
+    await ate(() => textos().length === N + 1, "o Bruno lê as 30 e a de agora", 30_000)
+    expect(new Set(textos()).size).toBe(N + 1)
   }, 90_000)
 })

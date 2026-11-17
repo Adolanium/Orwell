@@ -1,5 +1,16 @@
 [
   {
+    "versao": "1.3.18",
+    "nome": "Carmelo",
+    "data": "2026-11-17",
+    "itens": [
+      {
+        "tipo": "fix",
+        "texto": "Messages that arrived while a long catch-up was paused are no longer skipped."
+      }
+    ]
+  },
+  {
     "versao": "1.3.17",
     "nome": "Carmelo",
     "data": "2026-11-17",
