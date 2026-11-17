@@ -677,6 +677,12 @@ try {
   const redeC = []
   const ctxC = await browser.newContext(CONTEXTO)
   escutar(ctxC, redeC)
+  // The invite link carries no `?lingua=`, and since 1.3.9 the app opens in
+  // English until someone chooses. The 1.3.16 front end also drops the query on
+  // its way from `/app/c` to `/app/`, so the choice goes in as a saved one.
+  await ctxC.addInitScript(() => {
+    try { localStorage.setItem("enclave.lingua", "pt") } catch { /* about:blank has no storage */ }
+  })
   const c = await ctxC.newPage()
   // The short link `/c#…` is redirected by Caddy to `/app/c` (the fragment stays
   // in the browser); this script's front end doesn't have that redirect.

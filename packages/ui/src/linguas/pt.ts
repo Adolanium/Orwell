@@ -3765,6 +3765,8 @@ export const pt = {
     /* Joined to the sentence above when the room is a voice room. Leaving this
        to chance would pull the floor from whoever is talking, with no warning at all. */
     removeVoiceNote: "Quem estiver na chamada dessa sala sai dela.",
+    /* Joined to the sentence above for any text room (17/11/2026): deleting a room deletes its polls. */
+    removePollsNote: "As votações dela são eliminadas para todos.",
     removed: (nome: string): string => `"${nome}" eliminada. O que lá foi dito lê-se na sala por omissão.`,
     /*
       Closing does not ask: it is reversible, and confirming the reversible

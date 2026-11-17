@@ -69,6 +69,10 @@ const sessao: SessaoDeCanais = {
     feito.push(`closedRoomsOf:${channel}`)
     return [sala("fechada")]
   },
+  removedRoomsOf: (channel) => {
+    feito.push(`removedRoomsOf:${channel}`)
+    return ["apagada"]
+  },
   categoriesOf: (channel) => {
     feito.push(`categoriesOf:${channel}`)
     return [{ category: "geral", position: 0, roles: [] }]
@@ -361,6 +365,7 @@ async function medir(janela: BrowserWindow): Promise<Prova[]> {
     const esperadas = ${JSON.stringify([
       "rooms",
       "closedRooms",
+      "removedRooms",
       "categories",
       "setRoom",
       "setCategory",
@@ -413,6 +418,7 @@ async function medir(janela: BrowserWindow): Promise<Prova[]> {
       ["closedRooms", () => canais.closedRooms(CANAL), [
         { room: "fechada", name: "Sala fechada", category: "geral", kind: "text", position: 1 },
       ]],
+      ["removedRooms", () => canais.removedRooms(CANAL), ["apagada"]],
       ["categories", () => canais.categories(CANAL), [{ category: "geral", position: 0, roles: [] }]],
       ["meta", () => canais.meta(CANAL), { name: "O Canal", updatedAt: 7 }],
       ["mayEdit", () => canais.mayEdit(CANAL), true],

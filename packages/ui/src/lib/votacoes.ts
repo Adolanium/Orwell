@@ -199,3 +199,24 @@ export function fechosDe(
   }
   return fechos
 }
+
+/**
+ * The messages without the polls of deleted rooms (17/11/2026).
+ *
+ * Deleting a room deletes its polls, for everyone, like a deleted channel takes
+ * what was said in it. The other messages of a deleted room still read in the
+ * default room; a poll does not, or its card would come back there with the
+ * votes. `apagadas` comes from the room tombstones in the core
+ * (`removedRoomsOf`), which nothing older overwrites, so a backfill or an old
+ * client republishing the room cannot bring them back.
+ */
+export function semVotacoesDeSalasApagadas<M extends { payload: ChatMessage["payload"] }>(
+  messages: readonly M[],
+  apagadas: ReadonlySet<string>,
+): M[] {
+  if (apagadas.size === 0) return messages as M[]
+  return messages.filter((message) => {
+    const sala = (message.payload as { room?: string }).room ?? ""
+    return !(sala !== "" && apagadas.has(sala) && votacaoDe(message.payload) !== null)
+  })
+}

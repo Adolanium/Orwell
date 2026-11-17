@@ -98,6 +98,8 @@ beforeEach(() => {
 })
 
 const emitir: { current: ((mensagem: unknown) => void) | null } = { current: null }
+/** The bridge's typing subscription: who is typing reaches the screen through here. */
+const aEscrever: { current: ((sinal: unknown) => void) | null } = { current: null }
 
 function ponte(ligar: { current: ((estado: unknown) => void) | null }): EnclaveBridge {
   const fichas: Record<string, FichaDoCanal> = Object.fromEntries(CANAIS.map((c) => [c, { tipo: "sala" }]))
@@ -179,7 +181,10 @@ function ponte(ligar: { current: ((estado: unknown) => void) | null }): EnclaveB
       },
       channels: () => () => {},
       presence: () => () => {},
-      typing: () => () => {},
+      typing: (handler: (sinal: unknown) => void) => {
+        aEscrever.current = handler
+        return () => {}
+      },
       buzz: () => () => {},
       callActivity: () => () => {},
     },
@@ -258,6 +263,33 @@ describe("escrever numa conta grande", { timeout: 60_000 }, () => {
     )
 
     expect(caixa().value).toBe(frase)
+    expect(renders).toEqual({ sidebar: 0, membros: 0, conversa: 0 })
+  })
+
+  /*
+    "Who is typing" (1.3.16.1): it rode along with the scroll. It
+    lived inside the conversation's scroller, and each signal re-rendered the
+    whole chat screen, conversation included. Now it is a strip held by the
+    composer, with its height always reserved, and a signal only draws there.
+  */
+  it("alguém a escrever aparece na faixa da caixa, fora da conversa, e não volta a desenhar a conversa", async () => {
+    await abrir()
+    const faixa = document.querySelector(".chat-composer .chat-a-escrever")
+    // Reserved before anyone types: the strip is there, empty.
+    expect(faixa).not.toBeNull()
+    expect(faixa!.textContent).toBe("")
+    renders.sidebar = 0
+    renders.membros = 0
+    renders.conversa = 0
+    await act(async () => {
+      aEscrever.current?.({ channel: CANAIS[0], room: "", from: MEMBROS[3], until: Date.now() + 6_000 })
+      await Promise.resolve()
+    })
+    const nome = `${NOMES[2 % NOMES.length]} 2`
+    expect(faixa!.textContent).toContain(strings.chat.typing([nome]))
+    // The same node: the strip changes its text, it is not born or removed.
+    expect(document.querySelector(".chat-composer .chat-a-escrever")).toBe(faixa)
+    expect(document.querySelector(".timeline .chat-a-escrever, .timeline .timeline-typing")).toBeNull()
     expect(renders).toEqual({ sidebar: 0, membros: 0, conversa: 0 })
   })
 
@@ -405,6 +437,89 @@ describe("escrever numa conta grande", { timeout: 60_000 }, () => {
       expect(screen.getAllByText("antes de esconder")).toHaveLength(1)
     } finally {
       globalThis.requestAnimationFrame = original
+      delete (document as unknown as Record<string, unknown>).visibilityState
+      if (descritor) Object.defineProperty(Document.prototype, "visibilityState", descritor)
+    }
+  })
+
+  /*
+    1.3.16.1: a window covered by another, in another Space or minimized has no
+    frames, and Safari can keep it "visible". The batch waited for a frame that
+    never came: no line, no unread counter, no title, until the window showed
+    again. Without a frame the batch enters by a short deadline, and once the
+    frames are known to be stopped, the next message enters in its own handler,
+    with no timer (Safari throttles those too).
+  */
+  it("sem quadros e com a página visível, o lote entra na mesma, e a mensagem seguinte entra sem temporizador", async () => {
+    const quadros: FrameRequestCallback[] = []
+    const original = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = (f: FrameRequestCallback) => (quadros.push(f), quadros.length)
+    try {
+      await abrir({ lotePorQuadro: true })
+      await act(async () => {
+        emitir.current?.({
+          channel: CANAIS[0],
+          sender: MEMBROS[3],
+          seq: 40_000,
+          payload: { t: "message", id: "sem-quadro-1", sentAt: QUANDO + 700_000, body: "sem quadro um" },
+        })
+        // Longer than the deadline, and no frame ever runs.
+        await new Promise((r) => setTimeout(r, 250))
+      })
+      expect(screen.getByText("sem quadro um")).toBeTruthy()
+
+      // The frames are known to be stopped: the next one enters with only microtasks, no timer.
+      const temporizador = vi.spyOn(globalThis, "setTimeout")
+      try {
+        await act(async () => {
+          emitir.current?.({
+            channel: CANAIS[0],
+            sender: MEMBROS[3],
+            seq: 40_001,
+            payload: { t: "message", id: "sem-quadro-2", sentAt: QUANDO + 700_001, body: "sem quadro dois" },
+          })
+          await Promise.resolve()
+        })
+      } finally {
+        temporizador.mockRestore()
+      }
+      expect(screen.getByText("sem quadro dois")).toBeTruthy()
+
+      // The frames that finally run add nothing twice.
+      await act(async () => {
+        for (const f of quadros.splice(0)) f(performance.now())
+        await Promise.resolve()
+      })
+      expect(screen.getAllByText("sem quadro um")).toHaveLength(1)
+      expect(screen.getAllByText("sem quadro dois")).toHaveLength(1)
+    } finally {
+      globalThis.requestAnimationFrame = original
+    }
+  })
+
+  /*
+    A hidden page: Safari throttles a zero timer in a background tab to a second
+    or more, and the batch, with the unread counters and the title, waited for it.
+    Hidden, the batch enters in the handler's own task.
+  */
+  it("com a página escondida, a mensagem entra sem esperar por temporizador", async () => {
+    let visibilidade: DocumentVisibilityState = "visible"
+    const descritor = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState")
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibilidade })
+    try {
+      await abrir({ lotePorQuadro: true })
+      visibilidade = "hidden"
+      await act(async () => {
+        emitir.current?.({
+          channel: CANAIS[0],
+          sender: MEMBROS[3],
+          seq: 41_000,
+          payload: { t: "message", id: "escondida-1", sentAt: QUANDO + 800_000, body: "com a página escondida" },
+        })
+        await Promise.resolve()
+      })
+      expect(screen.getByText("com a página escondida")).toBeTruthy()
+    } finally {
       delete (document as unknown as Record<string, unknown>).visibilityState
       if (descritor) Object.defineProperty(Document.prototype, "visibilityState", descritor)
     }

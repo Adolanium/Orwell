@@ -90,7 +90,6 @@ function desenho(): string {
           podeMenuAlheio
           nameFor={(quem) => (quem === EU ? "Eu" : "Outra Pessoa Com Um Nome Comprido")}
           directory={new Map<string, Profile>()}
-          typists={["Outra Pessoa Com Um Nome Comprido", "Mais Alguém"]}
           fixadas={new Set(["m3"])}
         />
       </div>

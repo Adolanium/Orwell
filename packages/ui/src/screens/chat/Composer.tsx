@@ -139,6 +139,7 @@ export function Composer({
   resposta = null,
   onAlternarMencao,
   onCancelarResposta,
+  faixa,
 }: {
   connection: ConnectionState
   value: string
@@ -150,6 +151,12 @@ export function Composer({
    * nothing.
    */
   onTyping?: (() => void) | undefined
+  /**
+   * A strip drawn at the top of the form, above the box: "who is typing"
+   * (`QuemEscreve`). Inside the form so it scrolls with nothing and its
+   * height is part of the composer's, reserved.
+   */
+  faixa?: React.ReactNode
   /**
    * Who can be mentioned here, with their name already resolved.
    *
@@ -647,6 +654,7 @@ export function Composer({
           limpar()
         }}
       >
+        {faixa}
         {/* The reply announcement, always built: a live region that starts
             with text is not read by all screen readers. Polished: it says who
             is being replied to and how to cancel, once. */}

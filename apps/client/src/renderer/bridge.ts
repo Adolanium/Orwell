@@ -104,6 +104,7 @@ interface CanaisDoAnfitriao {
   // ------------------------------------------------------- as leituras
   rooms?: (channel: string) => Resposta<Salas>
   closedRooms?: (channel: string) => Resposta<Salas>
+  removedRooms?: (channel: string) => Resposta<string[]>
   categories?: (channel: string) => Resposta<Categorias>
   meta?: (channel: string) => Resposta<Propriedades>
   fichas?: () => Resposta<Fichas>
@@ -443,6 +444,9 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
        ------------------------------------------------------------------ */
     ...(canais.closedRooms
       ? { closedRooms: (channel: string) => ler("closedRooms", [channel], () => canais.closedRooms!(channel), []) }
+      : {}),
+    ...(canais.removedRooms
+      ? { removedRooms: (channel: string) => ler("removedRooms", [channel], () => canais.removedRooms!(channel), []) }
       : {}),
     ...(canais.categories
       ? { categories: (channel: string) => ler("categories", [channel], () => canais.categories!(channel), []) }

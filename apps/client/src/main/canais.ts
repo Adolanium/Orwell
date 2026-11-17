@@ -75,6 +75,7 @@ export const CANAIS_DE_CANAL = {
 export const LEITURAS_DE_CANAL = {
   salas: "channel:rooms",
   salasFechadas: "channel:closed-rooms",
+  salasApagadas: "channel:removed-rooms",
   categorias: "channel:categories",
   propriedades: "channel:meta",
   podeOrganizar: "channel:may-edit",
@@ -156,6 +157,7 @@ export interface SessaoDeCanais {
   // ------------------------------------------------------------ as leituras
   roomsOf(channel: string): SalaDoNucleo[]
   closedRoomsOf(channel: string): SalaDoNucleo[]
+  removedRoomsOf(channel: string): string[]
   categoriesOf(channel: string): { category: string; position: number; roles: string[]; updatedAt?: number }[]
   categoryTombstonesOf(channel: string): { category: string; position: number; roles: string[]; updatedAt: number; removed: true }[]
   spaceMeta(channel: string): { name: string; topic?: string; icon?: string; iconRef?: string; iconMini?: string; updatedAt: number } | null
@@ -309,6 +311,7 @@ export function ligarCanais({ registarPedido, registarLeitura, sessao }: PortasD
   // ------------------------------------------------------------- as salas
   leitura(LEITURAS_DE_CANAL.salas, (channel: string) => sessao.roomsOf(channel))
   leitura(LEITURAS_DE_CANAL.salasFechadas, (channel: string) => sessao.closedRoomsOf(channel))
+  leitura(LEITURAS_DE_CANAL.salasApagadas, (channel: string) => sessao.removedRoomsOf(channel))
   // The live ones and the tombstones: the UI needs both. See `categoryTombstonesOf` in the core.
   leitura(LEITURAS_DE_CANAL.categorias, (channel: string) => [...sessao.categoriesOf(channel), ...sessao.categoryTombstonesOf(channel)])
 

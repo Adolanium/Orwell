@@ -138,6 +138,13 @@ html {
     animation-duration: var(--vida-do-aviso, 2000ms) !important;
   }
 
+  /* And the "who is typing" dots (1.3.16.1): with reduced motion they pulse at
+     half the speed, never stop. Opacity only, nothing moves in space. */
+  .typing-dots i {
+    animation-duration: 2.4s !important;
+    animation-iteration-count: infinite !important;
+  }
+
   /* And the bell window: appears fading (`notif-esvanece`, in `screens.css`),
      slower, instead of rising. Opacity only. */
   .sheet.notif-janela {

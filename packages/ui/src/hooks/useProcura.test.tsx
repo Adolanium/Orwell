@@ -254,3 +254,21 @@ describe("useProcura", () => {
     expect(result.current.aLer).toBe(false)
   })
 })
+
+/** Deleting a room deletes its polls (17/11/2026): search does not find them, and still finds the room's text. */
+describe("useProcura e as salas eliminadas", () => {
+  it("a votação de uma sala eliminada não se encontra; o texto dessa sala, sim", async () => {
+    const votacao = { question: "Jantar na sexta?", options: ["Sim", "Não"] }
+    const ponte = ponteCom({
+      [CANAL]: [
+        guardada(1, "Jantar na sexta?", { room: "forum-votos", poll: votacao }),
+        guardada(2, "jantar marcado no lagar", { room: "forum-votos" }),
+      ],
+    })
+    const apagadas = new Set(["forum-votos"])
+    const { result } = renderHook(() => useProcura(ponte, CANAL, true, SEM_MENSAGENS, undefined, apagadas))
+    await waitFor(() => expect(result.current.procuradas).toBe(1))
+    act(() => result.current.definirTermo("jantar"))
+    expect(result.current.resultados.map((achado) => achado.id)).toEqual(["id-2"])
+  })
+})

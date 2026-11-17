@@ -243,6 +243,7 @@ contextBridge.exposeInMainWorld("enclaveHost", {
     // The rooms, which is the complaint this came from.
     rooms: (channel: string) => ler(LEITURAS_DE_CANAL.salas, channel),
     closedRooms: (channel: string) => ler(LEITURAS_DE_CANAL.salasFechadas, channel),
+    removedRooms: (channel: string) => ler(LEITURAS_DE_CANAL.salasApagadas, channel),
     categories: (channel: string) => ler(LEITURAS_DE_CANAL.categorias, channel),
     setRoom: (channel: string, next: unknown) => ipcRenderer.invoke(CANAIS_DE_CANAL.criarSala, channel, next),
     setCategory: (channel: string, next: unknown) =>

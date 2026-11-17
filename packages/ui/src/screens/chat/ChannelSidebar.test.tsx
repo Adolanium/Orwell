@@ -1489,29 +1489,44 @@ describe("ChannelSidebar — as marcas da chamada nas salas de voz (12/11/2026)"
 })
 
 
-describe("a entrada «Votações» da barra da comunidade", () => {
-  it("é a primeira linha da árvore de salas, visível sem clique direito, e abre a página do canal", async () => {
-    const onVotacoes = vi.fn()
-    const { container } = render(povoada({ onVotacoes }))
-    const botao = screen.getByRole("button", { name: new RegExp(strings.paginaVotacoes.menu) })
-    expect(container.querySelector(".room-tree .room")).toBe(botao)
-    expect(botao.querySelector("svg")).toBeTruthy()
-    await userEvent.click(botao)
-    expect(onVotacoes).toHaveBeenCalledWith("!geral:s")
-  })
+/**
+ * The polls room is a room (17/11/2026).
+ *
+ * Until 1.3.16 the tree opened with a fixed "Polls" row that had no room record
+ * behind it: it could not be dragged, renamed, deleted or given permissions, and
+ * the owner read it as a room that refused every gesture. The row is gone; a
+ * polls room (`layout: "polls"`) is a room row like any other. The host that
+ * still passes the old `onVotacoes` (1.3.16) must not bring the row back.
+ */
+describe("a sala de votações é uma sala como as outras", () => {
+  const comVotacoes = (): RoomGroup[] => [
+    ...arvore(),
+    { category: "Votos", rooms: [sala({ room: "pv", name: "polls", category: "Votos", layout: "polls" })] },
+  ]
 
-  it("um canal só com a sala por omissão, aberto, também a mostra", () => {
-    render(
-      povoada({
-        onVotacoes: vi.fn(),
-        roomGroups: [{ category: "", rooms: [sala({ room: "", name: "geral", position: -1 })] }],
-      }),
+  it("não há linha fixa de votações: cada linha da árvore arrasta-se e tem o menu da sala", () => {
+    const onRoomMenu = vi.fn()
+    const antigo = { onVotacoes: noop } as object
+    const { container } = render(povoada({ roomGroups: comVotacoes(), onReorderRoom: noop, onRoomMenu, ...antigo }))
+    expect(container.querySelector(".room-votacoes")).toBeNull()
+    const fixas = [...container.querySelectorAll(".room-tree .room-row")].filter(
+      (linha) => !linha.querySelector(".room-new") && linha.getAttribute("draggable") !== "true",
     )
-    expect(screen.getByRole("button", { name: new RegExp(strings.paginaVotacoes.menu) })).toBeTruthy()
+    expect(fixas.map((linha) => linha.textContent)).toEqual([])
+    const polls = [...container.querySelectorAll(".room-row")].find((linha) => linha.textContent?.includes("polls")) as HTMLElement
+    expect(polls.getAttribute("draggable")).toBe("true")
+    fireEvent.contextMenu(polls)
+    expect(onRoomMenu).toHaveBeenCalledWith("pv", expect.anything())
   })
 
-  it("sem o anfitrião a saber abrir votações, a linha não aparece", () => {
-    render(povoada())
-    expect(screen.queryByRole("button", { name: new RegExp(strings.paginaVotacoes.menu) })).toBeNull()
+  it("a sala de votações larga-se antes de outra sala, noutra categoria, como as outras", () => {
+    const onReorderRoom = vi.fn()
+    const { container } = render(povoada({ roomGroups: comVotacoes(), onReorderRoom }))
+    const linha = (nome: string): HTMLElement =>
+      [...container.querySelectorAll(".room-row")].find((r) => r.textContent?.includes(nome)) as HTMLElement
+    fireEvent.dragStart(linha("polls"), { dataTransfer: { setData: noop } })
+    fireEvent.dragOver(linha("avisos"))
+    fireEvent.drop(linha("avisos"))
+    expect(onReorderRoom).toHaveBeenCalledWith("pv", { antesDe: "r1" })
   })
 })

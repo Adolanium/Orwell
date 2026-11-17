@@ -1,5 +1,36 @@
 [
   {
+    "versao": "1.3.17",
+    "nome": "Carmelo",
+    "data": "2026-11-17",
+    "itens": [
+      {
+        "tipo": "fix",
+        "texto": "The \"+X people on this server\" list no longer stacks its rows."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Mention highlights keep their background on hover and after a tap, and no longer flash."
+      },
+      {
+        "tipo": "fix",
+        "texto": "The emoji picker uses our own emoji font, so flags and newer emoji show on Windows, and its card is opaque."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Live messages and unread counters arrive while the Safari window is covered or in the background."
+      },
+      {
+        "tipo": "fix",
+        "texto": "\"is typing\" sits above the message box and no longer moves the conversation."
+      },
+      {
+        "tipo": "fix",
+        "texto": "The polls room is a normal room: you can drag, rename and delete it, and deleting it deletes its polls."
+      }
+    ]
+  },
+  {
     "versao": "1.3.16",
     "nome": "Carmelo",
     "data": "2026-11-17",

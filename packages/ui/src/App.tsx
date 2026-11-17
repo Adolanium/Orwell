@@ -66,7 +66,7 @@ import type { Achado } from "./lib/procura.js"
 import { NOME_POR_OMISSAO, nomeDaSala, useRooms } from "./hooks/useRooms.js"
 import { useSpaceMeta } from "./hooks/useSpaceMeta.js"
 import { countUnreads, useUnreads } from "./hooks/useUnreads.js"
-import { apurar, corpoDaVotacao, fechosDe, votacaoDe, votosDe, type Apuramento, type Votacao } from "./lib/votacoes.js"
+import { apurar, corpoDaVotacao, fechosDe, semVotacoesDeSalasApagadas, votacaoDe, votosDe, type Apuramento, type Votacao } from "./lib/votacoes.js"
 import { NovaVotacao } from "./screens/overlays/NovaVotacao.js"
 import { SalaDeVotacoes } from "./screens/chat/SalaDeVotacoes.js"
 import { EscolherSalaDeVotacoes } from "./screens/chat/EscolherSalaDeVotacoes.js"
@@ -336,6 +336,13 @@ export function appendBounded(current: ChatMessage[], message: ChatMessage): Cha
  * A batch of live messages into the list, in order, in ONE state update (hotfix 1.3.12).
  * `onMessage` queues what arrives in the same task and this runs once at its end.
  */
+/**
+ * How long a live batch waits for its frame before entering without one. Short
+ * enough not to be seen as a delay; long enough for a frame at 30 Hz (Safari in
+ * low power mode) to win and keep the per-frame batching.
+ */
+const PRAZO_DO_QUADRO_MS = 100
+
 export function juntarLote(current: ChatMessage[], lote: readonly ChatMessage[]): ChatMessage[] {
   let lista = current
   for (const message of lote) lista = juntarCopiaAoVivo(lista, message) ?? appendBounded(lista, message)
@@ -2401,6 +2408,20 @@ function Shell({
   const loteAgendado = useRef(false)
   /** The batch waiting for its frame, if any: run now when the page hides. */
   const juntarPendente = useRef<(() => void) | null>(null)
+  /** When the frame now outstanding was asked for (`performance.now()`), or null when none is. */
+  const quadroPedidoEm = useRef<number | null>(null)
+  /** A frame asked for and not run within the deadline: this page has no frames right now. */
+  const quadrosParados = (): boolean =>
+    quadroPedidoEm.current !== null && performance.now() - quadroPedidoEm.current > PRAZO_DO_QUADRO_MS
+  /** One frame request at a time; when it runs it clears the mark and lets the waiting batch in. */
+  const pedirQuadro = (): void => {
+    if (quadroPedidoEm.current !== null) return
+    quadroPedidoEm.current = performance.now()
+    requestAnimationFrame(() => {
+      quadroPedidoEm.current = null
+      juntarPendente.current?.()
+    })
+  }
   /*
     A frame asked for just before the page hides does not run until it comes
     back, and the batch, the unread counters with it, would wait the whole
@@ -2447,7 +2468,7 @@ function Shell({
       if (!loteAgendado.current) {
         loteAgendado.current = true
         const juntar = (): void => {
-          // Runs once: from its frame, its timer or the page hiding, whichever comes first.
+          // Runs once: from its frame, its deadline, a later message, its own task or the page hiding, whichever comes first.
           if (juntarPendente.current !== juntar) return
           juntarPendente.current = null
           loteAgendado.current = false
@@ -2473,17 +2494,34 @@ function Shell({
           Once per frame: each server frame is a task, and
           a burst of 200 events was 200 renders, each with a forced layout to stay
           at the bottom. Now what arrives before the next frame enters in one
-          render. A hidden page has no frames: a zero timer, which the browser
-          already spaces out in the background, so it batches there too.
+          render. A hidden page has no frames, and its timers are throttled to a
+          second or more: there, the batch enters at the end of the task that
+          brought it (still one render per server frame, never one per message).
         */
         juntarPendente.current = juntar
-        if (lotePorQuadro && typeof requestAnimationFrame === "function" && document.visibilityState === "visible") {
-          requestAnimationFrame(juntar)
+        /*
+          The frame is never the only way in. A window covered by another, in
+          another Space or minimized has no frames, and Safari can keep it
+          "visible" the whole time (1.3.16.1): the batch, the unread counters and
+          the title waited for the window to show again. So: a frame, with a
+          deadline; once a frame has been asked for and not come for longer than
+          that, the frames are stopped and each batch enters at the end of its own
+          task, like a hidden page. No timer on that path: the browser throttles
+          those to a second or more in the same states. The first frame that
+          runs again brings the per-frame batching back.
+        */
+        if (lotePorQuadro && typeof requestAnimationFrame === "function" && document.visibilityState === "visible" && !quadrosParados()) {
+          pedirQuadro()
+          setTimeout(juntar, PRAZO_DO_QUADRO_MS)
         } else if (lotePorQuadro) {
-          setTimeout(juntar, 0)
+          if (typeof requestAnimationFrame === "function" && document.visibilityState === "visible") pedirQuadro()
+          queueMicrotask(juntar)
         } else {
           queueMicrotask(juntar)
         }
+      } else if (lotePorQuadro && juntarPendente.current && (document.visibilityState !== "visible" || quadrosParados())) {
+        // A batch already waiting for a frame that is not coming: it enters now, this message with it.
+        queueMicrotask(juntarPendente.current)
       }
       /**
        * The return slot is not given here.
@@ -3747,6 +3785,16 @@ function Shell({
   const refreshRooms = salasEmBruto.refresh
 
   /**
+   * The deleted rooms of the open channel: their polls are gone for everyone
+   * (17/11/2026, `semVotacoesDeSalasApagadas`). Read again when the room lists
+   * change, which is what a deletion changes.
+   */
+  const salasApagadas = useMemo(
+    () => new Set(active ? (bridge.channels.removedRooms?.(active) ?? []) : []),
+    [active, bridge, salasDoCanal, roomsFechadas],
+  )
+
+  /**
    * The open room, or the default one, if the chosen one stopped being visible.
    *
    * **Without this, hiding a category did not close anything for someone already in it.**
@@ -3793,8 +3841,13 @@ function Shell({
   const [procuraAberta, setProcuraAberta] = useState(false)
   /** The message you just jumped to. It lights up and goes out by itself. */
   const [destacada, setDestacada] = useState<string | null>(null)
-  const procura = useProcura(bridge, active, procuraAberta, messages, (erro) =>
-    pushToast(translateError(erro), "error"),
+  const procura = useProcura(
+    bridge,
+    active,
+    procuraAberta,
+    messages,
+    (erro) => pushToast(translateError(erro), "error"),
+    salasApagadas,
   )
 
   /**
@@ -3868,7 +3921,7 @@ function Shell({
      * takes space in the vault forever and cannot be found by anything. Garbage that
      * no one can ever manage again is worse than a conversation out of context.
      */
-    const daSala = messages.filter((message) => {
+    const daSala = semVotacoesDeSalasApagadas(messages, salasApagadas).filter((message) => {
       if (message.channel !== active) return false
       /**
        * Only what was SAID.
@@ -3910,7 +3963,7 @@ function Shell({
     return [...ditas].sort((a, b) => stampOf(a.payload) - stampOf(b.payload))
     // Roles change by messages (`role.assign`, `role.define`), which change
     // `messages`: that is the trigger for rereading who moderates.
-  }, [messages, active, activeRoom, salaDeLeitura, bridge])
+  }, [messages, active, activeRoom, salaDeLeitura, salasApagadas, bridge])
 
   /**
    * Search results, with the room translated to where the message reads.
@@ -3977,9 +4030,9 @@ function Shell({
   )
 
   /**
-   * Where the "Polls" row of a community leads.
+   * Where "Polls" in the channel menu leads (the fixed sidebar row is gone, 17/11/2026).
    *
-   * A polls room is a room like the others (`layout: "polls"`, see `SalaDeVotacoes`). The row goes
+   * A polls room is a room like the others (`layout: "polls"`, see `SalaDeVotacoes`). The entry goes
    * straight to the community's polls room when there is one; with several it shows a list to choose
    * from, and with none it shows how to create one (or says there are none). This state is the
    * channel and the room that was open when the row was tapped: the list shows only while both
@@ -4012,7 +4065,7 @@ function Shell({
     () =>
       active && salaAberta?.layout === "polls"
         ? listarVotacoes({
-            messages,
+            messages: semVotacoesDeSalasApagadas(messages, salasApagadas),
             channel: active,
             eu: address,
             existentes: salasExistentes,
@@ -4020,7 +4073,7 @@ function Shell({
             modera: (quem) => bridge.channels.mayModerate?.(active, quem) ?? false,
           })
         : [],
-    [active, salaAberta, messages, address, salasExistentes, activeRoom, bridge],
+    [active, salaAberta, messages, salasApagadas, address, salasExistentes, activeRoom, bridge],
   )
   /** Open the polls of a channel: from the always-visible row in the sidebar and from the channel menu. */
   const abrirVotacoes = (channel: string): void => {
@@ -4643,7 +4696,8 @@ function Shell({
    * What happens to the messages is written in the warning, and it is not
    * boilerplate: they are not deleted, because there is no way to do it. They
    * read in the default room instead, see `visible`, which is where that happens
-   * without rewriting anything.
+   * without rewriting anything. Its polls are the exception (17/11/2026): they
+   * are deleted for everyone, see `semVotacoesDeSalasApagadas`.
    */
   const eliminarSala = (room: string): void => {
     if (!active) return
@@ -4659,7 +4713,9 @@ function Shell({
     if (sala.room === "") return
     const canal = active
     const corpo =
-      sala.kind === "voice" ? `${strings.rooms.removeConfirm} ${strings.rooms.removeVoiceNote}` : strings.rooms.removeConfirm
+      sala.kind === "voice"
+        ? `${strings.rooms.removeConfirm} ${strings.rooms.removeVoiceNote}`
+        : `${strings.rooms.removeConfirm} ${strings.rooms.removePollsNote}`
     void confirmar({
       titulo: strings.rooms.removeRoomTitle(sala.name),
       corpo,
@@ -7040,7 +7096,6 @@ function Shell({
       if (gavetaSaiAoTocar(channel)) setSidebarOpen(false)
     }),
     menuDoCanal: useEstavel((channel: string, at: { x: number; y: number }) => setMenu({ channel, at })),
-    votacoes: useEstavel((channel: string) => abrirVotacoes(channel)),
     editarPerfil: useEstavel(() => setEditingProfile(true)),
     menuDoMicrofone: useEstavel((at: { x: number; y: number }) => setAudioMenu({ qual: "mic", at })),
     menuDoSom: useEstavel((at: { x: number; y: number }) => setAudioMenu({ qual: "som", at })),
@@ -7714,7 +7769,6 @@ function Shell({
           onRoomMenu={barra.menuDaSala}
           {...(editaOCanal ? { onCategoryMenu: barra.menuDaCategoria } : {})}
           onNewRoom={editaOCanal ? barra.novaSala : undefined}
-          onVotacoes={barra.votacoes}
           presenceForChannel={presenceForChannel}
           presenceHint={presenceHint}
           active={active}

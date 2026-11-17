@@ -1,3 +1,4 @@
+import { semVotacoesDeSalasApagadas } from "../lib/votacoes.js"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { HISTORY_MAX_PER_CHANNEL } from "@enclave/client-core"
 import type { EnclaveBridge } from "../bridge.js"
@@ -53,6 +54,8 @@ export interface EstadoDaProcura {
   aLer: boolean
 }
 
+const SEM_SALAS_APAGADAS: ReadonlySet<string> = new Set()
+
 export function useProcura(
   bridge: EnclaveBridge,
   channel: string | null,
@@ -60,6 +63,11 @@ export function useProcura(
   messages: ChatMessage[],
   /** Where a vault that cannot be read goes. Without this, it fails silently. */
   aoFalhar?: (erro: string) => void,
+  /**
+   * Rooms deleted in this channel (17/11/2026): their polls are deleted for
+   * everyone, so search does not find them either (`semVotacoesDeSalasApagadas`).
+   */
+  salasApagadas: ReadonlySet<string> = SEM_SALAS_APAGADAS,
 ): EstadoDaProcura {
   const [termo, definirTermo] = useState("")
   const [guardadas, setGuardadas] = useState<ChatMessage[]>([])
@@ -148,8 +156,8 @@ export function useProcura(
     if (!aberta || !channel) return []
     const conhecidas = new Set(guardadas.map(chaveDa))
     const porGravar = messages.filter((message) => message.channel === channel && !conhecidas.has(chaveDa(message)))
-    return porGravar.length === 0 ? guardadas : [...guardadas, ...porGravar]
-  }, [aberta, channel, guardadas, messages])
+    return semVotacoesDeSalasApagadas(porGravar.length === 0 ? guardadas : [...guardadas, ...porGravar], salasApagadas)
+  }, [aberta, channel, guardadas, messages, salasApagadas])
 
   /*
     With moderation (phase 3): a message deleted by a moderator cannot be found,

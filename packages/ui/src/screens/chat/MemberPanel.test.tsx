@@ -5,7 +5,10 @@ import type { Profile } from "../../bridge.js"
 import type { CargoDoMembro } from "../../lib/agruparMembros.js"
 import { en } from "../../linguas/en.js"
 import { strings } from "../../strings.js"
-import { MemberPanel } from "./MemberPanel.js"
+import { readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { ALTURA_DA_LINHA, janelaDaLista, MemberPanel } from "./MemberPanel.js"
 
 afterEach(cleanup)
 
@@ -623,5 +626,61 @@ describe("MemberPanel — canal grande", () => {
     render(panel({ members: membros.slice(0, 20), presenceFor }))
     expect(document.querySelectorAll(".member-row")).toHaveLength(20)
     expect(screen.queryByRole("button", { name: strings.members.maisPessoas(15) })).toBeNull()
+  })
+})
+
+/**
+ * The "+X people on this server" list drew its rows stacked on top of each
+ * other (1.3.16). The window is a flex column with a `max-height`, and the rows
+ * had the default `flex-shrink: 1`: 400 rows of spacer and row did not fit, so
+ * the browser shrank every row to about 1 px and the content of each one was
+ * drawn over the next. jsdom has no layout, so the browser proof is
+ * `scripts/medir-lista-pessoas-servidor.mjs`; here we hold the two things it
+ * depends on: the heights add up, and the stylesheet forbids the shrink.
+ */
+describe("MemberPanel — lista em janela", () => {
+  const folha = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "styles", "screens.css"), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  )
+
+  it("cada linha da janela tem a altura do código e não encolhe na coluna flex", () => {
+    const regra = folha.match(/^\.member-janela > li \{([^}]*)\}/m)?.[1] ?? ""
+    expect(regra).toMatch(new RegExp(`height:\\s*${ALTURA_DA_LINHA}px`))
+    expect(regra).toMatch(/flex:\s*none|flex-shrink:\s*0/)
+  })
+
+  it("os espaços e as linhas desenhadas somam sempre a lista inteira, e cobrem o que se vê", () => {
+    const total = 400
+    const altura = 540
+    for (let topo = 0; topo <= total * ALTURA_DA_LINHA; topo += 37) {
+      const { inicio, fim, acima, abaixo } = janelaDaLista(total, topo, altura)
+      expect(acima + (fim - inicio) * ALTURA_DA_LINHA + abaixo).toBe(total * ALTURA_DA_LINHA)
+      expect(acima).toBeLessThanOrEqual(topo)
+      expect(Math.min(topo + altura, total * ALTURA_DA_LINHA)).toBeLessThanOrEqual(total * ALTURA_DA_LINHA - abaixo)
+    }
+    expect(janelaDaLista(0, 0, altura)).toEqual({ inicio: 0, fim: 0, acima: 0, abaixo: 0 })
+    // A scroll offset past the end (a list that just got shorter) draws nothing and adds up.
+    const alem = janelaDaLista(10, 99_999, altura)
+    expect(alem.acima + (alem.fim - alem.inicio) * ALTURA_DA_LINHA + alem.abaixo).toBe(10 * ALTURA_DA_LINHA)
+  })
+
+  it("no DOM, com 400 pessoas e depois de rolar, os espaços mais as linhas dão 400 linhas", async () => {
+    const membros = Array.from({ length: 405 }, (_, i) => `@m${String(i).padStart(3, "0")}:s`)
+    const presenceFor = (address: string): "active" | "idle" => (membros.indexOf(address) < 5 ? "active" : "idle")
+    const user = userEvent.setup()
+    render(panel({ members: membros, presenceFor }))
+    await user.click(screen.getByRole("button", { name: strings.members.maisPessoas(400) }))
+    const caixa = document.querySelector<HTMLUListElement>(".member-janela")!
+    const soma = (): number =>
+      [...caixa.children].reduce(
+        (total, li) => total + (li.hasAttribute("aria-hidden") ? parseFloat((li as HTMLElement).style.height) : ALTURA_DA_LINHA),
+        0,
+      )
+    expect(soma()).toBe(400 * ALTURA_DA_LINHA)
+    caixa.scrollTop = 200 * ALTURA_DA_LINHA
+    fireEvent.scroll(caixa)
+    expect(caixa.firstElementChild?.hasAttribute("aria-hidden")).toBe(true)
+    expect(soma()).toBe(400 * ALTURA_DA_LINHA)
   })
 })

@@ -7212,6 +7212,36 @@ What was left behind:
   }
 
   /**
+   * The rooms of a channel that were deleted: the tombstones (`removed: true`).
+   *
+   * The messages of a deleted room read in the default room (see `visible` in the
+   * interface). Its polls do not (17/11/2026): deleting a room deletes its polls,
+   * for everyone, like a channel that is deleted takes what was said in it. The
+   * tombstone is in the vault and wins over any older statement of the room, so a
+   * backfill, or an old client that republishes the room from its own vault, does
+   * not bring the polls back: the interface reads this list, not the messages.
+   */
+  removedRoomsOf(channel: string): string[] {
+    const guardadas = this.vault.contents.channelRooms[channel] ?? {}
+    return Object.entries(guardadas)
+      .filter(([, entrada]) => this.#lapideValida(channel, entrada))
+      .map(([room]) => room)
+  }
+
+  /**
+   * A room tombstone that counts: `removed: true`, written by someone who may
+   * manage rooms in this channel (`gerirsalas`, the founder included), by the
+   * role chain as this device knows it now. Read again on each use, so a
+   * tombstone heard before the roles (a member joining by the card) counts once
+   * the roles arrive.
+   */
+  #lapideValida(channel: string, entrada: { payload: unknown; por?: string | undefined }): boolean {
+    const bruto = entrada.payload as { t?: unknown; removed?: unknown } | undefined
+    if (bruto?.t !== "channel.meta" || bruto.removed !== true) return false
+    return entrada.por !== undefined && this.powersOf(channel, entrada.por).includes("gerirsalas")
+  }
+
+  /**
    * The category of a room, accounting for tombstones (phase 1f, 28/10/2026).
    *
    * A category exists by declaration or by having rooms that name it. Deleting a
@@ -19281,6 +19311,27 @@ What was left behind:
       const doCanal = contents.channelRooms[channel] ?? {}
       const actual = doCanal[room]
       /*
+        A deleted room stays deleted (17/11/2026), when the deletion has authority.
+
+        Deleting is only offered from closed, never undone, and a new room gets a
+        new id, so two statements of the same id where one deletes are never a
+        real conflict: the other side had not heard of the deletion yet (an
+        older client republishing its copy, an admin reopening or dragging at the
+        same time). So a valid tombstone wins both ways, whatever the stamps: the
+        one stored keeps a later statement out, and the one that arrives replaces
+        a later statement already stored. Taken by stamps, the room came back for
+        some members only, with the polls that deleting it deletes.
+
+        Valid means its author may manage rooms (`#lapideValida`), checked here,
+        on receipt, with the same role chain as the rest: `channel.meta` is
+        accepted from any member, and the `gerirsalas` guard only exists on the
+        sending side. A tombstone from someone without it is a plain statement,
+        judged by its stamp as before, and hides nothing (`removedRoomsOf`).
+      */
+      const lapideGuardada = actual !== undefined && this.#lapideValida(channel, actual)
+      const lapideQueChega = this.#lapideValida(channel, { payload, por })
+      if (lapideGuardada && !lapideQueChega) continue
+      /*
         The pin list competes with its OWN stamp (12/11/2026), not the room's. A
         rename that says nothing about pins replaces the room and keeps the list,
         and the declaration that set the list is older than the room from then on.
@@ -19303,7 +19354,7 @@ What was left behind:
         contents.channelRooms[channel] = doCanal
         continue
       }
-      if (venceCarimbo(actual, { at, seq })) {
+      if (venceCarimbo(actual, { at, seq }) || (lapideQueChega && !lapideGuardada)) {
         /**
          * The room is replaced; the pinned list is MERGED. Two different rules
          * on the same record, and each one has its reason.

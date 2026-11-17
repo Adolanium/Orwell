@@ -161,6 +161,16 @@ function componentesForaDoRegisto(raiz) {
       texto: fonte("OFL-SpaceGrotesk.txt"),
     },
     {
+      titulo: "Noto Color Emoji 2.051 (emoji font, COLRv1, packages/ui/src/fontes/noto-color-emoji-colrv1-2.051.woff2)",
+      licenca: "OFL-1.1",
+      onde: "web, desktop app",
+      texto:
+        "Copyright 2022 Google Inc.\n" +
+        "Source: https://github.com/googlefonts/noto-emoji (tag v2.051, fonts/Noto-COLRv1.ttf)\n" +
+        "Changes made here: converted from TTF to WOFF2 (fontTools); no glyph changed.\n\n" +
+        fonte("OFL-NotoColorEmoji.txt"),
+    },
+    {
       titulo: "Noto Sans JP (font)",
       licenca: "OFL-1.1",
       onde: "web, desktop app",

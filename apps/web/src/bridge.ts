@@ -987,6 +987,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         return { ok: true }
       },
       closedRooms: (channel) => session.closedRoomsOf(channel),
+      removedRooms: (channel) => session.removedRoomsOf(channel),
       // Pin messages. The real rejection is in `pinMessage`, in the core, and the second half in the receiver;
       // this is just what the interface needs to know to avoid offering a gesture that will be rejected.
       pins: (channel, room) => session.pinnedOf(channel, room),

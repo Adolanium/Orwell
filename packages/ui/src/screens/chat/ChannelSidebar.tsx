@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from "react"
 import type { Activity, ChannelRoom, ConnectionState, Profile } from "../../bridge.js"
 import type { View } from "../../types.js"
 import { Button } from "../../components/Button.js"
-import { GripIcon, LockIcon, PersonAddIcon, PlusIcon, VotacoesIcon } from "../../icons.js"
+import { GripIcon, LockIcon, PersonAddIcon, PlusIcon } from "../../icons.js"
 import { strings } from "../../strings.js"
 import { seccoes, type Seccao } from "../settings/seccoes.js"
 import { Avatar } from "../../components/Avatar.js"
@@ -423,7 +423,6 @@ function ChannelSidebarInteira({
   onReopenRoom,
   onRemoveRoom,
   onNewRoom,
-  onVotacoes,
   presenceForChannel,
   presenceHint,
   active,
@@ -595,8 +594,6 @@ function ChannelSidebarInteira({
   onReopenRoom?: ((room: string) => void) | undefined
   /** Only those who manage the channel see what organizes the rooms. */
   onNewRoom?: (() => void) | undefined
-  /** Open the polls page of this channel. Always the first row of the room tree, so it is found without a right click. */
-  onVotacoes?: ((channel: string) => void) | undefined
   /** The other person's presence, for DM rows; null for rooms. */
   presenceForChannel?: ((channel: string) => "active" | "away" | "busy" | "idle" | null) | undefined
   presenceHint?: string | undefined
@@ -733,18 +730,6 @@ function ChannelSidebarInteira({
     }
   }, [open])
 
-  /** The polls row of a channel: first row under it, with an icon, found without a right click. */
-  const linhaDeVotacoes = (channel: string): React.JSX.Element | null =>
-    onVotacoes ? (
-      <div className="room-row">
-        <button className="room room-votacoes" onClick={() => onVotacoes(channel)}>
-          <span className="room-glyph" aria-hidden="true">
-            <VotacoesIcon size={13} />
-          </span>
-          <span className="room-votacoes-nome">{strings.paginaVotacoes.menu}</span>
-        </button>
-      </div>
-    ) : null
 
 
   return (
@@ -1046,13 +1031,11 @@ function ChannelSidebarInteira({
                     )}
                   </div>
 
-                  {/* A channel with only the default room has no tree; its polls row still shows, for the open channel. */}
-                  {!temArvore && channel === active && onVotacoes && (
-                    <div className="room-tree">{linhaDeVotacoes(channel)}</div>
-                  )}
                   {temArvore && arvoreAberta && (
                     <div className="room-tree">
-                      {linhaDeVotacoes(channel)}
+                      {/* No polls row here (17/11/2026). It was a fixed entry with no room record behind it, so it
+                          could not be dragged, renamed, deleted or given permissions. A polls room is a room
+                          (`layout: "polls"`) and sits in the tree like any other; the channel menu keeps "Polls". */}
                       {grupos.map((grupo) => {
                         const categoriaAberta = !isCollapsed(chave.categoria(channel, grupo.category))
                         /*

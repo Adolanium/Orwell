@@ -52,6 +52,8 @@
   --tinta: #080c1a;
 
   --fonte: "Space Grotesk", "Noto Sans JP", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* The same, with our emoji font before the system's: for the picker, the reaction chips, the messages and the box. See `fontes.css`. */
+  --fonte-com-emoji: "Space Grotesk", "Noto Sans JP", "Orwell Emoji", system-ui, -apple-system, "Segoe UI", sans-serif;
 
   /* ------------------------------------------------ roles, on the skin */
 

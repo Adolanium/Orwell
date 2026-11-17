@@ -61,6 +61,10 @@ function sessaoFalsa(): SessaoDeCanais & { rebentar: boolean } {
       feito.push(`closedRoomsOf:${channel}`)
       return [sala("fechada")]
     },
+    removedRoomsOf(channel) {
+      feito.push(`removedRoomsOf:${channel}`)
+      return ["apagada"]
+    },
     categoriesOf(channel) {
       feito.push(`categoriesOf:${channel}`)
       return [{ category: "geral", position: 0, roles: ["papel"] }]
@@ -260,7 +264,7 @@ function montar(): {
 const CANAL = "!geral:servidor"
 
 describe("o processo principal expõe as operações de canal todas", () => {
-  it("regista os 48 nomes, e nenhum fica por registar", () => {
+  it("regista os 50 nomes, e nenhum fica por registar", () => {
     const { leituras, pedidos } = montar()
 
     for (const nome of Object.values(LEITURAS_DE_CANAL)) expect(leituras.has(nome)).toBe(true)
@@ -292,8 +296,9 @@ describe("o processo principal expõe as operações de canal todas", () => {
 
       Reactions (12/11/2026): one request, `react`. 24 reads and 24 requests.
     */
-    // Plus `mayTransmit` (screen sharing as a role power, 12/11/2026).
-    expect(leituras.size).toBe(25)
+    // Plus `mayTransmit` (screen sharing as a role power, 12/11/2026), and
+    // `removedRooms` (17/11/2026: the polls of a deleted room are deleted).
+    expect(leituras.size).toBe(26)
     expect(pedidos.size).toBe(24)
   })
 
@@ -316,6 +321,7 @@ describe("cada leitura chama o método certo, com os argumentos por ordem", () =
   const casos: [string, unknown[], string, unknown][] = [
     [LEITURAS_DE_CANAL.salas, [CANAL], `roomsOf:${CANAL}`, undefined],
     [LEITURAS_DE_CANAL.salasFechadas, [CANAL], `closedRoomsOf:${CANAL}`, undefined],
+    [LEITURAS_DE_CANAL.salasApagadas, [CANAL], `removedRoomsOf:${CANAL}`, undefined],
     [LEITURAS_DE_CANAL.categorias, [CANAL], `categoriesOf:${CANAL}`, undefined],
     [LEITURAS_DE_CANAL.propriedades, [CANAL], `spaceMeta:${CANAL}`, { name: "O Canal", updatedAt: 7 }],
     [LEITURAS_DE_CANAL.fichas, [], "fichasDosCanais:", { "!opaca:servidor": { tipo: "directa", par: "@par:servidor" } }],

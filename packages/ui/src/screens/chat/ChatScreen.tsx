@@ -13,7 +13,6 @@ import type { OutboxEntry } from "../../hooks/useOutbox.js"
 import { useApresentacao } from "../../hooks/usePrefs.js"
 import { useBuzz } from "../../hooks/useBuzz.js"
 import { useConfirmar } from "../../hooks/useConfirmar.js"
-import { useTyping } from "../../hooks/useTyping.js"
 import { Button } from "../../components/Button.js"
 import { ConnectionBanner } from "../../components/ConnectionBanner.js"
 import { EmptyState } from "../../components/EmptyState.js"
@@ -32,7 +31,7 @@ import { NotasDeVersao } from "./NotasDeVersao.js"
 import { ContextMenu } from "../overlays/ContextMenu.js"
 import { DenunciarSheet } from "./DenunciarSheet.js"
 import { PedidoCard } from "./PedidoCard.js"
-import { ComposerComRascunho } from "./ComposerComRascunho.js"
+import { CaixaComQuemEscreve } from "./QuemEscreve.js"
 import { EditarMensagem } from "./EditarMensagem.js"
 import { MemberPanel } from "./MemberPanel.js"
 import { PinnedPanel } from "./PinnedPanel.js"
@@ -563,23 +562,14 @@ export function ChatScreen({
   // the rest is this device's memory of who has already read it.
   const apresentacao = useApresentacao(active, oficial)
 
-  /**
-   * Who is typing, and the signal we send.
-   *
-   * Lives here and not at the top of the app on purpose: this screen only
-   * exists while in a conversation, and leaving it clears the state. That is
-   * exactly the right behavior for something ephemeral. None of this ever
-   * reaches the vault.
-   */
-  const { typists, noteTyping, stopTyping } = useTyping(bridge, active, activeRoom, address, connection, oficial)
+  // Who is typing, and the signal we send, live in the composer (`CaixaComQuemEscreve`):
+  // a signal arriving here re-rendered the whole screen, conversation included.
 
   /** The channels catching up now. See `bridge.on.recuperacao`. */
   const [aRecuperarCanais, setARecuperarCanais] = useState<ReadonlySet<string>>(() => new Set())
   useEffect(() => bridge.on.recuperacao?.((evento) => setARecuperarCanais(new Set(evento.canais))), [bridge])
   const aRecuperar = active !== null && aRecuperarCanais.has(active)
 
-  /** The names, not the addresses: an indicator with `@ana:servidor` does not read well. */
-  const typistNames = useMemo(() => typists.map(nameFor), [typists, nameFor])
 
   /*
     The names this screen is about to show and does not have (12/11/2026): the
@@ -1049,7 +1039,6 @@ export function ChatScreen({
             hasStoredHistory={hasStoredHistory}
             canLoadOlder={canLoadOlder}
             onLoadOlder={onLoadOlder}
-            typists={typistNames}
             onOpenProfile={onOpenProfile}
             pedidoDe={pedidoDe}
             pedidoOcupado={pedidoOcupado}
@@ -1141,12 +1130,15 @@ export function ChatScreen({
               {strings.chat.aPorEmDia}
             </p>
           )}
-          <ComposerComRascunho
+          <CaixaComQuemEscreve
+            bridge={bridge}
+            sala={activeRoom}
+            salaGrande={oficial}
+            nomeDe={nameFor}
             canal={active ?? ""}
             rascunho={draft}
             onRascunho={onDraftChange}
             connection={connection}
-            onTyping={noteTyping}
             mentionable={mencionaveis}
             podeMencionarTodos={podeMencionarTodos}
             cargos={etiquetas?.cargos}
@@ -1169,13 +1161,7 @@ export function ChatScreen({
             /* Only when the host knows how to record a vote: creating a poll
                where nobody can vote was offering half a feature. */
             {...(onVotacao && bridge.votacoes ? { onVotacao } : {})}
-            onSend={(body, extras) => {
-              onSend(active, body, extras)
-              // The sentence ended. No "stopped typing" signal goes out, the timeout
-              // handles that on the other side. This reopens the burst so the
-              // next sentence signals again without waiting for the interval.
-              stopTyping()
-            }}
+            onSend={(body, extras) => onSend(active, body, extras)}
           />
           </>
           )}

@@ -713,7 +713,6 @@ function TimelineInteira({
   hasStoredHistory = false,
   canLoadOlder = false,
   onLoadOlder,
-  typists = [],
   onOpenProfile,
   pedidoDe,
   pedidoOcupado,
@@ -820,14 +819,6 @@ function TimelineInteira({
   /** Stored messages older than the ones shown exist and can be paged in. */
   canLoadOlder?: boolean
   onLoadOlder?: () => void
-  /**
-   * Who is typing now, with the name already resolved.
-   *
-   * Lives at the bottom of the scroller, stuck there, not as a message: a
-   * typing indicator is not something said, does not enter the history, and
-   * drawing it as a conversation line was the first step toward someone saving it.
-   */
-  typists?: string[]
   /** Click on a mention: that person's profile, which the shell draws. */
   onOpenProfile?: ((address: string) => void) | undefined
   /**
@@ -1623,21 +1614,7 @@ function TimelineInteira({
         </button>
       )}
 
-      {/*
-        Glued to the bottom of the scroller, not on its own screen line: it appears and disappears second by second, and a line that springs up and dies in the middle of the layout pushed the conversation up and down with each phrase someone began to type.
-        
-        `aria-live="polite"` not "assertive": it is a courtesy, not a banner.
-        */}
-      {typists.length > 0 && (
-        <p className="timeline-typing" aria-live="polite">
-          <span className="typing-dots" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
-          {strings.chat.typing(typists)}
-        </p>
-      )}
+      {/* "Who is typing" is not here: it is a strip held by the composer (`QuemEscreve`), outside the scroller. */}
 
       {/* The same sheet as the feed. See `Lightbox`. */}
       {zoom && (

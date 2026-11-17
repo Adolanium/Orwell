@@ -432,10 +432,31 @@ function MemberPanelInteira({
 /** Above this many members, the panel shows only who is online. */
 export const MEMBROS_PARA_SO_LIGADOS = 50
 
-/** The height of one member row in the windowed list, in px. Pinned by `.member-janela li` in the CSS. */
-const ALTURA_DA_LINHA = 44
+/**
+ * The height of one member row in the windowed list, in px. Pinned by
+ * `.member-janela > li` in the CSS, with `flex: none` so the flex column never
+ * shrinks it (the 1.3.16 stacked rows).
+ */
+export const ALTURA_DA_LINHA = 44
 /** Rows drawn above and below the window, so a fast scroll never shows a gap. */
 const MARGEM_DE_LINHAS = 8
+
+/**
+ * Which rows of a windowed list to draw, and the spacer heights around them.
+ *
+ * `topo` is the scroll offset and `altura` the visible height of the box. The
+ * spacers plus the drawn rows always add up to every row at its full height:
+ * that sum is what keeps each row where the scroll offset says it is.
+ */
+export function janelaDaLista(
+  total: number,
+  topo: number,
+  altura: number,
+): { inicio: number; fim: number; acima: number; abaixo: number } {
+  const inicio = Math.min(total, Math.max(0, Math.floor(topo / ALTURA_DA_LINHA) - MARGEM_DE_LINHAS))
+  const fim = Math.max(inicio, Math.min(total, Math.ceil((topo + altura) / ALTURA_DA_LINHA) + MARGEM_DE_LINHAS))
+  return { inicio, fim, acima: inicio * ALTURA_DA_LINHA, abaixo: (total - fim) * ALTURA_DA_LINHA }
+}
 
 /**
  * The offline members of a big channel, drawn only where the eye is: a fixed
@@ -461,8 +482,7 @@ function ListaEmJanela({
     const elemento = caixa.current
     if (elemento && elemento.clientHeight > 0) setAltura(elemento.clientHeight)
   }, [])
-  const inicio = Math.max(0, Math.floor(topo / ALTURA_DA_LINHA) - MARGEM_DE_LINHAS)
-  const fim = Math.min(membros.length, Math.ceil((topo + altura) / ALTURA_DA_LINHA) + MARGEM_DE_LINHAS)
+  const { inicio, fim, acima, abaixo } = janelaDaLista(membros.length, topo, altura)
   const janela = membros.slice(inicio, fim)
   useEffect(() => {
     if (!pedirPerfis) return
@@ -480,9 +500,9 @@ function ListaEmJanela({
       style={{ maxHeight: `min(60vh, ${membros.length * ALTURA_DA_LINHA}px)`, overflowY: "auto" }}
       onScroll={(evento) => setTopo(evento.currentTarget.scrollTop)}
     >
-      {inicio > 0 && <li aria-hidden="true" style={{ height: inicio * ALTURA_DA_LINHA }} />}
+      {acima > 0 && <li aria-hidden="true" style={{ height: acima }} />}
       {janela.map((membro) => linhaDe(membro))}
-      {fim < membros.length && <li aria-hidden="true" style={{ height: (membros.length - fim) * ALTURA_DA_LINHA }} />}
+      {abaixo > 0 && <li aria-hidden="true" style={{ height: abaixo }} />}
     </ul>
   )
 }

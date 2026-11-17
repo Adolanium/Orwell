@@ -91,7 +91,7 @@ try {
   await ana.page.locator(".votacoes-pagina-cartao", { hasText: "Que cor tinha o muro?" }).getByRole("button", { name: "Fechar votação" }).click()
   await wait(3000)
   // Bruno votes in the open one, so there is a result to read.
-  await bruno.page.locator(".room-votacoes").click()
+  await bruno.page.locator(".room-row", { has: bruno.page.locator(".room-name", { hasText: "votações" }) }).first().locator("button.room").click()
   await bruno.page.locator(".votacoes-pagina-cartao", { hasText: "Jantar na sexta?" }).getByRole("button", { name: /Votar em Sim/ }).click({ timeout: 60_000 })
   await wait(3000)
 

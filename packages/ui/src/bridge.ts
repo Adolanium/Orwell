@@ -899,6 +899,12 @@ export interface EnclaveBridge {
      */
     closedRooms?: (channel: string) => ChannelRoom[]
     /**
+     * The ids of the deleted rooms (the tombstones), 17/11/2026. Their polls are
+     * not shown anywhere. Optional: a host without it shows them in the default
+     * room, as 1.3.16 does. See `removedRoomsOf` in the core.
+     */
+    removedRooms?: (channel: string) => string[]
+    /**
      * The categories declared in this channel, in order.
      *
      * Optional, like the other additions to the bridge: a host that does not

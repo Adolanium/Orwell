@@ -2020,6 +2020,7 @@ export const en: Traducao = {
       "The room disappears for everybody. You cannot undo this. Its messages move to the default room.",
     removeAction: "Delete room",
     removeVoiceNote: "The people in the call of that room leave the call.",
+    removePollsNote: "Its polls are deleted for everybody.",
     removed: (nome: string): string => `"${nome}" deleted. What was said there is read in the default room.`,
     closed: (nome: string): string => `You closed "${nome}". Nothing was deleted.`,
     closedDefault:

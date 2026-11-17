@@ -1532,7 +1532,14 @@
   gap: 0;
 }
 
+/* `flex: none` is what holds the 44 px. The list is a flex column with a
+   `max-height`, and 400 rows of spacer and row are far taller than that: with
+   the default `flex-shrink: 1` the browser shrank every row (and the spacers)
+   to fit the box, down to about 1 px, and the content of each row, taller than
+   its squeezed box, was drawn on top of the next ones. `overflow: hidden` also
+   lets the minimum height fall to 0, so nothing stopped the shrink. */
 .member-janela > li {
+  flex: none;
   height: 44px;
   box-sizing: border-box;
   overflow: hidden;
@@ -2711,26 +2718,36 @@ numbers again. */
 /* ---------------------------------------------- a escrever, imagens, links */
 
 /**
- * Who is typing, stuck to the bottom of the scroller.
+ * Who is typing: a strip at the top of the composer, above the box (1.3.16.1).
  *
- * `sticky`, not its own screen line: appears and disappears every second, and a
- * line that's born and dies inside the layout would push the chat up and down
- * with each sentence someone started typing. Here it floats above the last
- * message and moves nothing.
+ * It was `sticky` at the bottom of the conversation's scroller, and it rode
+ * along with the scroll. Now it lives in the composer, outside the
+ * scroller, like in Discord. The paragraph is always there with a fixed height,
+ * so a name coming and going changes text, never layout: the conversation does
+ * not move a pixel. The negative margins eat into the form's top padding and
+ * the gap below, so the reserved line costs the conversation 16 px, not 28.
  */
-.timeline-typing {
-  position: sticky;
-  bottom: 0;
+.chat-a-escrever {
   flex: none;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-top: auto;
-  padding: var(--space-1) 0 0;
+  height: 16px;
+  min-width: 0;
+  margin: calc(-1 * var(--space-2)) 0 calc(-1 * var(--space-2));
+  padding: 0 var(--space-2);
+  overflow: hidden;
   font-size: var(--font-xs);
+  line-height: 16px;
   color: var(--text-dim);
-  background: linear-gradient(to top, var(--bg-main) 60%, transparent);
   pointer-events: none;
+}
+
+.chat-a-escrever-texto {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .typing-dots {
@@ -2766,14 +2783,8 @@ numbers again. */
   }
 }
 
-/* No motion for reduced-motion users: the dots stay still, and the text beside
-   them keeps saying everything needed. */
-@media (prefers-reduced-motion: reduce) {
-  .typing-dots i {
-    animation: none;
-    opacity: 0.7;
-  }
-}
+/* Reduced motion still moves: the dots pulse at half the speed. The rule lives
+   in `base.css`, next to the universal one it has to beat. */
 
 /* Images in a message are like the feed ones, more contained: chat reads top to
    bottom and a full-screen photo breaks it. */
@@ -7931,8 +7942,19 @@ button.tag-pill[aria-pressed="true"] {
   cursor: default;
 }
 
-/* The card yields to the screen before the screen cuts it, like the other sheets. */
+/* The emoji drawn by our own font, the same on every system (see `fontes.css`):
+   in the picker, the reaction chips, the messages and the writing box. */
+.emoji-panel,
+.reaccao,
+.message-body,
+.chat-composer {
+  font-family: var(--fonte-com-emoji);
+}
+
+/* The card yields to the screen before the screen cuts it, like the other sheets.
+   Opaque: at 95 % the empty conversation's text showed through, between the emoji. */
 .emoji-panel {
+  --painel-fundo: rgb(12, 17, 34);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -9902,10 +9924,9 @@ button.pinned-texto:hover {
     background: color-mix(in srgb, var(--accent) 18%, transparent);
     box-shadow: inset 2px 0 0 var(--accent);
   }
-  100% {
-    background: transparent;
-    box-shadow: inset 2px 0 0 transparent;
-  }
+  /* No end frame: the fade lands on the line's own ground, so a lit mention
+     jumped to from the bell keeps its ground instead of going clear and then
+     snapping back when the animation ends. */
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -12038,10 +12059,34 @@ button.message-citacao:focus-visible {
 }
 
 /* A message that mentions me (me, @all, or a role I hold): lit like Discord,
-   a soft ground and a bar on the left. */
+   a soft ground and a bar on the left.
+
+   The line has no side padding, so the bar used to sit on the first 3 px of the
+   face. The lit line now reaches 8 px into the timeline's own padding and pads
+   the same 8 px back: the bar sits clear of the face, and the face and text stay
+   in the same column as the unlit lines around it.
+
+   `:hover` is named here because the skin (`pele.css`, loaded later) clears the
+   hover ground of every line with a rule of the same weight, and the lit ground
+   vanished under the mouse. On a touch screen it was worse: the tapped line keeps
+   `:hover` until the next tap elsewhere, so a lit line lost its ground and stayed
+   that way. The hover keeps the rest ground; only a real pointer darkens it a
+   little, like Discord. */
 .message.menciona-me {
+  margin-inline-start: calc(-1 * var(--space-3));
+  padding-inline-start: var(--space-3);
   background: color-mix(in srgb, var(--accent) 9%, transparent);
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.message.menciona-me:hover {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+@media (hover: hover) {
+  .message.menciona-me:hover {
+    background: color-mix(in srgb, var(--accent) 13%, transparent);
+  }
 }
 
 /* The history progress in the channel's top bar (wide screen, 12/11/2026): one
@@ -12304,15 +12349,6 @@ button.message-citacao:focus-visible {
 
 .votacao-fechada {
   color: var(--text);
-  font-weight: 600;
-}
-
-/* The polls row at the top of a community's room list: same shape as a room, but it opens a page. */
-.room-votacoes-nome {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-weight: 600;
 }
 

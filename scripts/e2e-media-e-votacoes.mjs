@@ -281,16 +281,21 @@ try {
   await ana.page.getByRole("heading", { name: CANAL }).waitFor({ timeout: 30_000 })
   const etiqueta = etiquetaDe(CANAL)
   const linhaDoCanal = (page) => page.locator(".channel-row", { has: page.locator(".channel-name", { hasText: etiqueta }) }).first()
+  // "Polls" lives in the channel menu since 17/11/2026: the fixed sidebar row had no room behind it.
+  const abrirVotacoesDoCanal = async (page) => {
+    await linhaDoCanal(page).click({ button: "right" })
+    await page.locator(".context-menu").getByRole("menuitem", { name: "Votações" }).click()
+  }
   check("Bruno entrou no canal", await convidar(ana.page, etiqueta, bruno.addr) && (await aceitarConvite(bruno.page, etiqueta)))
   await linhaDoCanal(bruno.page).click()
   await wait(3000)
 
   // ---- No polls room yet: Bruno reads that there are none; Ana is offered the way to create one.
-  await bruno.page.locator(".room-votacoes").click()
+  await abrirVotacoesDoCanal(bruno.page)
   await bruno.page.locator(".votacoes-pagina").waitFor({ timeout: 10_000 })
   check("sem sala de votações, quem não organiza só lê que ainda não há votações",
     (await bruno.page.getByText("Ainda não há votações neste canal.").count()) === 1 && (await bruno.page.getByRole("button", { name: "Criar sala de votações" }).count()) === 0)
-  await ana.page.locator(".room-votacoes").click()
+  await abrirVotacoesDoCanal(ana.page)
   await ana.page.getByRole("button", { name: "Criar sala de votações" }).waitFor({ timeout: 10_000 })
   check("e quem organiza vê «Criar sala de votações»", true)
   await retratar(ana.page, "sem-sala-de-votacoes")
@@ -504,8 +509,10 @@ try {
   // ------------------------------------------------------------------ The polls room, as Bruno
   if (movel) await bp.getByRole("button", { name: "Abrir o painel lateral" }).tap().catch(() => {})
   await retratar(bp, "barra-com-sala-de-votacoes")
-  check("a linha «Votações» está sempre à vista na barra da comunidade", await bp.locator(".room-votacoes").isVisible())
-  await bp.locator(".room-votacoes").click()
+  const salaDeVotos = bp.locator(".room-row", { hasText: "votacoes" }).first()
+  check("a sala de votações está na barra como as outras salas, e arrasta-se", (await salaDeVotos.isVisible()) && (await salaDeVotos.getAttribute("draggable")) === "true")
+  check("e já não há linha fixa «Votações»", (await bp.locator(".room-votacoes").count()) === 0)
+  await salaDeVotos.locator("button.room").click()
   await bp.locator(".votacoes-pagina-cartao").first().waitFor({ timeout: 15_000 })
   check("com uma só sala de votações, a linha leva direto a ela", (await bp.locator(".votacoes-pagina-topo h2").innerText()) === "votacoes")
   check("e lá dentro não há conversa", (await caixa(bp).count()) === 0 && (await bp.locator(".message").count()) === 0)

@@ -7,6 +7,7 @@ import { strings } from "../../strings.js"
 import { ToastProvider } from "../../components/Toast.js"
 import { LAST_READ_KEY } from "../../hooks/useUnreads.js"
 import { MessageRow, Timeline } from "./Timeline.js"
+import { FaixaQuemEscreve } from "./QuemEscreve.js"
 
 /** MessageRow carries a copy action that toasts, so every render needs the
  * provider. Wrapped here once instead of in each call. */
@@ -301,22 +302,32 @@ describe("MessageRow — imagens e cartões de link", () => {
 })
 
 describe("Timeline — quem está a escrever", () => {
-  it("mostra a linha só quando há alguém a escrever", () => {
-    const { rerender } = render(timeline({ messages: [messageOf(1, "olá")] }))
-    expect(document.querySelector(".timeline-typing")).toBeNull()
+  it("a conversa não desenha quem está a escrever: isso vive na caixa de escrita (1.3.16.1)", () => {
+    render(timeline({ messages: [messageOf(1, "olá")] }))
+    expect(document.querySelector(".timeline-typing, .chat-a-escrever")).toBeNull()
+  })
+})
 
-    rerender(timeline({ messages: [messageOf(1, "olá")], typists: ["Ana"] }))
-    expect(screen.getByText(strings.chat.typing(["Ana"]))).toBeTruthy()
+describe("FaixaQuemEscreve", () => {
+  it("está sempre lá, vazia, quando ninguém escreve: a altura fica reservada", () => {
+    render(<FaixaQuemEscreve nomes={[]} />)
+    const faixa = document.querySelector(".chat-a-escrever")
+    expect(faixa).not.toBeNull()
+    expect(faixa!.textContent).toBe("")
   })
 
-  it("a linha não é uma mensagem: fica fora da lista de mensagens", () => {
-    // If it were drawn as a conversation row, the next step was someone recording it, // and then it took up places that belong to what was said.
-    render(timeline({ messages: [messageOf(1, "olá")], typists: ["Ana"] }))
-    expect(document.querySelectorAll("article.message")).toHaveLength(1)
+  it("mostra quem escreve, no mesmo nó, e volta a ficar vazia", () => {
+    const { rerender } = render(<FaixaQuemEscreve nomes={[]} />)
+    const faixa = document.querySelector(".chat-a-escrever")
+    rerender(<FaixaQuemEscreve nomes={["Ana"]} />)
+    expect(screen.getByText(strings.chat.typing(["Ana"]))).toBeTruthy()
+    expect(document.querySelector(".chat-a-escrever")).toBe(faixa)
+    rerender(<FaixaQuemEscreve nomes={[]} />)
+    expect(faixa!.textContent).toBe("")
   })
 
   it("acima de três pessoas conta-as em vez de as nomear", () => {
-    render(timeline({ typists: ["Ana", "Rui", "Zé", "Luís"] }))
+    render(<FaixaQuemEscreve nomes={["Ana", "Rui", "Zé", "Luís"]} />)
     expect(screen.getByText("Várias pessoas estão a escrever…")).toBeTruthy()
   })
 })
