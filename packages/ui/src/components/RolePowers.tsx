@@ -105,6 +105,8 @@ const ASSUNTO: Partial<Record<Power, Exclude<GrupoDePermissoes, "cifra" | "outra
   desligar: "voz",
   // Share the screen in a voice room (12/11/2026).
   transmitir: "voz",
+  // Create polls (1.3.21): it is about what is said in the channel.
+  votacoes: "mensagens",
 }
 
 const ORDEM_DOS_GRUPOS: readonly GrupoDePermissoes[] = ["cifra", "gerir", "membros", "mensagens", "voz", "outras"]

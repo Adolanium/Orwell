@@ -85,6 +85,10 @@ function sessaoFalsa(): SessaoDeCanais & { rebentar: boolean } {
       feito.push(`mayTransmit:${channel}:${room}`)
       return room !== "palco-fechado"
     },
+    mayCreatePoll(channel, address) {
+      feito.push(`mayCreatePoll:${channel}:${address ?? ""}`)
+      return address !== "@sem-cargo:servidor"
+    },
     mayEditChannel(channel) {
       feito.push(`mayEditChannel:${channel}`)
       return true
@@ -297,8 +301,9 @@ describe("o processo principal expõe as operações de canal todas", () => {
       Reactions (12/11/2026): one request, `react`. 24 reads and 24 requests.
     */
     // Plus `mayTransmit` (screen sharing as a role power, 12/11/2026), and
-    // `removedRooms` (17/11/2026: the polls of a deleted room are deleted).
-    expect(leituras.size).toBe(26)
+    // `removedRooms` (17/11/2026: the polls of a deleted room are deleted), and
+    // `mayCreatePoll` (polls as a role power, 1.3.21).
+    expect(leituras.size).toBe(27)
     expect(pedidos.size).toBe(24)
   })
 
@@ -351,6 +356,8 @@ describe("cada leitura chama o método certo, com os argumentos por ordem", () =
     [LEITURAS_DE_CANAL.podeExpulsar, [CANAL], `may:${CANAL}:expulsar`, true],
     [LEITURAS_DE_CANAL.podeTransmitir, [CANAL, "palco", "@ana:servidor"], `mayTransmit:${CANAL}:palco`, true],
     [LEITURAS_DE_CANAL.podeTransmitir, [CANAL, "palco-fechado"], `mayTransmit:${CANAL}:palco-fechado`, false],
+    [LEITURAS_DE_CANAL.podeCriarVotacoes, [CANAL], `mayCreatePoll:${CANAL}:`, true],
+    [LEITURAS_DE_CANAL.podeCriarVotacoes, [CANAL, "@sem-cargo:servidor"], `mayCreatePoll:${CANAL}:@sem-cargo:servidor`, false],
   ]
 
   for (const [canal, argumentos, esperado, valor] of casos) {

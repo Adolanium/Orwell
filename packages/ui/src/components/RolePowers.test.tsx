@@ -86,6 +86,8 @@ describe("degrausDe — a partição das responsabilidades", () => {
       "transmitir",
       // 12/11/2026: anyone may mention this role.
       "mencionavel",
+      // 1.3.21: create polls. Convention, and it undoes (delete the poll).
+      "votacoes",
     ])
     expect(degrausDe(POWERS).semVolta).toEqual(["eliminar", "banir"])
   })
@@ -171,8 +173,8 @@ describe("gruposDePermissoes", () => {
 
   it('moderar (fase 3) e mencionartodos (@all) caem em "Mensagens", ao lado de fixar e atender', () => {
     const mensagens = gruposDePermissoes(POWERS).find((cada) => cada.grupo === "mensagens")
-    // `mencionavel` (12/11/2026) sits next to `mencionartodos`.
-    expect(mensagens?.poderes).toEqual(["fixar", "atender", "moderar", "mencionartodos", "mencionavel"])
+    // `mencionavel` (12/11/2026) sits next to `mencionartodos`, and `votacoes` (1.3.21) closes the group.
+    expect(mensagens?.poderes).toEqual(["fixar", "atender", "moderar", "mencionartodos", "mencionavel", "votacoes"])
   })
 
   it('uma responsabilidade que esta versão não sabe arrumar cai em "outras", e não desaparece', () => {

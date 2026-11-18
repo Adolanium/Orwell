@@ -172,3 +172,20 @@ export function votosAGuardar<T>(itens: readonly T[], ler: (item: T) => EventoDe
   }
   return { guardar, orfaos }
 }
+
+/**
+ * The payload without its poll (1.3.21): what a poll its author could not create
+ * reads as. The body already writes the poll out in full, so it shows as text.
+ * Returns the SAME object when there is no poll.
+ */
+export function semPoll<P extends object>(payload: P): P {
+  if (!Object.hasOwn(payload, "poll")) return payload
+  const copia = { ...payload } as P & { poll?: unknown }
+  delete copia.poll
+  return copia
+}
+
+/** An entry's payload as the screen and the vote folds read it: without the poll when `semVotacao`. */
+export function comoNoEcra<P extends object>(entrada: { payload: P; semVotacao?: true | undefined }): P {
+  return entrada.semVotacao ? semPoll(entrada.payload) : entrada.payload
+}

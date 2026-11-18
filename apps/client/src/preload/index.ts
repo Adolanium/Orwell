@@ -293,6 +293,8 @@ contextBridge.exposeInMainWorld("enclaveHost", {
     mayMentionAll: (channel: string, room: string) => ler(LEITURAS_DE_CANAL.podeMencionarTodos, channel, room),
     mayTransmit: (channel: string, room: string, address?: string) =>
       ler(LEITURAS_DE_CANAL.podeTransmitir, channel, room, ...(address === undefined ? [] : [address])),
+    mayCreatePoll: (channel: string, address?: string) =>
+      ler(LEITURAS_DE_CANAL.podeCriarVotacoes, channel, ...(address === undefined ? [] : [address])),
     mayInvite: (channel: string) => ler(LEITURAS_DE_CANAL.podeConvidar, channel),
     moveVoice: (channel: string, address: string, room: string) =>
       ipcRenderer.invoke(CANAIS_DE_CANAL.moverVoz, channel, address, room),

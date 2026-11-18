@@ -133,6 +133,11 @@ import {
   alturaDe,
   compararCargos,
   fundirCargoAntigo,
+  fundirRepublicacaoAntiga,
+  PODERES_DO_ADMIN_NO_FIO,
+  MAX_PODERES_NO_FIO,
+  votacaoPedePoder,
+  PODER_DAS_VOTACOES_DESDE_MINUTO,
   mandaNosCargos,
   permissoesEm as permissoesNoModelo,
   MENCAO_TODOS,
@@ -220,6 +225,7 @@ import {
 import { APELIDO_MAX, apelidoDaMensagem, apelidosDoCanal, esquecerApelidos, registarApelido, type RegistoDeApelido } from "./apelidos.js"
 import { contarGrafemas, NOME_MAX } from "./nomeDeApresentacao.js"
 import { chaveDoEvento, dobrarReaccoes, porOrdemDoServidor, venceCarimbo } from "./dobras.js"
+import { comoNoEcra, lerVoto, semPoll, votacaoGuardada } from "./votos.js"
 import {
   anexosParaFixar,
   apagadasDe,
@@ -1569,6 +1575,8 @@ export type StatusCode =
   | "device-revoke-invalid"
   /** A message in a read-only room from someone who may not write there, dropped (12/11/2026). */
   | "read-only-dropped"
+  /** A poll from someone without `votacoes` (1.3.21), read as a plain message. See `#votacaoSemPoder`. */
+  | "poll-without-power"
   /** A link entry request from a device outside the account's manifest, or revoked. See `#admit`. */
   | "device-not-in-account"
   /** This device is not in the manifest and the account is at the limit: not adding it. See `#garantirManifesto`. */
@@ -5269,6 +5277,10 @@ What was left behind:
         throw new Error("you may not write in this room", { cause: { channel } })
       }
     }
+    // Creating polls needs `votacoes` (1.3.21). Asked through `mayCreatePoll`, for the reason of `mayWrite`.
+    if (payload.t === "message" && payload.poll !== undefined && !this.mayCreatePoll(channel)) {
+      throw new Error("you may not create polls in this channel", { cause: { channel } })
+    }
     await this.#sendPayload(channel, this.#comMencoesConferidas(channel, this.identity.address, payload), opcoes.daPessoa === true)
   }
 
@@ -6557,6 +6569,15 @@ What was left behind:
    */
   #podeEscreverNaSala(channel: string, address: string, room: string): boolean {
     if (this.#eDirecta(channel)) return true
+    return permissoesNoModelo(this.#estadoComPendentes(channel, address, room), address, { sala: room }).includes("escrever")
+  }
+
+  /**
+   * The permission state of this channel for `address` in `room`, counting what
+   * arrived and still waits for the vault write: room declarations, role
+   * assignments and role definitions of the same catch-up page. See `mayWrite`.
+   */
+  #estadoComPendentes(channel: string, address: string, room: string): EstadoDePermissoes {
     const estado = this.#estadoDePermissoes(channel)
     const guardada = this.vault.contents.channelRooms[channel]?.[room]
     let quandoSala = guardada?.at ?? -1
@@ -6577,12 +6598,25 @@ What was left behind:
     }
     // A role defined (or deleted) in the same page counts too: a deleted role no longer matches overrides.
     const definicoes = new Map<string, CargoDefinido | undefined>()
+    const brutos = new Map<string, Record<string, unknown>>()
     for (const pendente of this.#pendingRoleDefs) {
       if (pendente.channel !== channel) continue
-      const bruto = pendente.payload as { removed?: unknown; powers?: unknown; rank?: unknown }
+      /*
+        The save rule (`#drenarRegistos`), chained per role: an old writer's republish
+        keeps the newer powers and the rank (`fundirRepublicacaoAntiga`,
+        `fundirCargoAntigo`). Without it, a 1.3.20 republish and a poll in the same
+        catch-up page took `votacoes` away for that poll, and the verdict stays.
+      */
+      const guardado =
+        brutos.get(pendente.role) ??
+        (this.vault.contents.channelRoles[channel]?.[pendente.role]?.payload as Record<string, unknown> | undefined)
+      const bruto = fundirCargoAntigo(guardado, fundirRepublicacaoAntiga(guardado, pendente.payload as Record<string, unknown>))
+      brutos.set(pendente.role, bruto)
       definicoes.set(
         pendente.role,
-        bruto.removed === true ? undefined : { powers: poderesConhecidos(bruto.powers), rank: typeof bruto.rank === "number" ? bruto.rank : 0 },
+        bruto["removed"] === true
+          ? undefined
+          : { powers: poderesConhecidos(bruto["powers"]), rank: typeof bruto["rank"] === "number" ? bruto["rank"] : 0 },
       )
     }
     const comPendentes: EstadoDePermissoes = {
@@ -6593,7 +6627,59 @@ What was left behind:
       sobreposicoesDaSala: (sala) => (sala === room ? perms : estado.sobreposicoesDaSala?.(sala)),
       ...(cargos ? { cargosDe: (quem: string) => (quem === address ? cargos : estado.cargosDe(quem)) } : {}),
     }
-    return permissoesNoModelo(comPendentes, address, { sala: room }).includes("escrever")
+    return comPendentes
+  }
+
+  /**
+   * The server minute from which polls are judged (`PODER_DAS_VOTACOES_DESDE_MINUTO`).
+   * A static so a test with a real server, whose clock is today, can move it.
+   */
+  static VOTACOES_JULGADAS_DESDE_MINUTO = PODER_DAS_VOTACOES_DESDE_MINUTO
+
+  /**
+   * Whether `address` may create polls in this channel (`votacoes`, 1.3.21).
+   * The founder and `admin` always; the others by a role that carries it. A
+   * direct conversation, a feed and the account channel have no roles: yes.
+   *
+   * The public question, like `mayWrite`: `send` asks it, so a test can play an
+   * altered client by answering yes. The receivers judge anyway
+   * (`#votacaoSemPoder`).
+   */
+  mayCreatePoll(channel: string, address: string = this.identity.address): boolean {
+    if (this.#eDirecta(channel) || this.#eMural(channel) || channel === this.canalDaConta) return true
+    return this.permissoesEm(channel, address).includes("votacoes")
+  }
+
+  /**
+   * Whether this message carries a poll its author may not create, so it is read
+   * as a plain message (`votacoes`, 1.3.21).
+   *
+   * **An app rule, not a crypto rule**, like `#escritaRecusada`: an altered app
+   * sends the `poll` anyway, with its author authenticated by MLS and the roles
+   * signed up to the founder. Judged at arrival, in server order, against the
+   * state this device has at that point (the same page's pending roles included),
+   * and never again: the verdict is stored on the entry (`semVotacao`), so a role
+   * taken away later does not turn old polls into text.
+   *
+   * The message is kept whole, signed as it came: the body already writes the
+   * poll out in full, and that is what shows. Only polls the server received from
+   * `PODER_DAS_VOTACOES_DESDE_MINUTO` on are judged (`votacaoPedePoder`): a poll
+   * from before 1.3.21 keeps its card on a device that reads it late.
+   */
+  #votacaoSemPoder(channel: string, sender: string, payload: Payload, minuto?: number): boolean {
+    if (payload.t !== "message" || votacaoGuardada(payload as unknown as StoredPayload) === null) return false
+    if (this.#eDirecta(channel) || this.#eMural(channel) || channel === this.canalDaConta) return false
+    if (!votacaoPedePoder(minuto, Date.now(), Session.VOTACOES_JULGADAS_DESDE_MINUTO)) return false
+    const room = typeof payload.room === "string" ? payload.room : DEFAULT_ROOM.room
+    if (permissoesNoModelo(this.#estadoComPendentes(channel, sender, room), sender, { sala: room }).includes("votacoes")) return false
+    this.emit("status", {
+      detail: `${channel}: votação de ${sender} sem o poder de criar votações, lida como mensagem`,
+      level: "info",
+      code: "poll-without-power",
+      route: "log",
+      channel,
+    })
+    return true
   }
 
   /**
@@ -6854,7 +6940,9 @@ What was left behind:
     */
     const embutido = id === ADMIN_ROLE
     const antes = this.rolesOf(channel).find((papel) => papel.role === id)
-    const poderes = embutido ? [...POWERS] : POWERS.filter((poder) => next.powers.includes(poder))
+    // `admin` lists the first 32 (`PODERES_DO_ADMIN_NO_FIO`): the schema's cap, and what 1.3.20 sends.
+    // Every role fits the wire cap (`MAX_PODERES_NO_FIO`): above it, the encoder throws and a 1.3.20 drops the role.
+    const poderes = embutido ? [...PODERES_DO_ADMIN_NO_FIO] : POWERS.filter((poder) => next.powers.includes(poder)).slice(0, MAX_PODERES_NO_FIO)
     /*
       The `rank` always goes, even at zero (1.2): by it whoever reads can tell
       a new writer from an old one (see `fundirCargoAntigo`). Missing from the
@@ -8985,7 +9073,8 @@ What was left behind:
           t: "role.define",
           role: papel.role,
           name: papel.name,
-          powers: papel.powers,
+          // The wire cap (`MAX_PODERES_NO_FIO`): one role over it would throw and cut the rest of the republish.
+          powers: papel.powers.slice(0, MAX_PODERES_NO_FIO),
           ...(papel.colour ? { colour: papel.colour } : {}),
           position: papel.position,
           ...(comRank ? { rank: papel.rank } : {}),
@@ -9000,7 +9089,7 @@ What was left behind:
           t: "role.define",
           role: CARGO_TODOS,
           name: "todos",
-          powers: todos.powers,
+          powers: todos.powers.slice(0, MAX_PODERES_NO_FIO),
           position: 0,
           rank: 0,
           removed: false,
@@ -9014,7 +9103,7 @@ What was left behind:
           t: "role.define",
           role: ADMIN_ROLE,
           name: embutido.name,
-          powers: [...POWERS],
+          powers: [...PODERES_DO_ADMIN_NO_FIO],
           ...(embutido.colour ? { colour: embutido.colour } : {}),
           position: 0,
           removed: false,
@@ -14490,6 +14579,52 @@ What was left behind:
    * moderator's one is undone (the folds stop honouring it when the role
    * leaves), and the bytes must be there when it shows again.
    */
+  /**
+   * The polls deleted in this channel (1.3.21): a poll message with a tombstone
+   * (`redact`) from its author or from someone who may moderate, the rule the
+   * conversation fold applies to every message (`mayModerate`).
+   */
+  #votacoesApagadas(contents: VaultContents, channel: string): Set<string> {
+    const autores = new Map<string, string>()
+    const lapides: StoredChatMessage[] = []
+    for (const entrada of entradasDoCanal(contents, channel)) {
+      const votacao = votacaoGuardada(comoNoEcra(entrada))
+      if (votacao && !autores.has(votacao.id)) autores.set(votacao.id, entrada.sender)
+      else if (entrada.payload.t === "redact") lapides.push(entrada)
+    }
+    const apagadas = new Set<string>()
+    for (const lapide of lapides) {
+      const alvo = lapide.payload["target"]
+      if (typeof alvo !== "string") continue
+      const autor = autores.get(alvo)
+      if (autor !== undefined && (autor === lapide.sender || this.mayModerate(channel, lapide.sender))) apagadas.add(alvo)
+    }
+    return apagadas
+  }
+
+  /**
+   * A tombstone that deletes a poll (1.3.21): by its author, or by someone who may
+   * moderate. The votes for it stop counting and leave the vault's vote bucket in
+   * this same write. Returns the poll's id, or `null` when it deletes no poll.
+   *
+   * A poll its author could not create (`semVotacao`) is no poll, and its votes
+   * are already orphans (`votosAGuardar`).
+   */
+  #largarVotosDaVotacao(contents: VaultContents, channel: string, lapide: StoredChatMessage): string | null {
+    const alvo = lapide.payload["target"]
+    if (typeof alvo !== "string" || alvo === "") return null
+    const votacao = (contents.history[channel] ?? []).find((entrada) => votacaoGuardada(comoNoEcra(entrada))?.id === alvo)
+    if (!votacao || (votacao.sender !== lapide.sender && !this.mayModerate(channel, lapide.sender))) return null
+    const estado = contents.estadoDoCanal?.[channel]
+    if (estado) {
+      // In place, like `apararEstado`: the caller might be holding the list.
+      let escrita = 0
+      for (const entrada of estado) if (lerVoto(entrada)?.alvo !== alvo) estado[escrita++] = entrada
+      estado.length = escrita
+    }
+    return alvo
+  }
+
   #tirarMediaDoAlvo(contents: VaultContents, channel: string, lapide: StoredChatMessage): void {
     const alvo = (lapide.payload as { target?: unknown }).target
     if (typeof alvo !== "string") return
@@ -15036,8 +15171,10 @@ What was left behind:
     if (relatoJaGuardado(this.vault.contents, canal, seq, autor, payload as unknown as StoredPayload)) return
     const ocupado = seq >= 0 && entradasDoCanal(this.vault.contents, canal).some((entrada) => entrada.seq === seq)
     const antes = this.#pendingHistory.length
-    if (ocupado) this.#recordPayload(canal, -1, autor, payload, seq - 1)
-    else this.#recordPayload(canal, seq, autor, payload)
+    // No server minute on a report: judged by this device's clock (`votacaoPedePoder`).
+    const semVotacao = this.#votacaoSemPoder(canal, autor, payload)
+    if (ocupado) this.#recordPayload(canal, -1, autor, payload, seq - 1, semVotacao)
+    else this.#recordPayload(canal, seq, autor, payload, undefined, semVotacao)
     /*
       Marked as reported: a report's `seq` is not signed, and the
       server event with that `seq` (a gap that recovery fills later)
@@ -15046,7 +15183,12 @@ What was left behind:
     for (let i = antes; i < this.#pendingHistory.length; i++) this.#pendingHistory[i]!.entry.relatada = true
     // The author sent nothing now: a report does not prove their place works.
     this.#pendingTransmitters.pop()
-    this.emit("message", { channel: canal, seq, sender: autor as UserAddress, payload: this.#comMencoesConferidas(canal, autor, payload) })
+    this.emit("message", {
+      channel: canal,
+      seq,
+      sender: autor as UserAddress,
+      payload: this.#comMencoesConferidas(canal, autor, semVotacao ? semPoll(payload) : payload),
+    })
   }
 
   /**
@@ -19438,7 +19580,7 @@ What was left behind:
    * Returns false when the payload is a repeat of channel state we already hold, and
    * nothing was queued (hotfix 1.3.12). The caller then does not tell the interface.
    */
-  #recordPayload(channel: string, seq: number, sender: string, payload: Payload, apos?: number): boolean {
+  #recordPayload(channel: string, seq: number, sender: string, payload: Payload, apos?: number, semVotacao = false): boolean {
     // Anything that came out of the group at all proves this member's seat is
     // live — the profile they republish on every epoch counts exactly as much
     // as a post, and for a feed reader it is the only thing there is.
@@ -19454,7 +19596,9 @@ What was left behind:
     // we saw when it left (see `apos` in vault and `dobras.ts`).
     const marcaDeOrdem = seq < 0 && apos !== undefined && apos >= 0 ? { apos } : {}
     if (payload.t === "message") {
-      this.#pendingHistory.push({ channel, entry: { seq, sender, ...marcaDeOrdem, at: payload.sentAt, payload } })
+      // A poll its author may not create keeps the verdict on the entry. See `#votacaoSemPoder`.
+      const marcaDaVotacao = semVotacao ? { semVotacao: true as const } : {}
+      this.#pendingHistory.push({ channel, entry: { seq, sender, ...marcaDeOrdem, ...marcaDaVotacao, at: payload.sentAt, payload } })
       const apelido = this.#apelidoAceite(channel, sender, seq, payload)
       if (apelido) this.#pendingApelidos.push({ channel, ...apelido })
       const sucessao = this.#sucessaoRecebida(channel, sender, seq, payload)
@@ -19782,10 +19926,27 @@ What was left behind:
   #drenarRegistos(contents: VaultContents): void {
     if (this.#pendingHistory.some(({ entry }) => isFriendPayload(entry.payload))) this.#avisarAmizades()
     // The main input door (design §5): what arrives live, our sends and the reports.
+    // The deleted polls of each channel, read once per write and only if a vote comes (1.3.21).
+    const votacoesApagadas = new Map<string, Set<string>>()
+    const apagadasEm = (channel: string): Set<string> => {
+      let apagadas = votacoesApagadas.get(channel)
+      if (!apagadas) votacoesApagadas.set(channel, (apagadas = this.#votacoesApagadas(contents, channel)))
+      return apagadas
+    }
     for (const { channel, entry } of this.#pendingHistory) {
+      // A vote for a deleted poll counts for nothing, and is not stored. See `#largarVotosDaVotacao`.
+      const voto = lerVoto(entry)
+      if (voto && apagadasEm(channel).has(voto.alvo)) {
+        this.#largarEmVoo(entry.payload)
+        continue
+      }
       appendHistory(contents, channel, this.#absorverEntrada(contents, entry), this.#presente)
       this.#largarEmVoo(entry.payload)
-      if (entry.payload.t === "redact") this.#tirarMediaDoAlvo(contents, channel, entry)
+      if (entry.payload.t === "redact") {
+        this.#tirarMediaDoAlvo(contents, channel, entry)
+        const alvo = this.#largarVotosDaVotacao(contents, channel, entry)
+        if (alvo !== null) votacoesApagadas.get(channel)?.add(alvo)
+      }
     }
     this.#pendingHistory = []
     for (const { channel, subject, ...proposta } of this.#pendingApelidos) registarApelido(contents, channel, subject, proposta)
@@ -19927,7 +20088,9 @@ What was left behind:
         an action with the original date) the new writer's copy wins,
         whether it arrives first or last.
       */
-      const fundido = fundirCargoAntigo(actual?.payload as Record<string, unknown> | undefined, payload as Record<string, unknown>)
+      const guardado = actual?.payload as Record<string, unknown> | undefined
+      // And a 1.3.20 republishing with the original date keeps `votacoes` (`fundirRepublicacaoAntiga`).
+      const fundido = fundirCargoAntigo(guardado, fundirRepublicacaoAntiga(guardado, payload as Record<string, unknown>))
       const maisCompleto =
         actual !== undefined &&
         actual.at === at &&
@@ -19995,7 +20158,8 @@ What was left behind:
     const copia = structuredClone(limit === undefined ? list : list.slice(-limit))
     // The everyone mention only from those with the permission (`#comMencoesConferidas`).
     // And the measurements of each media item by reference, for the screen (`paraOEcra`).
-    for (const entrada of copia) entrada.payload = this.#paraOEcra(this.#comMencoesConferidas(channel, entrada.sender, entrada.payload))
+    // And a poll its author could not create, as a plain message (`semVotacao`).
+    for (const entrada of copia) entrada.payload = this.#paraOEcra(this.#comMencoesConferidas(channel, entrada.sender, comoNoEcra(entrada)))
     return copia
   }
 
@@ -20028,7 +20192,7 @@ What was left behind:
         if (edicao) edicoes.push(edicao)
       }
       const copia = structuredClone([...vivas, ...edicoes])
-      for (const entrada of copia) entrada.payload = this.#paraOEcra(this.#comMencoesConferidas(channel, entrada.sender, entrada.payload))
+      for (const entrada of copia) entrada.payload = this.#paraOEcra(this.#comMencoesConferidas(channel, entrada.sender, comoNoEcra(entrada)))
       return copia
     }
     if (cursor === undefined || cursor === null) {
@@ -21293,13 +21457,15 @@ None of this touches the deafness counter: whoever reads it is the next
       // stored, not shown. Decided NOW, in server order, so what was written
       // before the room became read-only stays. See `#escritaRecusada`.
       if (this.#escritaRecusada(channel, result.sender, result.payload)) return
+      // A poll from someone without `votacoes`: kept, and read as a plain message. See `#votacaoSemPoder`.
+      const semVotacao = this.#votacaoSemPoder(channel, result.sender, result.payload, minuto)
       // Before recording: what we had is what the vault still says. See `#cargosNovosParaMim`.
       const cargosNovos = aoVivo ? this.#cargosNovosParaMim(channel, result.sender, result.payload, seq) : []
       // Queue the chat-visible payloads for the vault write that `#rememberSeq`
       // is about to do anyway. Ephemeral kinds (typing, signalling) never land
       // on disk, and voice.* already returned above.
       // A repeat of state we already hold stops here: no queue, no `message`, no render (hotfix 1.3.12).
-      if (!this.#recordPayload(channel, seq, result.sender, result.payload)) return
+      if (!this.#recordPayload(channel, seq, result.sender, result.payload, undefined, semVotacao)) return
       // A friendship that arrives live closes live. See `#onFriendPayload` for why
       // it is live only, and `syncFriendships` for what came before.
       if (aoVivo && seq >= 0 && result.sender !== this.identity.address && isFriendPayload(result.payload)) {
@@ -21337,7 +21503,7 @@ None of this touches the deafness counter: whoever reads it is the next
         channel,
         seq,
         sender: result.sender,
-        payload: this.#comMencoesConferidas(channel, result.sender, result.payload),
+        payload: this.#comMencoesConferidas(channel, result.sender, semVotacao ? semPoll(result.payload) : result.payload),
         ...(aoVivo ? { aoVivo: true as const } : {}),
         ...(cargosNovos.length > 0 ? { cargosNovos } : {}),
       })

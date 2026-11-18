@@ -133,4 +133,29 @@ describe("listarVotacoes", () => {
   it("uma votação apagada pelo autor sai da lista", () => {
     expect(lista([votacao("a", "geral", 1), apagar("a")])).toEqual([])
   })
+
+  /*
+    Deleting a poll (1.3.21) is the message tombstone, and the page already folds it
+    with the same rule as the conversation (`comEmendas`): checked here, not rewritten.
+  */
+  it("uma votação eliminada por quem modera sai da lista; a lápide de um membro qualquer não a tira", () => {
+    const deOutro = (alvo: string, quem: string): ChatMessage =>
+      ({ channel: "c", seq: seq++, sender: quem, payload: { t: "redact", id: `r-${seq}`, target: alvo } }) as ChatMessage
+    const mensagens = [votacao("a", "geral", 1), deOutro("a", "@mod:s")]
+    const comModeracao = listarVotacoes({
+      messages: mensagens,
+      channel: "c",
+      eu: "@bia:s",
+      existentes: EXISTENTES,
+      salas: SALAS,
+      modera: (quem) => quem === "@mod:s",
+    })
+    expect(comModeracao).toEqual([])
+    expect(lista([votacao("b", "geral", 1), deOutro("b", "@qualquer:s")]).map((v) => v.id)).toEqual(["b"])
+  })
+
+  it("uma votação que chega sem `poll` (sem o poder de criar, 1.3.21) não entra na página", () => {
+    const semPoder = { channel: "c", seq: seq++, sender: "@carlos:s", payload: { t: "message", id: "x", sentAt: 1, body: "P x\n1. Sim\n2. Não", room: "geral" } } as ChatMessage
+    expect(lista([semPoder, voto("x", "@dora:s", 0)])).toEqual([])
+  })
 })

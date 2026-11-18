@@ -97,6 +97,7 @@ export const LEITURAS_DE_CANAL = {
   podeModerar: "channel:may-moderate",
   podeMencionarTodos: "channel:may-mention-all",
   podeTransmitir: "channel:may-transmit",
+  podeCriarVotacoes: "channel:may-create-poll",
   apelidos: "channel:nicknames",
   fichas: "channel:fichas",
 } as const
@@ -165,6 +166,8 @@ export interface SessaoDeCanais {
   mayEditChannel(channel: string): boolean
   /** Screen sharing as a role power (12/11/2026). See `Session.mayTransmit`. */
   mayTransmit(channel: string, room: string, address?: string): boolean
+  /** Polls as a role power (1.3.21). See `Session.mayCreatePoll`. */
+  mayCreatePoll(channel: string, address?: string): boolean
   founderOf(channel: string): string | null
   adminsOf(channel: string): string[]
   rolesOf(channel: string): { role: string; name: string; powers: Power[]; colour?: RoleColour; position: number }[]
@@ -422,6 +425,7 @@ export function ligarCanais({ registarPedido, registarLeitura, sessao }: PortasD
   leitura(LEITURAS_DE_CANAL.podeTransmitir, (channel: string, room: string, address?: string) =>
     sessao.mayTransmit(channel, room, address),
   )
+  leitura(LEITURAS_DE_CANAL.podeCriarVotacoes, (channel: string, address?: string) => sessao.mayCreatePoll(channel, address))
   /*
     `expulsar` was on the REQUESTS side, and it is the bug this file fixes
     instead of adding to: `ipcMain.handle` answers with a promise, the UI reads

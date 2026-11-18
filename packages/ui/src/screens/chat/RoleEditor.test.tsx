@@ -377,6 +377,24 @@ describe("RoleEditor — as permissões", () => {
     expect(onCreateRole).toHaveBeenCalledWith("Avisos", ["fixar"], undefined)
   })
 
+  it("criar votações (1.3.21) é um interruptor em Mensagens, desligado num cargo novo, e liga-se como os outros", async () => {
+    const user = userEvent.setup()
+    const onCreateRole = vi.fn()
+    const { container } = render(editor({ roles: [], onCreateRole }))
+
+    await user.click(screen.getByText(strings.roles.add))
+    await user.type(screen.getByLabelText(strings.roles.nameLabel), "Sondagens")
+    await irPara(user, "Permissões")
+    const interruptor = screen.getByRole("switch", { name: "criar votações" })
+    expect(interruptor.getAttribute("aria-checked")).toBe("false")
+    expect(grupo(container, "mensagens").textContent).toContain("criar votações")
+    expect(grupo(container, "mensagens").textContent).toContain(strings.cargos.powerHelp["votacoes"])
+    await user.click(interruptor)
+    await user.click(screen.getByText(strings.roles.create))
+
+    expect(onCreateRole).toHaveBeenCalledWith("Sondagens", ["votacoes"], undefined)
+  })
+
   it("o cargo administrador mostra tudo ligado, e nada se muda", async () => {
     const user = userEvent.setup()
     render(editor({ roles: papeis, souFundador: true }))

@@ -32,6 +32,8 @@ export function SalaDeVotacoes({
   podeFechar,
   onFechar,
   onNova,
+  podeEliminar = () => false,
+  onEliminar,
 }: {
   nome: string
   votacoes: VotacaoListada[]
@@ -41,6 +43,10 @@ export function SalaDeVotacoes({
   podeFechar: (votacao: VotacaoListada) => boolean
   onFechar: (votacao: VotacaoListada) => void
   onNova?: (() => void) | undefined
+  /** Can this account delete this poll? Its author, or whoever moderates (1.3.21). Absent: nobody. */
+  podeEliminar?: ((votacao: VotacaoListada) => boolean) | undefined
+  /** Delete the poll: the caller confirms and sends the message tombstone. */
+  onEliminar?: ((votacao: VotacaoListada) => void) | undefined
 }): React.JSX.Element {
   const [separador, setSeparador] = useState<Separador>("abertas")
   const id = useId()
@@ -109,10 +115,19 @@ export function SalaDeVotacoes({
                     formatarDataEHora(votacao.message.payload.sentAt),
                   )}
                 </p>
-                {!estaFechada(votacao) && podeFechar(votacao) && (
-                  <Button variant="ghost" type="button" onClick={() => onFechar(votacao)}>
-                    {strings.votacao.fechar}
-                  </Button>
+                {((!estaFechada(votacao) && podeFechar(votacao)) || (onEliminar && podeEliminar(votacao))) && (
+                  <div className="votacoes-pagina-accoes">
+                    {!estaFechada(votacao) && podeFechar(votacao) && (
+                      <Button variant="ghost" type="button" onClick={() => onFechar(votacao)}>
+                        {strings.votacao.fechar}
+                      </Button>
+                    )}
+                    {onEliminar && podeEliminar(votacao) && (
+                      <Button variant="danger" type="button" onClick={() => onEliminar(votacao)}>
+                        {strings.votacao.eliminar}
+                      </Button>
+                    )}
+                  </div>
                 )}
               </li>
             ))}

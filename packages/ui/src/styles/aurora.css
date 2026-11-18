@@ -97,3 +97,11 @@
     animation: emoji-tons-entra-calma 450ms var(--ease) !important;
   }
 }
+
+/* The poll card's actions (1.3.21): Close and Delete side by side. */
+:root[data-theme="aurora"] .votacoes-pagina-accoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-self: flex-start;
+}

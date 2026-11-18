@@ -394,6 +394,8 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "the server did not take the bug report": 762,
   // Poll deadline and close.
   "only the author or a moderator may close this poll": 780,
+  // Creating polls is a role power (`votacoes`, 1.3.21). See `Session.send`.
+  "you may not create polls in this channel": 781,
   // Notifications when the app is closed (Web Push, `client-core/src/push.ts`). Block 790-799,
   // away from 763-789 so a code taken in another branch does not collide.
   "this server does not send notifications when the app is closed": 790,

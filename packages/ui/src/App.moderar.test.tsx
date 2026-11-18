@@ -270,3 +270,52 @@ describe("fase 3: apelidos por canal", () => {
     expect(espioes.setNickname).toHaveBeenCalledWith(CANAL, ANA, "Ana R.")
   })
 })
+
+/*
+  Deleting a poll (1.3.21): the poll's menu says "Delete poll", in place of the
+  message's delete entries, for its author and for whoever moderates. Same
+  tombstone (`deleteMessage`) and the confirmation messages use.
+*/
+describe("eliminar votações no canal", () => {
+  const votacaoDaAna = {
+    channel: CANAL,
+    seq: 2,
+    sender: ANA,
+    payload: {
+      t: "message",
+      id: "v-ana-1",
+      sentAt: QUANDO,
+      body: "Jantar na sexta?\n1. Sim\n2. Não",
+      poll: { question: "Jantar na sexta?", options: ["Sim", "Não"] },
+    },
+  }
+
+  it("quem modera vê «Eliminar votação» no menu da votação da Ana, confirma, e a lápide sai", async () => {
+    const { user, emitir, espioes } = await abrir({ poderes: { [EU]: ["moderar"] } })
+    await emitir(votacaoDaAna)
+    await user.pointer({ keys: "[MouseRight]", target: await screen.findByText("Jantar na sexta?") })
+    await user.click(await screen.findByText(strings.votacao.eliminar))
+    // The poll entry replaces the message's: there is no second "Eliminar".
+    const aviso = await screen.findByRole("alertdialog", { name: strings.votacao.eliminarDeQuem("Ana") })
+    expect(within(aviso).getByText(strings.votacao.eliminarConfirmar)).toBeTruthy()
+    await user.click(within(aviso).getByRole("button", { name: strings.votacao.eliminar }))
+    await vi.waitFor(() => expect(espioes.deleteMessage).toHaveBeenCalledWith(CANAL, "v-ana-1"))
+  })
+
+  it("sem o poder, a votação de outra pessoa não oferece eliminar", async () => {
+    const { user, emitir } = await abrir({})
+    await emitir(votacaoDaAna)
+    await user.pointer({ keys: "[MouseRight]", target: await screen.findByText("Jantar na sexta?") })
+    await screen.findByText(strings.chat.copyText)
+    expect(screen.queryByText(strings.votacao.eliminar)).toBeNull()
+    expect(screen.queryByText(strings.chat.messageModerate)).toBeNull()
+  })
+
+  it("a votação do próprio autor diz «Eliminar votação», e não «Apagar»", async () => {
+    const { user, emitir } = await abrir({})
+    await emitir({ ...votacaoDaAna, sender: EU, payload: { ...votacaoDaAna.payload, id: "v-eu-1" } })
+    await user.pointer({ keys: "[MouseRight]", target: await screen.findByText("Jantar na sexta?") })
+    expect(await screen.findByText(strings.votacao.eliminar)).toBeTruthy()
+    expect(screen.queryByText(strings.chat.messageDelete)).toBeNull()
+  })
+})

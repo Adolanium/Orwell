@@ -126,7 +126,92 @@ export const PODERES_CUMPRIDOS: readonly Power[] = [
   "mencionartodos",
   "transmitir",
   "mencionavel",
+  "votacoes",
 ]
+
+/**
+ * The most names a role's `powers` may carry on the wire: the schema's cap in
+ * every released version (`role.define.powers`). Above it, a 1.3.20 refuses the
+ * whole `role.define`, and the encoder here refuses to send it.
+ */
+export const MAX_PODERES_NO_FIO = 32
+
+/**
+ * The powers the built-in `admin` publishes (1.3.21). The first
+ * `MAX_PODERES_NO_FIO` of `POWERS`.
+ *
+ * `admin` holds every power by rule (`permissoesEm`), and nobody reads what it
+ * lists: the list is a statement for whoever displays it. With 33 names the full
+ * list no longer fits the cap, and the founder's republish (`republishAuthority`)
+ * would throw on every join. The first 32 are byte for byte what 1.3.20 sends.
+ */
+export const PODERES_DO_ADMIN_NO_FIO: readonly Power[] = POWERS.slice(0, MAX_PODERES_NO_FIO)
+
+/**
+ * Creating polls (`votacoes`, 1.3.21) is judged only for polls the server
+ * received from this minute on (`receivedAtMinute`). 19/11/2026, 00:00 UTC.
+ *
+ * **Why a minute from the server, and not the poll's own date.** Polls created
+ * before 1.3.21 were open to everyone, and they must keep their card and their
+ * votes on a device that reads them late (a desktop catching up after days off,
+ * a new device). The poll's `sentAt` is written by its sender: an altered client
+ * would backdate it and pass. `receivedAtMinute` is written by the server, which
+ * already orders everything (`seq`); a client cannot choose it.
+ *
+ * **Set it to the day 1.3.21 goes live.** Earlier: a poll a 1.3.20 member made
+ * between this minute and the deploy shows as a poll on devices that read it
+ * then, and as text on a 1.3.21 device that reads it later. Later: an altered
+ * client has the gap to create polls without the power.
+ *
+ * An event with no server minute (a report relayed by another member, our own
+ * send before its echo) is judged by this device's clock: after the cut, always.
+ */
+export const PODER_DAS_VOTACOES_DESDE_MINUTO = Date.UTC(2026, 10, 19) / 60_000
+
+/**
+ * Whether a poll is judged by the `votacoes` power: received by the server at or
+ * after `desde` (`PODER_DAS_VOTACOES_DESDE_MINUTO`). `minuto` absent: `agora` decides.
+ */
+export function votacaoPedePoder(
+  minuto: number | undefined,
+  agora: number = Date.now(),
+  desde: number = PODER_DAS_VOTACOES_DESDE_MINUTO,
+): boolean {
+  return (minuto ?? Math.floor(agora / 60_000)) >= desde
+}
+
+/**
+ * The powers added after 1.3.20 (`votacoes`). A 1.3.20 does not know them and
+ * drops them when it republishes a role (`fundirRepublicacaoAntiga`).
+ */
+export const PODERES_DESDE_1_3_21: readonly Power[] = ["votacoes"]
+
+/**
+ * The `role.define` to save when a writer that does not know the powers of 1.3.21
+ * republishes a role with its original date.
+ *
+ * A 1.3.20 founder or admin republishes every role on each join
+ * (`republishAuthority`), filtered by its own `POWERS` and with the ORIGINAL
+ * `definedAt`. Same date, later `seq`: by the stamp it wins, and `votacoes` would
+ * leave the role in every vault each time a 1.3.20 founder is online. Same date
+ * means the same act said again, never a change (a change takes a new date,
+ * `#carimboSeguinte`), so the stored powers from `PODERES_DESDE_1_3_21` stay.
+ *
+ * An EDIT from a 1.3.20 (a new date) does drop `votacoes`: that client cannot show
+ * the toggle, and its save is what the editor showed. The note in the role editor
+ * of a newer version is the place to say so; the report of 1.3.21 says it.
+ */
+export function fundirRepublicacaoAntiga(
+  guardado: Readonly<Record<string, unknown>> | undefined,
+  proposto: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  if (!guardado || guardado["removed"] === true || proposto["removed"] === true) return { ...proposto }
+  if (guardado["definedAt"] === undefined || guardado["definedAt"] !== proposto["definedAt"]) return { ...proposto }
+  const ditos = Array.isArray(proposto["powers"]) ? (proposto["powers"] as unknown[]).filter((p) => typeof p === "string") : []
+  const guardados = Array.isArray(guardado["powers"]) ? (guardado["powers"] as unknown[]) : []
+  const novos = PODERES_DESDE_1_3_21.filter((poder) => guardados.includes(poder) && !ditos.includes(poder))
+  return novos.length === 0 ? { ...proposto } : { ...proposto, powers: [...ditos, ...novos] }
+}
 
 /**
  * The per-room permissions that THIS version enforces (`mover`, `desligar`,

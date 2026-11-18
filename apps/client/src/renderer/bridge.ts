@@ -124,6 +124,7 @@ interface CanaisDoAnfitriao {
   mayMove?: (channel: string) => Resposta<boolean>
   mayMentionAll?: (channel: string, room: string) => Resposta<boolean>
   mayTransmit?: (channel: string, room: string, address?: string) => Resposta<boolean>
+  mayCreatePoll?: (channel: string, address?: string) => Resposta<boolean>
   mayInvite?: (channel: string) => Resposta<boolean>
   mayExpel?: (channel: string) => Resposta<boolean>
   pins?: (channel: string, room: string) => Resposta<Fixadas>
@@ -522,6 +523,13 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
       ? {
           mayTransmit: (channel: string, room: string, address?: string) =>
             ler("mayTransmit", [channel, room, address], () => canais.mayTransmit!(channel, room, address), true),
+        }
+      : {}),
+    // Polls as a role power (1.3.21). An old preload without it answers "yes", as before.
+    ...(canais.mayCreatePoll
+      ? {
+          mayCreatePoll: (channel: string, address?: string) =>
+            ler("mayCreatePoll", [channel, address], () => canais.mayCreatePoll!(channel, address), true),
         }
       : {}),
     ...(canais.mayInvite

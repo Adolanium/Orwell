@@ -51,6 +51,10 @@ describe("os votos ficam memorizados, entre clientes reais", () => {
     const telemovel = await emparelharAparelho(ana!)
     abertas.push(telemovel)
     await ate(() => telemovel.session.channels.includes(canal), "o telemóvel da Ana entra no canal", 30_000)
+    // Since 1.3.21 creating polls needs `votacoes`: Ana gives Bruno a role that carries it.
+    await ana!.session.defineRole(canal, { role: "sondagens", name: "Sondagens", powers: ["votacoes"], rank: 1 })
+    await ana!.session.assignRoles(canal, bruno!.address, ["sondagens"])
+    await ate(() => bruno!.session.mayCreatePoll(canal), "o Bruno pode criar votações", 30_000)
 
     await bruno!.session.send(
       canal,

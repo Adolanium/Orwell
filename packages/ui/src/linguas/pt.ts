@@ -1294,6 +1294,7 @@ export const pt = {
       ecra: "partilhar o ecrã",
       musica: "pôr música",
       transmitir: "partilhar o ecrã",
+      votacoes: "criar votações",
       silenciarvoz: "calar na voz",
       ensurdecer: "ensurdecer",
       desligar: "desligar da chamada",
@@ -1498,6 +1499,7 @@ export const pt = {
       video: "Ligar a câmara numa sala de voz.",
       ecra: "Partilhar o ecrã numa sala de voz.",
       transmitir: "Partilhar o ecrã numa sala de voz. Quem administra tem-na sempre. O cargo de toda a gente não a tem por omissão.",
+      votacoes: "Criar votações nas salas do canal. Quem administra tem-na sempre. Nenhum outro cargo a tem por omissão.",
       musica: "Pôr música numa sala de voz.",
       silenciarvoz: "Calar o microfone de outra pessoa na voz.",
       ensurdecer: "Tirar o som a outra pessoa na voz.",
@@ -4115,6 +4117,11 @@ export const pt = {
     fechada: "Votação fechada",
     fechar: "Fechar votação",
     fecharFeito: "A votação ficou fechada.",
+    /* Deleting a poll (1.3.21): the message tombstone, as for any message. The votes go with it. */
+    eliminar: "Eliminar votação",
+    eliminarTitulo: "Eliminar esta votação?",
+    eliminarConfirmar: "A votação sai do canal e da página das votações, e os votos deixam de contar. Quem já a viu, já a viu.",
+    eliminarDeQuem: (nome: string): string => `Eliminar a votação de ${nome}?`,
   },
   /**
    * «Como funciona»: six ideas, one card per idea (phase 6, layer 2).
@@ -4928,6 +4935,8 @@ export const errosPt: Record<string, FraseDeErro> = {
     "Só quem escreveu a mensagem, ou quem modera o canal, a pode eliminar.",
   "only the author or a moderator may close this poll":
     "Só quem criou a votação, ou quem modera o canal, a pode fechar.",
+  "you may not create polls in this channel":
+    "Não podes criar votações neste canal. Pede a um administrador do canal que te dê esta permissão.",
   "the reaction emoji is not valid": "Esta reacção não é válida. Escolhe outro emoji.",
   "only a closed ticket can be deleted": "Só se elimina um ticket fechado. Fecha-o primeiro.",
   "you may not moderate in this channel": "O teu cargo não te deixa moderar este canal.",

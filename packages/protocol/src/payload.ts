@@ -259,6 +259,21 @@ export const POWERS = [
     nothing else changes, and the signed payload stays the same shape.
   */
   "mencionavel",
+  /*
+    Create polls (1.3.21, 18/11/2026: "creating polls needs a role"). Channel-wide,
+    not per room. Nobody gains it by migration: not `@todos`, not a role that
+    moderates, not a role from before. In an existing channel only the founder and
+    `admin` create until someone turns it on for a role. Enforced on receipt, in
+    server order: a poll from someone without it reads as a plain message (see
+    `PODER_DAS_VOTACOES_DESDE_MINUTO` in `permissoes.ts`).
+
+    The 33rd name, one past the schema's cap of 32 for a role's `powers`. No custom
+    role reaches the cap (the editor offers `PODERES_CUMPRIDOS`), and the built-in
+    `admin`, the only role published with every name, goes out with
+    `PODERES_DO_ADMIN_NO_FIO`: the first 32, which is exactly what 1.3.20 publishes.
+    `admin` holds every power by rule (`permissoesEm`), never by what it lists.
+  */
+  "votacoes",
 ] as const
 export type Power = (typeof POWERS)[number]
 

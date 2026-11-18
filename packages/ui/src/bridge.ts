@@ -1126,6 +1126,13 @@ export interface EnclaveBridge {
      */
     mayTransmit?: (channel: string, room: string, address?: string) => boolean
     /**
+     * Whether this account (or `address`) may create polls in this channel
+     * (`votacoes`, 1.3.21). Only decides what the screen offers; the core refuses
+     * on send and reads a poll from someone without it as a plain message.
+     * Absent means "yes": an older host keeps the option as it was.
+     */
+    mayCreatePoll?: (channel: string, address?: string) => boolean
+    /**
      * The permission model of 1.2 (`permissoes.ts` in the protocol). All
      * optional: an older host does not bring it, and the `CargosEPermissoes`
      * component does not mount.

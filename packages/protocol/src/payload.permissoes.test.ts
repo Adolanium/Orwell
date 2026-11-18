@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { z } from "zod"
 import { formaAssinada } from "./autoria.js"
 import { decodePayload, encodePayload, IRREVERSIBLE_POWERS, Payload, POWERS } from "./payload.js"
-import { PODERES_ANTIGOS } from "./permissoes.js"
+import { MAX_PODERES_NO_FIO, PODERES_ANTIGOS, PODERES_CUMPRIDOS, PODERES_DO_ADMIN_NO_FIO } from "./permissoes.js"
 
 /**
  * The format of the permissions model (1.2, section 4.2 of the parity plan): new
@@ -63,8 +63,24 @@ describe("os nomes das permissões", () => {
   it("os oito antigos ficam à cabeça, pela mesma ordem, e os novos vão ao fim", () => {
     expect(POWERS.slice(0, 8)).toEqual(POWERS_DA_110)
     expect([...PODERES_ANTIGOS]).toEqual(POWERS_DA_110)
-    expect(POWERS.length).toBeLessThanOrEqual(32)
     expect(new Set(POWERS).size).toBe(POWERS.length)
+  })
+
+  it("passou de 32 nomes (votacoes, 1.3.21), e o que sai no fio continua a caber no tecto de 32", () => {
+    // `votacoes` is the 33rd name. The schema of every released version caps a
+    // role's `powers` at 32, and the built-in `admin` was published with ALL of
+    // `POWERS`: it now goes out with the first 32, what 1.3.20 sends.
+    expect(POWERS).toHaveLength(33)
+    expect(POWERS[32]).toBe("votacoes")
+    expect(MAX_PODERES_NO_FIO).toBe(32)
+    expect([...PODERES_DO_ADMIN_NO_FIO]).toEqual(POWERS.slice(0, 32))
+    expect(PODERES_DO_ADMIN_NO_FIO).not.toContain("votacoes")
+    // Everything the role editor can turn on fits too.
+    expect(PODERES_CUMPRIDOS.length).toBeLessThanOrEqual(MAX_PODERES_NO_FIO)
+    const admin = { t: "role.define", role: "admin", name: "Admin", powers: [...PODERES_DO_ADMIN_NO_FIO], position: 0, removed: false, definedAt: 1 } as Payload
+    expect(() => encodePayload(admin)).not.toThrow()
+    // And the full list would not: that is the throw this avoids on every join.
+    expect(() => encodePayload({ ...admin, powers: [...POWERS] } as Payload)).toThrow()
   })
 
   it("cada nome novo passa no formato estreito de `powers` (o de qualquer versão)", () => {

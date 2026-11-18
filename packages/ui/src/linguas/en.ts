@@ -607,6 +607,7 @@ export const en: Traducao = {
       video: "turn on video",
       ecra: "share the screen",
       transmitir: "share the screen",
+      votacoes: "create polls",
       musica: "play music",
       silenciarvoz: "mute in voice",
       ensurdecer: "deafen",
@@ -744,6 +745,7 @@ export const en: Traducao = {
       video: "Turn on the camera in a voice room.",
       ecra: "Share the screen in a voice room.",
       transmitir: "Share the screen in a voice room. Administrators always have it. The everyone role does not have it by default.",
+      votacoes: "Create polls in the rooms of the channel. Administrators always have it. No other role has it by default.",
       musica: "Play music in a voice room.",
       silenciarvoz: "Mute the microphone of a different person in voice.",
       ensurdecer: "Remove the sound for a different person in voice.",
@@ -2226,6 +2228,10 @@ export const en: Traducao = {
     fechada: "Poll closed",
     fechar: "Close poll",
     fecharFeito: "The poll is closed.",
+    eliminar: "Delete poll",
+    eliminarTitulo: "Delete this poll?",
+    eliminarConfirmar: "The poll goes out of the channel and the polls page, and the votes stop counting. People who already saw it, saw it.",
+    eliminarDeQuem: (nome: string): string => `Delete the poll of ${nome}?`,
   },
 
   comunicarErro: {
@@ -2882,6 +2888,8 @@ export const errosEn: Record<string, FraseDeErro> = {
     "Only the author of the message, or a moderator of the channel, can delete it.",
   "only the author or a moderator may close this poll":
     "Only the person who created the poll, or a moderator of the channel, can close it.",
+  "you may not create polls in this channel":
+    "You cannot create polls in this channel. Ask a channel admin to give you this permission.",
   "the reaction emoji is not valid": "This reaction is not valid. Choose another emoji.",
   "only a closed ticket can be deleted": "You can delete only a closed ticket. Close it first.",
   "you may not moderate in this channel": "Your role does not let you moderate this channel.",

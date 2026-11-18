@@ -4431,11 +4431,28 @@ function Shell({
    */
   const criarVotacao = useCallback(
     async (canal: string, votacao: Votacao): Promise<void> => {
+      /*
+        Asked again here, not only when the option is drawn (1.3.21): a role can
+        leave this account while the sheet is open. The core refuses anyway; asking
+        first keeps the outbox from holding a red bubble it can never send.
+      */
+      if (!(bridge.channels.mayCreatePoll?.(canal) ?? true)) {
+        pushToast(translateError("you may not create polls in this channel"), "error")
+        setVotacaoNoCanal(null)
+        return
+      }
       sendMessage(canal, corpoDaVotacao(votacao), activeRoom || undefined, { poll: votacao })
       setVotacaoNoCanal(null)
     },
-    [sendMessage, activeRoom],
+    [sendMessage, activeRoom, bridge, pushToast],
   )
+
+  /**
+   * Whether this account may create polls in the open channel (`votacoes`, 1.3.21).
+   * Without it, no entry to create one is drawn: not in the message box, not on the
+   * polls page. Absent from the host means "yes", as before.
+   */
+  const podeCriarVotacoes = active !== null && (bridge.channels.mayCreatePoll?.(active) ?? true)
 
   /**
    * Vote on a vote in the conversation.
@@ -4479,6 +4496,30 @@ function Shell({
     [address, profile.displayName, directoryNameFor],
   )
   notifyRef.current = { me: address, nameFor }
+
+  /**
+   * Delete a poll (1.3.21): the message tombstone, with the confirmation messages use.
+   * The author, or whoever moderates. The core removes its votes from the vault.
+   */
+  const eliminarVotacao = useCallback(
+    (canal: string, message: ChatMessage): void => {
+      const alvo = message.payload.id
+      if (!alvo || !bridge.channels.deleteMessage) return
+      const deOutraPessoa = message.sender !== address
+      void confirmar({
+        titulo: deOutraPessoa ? strings.votacao.eliminarDeQuem(nameFor(message.sender)) : strings.votacao.eliminarTitulo,
+        corpo: strings.votacao.eliminarConfirmar,
+        verbo: strings.votacao.eliminar,
+        destructive: true,
+      })
+        .then(async (sim) => {
+          if (sim) await bridge.channels.deleteMessage?.(canal, alvo)
+        })
+        .catch((error: Error) => pushToast(traduzirErro(error), "error"))
+    },
+    [bridge, address, confirmar, pushToast, nameFor],
+  )
+
   soundRef.current = { active, room: activeRoom, callChannel, callRoom, ringing, participants, mediaPronta: localStream !== null }
 
   // Entering a ringing call is answering it: it can no longer stay lost.
@@ -7414,8 +7455,16 @@ function Shell({
         }}
         {...(address !== null &&
         (bridge.channels.permissoes?.em(active, address, { sala: activeRoom }).includes("escrever") ?? true) &&
+        podeCriarVotacoes &&
         bridge.votacoes
           ? { onNova: () => setVotacaoNoCanal(active) }
+          : {})}
+        {...(bridge.channels.deleteMessage
+          ? {
+              podeEliminar: (votacao: VotacaoListada) =>
+                votacao.message.sender === address || (bridge.channels.mayModerate?.(active, address ?? "") ?? false),
+              onEliminar: (votacao: VotacaoListada) => eliminarVotacao(active, votacao.message),
+            }
           : {})}
       />
     )
@@ -7632,7 +7681,10 @@ function Shell({
       reaccoes={reaccoesDoCanal}
       etiquetas={etiquetasDaConversa}
       {...(bridge.channels.react ? { onReagir: reagirNaConversa } : {})}
-      onVotacao={() => active && setVotacaoNoCanal(active)}
+      onVotacao={podeCriarVotacoes ? () => setVotacaoNoCanal(active) : undefined}
+      onEliminarVotacao={(message: ChatMessage) => {
+        if (active) eliminarVotacao(active, message)
+      }}
       meuNome={profile.displayName || undefined}
       onSaveStatus={guardarEstado}
       pedidoDe={pedidoDe}

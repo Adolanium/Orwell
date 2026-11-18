@@ -1051,6 +1051,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       mayMoveIn: (channel, de, para) => session.mayMoveIn(channel, de, para),
       mayMentionAll: (channel, room) => session.may(channel, "mencionartodos", room),
       mayTransmit: (channel, room, address) => session.mayTransmit(channel, room, address),
+      mayCreatePoll: (channel, address) => session.mayCreatePoll(channel, address),
       // The permission model for 1.2. The real guard is in the core.
       permissoes: {
         todos: (channel) => session.todosOf(channel),

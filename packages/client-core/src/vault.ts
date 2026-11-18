@@ -3,7 +3,7 @@ import { xchacha20poly1305 } from "@noble/ciphers/chacha.js"
 import { argon2id } from "@noble/hashes/argon2.js"
 import { fromBase64, toBase64, type CorpoDaDenuncia, type Motivo } from "@enclave/protocol"
 import { chavesDeOrdem, chaveDoEvento, venceCarimbo } from "./dobras.js"
-import { votosAGuardar } from "./votos.js"
+import { comoNoEcra, votosAGuardar } from "./votos.js"
 import { carriesBytes, entryMediaBytes, LINK_KEY, MEDIA_KEYS, thumbnailBytes } from "./medidaDeMedia.js"
 import { comCabecalho, semCabecalho, versaoDoFicheiro, type VersaoDoFicheiroDoCofre } from "./cabecalhoDoCofre.js"
 import { registarFicha, type FichaDoCanal, type FichaQueChega } from "./tipoDoCanal.js"
@@ -103,6 +103,13 @@ export interface StoredChatMessage {
    * event.
    */
   relatada?: true
+  /**
+   * A message with a poll its author could not create (`votacoes`, 1.3.21): the
+   * verdict at arrival, in server order (`#votacaoSemPoder` in the session). The
+   * payload stays as it was signed; the screen and the vote folds read it without
+   * the poll (`comoNoEcra`). Travels with the entry to a sibling and to the archive.
+   */
+  semVotacao?: true
 }
 
 /** The freshest profile payload a peer published, kept so names survive reload. */
@@ -1560,7 +1567,8 @@ function apararEstado(contents: VaultContents, channel: string): void {
   if (excesso("voto") > 0) {
     const abaixoDe = Math.floor(TECTOS_DO_ESTADO.voto * 0.9)
     const votacoes = [...(contents.history[channel] ?? []), ...ordenadas]
-    const { guardar, orfaos } = votosAGuardar(votacoes, (entry) => entry)
+    // A poll its author could not create is no poll: its votes are orphans (`semVotacao`).
+    const { guardar, orfaos } = votosAGuardar(votacoes, (entry) => ({ sender: entry.sender, payload: comoNoEcra(entry) }))
     const fases: ((entry: StoredChatMessage) => boolean)[] = [
       (entry) => !guardar.has(entry) && !orfaos.has(entry),
       (entry) => orfaos.has(entry),
@@ -1783,6 +1791,9 @@ function confirmarRelato(guardada: StoredChatMessage, chega: StoredChatMessage, 
   guardada.seq = chega.seq
   delete guardada.apos
   delete guardada.relatada
+  // The poll verdict is the server event's (1.3.21): it was judged with the server minute, the report by this clock.
+  if (chega.semVotacao) guardada.semVotacao = true
+  else delete guardada.semVotacao
   if (entryMediaBytes(chega, peso.presente, peso.media) <= entryMediaBytes(guardada, peso.presente, peso.media)) return "confirmou"
   // A new copy and not the same one changed: whoever read the old payload may be holding it.
   guardada.payload = structuredClone(chega.payload)

@@ -148,6 +148,7 @@ export function ChatScreen({
   onReagir,
   etiquetas,
   onVotacao,
+  onEliminarVotacao,
   pedidoDeAmizade = null,
   escritaTrancada: escritaTrancadaDoAnfitriao = null,
   directaBloqueada = false,
@@ -392,8 +393,14 @@ export function ChatScreen({
   etiquetas?:
     | (Omit<Etiquetas, "mencoes"> & { cargos: readonly MentionCandidate[]; salas: readonly MentionCandidate[] })
     | undefined
-  /** Open the sheet to create a poll. Absent means absent: no entry. */
+  /** Open the sheet to create a poll. Absent means absent: no entry (also without `votacoes`, 1.3.21). */
   onVotacao?: (() => void) | undefined
+  /**
+   * Delete a poll (1.3.21): the shell asks for confirmation and sends the tombstone.
+   * A poll message's menu offers "Delete poll" in place of the message's delete
+   * entries, to its author and to whoever moderates. Absent: the message's entries stay.
+   */
+  onEliminarVotacao?: ((message: ChatMessage) => void) | undefined
   /**
    * The friend request to resolve on this conversation, if there is one.
    *
@@ -737,6 +744,14 @@ export function ChatScreen({
     if (fecho !== null && fecho <= Date.now()) return false
     return message.sender === address || podeModerar
   }
+  /** Whether this message is a poll this account may delete (its author, or whoever moderates; 1.3.21). */
+  const eVotacaoEliminavel = (message: ChatMessage): boolean =>
+    onEliminarVotacao !== undefined &&
+    bridge.channels.deleteMessage !== undefined &&
+    message.payload.id !== undefined &&
+    message.payload.moderada !== true &&
+    votacaoDe(message.payload) !== null &&
+    (message.sender === address || podeModerar)
   const temMenu = (message: ChatMessage): boolean =>
     // Deleted by moderation: no text left, nothing to do to it.
     message.payload.moderada !== true &&
@@ -1376,6 +1391,18 @@ export function ChatScreen({
                   },
                 ]
               : []),
+            /* Delete a poll (1.3.21): one entry, for its author and for whoever moderates,
+               in place of the two delete entries below. Same tombstone, same confirmation. */
+            ...(eVotacaoEliminavel(menuDaMensagem.message)
+              ? [
+                  {
+                    label: strings.votacao.eliminar,
+                    separatorBefore: true,
+                    destructive: true,
+                    onSelect: () => onEliminarVotacao?.(menuDaMensagem.message),
+                  },
+                ]
+              : []),
             /* Edit and delete stay only on what is YOURS. `Timeline`
                no longer does that filtering, it now opens the menu on any message
                so pinning fits, so it must be done here, entry by entry. */
@@ -1392,7 +1419,7 @@ export function ChatScreen({
                   },
                 ]
               : []),
-            ...(bridge.channels.deleteMessage && menuDaMensagem.message.sender === address
+            ...(bridge.channels.deleteMessage && menuDaMensagem.message.sender === address && !eVotacaoEliminavel(menuDaMensagem.message)
               ? [
                   {
                     label: strings.chat.messageDelete,
@@ -1420,6 +1447,7 @@ export function ChatScreen({
             ...(bridge.channels.deleteMessage &&
             podeModerar &&
             menuDaMensagem.message.sender !== address &&
+            !eVotacaoEliminavel(menuDaMensagem.message) &&
             menuDaMensagem.message.payload.id
               ? [
                   {

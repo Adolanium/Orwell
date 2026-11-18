@@ -102,7 +102,7 @@
         <li>
           <strong>Old addresses.</strong> A request to <span class="mono">http://orwell.pt</span> or to
           <span class="mono">www.orwell.pt</span> is redirected to <span class="mono">https://orwell.pt</span>. That
-          request goes into the web server's general log, with the full IP address and the browser.
+          request goes into the same access log: only the network of the IP address, and not the browser.
         </li>
         <li>The web server deletes each log after 15 days at most.</li>
       </ul>
