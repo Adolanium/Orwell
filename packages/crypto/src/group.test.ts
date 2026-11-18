@@ -209,6 +209,15 @@ describe("MLS channel", () => {
     }
   })
 
+  /*
+   * 30 s, not the default 5 s. Almost all of this test is one call: Dave, the
+   * removed member, processing the commit that removes him. ts-mls (1.6.2)
+   * spends it in `directPath` (`treemath.js`) before it throws, and
+   * `tiraANossaFolha` reads the removal after that. Measured on 18/11/2026:
+   * 1.2 s of 1.4 s in that function on an M4 Pro (CPU profile), 5.1 to 7.0 s on
+   * the GitHub runner in the CI of 1.3.15 to 1.3.18, where it failed on the
+   * timeout and on nothing else.
+   */
   it("quem fica no canal continua a ler através da remoção", async () => {
     // The removal rekeys the group, and that must not cost the remaining members the channel.
     const alice = generateIdentity(HOME)
@@ -237,7 +246,7 @@ describe("MLS channel", () => {
     const depois = await encryptPayload(removal.session, text("só para quem ficou"))
     expect((await receive(carolSession, depois.ciphertext)).kind).toBe("payload")
     expect((await receive(daveSession, depois.ciphertext)).kind).toBe("ignored")
-  })
+  }, 30_000)
 
   /**
    * The risk the fix brings, not the hole it closes.

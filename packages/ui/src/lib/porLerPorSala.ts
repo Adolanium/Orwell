@@ -249,3 +249,37 @@ export function contarPorSala(
   }
   return porCanal
 }
+
+/**
+ * Where each conversation (channel and room) was read up to, AS IT WAS when this
+ * visit entered it (17/11/2026). The mention highlight reads it: a line that
+ * mentions me is lit while it was unread on entry, and goes dark on the next
+ * visit, after a reload, and on the other devices of the account, because the
+ * mark it compares with is the same one the unread mention count uses
+ * (`marcaDaSala`, which travels in the account).
+ *
+ * A module-level `Map`, like `marcaDeEntrada` in `useUnreads`: it is good for
+ * this visit to the app only. The shell writes it while it renders the room
+ * switch, before any effect advances the room's mark; the timeline, a child,
+ * reads it later in the same render pass, so it needs no subscription.
+ */
+const entradaNaConversa = new Map<string, number>()
+
+/** The key of a conversation, as the chat screen names it to the timeline. */
+export function chaveDaConversa(canal: string, sala: string): string {
+  return `${canal}|${sala}`
+}
+
+export function entrarNaConversa(chave: string, marca: number): void {
+  entradaNaConversa.set(chave, marca)
+}
+
+/** The mark on entry, or `null` when this visit has not entered it (a direct conversation, a test). */
+export function marcaDeEntradaNaConversa(chave: string): number | null {
+  return entradaNaConversa.get(chave) ?? null
+}
+
+/** For tests only: a new visit to the app. */
+export function esquecerEntradasNasConversas(): void {
+  entradaNaConversa.clear()
+}

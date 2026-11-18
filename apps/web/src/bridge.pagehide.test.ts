@@ -10,7 +10,9 @@ import { describe, expect, it, vi } from "vitest"
 
 const gravacoes = { pedidas: 0 }
 
-vi.mock("@enclave/client-core", () => ({
+vi.mock("@enclave/client-core", async (original) => ({
+  // The real module underneath: a new export of client-core that bridge.ts reads must not break every suite here.
+  ...(await original<typeof import("@enclave/client-core")>()),
   Call: class {
     on(): () => void {
       return () => {}

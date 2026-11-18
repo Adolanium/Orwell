@@ -3,6 +3,7 @@ import { TextoDeErro } from "../../components/TextoDeErro.js"
 import { parseServerName } from "@enclave/protocol"
 import { useBridge } from "../../App.js"
 import { Button } from "../../components/Button.js"
+import { CampoDeNome } from "../../components/CampoDeNome.js"
 import { Field } from "../../components/Field.js"
 import { CampoDeIdentidade } from "./CampoDeIdentidade.js"
 import { CaixaMemorizar, useMemorizarDepoisDeAbrir } from "./MemorizarSessao.js"
@@ -542,15 +543,14 @@ export function Setup({
 
             {!aCriar && passo === "nome" && (
               <>
-                <Field label={<span className="sr-only">{strings.gate.name}</span>}>
-                  <input
-                    ref={campo}
-                    value={name}
-                    autoFocus
-                    placeholder={strings.gate.namePlaceholder}
-                    onChange={(event) => setName(event.target.value)}
-                  />
-                </Field>
+                <CampoDeNome
+                  rotulo={<span className="sr-only">{strings.gate.name}</span>}
+                  campoRef={campo}
+                  value={name}
+                  autoFocus
+                  placeholder={strings.gate.namePlaceholder}
+                  onChange={setName}
+                />
                 <p className="gate-lead setup-promise">{strings.gate.setupLead}</p>
               </>
             )}

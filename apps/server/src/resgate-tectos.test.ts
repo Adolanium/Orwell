@@ -231,18 +231,26 @@ describe("INV-02: a fila de cada ligação tem tecto", () => {
       lento.cliente.pausarLeitura()
 
       /*
-        64 frames of 1 MiB in a burst. Measured on 4/11/2026 on this machine: the
-        reader's queue reaches 1 to 9 MiB (the server writes faster than the socket
-        drains, even on loopback); the non-reader's queue holds what the
-        kernel did not absorb (on loopback, on macOS, ~24 MiB of 48). The test
-        cap (16 MiB) sits between the two; the production cap is 64 MiB.
+        64 frames of 1 MiB, each one sent when the reader has the previous one.
+        The non-reader's queue holds what the kernel did not absorb (on
+        loopback, ~24 MiB of 64 on macOS, less on Linux), past the test cap of
+        16 MiB; the production cap is 64 MiB.
+
+        Not in a burst, as it was until 1.3.19: the server and the readers
+        share this process's event loop, and on a slow CI runner the READER's
+        queue passed 16 MiB too, so the server cut it, and the test failed
+        with "nunca chegou um channel.event" (1.3.15 to 1.3.18). Measured on
+        18/11/2026 with the process on the efficiency cores (`taskpolicy -b`):
+        the burst failed 4 of 4, with two or three connections cut. In
+        lockstep, the reader's queue is one frame, and what is measured is the
+        rule alone: whoever reads gets everything, whoever does not is cut.
       */
       const fechou = lento.cliente.fechado()
       const recebidas: number[] = []
       for (let i = 0; i < 64; i++) {
         dono.enviar({ t: "channel.send", channel: canal, kind: "application", ciphertext: toBase64(new Uint8Array(768 * 1024).fill(i)), ref: `r${i}` })
+        recebidas.push((await atento.cliente.proximoDe("channel.event")).seq)
       }
-      for (let i = 0; i < 64; i++) recebidas.push((await atento.cliente.proximoDe("channel.event")).seq)
       expect(recebidas).toHaveLength(64)
       // Closed by the server, and counted. The client only finds out when it reads again.
       const metricas = servidor.enclave.gateway.metricasDosEnvios()
@@ -253,9 +261,17 @@ describe("INV-02: a fila de cada ligação tem tecto", () => {
       // The slow one returns and reads everything through history, which is the recovery path.
       const deVolta = await Cliente.ligar(servidor.url, lento.identidade)
       clientes.push(deVolta)
-      deVolta.enviar({ t: "channel.backfill", channel: canal, afterSeq: -1, limit: 200 })
-      const pagina = await deVolta.proximoDe("channel.backfill.page")
-      expect(pagina.events.filter((e) => e.kind === "application")).toHaveLength(64)
+      // In pages of 8 MiB: one page of 64 MiB took longer than the harness waits for a frame on a slow machine.
+      let aplicacoes = 0
+      let depois = -1
+      for (let volta = 0; volta < 20 && aplicacoes < 64; volta++) {
+        deVolta.enviar({ t: "channel.backfill", channel: canal, afterSeq: depois, limit: 8 })
+        const pagina = await deVolta.proximoDe("channel.backfill.page")
+        if (pagina.events.length === 0) break
+        aplicacoes += pagina.events.filter((e) => e.kind === "application").length
+        depois = Math.max(...pagina.events.map((e) => e.seq))
+      }
+      expect(aplicacoes).toBe(64)
     } finally {
       Gateway.FILA_MAXIMA_BYTES = tecto
     }

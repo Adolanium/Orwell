@@ -24,7 +24,9 @@ const motor = { reafirmacoes: 0, desligados: [] as string[] }
 /** The listeners that the bridge registered in the session, so we can fire them. */
 const ouvintes = new Map<string, ((evento: unknown) => void)[]>()
 
-vi.mock("@enclave/client-core", () => ({
+vi.mock("@enclave/client-core", async (original) => ({
+  // The real module underneath: a new export of client-core that bridge.ts reads must not break every suite here.
+  ...(await original<typeof import("@enclave/client-core")>()),
   Call: class {
     reafirmarPresenca(): void {
       motor.reafirmacoes += 1

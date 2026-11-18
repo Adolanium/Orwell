@@ -731,6 +731,35 @@ describe("gateway", () => {
 })
 
 describe("presença", () => {
+  it("uma resubscrição que não acrescenta canais à ligação não volta a anunciar presença", async () => {
+    // Review of 1.3.19, I2: 600 resubscriptions a minute, each announcing presence to
+    // every channel-mate and asking for the peers again.
+    const channel = moradaDeSala(HOME)
+    const alice = await TestClient.connect(gatewayUrl)
+    const bob = await TestClient.connect(gatewayUrl)
+    await login(alice, generateIdentity(HOME))
+    await login(bob, generateIdentity(HOME))
+    alice.send({ t: "channel.subscribe", channels: [channel] })
+    await alice.sync()
+    await sentarPorConvite(alice, bob, channel)
+    bob.send({ t: "channel.subscribe", channels: [channel] })
+    await bob.nextOf("presence")
+    await alice.nextOf("presence")
+    for (let i = 0; i < 10; i++) bob.send({ t: "channel.subscribe", channels: [channel] })
+    bob.send({ t: "ping" })
+    for (let i = 0; i < 100; i++) if ((await bob.next()).t === "pong") break
+    const ouvidas: string[] = []
+    alice.send({ t: "ping" })
+    for (let i = 0; i < 100; i++) {
+      const trama = await alice.next()
+      if (trama.t === "pong") break
+      ouvidas.push(trama.t)
+    }
+    expect(ouvidas.filter((t) => t === "presence")).toHaveLength(0)
+    alice.close()
+    bob.close()
+  })
+
   it("difunde online/offline só a quem partilha canal, e dá o snapshot ao subscrever", async () => {
     const channel = moradaDeSala(HOME)
     const alice = await TestClient.connect(gatewayUrl)
@@ -2251,6 +2280,99 @@ describe("gateway: keypackage.claim em bundle", () => {
     ligA.close()
     ligB.close()
   }, 20_000)
+
+  /** Every frame up to the answer of a ping: what the connection heard meanwhile. */
+  async function ateAoPong(lig: TestClient): Promise<string[]> {
+    lig.send({ t: "ping" })
+    const ouvidas: string[] = []
+    for (let i = 0; i < 200; i++) {
+      const trama = await lig.next()
+      if (trama.t === "pong" || (trama.t === "error" && trama.code === "timeout")) break
+      ouvidas.push(trama.t)
+    }
+    return ouvidas
+  }
+
+  it("uma rajada de reclamações dá um só keypackage.low por ligação, não um por reclamação", async () => {
+    // Review of 1.3.18, I1: each claim below the floor nudged every connected device,
+    // and each nudge made it mint 20 more. Claiming in a loop was a key factory.
+    const vitima = generateIdentity(HOME)
+    const ligV = await TestClient.connect(gatewayUrl)
+    await entrarComCadeia(ligV, vitima)
+    ligV.send({ t: "keypackage.publish", packages: pacotes(15), replace: true })
+    await ateAoPong(ligV)
+    const atacante = await TestClient.connect(gatewayUrl)
+    await entrarComCadeia(atacante, generateIdentity(HOME))
+    for (let i = 0; i < 15; i++) atacante.send({ t: "keypackage.claim", address: vitima.address })
+    // Fifteen answers come before the pong: past what `sync` reads through.
+    await ateAoPong(atacante)
+    const avisos = (await ateAoPong(ligV)).filter((t) => t === "keypackage.low")
+    expect(avisos).toHaveLength(1)
+    atacante.close()
+    ligV.close()
+  })
+
+  it("depois de um keypackage.low, a reposição do aparelho abre o aviso seguinte logo", async () => {
+    // A new device that the main one seats in 47 channels: claims faster than one
+    // top-up of 20. With only the 5 s window the main device's claims ran past the
+    // pool between two nudges, and those seats failed for good.
+    const aparelho = generateIdentity(HOME)
+    const ligA = await TestClient.connect(gatewayUrl)
+    await entrarComCadeia(ligA, aparelho)
+    ligA.send({ t: "keypackage.publish", packages: pacotes(12), replace: true })
+    await ateAoPong(ligA)
+    const principal = await TestClient.connect(gatewayUrl)
+    await entrarComCadeia(principal, generateIdentity(HOME))
+    for (let i = 0; i < 3; i++) principal.send({ t: "keypackage.claim", address: aparelho.address })
+    await ateAoPong(principal)
+    expect((await ateAoPong(ligA)).filter((t) => t === "keypackage.low")).toHaveLength(1)
+    // The device tops up (by one here, so the pool stays under the floor of 20), and
+    // the next claim below the floor nudges again, inside the 5 s.
+    ligA.send({ t: "keypackage.publish", packages: pacotes(1) })
+    await ateAoPong(ligA)
+    principal.send({ t: "keypackage.claim", address: aparelho.address })
+    await ateAoPong(principal)
+    expect((await ateAoPong(ligA)).filter((t) => t === "keypackage.low")).toHaveLength(1)
+    principal.close()
+    ligA.close()
+  })
+
+  it("o aviso sai abaixo de 20 chaves: uma reclamação que deixa 15 já avisa o aparelho", async () => {
+    // Under load, 10 to 13 bundle claims in under 20 ms emptied a pool nudged at 10
+    // before the top-up came back, and the main device's seat of a new one failed.
+    const aparelho = generateIdentity(HOME)
+    const ligA = await TestClient.connect(gatewayUrl)
+    await entrarComCadeia(ligA, aparelho)
+    ligA.send({ t: "keypackage.publish", packages: pacotes(16), replace: true })
+    await ateAoPong(ligA)
+    const outro = await TestClient.connect(gatewayUrl)
+    await entrarComCadeia(outro, generateIdentity(HOME))
+    outro.send({ t: "keypackage.claim", address: aparelho.address })
+    await ateAoPong(outro)
+    expect(enclave.store.availableKeyPackages(aparelho.address, aparelho.deviceSigningPublicKey)).toBe(15)
+    expect((await ateAoPong(ligA)).filter((t) => t === "keypackage.low")).toHaveLength(1)
+    outro.close()
+    ligA.close()
+  })
+
+  it("passado o tecto de reclamações por minuto, a resposta é a de uma reserva vazia, e nada se gasta", async () => {
+    const vitima = generateIdentity(HOME)
+    const ligV = await TestClient.connect(gatewayUrl)
+    await entrarComCadeia(ligV, vitima)
+    for (let i = 0; i < 3; i++) ligV.send({ t: "keypackage.publish", packages: pacotes(100), ...(i === 0 ? { replace: true } : {}) })
+    await ligV.sync()
+    const atacante = await TestClient.connect(gatewayUrl)
+    await entrarComCadeia(atacante, generateIdentity(HOME))
+    let servidas = 0
+    for (let i = 0; i < Gateway.RECLAMACOES_POR_MINUTO + 1; i++) {
+      atacante.send({ t: "keypackage.claim", address: vitima.address })
+      if ((await atacante.nextOf("keypackage.claimed")).keyPackage !== null) servidas++
+    }
+    expect(servidas).toBe(Gateway.RECLAMACOES_POR_MINUTO)
+    expect(enclave.store.availableKeyPackages(vitima.address)).toBe(300 - Gateway.RECLAMACOES_POR_MINUTO)
+    atacante.close()
+    ligV.close()
+  }, 30_000)
 })
 
 /**

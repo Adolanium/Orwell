@@ -1,3 +1,4 @@
+import { NomeDePessoa } from "../../components/NomeDePessoa.js"
 import { Avatar } from "../../components/Avatar.js"
 import type { Profile } from "../../bridge.js"
 import { MENCAO_TODOS, type MentionCandidate } from "../../lib/mentions.js"
@@ -97,7 +98,10 @@ export function MentionPicker({
                     emChamada={emChamada?.(candidato.address)}
                   />
                 </span>
-                <span className="mention-name">{candidato.name}</span>
+                <span className="mention-name">
+                  {/* Drawn cut at 12 like every name; the search above still reads the whole one. */}
+                  <NomeDePessoa nome={candidato.name} endereco={candidato.address} />
+                </span>
               </>
             )}
           </button>

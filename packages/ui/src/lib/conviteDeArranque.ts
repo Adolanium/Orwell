@@ -1,4 +1,4 @@
-import { formatInviteLink, parseInviteLink, sameHomeserver } from "@enclave/client-core"
+import { formatInviteLink, nomeVisivel, parseInviteLink, sameHomeserver } from "@enclave/client-core"
 import { eMoradaOpaca } from "@enclave/protocol"
 import { nomeSeguro, semMarcasNemControlos } from "./ficheiros.js"
 import { serverOf, shortName } from "./format.js"
@@ -112,7 +112,10 @@ export function canalDoConviteParaMostrar(canal: string, nome: NomeDoConvite | n
 
 /** The name of who invited, from the seal, or `null`. Only with the channel name. */
 export function quemConvidaParaMostrar(nome: NomeDoConvite | null): string | null {
-  return nome && nomeDoSeloParaMostrar(nome.canal) ? nomeDoSeloParaMostrar(nome.quem) : null
+  if (!nome || !nomeDoSeloParaMostrar(nome.canal)) return null
+  // A person's display name: cut at 12 graphemes, like everywhere it is drawn.
+  const quem = nomeDoSeloParaMostrar(nome.quem)
+  return quem ? nomeVisivel(quem) : null
 }
 
 /** The channel name the seal gave, cleaned, or `null`. Kept for the wait. */

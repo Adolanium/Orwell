@@ -1,3 +1,4 @@
+import { nomeVisivel } from "@enclave/client-core"
 import { strings } from "../strings.js"
 import { shortName } from "./format.js"
 
@@ -641,7 +642,8 @@ export function notificationTextOf(
   nameFor: (address: string) => string,
   labelFor: (channel: string) => string | null,
 ): string {
-  const who = entry.actor ? nameFor(entry.actor) : ""
+  // A notice is plain text, with no tooltip: a long old name goes cut (`nomeVisivel`).
+  const who = entry.actor ? nomeVisivel(nameFor(entry.actor)) : ""
   const sala = entry.channel ? labelFor(entry.channel) : null
   switch (entry.kind) {
     case "room-added":

@@ -155,7 +155,12 @@ describe("o autor está ligado: a imagem chega", () => {
     for (const conta of [ana, bruno, carlos, ze]) await despejar(conta, canal, id)
     await ana.session.seat(canal, eva.address)
     await ate(() => tem(eva.session, canal, id), "a publicação chega à Eva", 60_000)
+    // Seating Eva brings the bytes back to all four (the author's device tells again
+    // what is its own to whoever arrived), as in `salaComAutorAlto`. Without this
+    // dump Zé's computer held them again and answered first in about 1 run of 3:
+    // Eva got the image, from the device the test says no longer has it.
     await despejar(eva, canal, id)
+    for (const conta of [ana, bruno, carlos, ze]) await despejar(conta, canal, id)
     const desfecho = await eva.session.pedirAnexo(canal, id, 0)
     expect(desfecho).toMatchObject({ ok: true })
     expect(telemovel.session.estatisticasDaSincronia.anexosEnviados).toBe(1)

@@ -3,6 +3,7 @@ import { xchacha20poly1305 } from "@noble/ciphers/chacha.js"
 import { argon2id } from "@noble/hashes/argon2.js"
 import { fromBase64, toBase64, type CorpoDaDenuncia, type Motivo } from "@enclave/protocol"
 import { chavesDeOrdem, chaveDoEvento, venceCarimbo } from "./dobras.js"
+import { votosAGuardar } from "./votos.js"
 import { carriesBytes, entryMediaBytes, LINK_KEY, MEDIA_KEYS, thumbnailBytes } from "./medidaDeMedia.js"
 import { comCabecalho, semCabecalho, versaoDoFicheiro, type VersaoDoFicheiroDoCofre } from "./cabecalhoDoCofre.js"
 import { registarFicha, type FichaDoCanal, type FichaQueChega } from "./tipoDoCanal.js"
@@ -1227,6 +1228,13 @@ export const LEDGER_MAX_PER_CHANNEL = 200
  *   a tombstone only evicts after all edits, and never while the target is in
  *   either list: the tombstone is what keeps the target from returning.
  *
+ * - `voto` (poll votes, `post.reaction` with a numeric `vote`): five thousand per
+ *   channel, in a bucket of their own (hotfix 1.3.19). They shared "gosto" with every
+ *   reaction and like, and the oldest left first; then they were kept outside any cap,
+ *   and a member sending votes to invented targets grew every vault without end.
+ *   Replaced votes evict first, then votes for no poll held here, then the oldest
+ *   (`votosAGuardar`).
+ *
  * Above each cap, the oldest of that type evicts, by server order. The byte
  * cap from the plan (2 MB per channel) does not apply here: measuring it on
  * every write cost more than it saved, and the per-type caps already enforce
@@ -1237,6 +1245,7 @@ export const TECTOS_DO_ESTADO = {
   publicacao: 1_000,
   comentario: 5_000,
   gosto: 5_000,
+  voto: 5_000,
   ticket: 2_000,
   emenda: 2_000,
 } as const
@@ -1278,6 +1287,8 @@ export function tipoDoEstado(entry: StoredChatMessage): TipoDoEstado | null {
     case "post.comment":
       return "comentario"
     case "post.reaction":
+      // A poll vote has its own bucket: see `voto` in `TECTOS_DO_ESTADO`.
+      return typeof entry.payload["vote"] === "number" ? "voto" : "gosto"
     // A chat reaction is state about a message, not conversation: in the chat cap
     // it would push real messages out of the vault, one per tap.
     case "reaction":
@@ -1425,7 +1436,7 @@ function ticketsParaSair(ordenadas: readonly StoredChatMessage[], excesso: numbe
 function apararEstado(contents: VaultContents, channel: string): void {
   const list = contents.estadoDoCanal?.[channel]
   if (!list) return
-  const contagem: Record<TipoDoEstado, number> = { livro: 0, publicacao: 0, comentario: 0, gosto: 0, ticket: 0, emenda: 0 }
+  const contagem: Record<TipoDoEstado, number> = { livro: 0, publicacao: 0, comentario: 0, gosto: 0, voto: 0, ticket: 0, emenda: 0 }
   for (const entry of list) {
     const tipo = tipoDoEstado(entry)
     if (tipo) contagem[tipo] += 1
@@ -1433,6 +1444,7 @@ function apararEstado(contents: VaultContents, channel: string): void {
   const excesso = (tipo: TipoDoEstado): number => Math.max(0, contagem[tipo] - TECTOS_DO_ESTADO[tipo])
   if ((Object.keys(contagem) as TipoDoEstado[]).every((tipo) => excesso(tipo) === 0)) return
 
+  const ordenadas = porOrdem(list)
   const sair = new Set<StoredChatMessage>()
   const marcar = (entry: StoredChatMessage, tipo: TipoDoEstado): void => {
     sair.add(entry)
@@ -1441,7 +1453,25 @@ function apararEstado(contents: VaultContents, channel: string): void {
   if (excesso("livro") > 0) {
     for (const entry of redundantesDoLivro(list)) if (excesso("livro") > 0) marcar(entry, "livro")
   }
-  const ordenadas = porOrdem(list)
+  // Votes: the replaced first, then those for no poll held here, then the oldest (`votosAGuardar`).
+  // Down to 90 % of the cap, not to the cap: a sender at the cap would otherwise make
+  // every new vote sort and fold the whole book again (review of 1.3.19, I3).
+  if (excesso("voto") > 0) {
+    const abaixoDe = Math.floor(TECTOS_DO_ESTADO.voto * 0.9)
+    const votacoes = [...(contents.history[channel] ?? []), ...ordenadas]
+    const { guardar, orfaos } = votosAGuardar(votacoes, (entry) => entry)
+    const fases: ((entry: StoredChatMessage) => boolean)[] = [
+      (entry) => !guardar.has(entry) && !orfaos.has(entry),
+      (entry) => orfaos.has(entry),
+      () => true,
+    ]
+    for (const fase of fases) {
+      for (const entry of ordenadas) {
+        if (contagem.voto <= abaixoDe) break
+        if (!sair.has(entry) && tipoDoEstado(entry) === "voto" && fase(entry)) marcar(entry, "voto")
+      }
+    }
+  }
   // Tickets evict as whole tickets, not by oldest message: see `ticketsParaSair`.
   if (excesso("ticket") > 0) for (const entry of ticketsParaSair(ordenadas, excesso("ticket"))) marcar(entry, "ticket")
   const alvos = excesso("emenda") > 0 ? alvosGuardados(contents, channel) : new Set<string>()

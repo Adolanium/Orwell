@@ -1,3 +1,4 @@
+import { nomeVisivel } from "@enclave/client-core"
 import { NomeDePessoa } from "./NomeDePessoa.js"
 
 /**
@@ -21,7 +22,10 @@ export function NomeComApelido({
   if (!apelido) return <NomeDePessoa nome={nome} endereco={endereco} />
   return (
     <>
-      <span className="apelido">{apelido}</span>{" "}
+      {/* A nickname is a display name for one channel, and is cut the same way. */}
+      <span className="apelido" title={nomeVisivel(apelido) !== apelido ? apelido : undefined}>
+        {nomeVisivel(apelido)}
+      </span>{" "}
       <span className="nome-sob-apelido">
         <NomeDePessoa nome={nome} endereco={endereco} />
       </span>

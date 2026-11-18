@@ -3,9 +3,12 @@ import { copiarTexto } from "./lib/copiar.js"
 import {
   dobrarReaccoes,
   marcarArranque,
+  nomeVisivel,
   parseInviteLink,
   parseShortInviteLink,
   sameHomeserver,
+  TECTOS_DO_ESTADO,
+  votosAGuardar,
   type FichaDeReaccao,
   type Participant,
   type StoredChatMessage,
@@ -95,12 +98,21 @@ import { citacaoDe as citacaoNoIndice, indiceDasCitacoes, type Citacao, type Res
 import { prefersReducedMotion } from "./lib/scroll.js"
 import { cacheDeMedia } from "./lib/cacheDeMedia.js"
 import { closeDirect, directasQueContam, listDirects } from "./lib/directs.js"
-import { arquivar, desarquivar, esquecerEstadoDoBrowser, ligarEstadoDaConta, marcarLido, useEstadoDaConta } from "./lib/estadoDaConta.js"
+import { arquivar, desarquivar, esquecerEstadoDoBrowser, lerEstadoDaConta, ligarEstadoDaConta, marcarLido, useEstadoDaConta } from "./lib/estadoDaConta.js"
 import { aceitesAEspera, conviteDaMensagem, convitesDe } from "./lib/convites.js"
 import { nomeSeguro } from "./lib/ficheiros.js"
 import { escritaNaDirecta } from "./lib/friendship.js"
 import { repartirPorDestino } from "./lib/porAtender.js"
-import { chaveDaLidaDaSala, contarPorSala, lerSala, useLidasPorSala } from "./lib/porLerPorSala.js"
+import {
+  chaveDaConversa,
+  chaveDaLidaDaSala,
+  contarPorSala,
+  entrarNaConversa,
+  lerLidasPorSala,
+  lerSala,
+  marcaDaSala,
+  useLidasPorSala,
+} from "./lib/porLerPorSala.js"
 import { transmissaoDe, type Transmissao } from "./components/MarcaDeChamada.js"
 import { chaveDoSilencio, estaSilenciado, numeroVisivel } from "./lib/silenciados.js"
 import { avisoDoAmigoCabe, criarVigiaDosAmigos, type TipoDeAvisoDeAmigo } from "./lib/amigosOnline.js"
@@ -297,6 +309,40 @@ export function reaccoesParaDobrar(messages: readonly ChatMessage[], channel: st
     .map((message) => (message.seq < 0 && message.apos === undefined ? { ...message, apos: Number.MAX_SAFE_INTEGER } : message))
 }
 
+/** A poll vote: a `post.reaction` with a numeric `vote` (see `votosDe`). */
+const ehVoto = (message: ChatMessage): boolean =>
+  message.payload.t === "post.reaction" && typeof (message.payload as { vote?: unknown }).vote === "number"
+
+/** Poll votes held on screen per channel: the vault's `TECTOS_DO_ESTADO.voto`. */
+const MEMORY_VOTOS_CAP = TECTOS_DO_ESTADO.voto
+
+/** The list without the channel's votes past `MEMORY_VOTOS_CAP`, in the vault's order of leaving. */
+function semVotosAMais(lista: ChatMessage[], channel: string): ChatMessage[] {
+  let votos = 0
+  for (const item of lista) if (item.channel === channel && ehVoto(item)) votos += 1
+  if (votos <= MEMORY_VOTOS_CAP) return lista
+  const doCanal = lista.filter((item) => item.channel === channel)
+  const { guardar, orfaos } = votosAGuardar(doCanal, (item) => item)
+  // Down to 90 % of the bound, like the vault, so a sender at the bound does not fold the whole list on each vote.
+  let aSair = votos - Math.floor(MEMORY_VOTOS_CAP * 0.9)
+  const largar = new Set<ChatMessage>()
+  const fases: ((item: ChatMessage) => boolean)[] = [
+    (item) => !guardar.has(item) && !orfaos.has(item),
+    (item) => orfaos.has(item),
+    () => true,
+  ]
+  for (const fase of fases) {
+    for (const item of doCanal) {
+      if (aSair === 0) break
+      if (ehVoto(item) && !largar.has(item) && fase(item)) {
+        largar.add(item)
+        aSair -= 1
+      }
+    }
+  }
+  return lista.filter((item) => !largar.has(item))
+}
+
 /** What is conversation on screen. Everything else (channels, roles, banner) is state the vault already stores. */
 const DA_CONVERSA: ReadonlySet<string> = new Set(["message", "edit", "redact", "reaction"])
 
@@ -308,23 +354,32 @@ const DA_CONVERSA: ReadonlySet<string> = new Set(["message", "edit", "redact", "
  * again, and each of these payloads counted toward the cap as one message: in a
  * wave of new accounts they pushed old conversation off screen, and it only
  * came back on reload. Profiles do not even come here anymore (see `onMessage`).
+ *
+ * Poll votes do not count toward that bound (17/11/2026). A vote is not
+ * conversation, so it used to be the first to go: in a busy channel the poll
+ * stayed on screen and its count fell back to zero, own mark included. They have
+ * their own bound instead (`MEMORY_VOTOS_CAP`, hotfix 1.3.19): without one, a member
+ * sending votes to invented targets grew the list without end. Past it, the replaced
+ * votes leave first, then those for no poll on screen, then the oldest
+ * (`votosAGuardar`, the vault's rule).
  */
 export function appendBounded(current: ChatMessage[], message: ChatMessage): ChatMessage[] {
-  const next = [...current, message]
-  const inChannel = next.reduce((count, item) => (item.channel === message.channel ? count + 1 : count), 0)
+  const next = semVotosAMais([...current, message], message.channel)
+  const conta = (item: ChatMessage): boolean => item.channel === message.channel && !ehVoto(item)
+  const inChannel = next.reduce((count, item) => (conta(item) ? count + 1 : count), 0)
   if (inChannel <= MEMORY_HARD_CAP) return next
   let toDrop = inChannel - MEMORY_HARD_CAP
   const largar = new Set<ChatMessage>()
   for (const item of next) {
     if (toDrop === 0) break
-    if (item.channel === message.channel && !DA_CONVERSA.has(item.payload.t)) {
+    if (conta(item) && !DA_CONVERSA.has(item.payload.t)) {
       largar.add(item)
       toDrop -= 1
     }
   }
   for (const item of next) {
     if (toDrop === 0) break
-    if (item.channel === message.channel && !largar.has(item)) {
+    if (conta(item) && !largar.has(item)) {
       largar.add(item)
       toDrop -= 1
     }
@@ -4889,6 +4944,21 @@ function Shell({
    * it. Each message that arrives while it is in front advances its marker.
    * Runs after `useUnreads`, which stores where the channel was on entry.
    */
+  /*
+    Entering a room: keep its mark as it is NOW, during this render, before the
+    effects below and in `useUnreads` advance it. The mention highlight compares
+    with it (`entrarNaConversa`, read by the timeline in this same render pass).
+    Idempotent: a render run twice writes the same value. The key is cleared on
+    a direct conversation too, so coming back to the same room is a new entry.
+  */
+  const conversaLida = useRef<string | null>(null)
+  const conversaAgora = active ? chaveDaConversa(active, activeRoom) : null
+  if (conversaAgora !== conversaLida.current) {
+    conversaLida.current = conversaAgora
+    if (active && conversaAgora !== null && !isDirect(active) && !isFeed(active)) {
+      entrarNaConversa(conversaAgora, marcaDaSala(lerLidasPorSala(), lerEstadoDaConta().lidas, active, activeRoom))
+    }
+  }
   useEffect(() => {
     if (!active || isDirect(active) || isFeed(active)) return
     let at = Date.now()
@@ -8519,7 +8589,8 @@ function Shell({
                 : strings.userMenu.nicknameTitle(nameFor(aMudarApelido.who))
             }
             label={strings.userMenu.nicknameLabel}
-            placeholder={nameFor(aMudarApelido.who)}
+            nome
+            placeholder={nomeVisivel(nameFor(aMudarApelido.who))}
             hint={strings.userMenu.nicknameHint}
             initialValue={bridge.channels.nicknames?.(aMudarApelido.canal)?.[aMudarApelido.who] ?? ""}
             onCancel={() => setAMudarApelido(null)}

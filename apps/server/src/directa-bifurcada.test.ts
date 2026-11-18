@@ -88,6 +88,39 @@ describe("a directa aberta pelos dois lados no mesmo instante", () => {
     }, 120_000)
   }
 
+  /*
+   * The window behind the CI failure of 1.3.15 to 1.3.18 ("Cannot send messages
+   * after being removed from group", always round 1, the one where Ana also
+   * founds the common room and so is slower). Bruno's `channel.claim` lands
+   * after Ana's first commit: the debut is Ana's and the channel is no longer
+   * empty, so Bruno asked for a seat at once, with Ana's Welcome already on its
+   * way. Ana answered the request with a reseat and removed the leaf she had
+   * just given him; when the reseat's Welcome did not open, Bruno stayed
+   * removed and dropped the conversation 30 s later. Here Bruno opens exactly
+   * in that window: the moment Ana's opening returns.
+   */
+  for (const volta of [1, 2, 3]) {
+    it(`quem perde a estreia e a encontra já usada entra pelo Welcome a caminho, sem reassento (volta ${volta})`, async () => {
+      const [ana, bruno] = await contas("Ana", "Bruno")
+      const dm = moradaDirecta(chaveDeConta(ana!.session.identity), bruno!.session.identity.signingPublicKey, ana!.address, bruno!.address)
+      // Right when Ana is done: her commit and Welcome are on the server, and
+      // Bruno is still opening the Welcome (an MLS join takes tens of ms).
+      expect(await ana!.session.openDirect(bruno!.address)).toBe(dm)
+      expect(servidor.enclave.store.channelNeverUsed(dm)).toBe(false)
+      expect(await bruno!.session.openDirect(ana!.address)).toBe(dm)
+
+      // Writes several times over the next second, as a person would: a send
+      // that lands while the leaf is removed throws, and that is the failure.
+      for (let i = 0; i < 10; i++) {
+        await Promise.all([ana!.session.send(dm, mensagem(`da Ana ${i}`)), bruno!.session.send(dm, mensagem(`do Bruno ${i}`))])
+        await new Promise((pronto) => setTimeout(pronto, 100))
+      }
+      await ate(() => leu(bruno!, dm, "da Ana 9") && leu(ana!, dm, "do Bruno 9"), "cada um lê o do outro", 30_000)
+      // No reseat: Bruno kept the leaf of the first Welcome.
+      expect(bruno!.avisos).not.toContain("channel-readopted")
+    }, 120_000)
+  }
+
   it("dois pedidos de amizade cruzados sem directa aberta dão «amigos» dos dois lados", async () => {
     const [ana, bruno] = await contas("Ana", "Bruno")
     // What the interface does when you click "Request friend": it opens the DM and sends the request.

@@ -1127,6 +1127,16 @@ export const pt = {
     selo: "Embaixador do Orwell",
   },
 
+  /*
+    The name field: 12 characters at most (see `CampoDeNome`). The counter
+    is "8/12"; the sentence shows when a paste was cut.
+  */
+  nomeCurto: {
+    contador: (n: number, max: number): string => `${n}/${max}`,
+    contadorRotulo: (n: number, max: number): string => `${n} de ${max} caracteres`,
+    maximo: (max: number): string => `Máximo ${max} caracteres.`,
+  },
+
   members: {
     count: (n: number): string => (n === 1 ? "1 pessoa" : `${n} pessoas`),
     /* The drawer's name, for whoever listens to the screen. It only exists on a
@@ -4915,6 +4925,10 @@ export const errosPt: Record<string, FraseDeErro> = {
     "Esta conversa precisa da outra pessoa. Quando ela ligar a app, a conversa volta a abrir.",
   "this device does not know the account feed yet":
     "Este aparelho ainda não conhece o mural da conta. Liga o aparelho onde criaste a conta e tenta outra vez.",
+  "the display name is too long": (detalhe) => {
+    const maximo = detalhe["max"]
+    return typeof maximo === "number" ? `O nome tem mais de ${maximo} caracteres.` : "O nome é longo de mais."
+  },
   "there is no friend request to cancel": "Não há pedido teu por cancelar.",
   "you cannot block yourself": "Não te podes bloquear a ti próprio.",
   "that is not an account address": "Isto não é o endereço de uma conta.",

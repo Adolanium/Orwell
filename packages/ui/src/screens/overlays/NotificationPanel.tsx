@@ -1,3 +1,4 @@
+import { nomeVisivel } from "@enclave/client-core"
 import { useId, useMemo, useRef, useState } from "react"
 import { Avatar } from "../../components/Avatar.js"
 import { Button } from "../../components/Button.js"
@@ -207,11 +208,11 @@ export function NotificationPanel({
                       <div className="notif-row unread">
                         <Avatar profile={directory.get(oferta.para)} fallback={oferta.para[1] ?? "?"} />
                         <span className="notif-labels">
-                          <span className="notif-text">{strings.notifCenter.sucessao(nameFor(oferta.de), para)}</span>
+                          <span className="notif-text">{strings.notifCenter.sucessao(nomeVisivel(nameFor(oferta.de)), nomeVisivel(para))}</span>
                           <span className="notif-text">
                             {oferta.tipo === "amigo"
-                              ? strings.notifCenter.sucessaoAdicionar(para)
-                              : strings.notifCenter.sucessaoConvidar(para, labelFor(oferta.canal))}
+                              ? strings.notifCenter.sucessaoAdicionar(nomeVisivel(para))
+                              : strings.notifCenter.sucessaoConvidar(nomeVisivel(para), labelFor(oferta.canal))}
                           </span>
                         </span>
                       </div>
@@ -242,7 +243,7 @@ export function NotificationPanel({
                     const request = entry.kind === "friend-request" ? openRequestFrom(friendships, entry.actor) : null
                     const texto =
                       entry.kind === "friend-request" && !request && entry.actor
-                        ? strings.notifCenter.friendRequestClosed(nameFor(entry.actor))
+                        ? strings.notifCenter.friendRequestClosed(nomeVisivel(nameFor(entry.actor)))
                         : notificationTextOf(entry, nameFor, labelFor)
                     return (
                       <li key={entry.id} className="notif-evento" data-tipo={entry.kind}>

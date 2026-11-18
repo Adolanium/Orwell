@@ -1,3 +1,4 @@
+import { fechosDasVotacoes, votosQueContam } from "@enclave/client-core"
 import type { ChatMessage } from "../types.js"
 import { strings } from "../strings.js"
 import { formatarDataEHora } from "./format.js"
@@ -86,34 +87,14 @@ export function votosDe(
   /** The closing instant of each poll (`fechosDe`). A vote stamped later does not count. */
   fechos?: ReadonlyMap<string, number>,
 ): Map<string, Map<string, number>> {
-  /** target → voter → { option chosen (or none), when } */
-  const porAlvo = new Map<string, Map<string, { opcao: number | null; at: number }>>()
-
-  for (const message of messages) {
-    const { payload, sender } = message
-    if (payload.t !== "post.reaction") continue
-    if (!payload.target) continue
-    // A reaction with no vote is a thumbs-up, and thumbs-ups are summed elsewhere.
-    if (typeof payload.vote !== "number") continue
-
-    const at = payload.at ?? 0
-    // After the close, by the vote's OWN timestamp and not by anyone's clock now: every device
-    // with the same events reaches the same count.
-    const fecho = fechos?.get(payload.target)
-    if (fecho !== undefined && at > fecho) continue
-
-    const porPessoa = porAlvo.get(payload.target) ?? new Map<string, { opcao: number | null; at: number }>()
-    const conhecido = porPessoa.get(sender)
-    if (!conhecido || at >= conhecido.at) {
-      porPessoa.set(sender, { opcao: payload.remove ? null : payload.vote, at })
-    }
-    porAlvo.set(payload.target, porPessoa)
-  }
-
+  // The rule lives in the core (`votosQueContam`), so the vault keeps exactly the vote this
+  // counts (review of 1.3.19, I1): the highest `at` not after the close, ties by thread order.
   const votos = new Map<string, Map<string, number>>()
-  for (const [alvo, porPessoa] of porAlvo) {
+  for (const [alvo, porPessoa] of votosQueContam(messages, (message) => message, fechos)) {
     const escolhas = new Map<string, number>()
-    for (const [quem, { opcao }] of porPessoa) if (opcao !== null) escolhas.set(quem, opcao)
+    for (const [quem, { payload }] of porPessoa) {
+      if (!payload.remove && typeof payload.vote === "number") escolhas.set(quem, payload.vote)
+    }
     votos.set(alvo, escolhas)
   }
   return votos
@@ -179,25 +160,7 @@ export function fechosDe(
   messages: ChatMessage[],
   modera: (quem: string) => boolean = () => false,
 ): Map<string, number> {
-  const autores = new Map<string, string>()
-  const fechos = new Map<string, number>()
-  for (const { payload, sender } of messages) {
-    if (payload.t !== "message" && payload.t !== "post") continue
-    const id = payload.id
-    if (!id || !votacaoDe(payload) || autores.has(id)) continue
-    autores.set(id, sender)
-    const prazo = votacaoDe(payload)?.closesAt
-    if (prazo !== undefined) fechos.set(id, prazo)
-  }
-  for (const { payload, sender } of messages) {
-    if (payload.t !== "edit" || payload.closePoll !== true || !payload.target) continue
-    const autor = autores.get(payload.target)
-    if (autor === undefined || (autor !== sender && !modera(sender))) continue
-    const quando = payload.editedAt ?? 0
-    const actual = fechos.get(payload.target)
-    if (actual === undefined || quando < actual) fechos.set(payload.target, quando)
-  }
-  return fechos
+  return fechosDasVotacoes(messages, (message) => message, modera)
 }
 
 /**

@@ -1,7 +1,9 @@
+import { nomeVisivel } from "@enclave/client-core"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useEstavel } from "../../hooks/useEstavel.js"
 import { copiarTexto } from "../../lib/copiar.js"
 import type { FichaDeReaccao, Participant } from "@enclave/client-core"
+import { NomeDePessoa } from "../../components/NomeDePessoa.js"
 import { EmojiPicker } from "../../components/EmojiPicker.js"
 import { useEcraLargo } from "../../hooks/useEcraLargo.js"
 import type { Etiquetas } from "../../components/RichText.js"
@@ -47,6 +49,7 @@ import { AvisoDoEnvio, BarraDoHistorico, useHistoricoDosIrmaos } from "../../com
 import { useSincronia } from "../../hooks/useSincronia.js"
 import { podeResponder, type Citacao, type RespostaPendente } from "../../lib/respostas.js"
 import { miniaturaParaFixar } from "../../lib/miniaturaFixada.js"
+import { chaveDaConversa } from "../../lib/porLerPorSala.js"
 
 /** What the shell answers for each line. See `Timeline`. */
 export type ChatScreenPedidoDe = (
@@ -747,7 +750,15 @@ export function ChatScreen({
               round={isDirect(active)}
               official={oficial}
             />
-            <h1>{labelFor(active)}</h1>
+            {/* A direct is titled with the other person's name: cut like every name,
+                whole in the tooltip. A channel name is not a display name. */}
+            {isDirect(active) ? (
+              <h1>
+                <NomeDePessoa nome={labelFor(active)} />
+              </h1>
+            ) : (
+              <h1>{labelFor(active)}</h1>
+            )}
             {oficial && <SeloOficial />}
             {/* Wide screen: the history progress lives here, beside the name. */}
             {ecraLargo && <BarraDoHistorico estado={historicoDosIrmaos} noTopo />}
@@ -905,7 +916,7 @@ export function ChatScreen({
               reader: the sentence after says who they are, by name. */}
           <Vozes outros={ringing.get(active)?.size ?? 0} rotulo={null} />
           <span>
-            {[...(ringing.get(active)?.keys() ?? [])].map(nameFor).join(", ")}
+            {[...(ringing.get(active)?.keys() ?? [])].map((quem) => nomeVisivel(nameFor(quem))).join(", ")}
             {(ringing.get(active)?.size ?? 0) === 1 ? strings.chat.inCallOne : strings.chat.inCallMany}
           </span>
           <Button
@@ -1020,7 +1031,7 @@ export function ChatScreen({
           ) : (
           <Timeline
             channel={active}
-            conversa={`${active}|${activeRoom}`}
+            conversa={chaveDaConversa(active, activeRoom)}
             lugar={sincronia.lugar}
             /* The same truth in both places: without an input bar, emptiness cannot
                ask to find it below. See `escritaTrancada`. */

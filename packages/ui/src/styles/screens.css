@@ -1607,6 +1607,20 @@
   white-space: nowrap;
 }
 
+/* Line 2 of a member (17/11/2026): the role, then the state. Left to right,
+   unlike the `rtl` above (kept for the role-only preview in the role editor):
+   the role is read first, and the state is what gives way, with "…". */
+.member-subline {
+  direction: ltr;
+  max-width: 100%;
+}
+
+.member-sub-sep,
+.member-estado {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
 .member-empty {
   color: var(--text-faint);
   font-size: var(--font-sm);
@@ -7902,18 +7916,8 @@ button.tag-pill[aria-pressed="true"] {
   }
 }
 
-/* A member reads top-down: who, which account, what they are up to. */
-/* The personal message next to the name, Messenger style: italic, dimmed, unweighted, and it is the one that gives when the line does not fit. */
-.member-status {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--font-sm);
-  font-weight: 400;
-  font-style: italic;
-  color: var(--text-dim);
-  overflow: hidden;
-  white-space: nowrap;
-}
+/* The status that scrolled next to the member's name moved to line 2, after
+   the role (17/11/2026): see `.member-subline`. */
 
 
 /* ---------------------------------------------------------------- emojis */
@@ -10026,6 +10030,11 @@ button.message-citacao:focus-visible {
   color: var(--text);
 }
 
+/* "@" before the name: the reply pinged the author of the original, like Discord. */
+.message-citacao-arroba {
+  color: inherit;
+}
+
 .message-citacao-texto {
   min-width: 0;
   overflow: hidden;
@@ -12086,6 +12095,27 @@ button.message-citacao:focus-visible {
 @media (hover: hover) {
   .message.menciona-me:hover {
     background: color-mix(in srgb, var(--accent) 13%, transparent);
+  }
+}
+
+/* A lit line seen in this visit (a few seconds in view, window in front,
+   `useMencoesVistas`): its light fades out in place. The margin and padding of
+   the lit line stay, so nothing moves. With reduced motion it still fades, only
+   slower: nothing stops, it moves more gently. The next visit does not light it. */
+.message.menciona-me.mencao-vista,
+.message.menciona-me.mencao-vista:hover {
+  background: transparent;
+  box-shadow: inset 3px 0 0 transparent;
+  transition:
+    background-color 1.6s ease,
+    box-shadow 1.6s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* `!important` to beat the universal zero in `base.css` (house rule: it slows, it does not stop). */
+  .message.menciona-me.mencao-vista,
+  .message.menciona-me.mencao-vista:hover {
+    transition-duration: 3.2s !important;
   }
 }
 

@@ -1,3 +1,4 @@
+import { nomeVisivel } from "@enclave/client-core"
 import { memo, useEffect, useRef, useState } from "react"
 import type { Activity, ChannelRoom, ConnectionState, Profile } from "../../bridge.js"
 import type { View } from "../../types.js"
@@ -991,7 +992,8 @@ function ChannelSidebarInteira({
                       */}
                       <span className="channel-label">
                         <span className="channel-name" title={nome}>
-                          {nome}
+                          {/* A direct carries a person's name: cut like every name. */}
+                          {isDirect(channel) ? nomeVisivel(nome) : nome}
                         </span>
                         {ehOficial && <SeloOficial />}
                         {silenciado?.(channel) && <MarcaDeSilencio />}

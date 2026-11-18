@@ -556,6 +556,13 @@ export interface OpcoesDoMotor {
   registar?: (linha: string) => void
 }
 
+/** An `entrar` waiting on its scope. See `MotorDeMedia.#entradasPendentes`. */
+interface EntradaPendente {
+  readonly chave: string
+  /** Set by `sair`: the owner left, and the entry must undo itself when it lands. */
+  cancelada: boolean
+}
+
 export class MotorDeMedia {
   #worker: types.Worker
   #webRtcServer: types.WebRtcServer
@@ -564,6 +571,14 @@ export class MotorDeMedia {
   /** The same, resolved, for those who need to look without waiting. */
   #ambitosResolvidos = new Map<string, Ambito>()
   #transportes = new Map<string, RegistoDeTransporte>()
+  /**
+   * The entries still waiting on their scope, per owner. See `entrar`: an
+   * owner that leaves (`sair`) while one is in flight marks it, and the entry
+   * undoes itself when it lands instead of leaving a member nobody will remove.
+   */
+  #entradasPendentes = new Map<string, Set<EntradaPendente>>()
+  /** `(dono, âmbito, sentido)` of the transports being created. See `criarTransporte`. */
+  #transportesPendentes = new Set<string>()
   #fechado = false
   /** The consumers of each screen image, so the keyframe clock can pick who to ask. */
   #consumosDoEcra = new Map<string, Set<types.Consumer>>()
@@ -763,15 +778,47 @@ export class MotorDeMedia {
   async entrar(chave: string, dono: string): Promise<{ rtpCapabilities: types.RtpCapabilities; produtores: ProdutorNoAmbito[] }> {
     this.#exigirDePe()
 
-    const jaMeus = this.#ambitosDe(dono)
-    if (jaMeus.size >= AMBITOS_POR_LIGACAO && !jaMeus.has(chave)) {
+    // The entries still in flight count as seats already taken: counting only
+    // the scopes joined, with the record after the `await`, let twelve parallel
+    // joins through a cap of four (ORW-134-06). The seat is taken here,
+    // synchronously, and given back in the `finally` when the entry fails.
+    let pendentes = this.#entradasPendentes.get(dono)
+    const ocupados = this.#ambitosDe(dono)
+    for (const outra of pendentes ?? []) if (!outra.cancelada) ocupados.add(outra.chave)
+    if (ocupados.size >= AMBITOS_POR_LIGACAO && !ocupados.has(chave)) {
       throw new RecusaDeMedia(
         "demasiados-ambitos",
         `esta ligação já está em ${AMBITOS_POR_LIGACAO} chamadas ao mesmo tempo`,
       )
     }
 
+    // Registered before the `await`, so a `sair` that runs during it can see it
+    // (ORW-134-07).
+    const entrada: EntradaPendente = { chave, cancelada: false }
+    if (!pendentes) this.#entradasPendentes.set(dono, (pendentes = new Set()))
+    pendentes.add(entrada)
+    try {
+      return await this.#entrarNoAmbito(chave, dono, entrada)
+    } finally {
+      pendentes.delete(entrada)
+      if (pendentes.size === 0 && this.#entradasPendentes.get(dono) === pendentes) this.#entradasPendentes.delete(dono)
+    }
+  }
+
+  async #entrarNoAmbito(
+    chave: string,
+    dono: string,
+    entrada: EntradaPendente,
+  ): Promise<{ rtpCapabilities: types.RtpCapabilities; produtores: ProdutorNoAmbito[] }> {
     const ambito = await this.#ambitoVivo(chave)
+
+    // The owner left while the scope was being made. Becoming a member now
+    // would leave a member that no exit will ever remove, and a router that
+    // `#talvezFecharAmbito` never closes: a leak in the worker until restart.
+    if (entrada.cancelada) {
+      await this.#talvezFecharAmbito(ambito)
+      throw new RecusaDeMedia("saiu-a-meio", "esta ligação saiu da chamada antes de acabar de entrar")
+    }
 
     if (!ambito.membros.has(dono) && ambito.membros.size >= PARTICIPANTES_POR_AMBITO) {
       throw new RecusaDeMedia(
@@ -860,12 +907,31 @@ export class MotorDeMedia {
       throw new RecusaDeMedia("fora-do-ambito", "esta ligação não entrou nesta chamada")
     }
 
-    for (const id of meus) {
-      if (this.#transportes.get(id)?.sentido === sentido) {
-        throw new RecusaDeMedia("transporte-repetido", `esta ligação já tem um transporte de ${sentido} nesta chamada`)
-      }
+    // A transport still being created counts as one that exists: the check
+    // above runs before the `await` and the record after it, so two parallel
+    // requests both passed (ORW-134-08), and each extra send transport is one
+    // more `BANDA_DE_ENTRADA_POR_TRANSPORTE` for the same connection. Reserved
+    // synchronously, given back in the `finally`.
+    const reserva = `${dono}\u0000${chave}\u0000${sentido}`
+    const repetido = this.#transportesPendentes.has(reserva) || [...meus].some((id) => this.#transportes.get(id)?.sentido === sentido)
+    if (repetido) {
+      throw new RecusaDeMedia("transporte-repetido", `esta ligação já tem um transporte de ${sentido} nesta chamada`)
     }
+    this.#transportesPendentes.add(reserva)
+    try {
+      return await this.#abrirTransporte(ambito, chave, dono, sentido, meus)
+    } finally {
+      this.#transportesPendentes.delete(reserva)
+    }
+  }
 
+  async #abrirTransporte(
+    ambito: Ambito,
+    chave: string,
+    dono: string,
+    sentido: Sentido,
+    meus: Set<string>,
+  ): Promise<ParametrosDoTransporte> {
     const transporte = await ambito.router.createWebRtcTransport({
       webRtcServer: this.#webRtcServer,
       enableUdp: true,
@@ -873,10 +939,23 @@ export class MotorDeMedia {
       preferUdp: true,
     })
 
-    // The cap goes on the transport where the bandwidth comes IN. A receive
-    // transport has nothing to limit: what leaves here is up to us.
-    if (sentido === "envio") {
-      await transporte.setMaxIncomingBitrate(BANDA_DE_ENTRADA_POR_TRANSPORTE)
+    try {
+      // The cap goes on the transport where the bandwidth comes IN. A receive
+      // transport has nothing to limit: what leaves here is up to us.
+      if (sentido === "envio") {
+        await transporte.setMaxIncomingBitrate(BANDA_DE_ENTRADA_POR_TRANSPORTE)
+      }
+    } catch (erro) {
+      transporte.close()
+      throw erro
+    }
+
+    // The owner may have left during the `await`s (`sair`, `sairDoAmbito`). Its
+    // member entry is gone, so no exit would ever close this transport: it
+    // would live until the router does (ORW-134-07).
+    if (ambito.fechado || ambito.membros.get(dono) !== meus) {
+      transporte.close()
+      throw new RecusaDeMedia("fora-do-ambito", "esta ligação saiu da chamada antes de o transporte ficar pronto")
     }
 
     this.#transportes.set(transporte.id, {
@@ -1469,6 +1548,8 @@ export class MotorDeMedia {
 
   /** Drop everything a connection has, in all scopes. See `#drop`. */
   async sair(dono: string): Promise<{ chave: string; produtores: string[] }[]> {
+    // Synchronously, before any `await`: an entry in flight must learn it now.
+    for (const entrada of this.#entradasPendentes.get(dono) ?? []) entrada.cancelada = true
     const saldo: { chave: string; produtores: string[] }[] = []
     for (const chave of [...this.#ambitosDe(dono)]) {
       const produtores = await this.sairDoAmbito(dono, chave)

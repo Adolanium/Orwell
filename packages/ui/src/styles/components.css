@@ -2366,3 +2366,28 @@ span.mention {
   flex: none;
   color: var(--text-muted, currentColor);
 }
+
+/* The name field's foot (`CampoDeNome`): the cut notice on the left, the
+   counter on the right, both small and quiet. The counter turns to the
+   warning colour only for an old name already over the limit. */
+.campo-de-nome-pe {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: calc(var(--space-2) * -1) 0 0;
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+}
+
+.aviso-do-nome {
+  color: var(--text-dim);
+}
+
+.contador-do-nome {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.contador-do-nome.acima {
+  color: var(--warning);
+}

@@ -698,7 +698,9 @@ describe("ChannelSidebar — símbolos", () => {
       povoada({ profile: { displayName: "Duarte Bivar de Sousa Nepomuceno", donations: [] } as unknown as Profile }),
     )
     const nome = container.querySelector(".me-name")
-    expect(nome?.querySelector(".me-name-text")?.textContent).toBe("Duarte Bivar de Sousa Nepomuceno")
+    // An old name over 12 graphemes is drawn cut, whole in the tooltip (17/11/2026).
+    expect(nome?.querySelector(".me-name-text")?.textContent).toBe("Duarte Bivar…")
+    expect(nome?.querySelector('[title="Duarte Bivar de Sousa Nepomuceno"]')).toBeTruthy()
     // Since the banner, the status marker lives in the avatar corner and not
     // beside the name: a long name can no longer push it out.
     expect(nome?.querySelector(".dot")).toBeNull()

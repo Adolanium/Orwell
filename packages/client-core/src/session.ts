@@ -31,6 +31,7 @@ import {
   deriveSframeKeyMaterial,
   type AddMembersResult,
   type EntradaPorWelcome,
+  type GeneratedKeyPackage,
   type GroupSession,
   type StoredKeyPackage,
 } from "@enclave/crypto"
@@ -214,6 +215,7 @@ import {
   type TipoDoCanal,
 } from "./tipoDoCanal.js"
 import { APELIDO_MAX, apelidoDaMensagem, apelidosDoCanal, esquecerApelidos, registarApelido, type RegistoDeApelido } from "./apelidos.js"
+import { contarGrafemas, NOME_MAX } from "./nomeDeApresentacao.js"
 import { chaveDoEvento, porOrdemDoServidor, venceCarimbo } from "./dobras.js"
 import {
   anexosParaFixar,
@@ -1839,6 +1841,19 @@ export class Session extends Emitter<SessionEvents> {
   /** A read of the inbox each time. See `recolherDenuncias`. */
   #recolhaEmCurso: Promise<void> | null = null
   #keyPackages = new Map<string, StoredKeyPackage>()
+  /** The most private key packages this device keeps (see `topUpKeyPackages`). */
+  static KEY_PACKAGES_LOCAIS_MAX = 200
+  /**
+   * The waits between two tries to seat a new device of this account that has no
+   * key packages on the server yet (`#assentarAparelho`), each with ±20 % jitter.
+   * It was two more tries 3 s apart: under load the new device's top-up came later
+   * than that and the channel was lost for good (e2e-membros-aparelho-novo, 12/14).
+   */
+  static ESPERAS_DE_ASSENTO_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000]
+  /** For tests: how many private key packages this device holds. */
+  get keyPackagesLocais(): number {
+    return this.#keyPackages.size
+  }
   #pending = new Map<string, ((frame: ServerFrame) => void)[]>()
   /**
    * Pending SFU requests, by TAG not by type.
@@ -2607,7 +2622,14 @@ export class Session extends Emitter<SessionEvents> {
       } catch {
         return
       }
-      void this.#onFrame(frame).catch((error: Error) => {
+      const tratamento = this.#onFrame(frame)
+      // Tracked from arrival, before any await, so `#welcomesLidos` sees every Welcome
+      // that came in ahead of its `pong`. See `#welcomesEmCurso`.
+      if (frame.t === "channel.event" && frame.kind === "welcome") {
+        this.#welcomesEmCurso.add(tratamento)
+        void tratamento.catch(() => {}).finally(() => this.#welcomesEmCurso.delete(tratamento))
+      }
+      void tratamento.catch((error: Error) => {
         // Handling one frame must never take the connection with it: the
         // vault write behind it can fail (quota, a lock racing the write) and
         // the socket is still perfectly good.
@@ -2976,7 +2998,16 @@ export class Session extends Emitter<SessionEvents> {
     // inviter gets nothing and the invitation silently never happens.
     try {
       if (this.#keyPackages.size === 0) await this.topUpKeyPackages(20, true)
+      else if (this.#anelPresoNoLogin && this.#keyPackages.size >= Session.KEY_PACKAGES_LOCAIS_MAX) {
+        // The Welcomes of `welcome.resync` first: the last packages claimed are the oldest
+        // halves, the ones a reset drops (review of 1.3.19, R1). With no channel to
+        // restore there is no catch-up between that frame and this line.
+        await this.#welcomesLidos()
+        if (this.#keyPackages.size >= Session.KEY_PACKAGES_LOCAIS_MAX) await this.#reiniciarAnel()
+        else await this.topUpKeyPackages(20)
+      }
       else if (this.#keyPackages.size < 10) await this.topUpKeyPackages(20)
+      this.#anelPresoNoLogin = false
       this.#chavesProntas = true
       marcarArranque("chaves")
     } catch (error) {
@@ -3476,6 +3507,130 @@ export class Session extends Emitter<SessionEvents> {
     this.#cancelarFlushAdiado()
   }
 
+  /** A top-up in flight, so a burst of `keypackage.low` nudges publishes one pool, not one each. */
+  #reposicaoDeChaves: Promise<void> | null = null
+
+  /**
+   * Answer the server's `keypackage.low`, once at a time (17/11/2026).
+   *
+   * The server used to say it only at login. Since then it also says it when a
+   * claim leaves this device below its floor, which is what a new device sees
+   * when the main one seats it in every channel, one package per channel: a burst
+   * of claims, and a nudge after each. The nudge can also land in the same tick
+   * as a disconnect; topping up then throws on a dead socket. The pool is refilled
+   * at the next connect anyway, so this is a lost opportunity, never an error.
+   */
+  #reporChaves(remaining: number): Promise<void> {
+    this.#reservaNoServidor = remaining
+    if (this.#anelPreso(remaining) && !this.#chavesProntas) {
+      // At login: the handshake decides once the vault is restored (see `#handshake`).
+      this.#anelPresoNoLogin = true
+      return Promise.resolve()
+    }
+    this.#reposicaoDeChaves ??= (this.#anelPreso(remaining) ? this.#reiniciarAnelDepoisDosWelcomes() : this.topUpKeyPackages(20))
+      .catch(() => {})
+      .finally(() => {
+        this.#reposicaoDeChaves = null
+      })
+    return this.#reposicaoDeChaves
+  }
+
+  /**
+   * How long a stuck ring waits, outside login, before it is reset (review of 1.3.19, R1).
+   *
+   * The server sends `keypackage.low` at the claim; the Welcome of that claim comes
+   * only after the claimer's commit. The package that empties the pool is the oldest
+   * one, so its half is at the head of the ring, which is what a reset drops. Within
+   * this wait the Welcomes in flight are applied (and spend their half) or not coming.
+   */
+  static ESPERA_ANTES_DE_REINICIAR_O_ANEL_MS = 30_000
+
+  /** The last pool size the server told this connection, or `null` before it said any. */
+  #reservaNoServidor: number | null = null
+
+  /** Every `channel.event` Welcome being handled, from the moment its frame arrived. */
+  readonly #welcomesEmCurso = new Set<Promise<void>>()
+
+  /**
+   * Wait until every Welcome the server sent so far has been handled.
+   *
+   * The server answers in order, so once the `pong` is here every earlier frame
+   * (the Welcomes of `welcome.resync` among them) has arrived and is in
+   * `#welcomesEmCurso`. Bounded: a Welcome stuck on something else must not hold
+   * the key step for ever.
+   */
+  async #welcomesLidos(): Promise<void> {
+    try {
+      this.#send({ t: "ping" })
+      await this.#await("pong", Session.ESPERA_PELA_RECUPERACAO_MS)
+    } catch {
+      // No pong: whatever arrived is still waited for below.
+    }
+    await this.#welcomesTratados()
+  }
+
+  /** Wait for the Welcomes already arrived to be handled, bounded. See `#welcomesLidos`. */
+  async #welcomesTratados(): Promise<void> {
+    if (this.#welcomesEmCurso.size === 0) return
+    let prazo: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      Promise.allSettled([...this.#welcomesEmCurso]),
+      new Promise((resolve) => (prazo = setTimeout(resolve, Session.ESPERA_PELA_RECUPERACAO_MS))),
+    ])
+    clearTimeout(prazo)
+  }
+
+  /**
+   * Outside login: reset a stuck ring only if it is still stuck after the Welcomes in
+   * flight had their time (`ESPERA_ANTES_DE_REINICIAR_O_ANEL_MS`).
+   *
+   * A Welcome that came in spent a half and left room: then a plain top-up refills the
+   * pool. Bound to this socket: a reconnect in between runs its own check at login.
+   */
+  async #reiniciarAnelDepoisDosWelcomes(): Promise<void> {
+    const socket = this.#socket
+    await new Promise((resolve) => setTimeout(resolve, Session.ESPERA_ANTES_DE_REINICIAR_O_ANEL_MS))
+    if (this.#socket !== socket || this.#connection !== "online" || !this.#chavesProntas) return
+    await this.#welcomesLidos()
+    if (this.#socket !== socket) return
+    if (this.#anelPreso(this.#reservaNoServidor ?? -1)) await this.#reiniciarAnel()
+    else await this.topUpKeyPackages(20)
+  }
+
+  /** The login said the pool was empty with the ring at its cap: `#reiniciarAnel` runs in the handshake. */
+  #anelPresoNoLogin = false
+
+  /**
+   * The ring is full and the server has nothing of ours left (review of 1.3.19, C2).
+   *
+   * A private half leaves the ring only when a Welcome spends it. A claim that never
+   * becomes a Welcome (a commit that failed, a dead Welcome, someone claiming in a loop)
+   * leaves its half here for good. At the cap `topUpKeyPackages` mints nothing, so with
+   * the server's pool at 0 this device could no longer be invited or seated anywhere.
+   */
+  #anelPreso(remaining: number): boolean {
+    return remaining === 0 && this.#keyPackages.size >= Session.KEY_PACKAGES_LOCAIS_MAX
+  }
+
+  /**
+   * Drop the oldest half of the ring and publish a fresh pool with `replace`.
+   *
+   * The server serves the newest packages first (`ORDER BY id DESC` in the store), so the
+   * LAST package to leave the pool is the oldest, whose half is at the head of the ring:
+   * the claim that left the pool at 0 has its Welcome possibly still on the way for one
+   * of the halves dropped here. Callers wait for those Welcomes first: `#welcomesLidos`
+   * at login, `#reiniciarAnelDepoisDosWelcomes` outside it (review of 1.3.19, R1).
+   */
+  async #reiniciarAnel(): Promise<void> {
+    const ficam = Math.floor(Session.KEY_PACKAGES_LOCAIS_MAX / 2)
+    for (const id of this.#keyPackages.keys()) {
+      if (this.#keyPackages.size <= ficam) break
+      this.#keyPackages.delete(id)
+    }
+    this.#keyPackagesDirty = true
+    await this.topUpKeyPackages(20, true)
+  }
+
   /**
    * Keep a pool of unclaimed key packages on the server.
    *
@@ -3484,9 +3639,20 @@ export class Session extends Emitter<SessionEvents> {
    * encourage.
    */
   async topUpKeyPackages(count: number, replaceServerCopy = false): Promise<void> {
-    const generated = await generateKeyPackages(this.identity, count)
+    // The private halves stay here until a Welcome spends them, and each Welcome
+    // tries them all. Someone claiming our packages in a loop used to grow this
+    // without end (and the vault with it): at the cap this device mints no more.
+    // A top-up never drops a half to make room: a half dropped while its Welcome
+    // was still on the way left a new device out of that channel
+    // (e2e-membros-aparelho-novo, 3 channels missing in Chromium). The server serves
+    // the NEWEST packages first (`ORDER BY id DESC`); a ring stuck at the cap with
+    // nothing left on the server is reset by `#reiniciarAnel`.
+    const espaco = replaceServerCopy ? count : Math.min(count, Session.KEY_PACKAGES_LOCAIS_MAX - this.#keyPackages.size)
+    if (espaco <= 0) return
+    const generated = await generateKeyPackages(this.identity, espaco)
     for (const item of generated) this.#keyPackages.set(toBase64(item.wire), exportKeyPackage(item))
     this.#keyPackagesDirty = true
+    this.#reservaNoServidor = replaceServerCopy ? generated.length : (this.#reservaNoServidor ?? 0) + generated.length
     this.#send({
       t: "keypackage.publish",
       packages: generated.map((item) => toBase64(item.wire)),
@@ -7987,7 +8153,7 @@ What was left behind:
       throw new Error("you may not moderate in this channel", { cause: { channel } })
     }
     const apelido = nick.trim()
-    if (apelido.length > APELIDO_MAX) throw new Error("the nickname is too long", { cause: { max: APELIDO_MAX } })
+    if (contarGrafemas(apelido) > APELIDO_MAX) throw new Error("the nickname is too long", { cause: { max: APELIDO_MAX } })
     const publicado = this.vault.contents.directory[subject]?.payload["displayName"]
     const nome = typeof publicado === "string" && publicado.trim() !== "" ? publicado : subject
     const corpo =
@@ -9366,6 +9532,15 @@ What was left behind:
   // ---------------------------------------------------------------- profile
 
   async updateProfile(next: Omit<StoredProfile, "activity" | "updatedAt"> & { activity?: string }): Promise<void> {
+    /*
+      A new name stops at 12 graphemes (`nomeDeApresentacao.ts`). Only a CHANGED
+      name is judged: an account that already holds a longer one (written by
+      1.3.7 to 1.3.18) still saves its bio or state without being made to rename.
+    */
+    const nome = next.displayName.trim()
+    if (nome !== this.vault.contents.profile.displayName.trim() && contarGrafemas(nome) > NOME_MAX) {
+      throw new Error("the display name is too long", { cause: { max: NOME_MAX } })
+    }
     /*
       The chosen state enters the profile only if it is one that publishes (phase
       1h). "online" is the absence of state, and "invisible" does not publish: being
@@ -11212,15 +11387,16 @@ What was left behind:
    * Best effort, one channel at a time, and patient: the phone just published
    * its keys and the server may not have them all yet. A channel where the
    * device is already there ("already in this room") is not an error; a channel
-   * with no keys for the device (`AparelhoSemChaves`) waits and tries two more
-   * times.
+   * with no keys for the device (`AparelhoSemChaves`) waits and tries again, up
+   * to six more times (`ESPERAS_DE_ASSENTO_MS`).
    */
   async #assentarAparelho(deviceKey: Uint8Array): Promise<void> {
     const chave = toBase64(deviceKey)
     const comum = this.#commonRoom
     for (const canal of this.channels) {
       if (canal === comum) continue
-      for (let tentativa = 0; tentativa < 3; tentativa++) {
+      const esperas = Session.ESPERAS_DE_ASSENTO_MS
+      for (let tentativa = 0; tentativa <= esperas.length; tentativa++) {
         const group = this.#groups.get(canal)
         if (!group) break
         const tree = group.state.ratchetTree
@@ -11233,8 +11409,13 @@ What was left behind:
           await this.#seatInvite(canal, this.identity.address)
           break
         } catch (erro) {
-          if (erro instanceof AparelhoSemChaves && tentativa < 2) {
-            await new Promise((resolve) => setTimeout(resolve, 3_000))
+          if (erro instanceof AparelhoSemChaves && tentativa < esperas.length) {
+            // The new device tops up when the server nudges it, but under load a burst
+            // of claims can empty its pool before the top-up lands. This device hears
+            // nothing of that top-up, so it waits, longer each time, with jitter so
+            // that two devices seating at once do not claim in step.
+            const espera = (esperas[tentativa] as number) * (0.8 + Math.random() * 0.4)
+            await new Promise((resolve) => setTimeout(resolve, espera))
             continue
           }
           if ((erro as Error).message !== "that person is already in this channel") this.#falhaDeLugar(canal, "assentar o aparelho novo", erro)
@@ -17283,6 +17464,18 @@ What was left behind:
    */
   async #esperarPeloGrupo(channel: string, pedirJa = false): Promise<void> {
     const entrou = (): boolean => this.#groups.has(channel)
+    /*
+      "Already used" can mean the peer's Welcome is in this socket right now:
+      whoever lost the debut of a direct gets `empty: false` when its claim
+      lands after the winner's commit, and the server sent that Welcome BEFORE
+      the claim's answer. Asking for a seat then made the winner reseat us,
+      removing the leaf it had just given, and when the reseat's Welcome did
+      not open we stayed removed ("Cannot send messages after being removed
+      from group", CI of 1.3.15 to 1.3.18, `directa-bifurcada`). So the
+      Welcomes that already arrived are handled first. For a channel this
+      device forgot there are none, and the request goes at once.
+    */
+    if (pedirJa) await this.#welcomesTratados()
     for (let tentativa = 0; tentativa < 2 && !entrou(); tentativa++) {
       if (tentativa > 0 || pedirJa) this.requestRejoin(channel)
       const fim = Date.now() + Session.ESPERA_DA_ESTREIA_MS
@@ -19957,14 +20150,26 @@ What was left behind:
     if (!this.#serverCapabilities.includes("common-room-groupinfo")) return false
 
     /**
-     * The key we use to enter, verified BEFORE we request the gate.
+     * The key we use to enter, ready BEFORE we request the gate.
      *
-     * Our key package, which burns like any other: the leaf we are about to occupy is built from it, and keeping the private half after use is a secret debt with no reward.
+     * This used to be read AFTER the `take`, and the `take` is irreversible: the server delivers the blank once and deletes it. A device that could not use it returned `false` and left the room without any blank, and the retry repeated (15 s, 30 s, 60 s, then every two minutes), each time burning the blank another member had just reposted.
      *
-     * This used to be read AFTER the `take`, and the `take` is irreversible: the server delivers the blank once and deletes it. A vault with no keys, the handshake reset failed, and it fails silently on purpose to not drop the connection, would draw the room's gate, could not use it, and return `false`. The room was left without any blank because of someone who never even entered, and the worst part is the retry repeats: at 15s, at 30s, at 60s and then every two minutes, each attempt burning the blank another member just reposted. While that app was open, the gate vanished as soon as it appeared, and with no one online to admit via the path below, no one else entered.
+     * **A fresh key package, never published, never in the ring (1.3.19).** This used to be the first package of the ring, one this device had just published. Burning its private half here left the public half on the server, unclaimed and the oldest of the pool, so it was served last: to the main device seating this one in a channel, or to a friend seating it in a direct. Their Welcome opened with no key, died here (`welcome-dead`, or nothing at all with the ring empty), and the inviter saw the seat as done. The new device never got that channel. An external commit needs a leaf, not a package anyone can claim, so the leaf comes from a package only this call ever sees, as `redeemInvite` does. Test: `session.cartao-chave-nao-publicada.rede`.
      */
-    const [primeira] = [...this.#keyPackages.entries()]
-    if (!primeira) return false
+    /*
+      Still nothing with an empty ring, though the ring is no longer spent here: an
+      empty ring is a handshake whose key work failed (recovery swallows that on
+      purpose), and a device in that state leaves the door for whoever can use it
+      (`session.sala-comum`, "não é levantado por quem não tem chaves").
+    */
+    if (this.#keyPackages.size === 0) return false
+    let par: GeneratedKeyPackage | undefined
+    try {
+      ;[par] = await generateKeyPackages(this.identity, 1)
+    } catch {
+      return false
+    }
+    if (!par) return false
 
     this.#send({ t: "channel.groupinfo.take", channel: sala })
 
@@ -19977,9 +20182,6 @@ What was left behind:
       // Older server, or connection dropping. The path below works.
       return false
     }
-
-    const [id, guardada] = primeira
-    const par = importKeyPackage(guardada)
 
     let entrada
     try {
@@ -19997,10 +20199,6 @@ What was left behind:
         channel: sala,
       })
     }
-
-    // Spent already, whether the commit went or not: the leaf it built may have gone to the wire, and a key package does not use twice.
-    this.#keyPackages.delete(id)
-    this.#keyPackagesDirty = true
 
     /*
       The commit goes out, and only with the verdict do we enter. See `#commitar`.
@@ -20362,7 +20560,20 @@ None of this touches the deafness counter: whoever reads it is the next
         before.
       */
       const piso = this.#epocaAoLigar.get(channel)
-      if (desfecho && seq >= 0 && piso !== undefined && result.epochDoFrame !== undefined && result.epochDoFrame >= piso) {
+      /*
+        A generation already spent is not a loss (17/11/2026). "Desired gen in
+        the past" in a past epoch means this device holds that epoch and already
+        used that key: it read the frame before, or it SENT it. The case
+        measured is our own echo: a send that goes out during the channel's
+        recovery in epoch E, numbered by the server after a commit E -> E+1;
+        recovery applies the commit, then reads our frame back from the page,
+        and it was reported as "o evento N não se leu", with a gap kept for
+        days (e2e-cliente-antigo, section 8, three times under load). The
+        current-epoch branch below already reads this refusal as proof
+        (`geracaoGasta`); this keeps the past epoch in line with it.
+      */
+      const gasta = result.kind === "ignored" && result.reason.includes("Desired gen in the past")
+      if (desfecho && seq >= 0 && !gasta && piso !== undefined && result.epochDoFrame !== undefined && result.epochDoFrame >= piso) {
         desfecho.saltado = true
       }
       return
@@ -21183,10 +21394,7 @@ None of this touches the deafness counter: whoever reads it is the next
     }
 
     if (frame.t === "keypackage.low") {
-      // The nudge can land in the same tick as a disconnect; topping up then
-      // throws on a dead socket. The pool is refilled at the next connect
-      // anyway, so this is a lost opportunity, never an error.
-      await this.topUpKeyPackages(20).catch(() => {})
+      await this.#reporChaves(frame.remaining)
       return
     }
 

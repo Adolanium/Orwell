@@ -532,6 +532,12 @@ export const en: Traducao = {
     selo: "Orwell ambassador",
   },
 
+  nomeCurto: {
+    contador: (n: number, max: number): string => `${n}/${max}`,
+    contadorRotulo: (n: number, max: number): string => `${n} of ${max} characters`,
+    maximo: (max: number): string => `${max} characters at most.`,
+  },
+
   members: {
     count: (n: number): string => (n === 1 ? "1 person" : `${n} people`),
     drawerLabel: "People",
@@ -2889,6 +2895,10 @@ export const errosEn: Record<string, FraseDeErro> = {
     "This conversation needs the other person. When they open the app, the conversation opens again.",
   "this device does not know the account feed yet":
     "This device does not know the account feed yet. Connect the device where you created the account and try again.",
+  "the display name is too long": (detalhe) => {
+    const maximo = detalhe["max"]
+    return typeof maximo === "number" ? `The name has more than ${maximo} characters.` : "The name is too long."
+  },
   "there is no friend request to cancel": "You have no request to cancel.",
   "you cannot block yourself": "You cannot block yourself.",
   "that is not an account address": "This is not an account address.",

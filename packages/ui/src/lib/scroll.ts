@@ -22,3 +22,14 @@ export function prefersReducedMotion(): boolean {
     return true
   }
 }
+
+/**
+ * The window is in front: the page shows and has the focus. What counts as
+ * "seen" (the unread bar, the mention highlight) needs both: a page behind
+ * another window, or in a hidden tab, is open and not read. A host without
+ * `hasFocus` counts as in front.
+ */
+export function janelaAFrente(): boolean {
+  if (typeof document === "undefined" || document.visibilityState === "hidden") return false
+  return typeof document.hasFocus === "function" ? document.hasFocus() : true
+}

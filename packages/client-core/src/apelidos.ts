@@ -1,3 +1,4 @@
+import { NOME_MAX } from "./nomeDeApresentacao.js"
 import { venceCarimbo } from "./dobras.js"
 import type { VaultContents } from "./vault.js"
 
@@ -29,8 +30,12 @@ import type { VaultContents } from "./vault.js"
  * joined.
  */
 
-/** The write cap for a nickname. Read accepts 64 (see the protocol). */
-export const APELIDO_MAX = 32
+/**
+ * The write cap for a nickname, in graphemes: the display name's (`NOME_MAX`),
+ * because a nickname is the display name for one channel. Read accepts 64
+ * (see the protocol).
+ */
+export const APELIDO_MAX = NOME_MAX
 
 export interface RegistoDeApelido {
   /** The nickname. Empty means "no nickname", and is not shown. */

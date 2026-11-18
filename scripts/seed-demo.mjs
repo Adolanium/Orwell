@@ -18,6 +18,7 @@ import {
 import {
   PROTOCOL_VERSION, fromBase64, generateIdentity, moradaDeSala, moradaDoMural, parseServerName, sign, toBase64,
 } from "@enclave/protocol"
+import { confirmarNome } from "./conta.mjs"
 
 const target = process.argv[2]
 if (!target || !target.startsWith("@")) {
@@ -130,7 +131,7 @@ class Demo {
   }
 
   profile(displayName, extra = {}) {
-    return { t: "profile", displayName, donations: [], updatedAt: Date.now(), ...extra }
+    return { t: "profile", displayName: confirmarNome(displayName), donations: [], updatedAt: Date.now(), ...extra }
   }
 
   message(body) {

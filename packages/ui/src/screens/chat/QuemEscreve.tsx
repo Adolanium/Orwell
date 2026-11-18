@@ -1,3 +1,4 @@
+import { nomeVisivel } from "@enclave/client-core"
 import { memo, useMemo, type ComponentProps } from "react"
 import type { EnclaveBridge } from "../../bridge.js"
 import { useTyping } from "../../hooks/useTyping.js"
@@ -57,7 +58,8 @@ type Props = Omit<ComponentProps<typeof ComposerComRascunho>, "onTyping" | "faix
  */
 export function CaixaComQuemEscreve({ bridge, sala, salaGrande, nomeDe, onSend, ...resto }: Props): React.JSX.Element {
   const { typists, noteTyping, stopTyping } = useTyping(bridge, resto.canal || null, sala, resto.eu ?? null, resto.connection, salaGrande)
-  const nomes = useMemo(() => typists.map(nomeDe), [typists, nomeDe])
+  // A sentence, with no tooltip: a long old name goes cut (`nomeVisivel`).
+  const nomes = useMemo(() => typists.map((quem) => nomeVisivel(nomeDe(quem))), [typists, nomeDe])
   return (
     <ComposerComRascunho
       {...resto}

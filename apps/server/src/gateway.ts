@@ -62,6 +62,8 @@ interface Connection {
   batimento: ReturnType<typeof setInterval> | null
   /** Control pings counted as missed since the last pong or frame. See `PINGS_SEM_PONG_MAXIMOS`. */
   pingsSemPong: number
+  /** Closes the connection that has not logged in in time. See `PRAZO_DO_LOGIN_MS`. */
+  prazoDoLogin: ReturnType<typeof setTimeout> | null
   /**
    * Who this CONNECTION is, for the media engine.
    *
@@ -94,6 +96,17 @@ interface Connection {
   /** Nonce we handed out, pending signature. Single-use. */
   challenge: Uint8Array | null
   channels: Set<string>
+  /**
+   * When this connection last heard a claim-triggered `keypackage.low`, 0 once it
+   * published again: at most one nudge per `AVISO_DE_CHAVES_MS` or per top-up.
+   */
+  chavesAvisadasEm: number
+  /**
+   * The channels whose presence this connection already exchanged on a `channel.subscribe`.
+   * Not `channels`: the card's commit puts the common room there without presence, and the
+   * client's subscribe after it is what brings the names (review of 1.3.19, I2).
+   */
+  presencaDada: Set<string>
   /**
    * The TEMPORARY slots in the common room, by channel, with the instant they
    * expire (INV-01). Created by `channel.groupinfo.take`, they serve one
@@ -407,17 +420,35 @@ export class Gateway {
    */
   static VARRER_SUSPENSAS_MS = 60_000
 
+  /**
+   * How long a connection has, from the socket opening, to reach `auth.ok`
+   * (ORW-136-07).
+   *
+   * A client logs in right after `hello`: one challenge, one signature, well
+   * under a second. Without a deadline, a socket that answers the control pings
+   * lived forever without an account, and kept open the window between
+   * `auth.begin` and `auth.finish` (ORW-134-01). Thirty seconds is far above a
+   * slow phone on a bad network, and still a cap. The phone in a pairing box
+   * has no account by design and waits for the person on the other device: it
+   * is checked again every period, and the box has its own deadline
+   * (`PAIR_TTL_MS`). Not `readonly`, so tests can shorten it.
+   */
+  static PRAZO_DO_LOGIN_MS = 30_000
+
   accept(socket: WebSocket): void {
     const connection: Connection = {
       socket,
       id: randomUUID(),
       batimento: null,
       pingsSemPong: 0,
+      prazoDoLogin: null,
       address: null,
       deviceKey: null,
       pending: null,
       challenge: null,
       channels: new Set(),
+      chavesAvisadasEm: 0,
+      presencaDada: new Set(),
       lugaresTemporarios: new Map(),
       visible: true,
       sfu: new Map(),
@@ -429,6 +460,7 @@ export class Gateway {
     }
     this.#connections.add(connection)
     this.#porId.set(connection.id, connection)
+    this.#armarPrazoDoLogin(connection)
 
     connection.batimento = setInterval(() => {
       if (socket.readyState !== socket.OPEN) return
@@ -477,10 +509,38 @@ export class Gateway {
     socket.on("error", () => this.#drop(connection))
   }
 
+  #armarPrazoDoLogin(connection: Connection): void {
+    connection.prazoDoLogin = setTimeout(() => {
+      connection.prazoDoLogin = null
+      if (connection.address !== null || !this.#connections.has(connection)) return
+      if (this.#estaNumaCaixa(connection)) {
+        this.#armarPrazoDoLogin(connection)
+        return
+      }
+      // A challenge still pending burns with the connection.
+      connection.pending = null
+      connection.challenge = null
+      this.#send(connection, { t: "error", code: "login-timeout", message: "authenticate sooner", fatal: true })
+      connection.socket.close()
+    }, Gateway.PRAZO_DO_LOGIN_MS)
+    connection.prazoDoLogin.unref?.()
+  }
+
+  #estaNumaCaixa(connection: Connection): boolean {
+    for (const caixa of this.#caixas.values()) {
+      if (caixa.anfitriao === connection || caixa.convidado === connection) return true
+    }
+    return false
+  }
+
   #drop(connection: Connection): void {
     if (connection.batimento) {
       clearInterval(connection.batimento)
       connection.batimento = null
+    }
+    if (connection.prazoDoLogin) {
+      clearTimeout(connection.prazoDoLogin)
+      connection.prazoDoLogin = null
     }
     this.#connections.delete(connection)
     this.#porId.delete(connection.id)
@@ -494,7 +554,11 @@ export class Gateway {
     // `void` because `close` does not wait on anyone's promises; the `catch`
     // exists because an uncaught rejection here would crash the entire process
     // over a call that had already ended.
-    if (connection.sfu.size > 0) void this.#largarMedia(connection).catch(() => {})
+    //
+    // Always, not only with `connection.sfu` filled: a `sfu.scope.join` still
+    // waiting on the engine has not reached `connection.sfu` yet, and only
+    // `motor.sair` tells it to undo itself (ORW-134-07).
+    if (this.#motor) void this.#largarMedia(connection).catch(() => {})
     // Only the last VISIBLE connection of an account going away means offline:
     // a second tab or device keeps the person present, but an invisible one
     // does not. It used to count any connection at all, so going invisible in
@@ -831,10 +895,25 @@ export class Gateway {
         return
 
       case "channel.subscribe": {
-        // One frame, one unit: the schema already caps it at 512 channels at a time,
-        // and the client subscribes once per connection. Counting per channel would
-        // punish users with many rooms who reconnect on a bad network.
-        if (!this.#dentroDoTecto("subscricoes", connection.address as string, Gateway.SUBSCRICOES_POR_MINUTO)) return
+        // One frame, one unit: the schema already caps it at 512 channels at a time.
+        // Counting per channel would punish users with many rooms who reconnect on a
+        // bad network.
+        //
+        // Only a frame that would write a NEW subscription row counts (17/11/2026). The
+        // client subscribes once per connection, but also once per Welcome it accepts:
+        // a device paired into an account with many channels accepts one Welcome per
+        // channel within the minute, and every frame past the cap was dropped without
+        // a word. Those channels stayed seated but deaf on that connection: no live
+        // messages, no presence, until the next connection. A channel the account is
+        // already subscribed to writes nothing here, and it is what a new device of
+        // the account asks for. Every frame counts against a cap ten times wider
+        // (`RESUBSCRICOES_POR_MINUTO`), checked BEFORE any database read: a refused
+        // frame used to cost up to 512 SQLite reads first (review of 1.3.19, I2). And
+        // only the channels this connection does not hold yet go to the database.
+        const quem = connection.address as string
+        if (!this.#dentroDoTecto("resubscricoes", quem, Gateway.RESUBSCRICOES_POR_MINUTO)) return
+        const escreveLinhas = frame.channels.some((channel) => !connection.channels.has(channel) && !this.store.isSubscribed(channel, quem))
+        if (escreveLinhas && !this.#dentroDoTecto("subscricoes", quem, Gateway.SUBSCRICOES_POR_MINUTO)) return
         const sentados: string[] = []
         for (const channel of frame.channels) {
           // Subscribing to someone else's feed used to hand over their whole
@@ -855,11 +934,17 @@ export class Gateway {
           if (home !== this.config.serverName) this.store.addChannelPeer(channel, home)
         }
         // Presence flows both ways at subscribe time, because this is the
-        // moment the server learns who counts as a channel-mate. Repeats are
-        // harmless: the client treats them as set membership.
-        this.#announcePresence(connection, true)
-        for (const peer of this.#onlinePeersOf(connection)) {
-          this.#send(connection, { t: "presence", address: peer, online: true })
+        // moment the server learns who counts as a channel-mate. Only when this
+        // connection subscribed to a channel it had not exchanged presence for (review of
+        // 1.3.19, I2): a frame for those changes no channel-mate, and at 600 a minute in a
+        // channel with 400 people online it was thousands of presence frames a second.
+        const novos = sentados.filter((channel) => !connection.presencaDada.has(channel))
+        if (novos.length > 0) {
+          for (const channel of novos) connection.presencaDada.add(channel)
+          this.#announcePresence(connection, true)
+          for (const peer of this.#onlinePeersOf(connection)) {
+            this.#send(connection, { t: "presence", address: peer, online: true })
+          }
         }
         // The vault versions of the channels it joined, so the client only asks
         // for what changed. Only to connections that announced the vault, and
@@ -877,6 +962,7 @@ export class Gateway {
       case "channel.unsubscribe":
         for (const channel of frame.channels) {
           connection.channels.delete(channel)
+          connection.presencaDada.delete(channel)
           this.store.unsubscribe(channel, connection.address as string)
         }
         return
@@ -968,11 +1054,25 @@ export class Gateway {
           frame.replace,
           device,
         )
+        // The device answered the last nudge: the next claim below the floor may nudge again at once.
+        connection.chavesAvisadasEm = 0
         return
       }
 
       case "keypackage.claim": {
         if (this.#recusarRevogado(connection)) return
+        // Each claim can nudge the target's devices to mint more: without a cap,
+        // claiming in a loop made a connected victim mint keys without end. Past
+        // the cap the answer is the one of an empty pool, and nothing is spent.
+        if (!this.#dentroDoTecto("reclamacoes", connection.address as string, Gateway.RECLAMACOES_POR_MINUTO)) {
+          this.#send(connection, {
+            t: "keypackage.claimed",
+            address: frame.address,
+            keyPackage: null,
+            ...(frame.bundle ? { keyPackages: [], manifest: null } : {}),
+          })
+          return
+        }
         await this.#claimKeyPackage(connection, frame.address, frame.bundle, frame.devices)
         return
       }
@@ -1319,9 +1419,22 @@ export class Gateway {
         // Devices this manifest revoked that are connected now are dropped at once,
         // not on their next connect: until then they could claim key packages,
         // publish others, and ask for seats in channels.
+        // So are the logins still waiting on their challenge: they have no
+        // `address` yet, and finishing would hand a revoked device `auth.ok`
+        // (ORW-134-01). `#finishAuth` checks again; this closes them now.
         if (resultado.ok && resultado.revogados.length > 0) {
           const revogados = new Set(resultado.revogados)
           for (const outra of this.#connections) {
+            const pendente = outra.pending
+            if (outra.address === null && pendente?.comCadeia && pendente.address === quem) {
+              if (revogados.has(toBase64(pendente.signingKey))) {
+                // Burn the challenge first: a finish already in the socket must find nothing.
+                outra.pending = null
+                outra.challenge = null
+                this.#fecharRevogado(outra, quem)
+              }
+              continue
+            }
             if (outra.address !== quem || outra.deviceKey === null) continue
             if (revogados.has(toBase64(outra.deviceKey))) this.#fecharRevogado(outra)
           }
@@ -2050,6 +2163,12 @@ export class Gateway {
         }
         const chave = chaveDeAmbito(frame.channel, frame.scope)
         const { rtpCapabilities, produtores } = await motor.entrar(chave, connection.id)
+        // The socket may have closed during the `await`, and `#drop` already ran:
+        // nobody else will take this member out (ORW-134-07).
+        if (!this.#connections.has(connection)) {
+          await motor.sairDoAmbito(connection.id, chave)
+          return
+        }
         connection.sfu.set(chave, { channel: frame.channel, scope: frame.scope })
         this.#send(connection, {
           t: "sfu.scope.joined",
@@ -2094,6 +2213,11 @@ export class Gateway {
         // a new direction in `wire.ts` that no one taught the engine would pass
         // through here silently and break in production.
         const parametros = await motor.criarTransporte(chave, connection.id, frame.direction)
+        // Same as after `entrar`: a socket that closed meanwhile leaves no transport behind.
+        if (!this.#connections.has(connection)) {
+          await motor.sair(connection.id)
+          return
+        }
         this.#send(connection, {
           t: "sfu.transport.created",
           transport: parametros.id,
@@ -2389,9 +2513,21 @@ export class Gateway {
       this.#fecharCopiaSubstituida(connection)
       return
     }
+    // Again, here: the revocation may have landed after `#beginAuth` issued the
+    // challenge, and a challenge asked for while approved must not log in a
+    // device the account removed since (ORW-134-01). Only with the chain, as in
+    // `#beginAuth`: a device not yet in the manifest is not revoked, and pairs.
+    if (pending.comCadeia && this.store.isDeviceRevoked(pending.address, pending.signingKey)) {
+      this.#fecharRevogado(connection, pending.address)
+      return
+    }
     this.store.registerDevice(pending.address, pending.signingKey)
 
     connection.address = pending.address
+    if (connection.prazoDoLogin) {
+      clearTimeout(connection.prazoDoLogin)
+      connection.prazoDoLogin = null
+    }
     // With a chain, `signingKey` is the device key; without one it is the
     // account key, and the connection has no known device. See `Connection.deviceKey`.
     connection.deviceKey = pending.comCadeia ? pending.signingKey : null
@@ -2601,6 +2737,13 @@ export class Gateway {
    */
   static LUGAR_TEMPORARIO_MS = 2 * 60_000
   static readonly SUBSCRICOES_POR_MINUTO = 60
+  /**
+   * Subscription frames that write no new row, per account per minute: the
+   * account is already subscribed to every channel in them. One per Welcome a new
+   * device accepts, so an account with a few hundred channels pairs a device
+   * within one minute. See `channel.subscribe`.
+   */
+  static readonly RESUBSCRICOES_POR_MINUTO = 600
   static readonly CONVITES_POR_MINUTO = 30
   /**
    * Short code resolutions per account per minute. A user opens one link,
@@ -2617,6 +2760,20 @@ export class Gateway {
    */
   static readonly RESOLUCOES_DO_SERVIDOR_POR_MINUTO = 600
   static readonly KEYPACKAGES_POR_MINUTO = 30
+  /**
+   * `keypackage.claim` per account per minute. A main device seating a new one
+   * in every channel claims one per channel (57 in the proof), with room to spare.
+   */
+  static readonly RECLAMACOES_POR_MINUTO = 240
+  /** The least time between two claim-triggered `keypackage.low` on one connection. */
+  static AVISO_DE_CHAVES_MS = 5_000
+  /**
+   * Below this many key packages, a claim nudges the connected device (`keypackage.low`).
+   * It was 10: a burst of 10 to 13 bundle claims in under 20 ms (friends seating a new
+   * device) emptied the pool before one top-up of 20 came back, and the main device's
+   * seat got an empty pool. At 20 the same burst leaves keys while the top-up travels.
+   */
+  static readonly MINIMO_DE_CHAVES = 20
   /**
    * The caps of `invite.redeem` (INV-02, external audit of 1.1.0).
    *
@@ -3225,6 +3382,7 @@ export class Gateway {
           const claimed = this.store.claimKeyPackage(address)
           resposta = { t: "keypackage.claimed", address, keyPackage: claimed ? toBase64(claimed) : null }
         }
+        if (resposta.keyPackage !== null) this.#avisarChavesBaixas(address)
       } else if (this.#federation) {
         const remoto = await this.#federation.claimRemote(address, home, bundle ? { bundle, devices } : undefined)
         if (remoto) {
@@ -3243,6 +3401,32 @@ export class Gateway {
     }
 
     this.#send(connection, resposta)
+  }
+
+  /**
+   * Tell the connected devices of an account whose pool a claim left low (17/11/2026).
+   *
+   * `keypackage.low` used to go out only at login. A new device that the main
+   * one seats in every channel spends one package per channel, all in a minute
+   * and while connected: past its pool every seat failed, and the new device
+   * stayed out of those channels until some later login. Per device, like the
+   * nudge at login. A client of any version tops up on this frame.
+   */
+  #avisarChavesBaixas(address: string): void {
+    const agora = Date.now()
+    for (const outra of this.#connections) {
+      if (outra.address !== address || outra.deviceKey === null) continue
+      // One nudge per connection until it tops up, or per window: a burst of claims
+      // needs a few nudges, not one per claim. Never the window alone: a main device
+      // seating a new one in 47 channels claims faster than one top-up, and the seats
+      // past the pool failed for good (session.aparelho-novo-muitos-canais.rede).
+      if (agora - outra.chavesAvisadasEm < Gateway.AVISO_DE_CHAVES_MS) continue
+      const remaining = this.store.availableKeyPackages(address, outra.deviceKey)
+      if (remaining < Gateway.MINIMO_DE_CHAVES) {
+        outra.chavesAvisadasEm = agora
+        this.#send(outra, { t: "keypackage.low", remaining })
+      }
+    }
   }
 
   /**

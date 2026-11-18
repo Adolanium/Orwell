@@ -19,7 +19,9 @@
  *   top, after scrolling to the middle and after scrolling to the end;
  * - the rows sit where the spacers say: row i starts at i * 44 px inside the
  *   scroll box;
- * - the list opens with 400 people in under 150 ms (click to the next frame).
+ * - the list opens with 400 people in under 150 ms (click to the next frame);
+ * - (17/11/2026) every row of the online groups is whole: name on line 1, and
+ *   role and state on line 2, neither line spilling out of the row.
  *
  * Records screenshots in `capturas/lista-pessoas-servidor-<rotulo>-*.png`.
  * All local, no server: the panel is mounted alone from a file:// page.
@@ -86,6 +88,9 @@ const directory = new Map(
   }]),
 )
 const cargos = { 7: { label: "Moderator", tint: "#e67e22" }, 21: { label: "Admin", tint: "#3498db" } }
+/* Online rows cover every subline case (17/11/2026): role and status (0), busy
+   without a role (1), away (2), nothing (3), status only (5), role only (7). */
+const presencaDe = (i) => (i >= LIGADOS ? "idle" : i === 1 ? "busy" : i === 2 ? "away" : "active")
 
 function Demo() {
   return (
@@ -106,7 +111,7 @@ function Demo() {
           onInvite={noop}
           onUserMenu={noop}
           onOpenProfile={noop}
-          presenceFor={(a) => (membros.indexOf(a) < LIGADOS ? "active" : "idle")}
+          presenceFor={(a) => presencaDe(membros.indexOf(a))}
           roleFor={(a) => { const i = membros.indexOf(a); return i % 7 === 0 && cargos[i % 28 === 0 ? 7 : 21] ? { ...cargos[i % 28 === 0 ? 7 : 21], power: 50 } : null }}
         />
       </div>
@@ -214,6 +219,34 @@ for (const [nomeMotor, motor] of Object.entries(MOTORES)) {
             await page.waitForSelector(".member-mais", { timeout: 10_000 })
             await page.waitForTimeout(150)
             const id = `${nomeMotor} ${largura} ${escala}x ${movimento}${densidade ? " compacta" : ""}`
+
+            // The online groups, before the window opens: each row whole, none on top of another.
+            const ligadas = await page.evaluate(() => {
+              const botoes = [...document.querySelectorAll(".member-group:not(.offline) .member-row")]
+              const caixas = botoes.map((b) => b.getBoundingClientRect())
+              let sobrepostas = 0
+              for (let i = 0; i < caixas.length; i++)
+                for (let j = i + 1; j < caixas.length; j++)
+                  if (caixas[i].top < caixas[j].bottom - 0.01 && caixas[j].top < caixas[i].bottom - 0.01) sobrepostas++
+              // A line of text that spills out of its row (top or bottom) is a row drawn on its neighbour.
+              const fora = botoes.filter((b) => {
+                const r = b.getBoundingClientRect()
+                return [...b.querySelectorAll(".member-name, .member-sub")].some((e) => {
+                  const t = e.getBoundingClientRect()
+                  return t.top < r.top - 0.5 || t.bottom > r.bottom + 0.5 || t.right > r.right + 0.5
+                })
+              }).length
+              const sublinhas = botoes.map((b) => b.querySelector(".member-sub")?.textContent ?? "")
+              return { n: botoes.length, sobrepostas, fora, sublinhas }
+            })
+            check(
+              `${id}: ${ligadas.n} online rows, none overlap, no line spills`,
+              ligadas.n > 0 && ligadas.sobrepostas === 0 && ligadas.fora === 0,
+              `overlaps=${ligadas.sobrepostas} spills=${ligadas.fora} sublines=${JSON.stringify(ligadas.sublinhas.slice(0, 8))}`,
+            )
+            if (escala === 1 && movimento === "normal" && !densidade) {
+              await page.locator(".members").screenshot({ path: join(CAPTURAS, `lista-pessoas-servidor-${ROTULO}-${nomeMotor}-${largura}-ligados.png`) })
+            }
 
             const texto = await page.textContent(".member-mais")
             check(`${id}: the line reads "+400 people on this server"`, texto?.trim() === "+400 people on this server", texto ?? "")

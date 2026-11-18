@@ -16,10 +16,11 @@ import { useToast } from "../../components/Toast.js"
 import { CopyIcon, MoreIcon, PinIcon, ResponderIcon, SmileyIcon } from "../../icons.js"
 import type { FichaDeReaccao } from "@enclave/client-core"
 import { chaveDe, usePorLer } from "../../hooks/usePorLer.js"
+import { useMencoesVistas } from "../../hooks/useMencoesVistas.js"
 import { useToqueLongo } from "../../hooks/useToqueLongo.js"
 import { useDeslizarParaResponder } from "../../hooks/useDeslizarParaResponder.js"
 import { chaveDoDia, formatarDataEHora, formatarDia, formatTime, nomeEmFalta } from "../../lib/format.js"
-import { isNearBottom, prefersReducedMotion } from "../../lib/scroll.js"
+import { isNearBottom, janelaAFrente, prefersReducedMotion } from "../../lib/scroll.js"
 import { strings } from "../../strings.js"
 import { LinkPreview } from "../social/LinkPreview.js"
 import { PedidoCard } from "./PedidoCard.js"
@@ -30,6 +31,7 @@ import { votacaoDe, type Apuramento } from "../../lib/votacoes.js"
 import { NomeDePessoa } from "../../components/NomeDePessoa.js"
 import { podeResponder, resumoDoOriginal, type Citacao } from "../../lib/respostas.js"
 import { mencionaMe as mencionaAConta } from "../../lib/mentions.js"
+import { marcaDeEntradaNaConversa } from "../../lib/porLerPorSala.js"
 
 /** A key pressed in a field is not a shortcut: R for "reply" only counts outside them. */
 function emCampoDeTexto(alvo: EventTarget | null): boolean {
@@ -75,12 +77,14 @@ export const MessageRow = memo(function MessageRow({
   citacaoNome,
   citacaoTexto,
   citacaoPerfil,
+  citacaoMencionou = false,
   onIrParaOriginal,
   reaccoes,
   onReagir,
   onPedirReaccao,
   etiquetas,
   mencionaMe = false,
+  mencaoVista = false,
 }: {
   message: ChatMessage
   /** Same sender, shortly after the previous message: no name, no avatar. */
@@ -207,11 +211,18 @@ export const MessageRow = memo(function MessageRow({
   onPedirReaccao?: ((message: ChatMessage) => void) | undefined
   /** Roles and rooms. Stable by construction (see `Timeline`), like the callbacks above. */
   etiquetas?: Omit<Etiquetas, "mencoes"> | undefined
+  /** The reply mentions the author of the original ("@ Mention" on): the quote says "@Name", like Discord. */
+  citacaoMencionou?: boolean | undefined
   /**
    * This message mentions me: my address, `@all`, or a role I hold (the core puts
    * my address in for the role). Lit like Discord. A boolean, for the memo.
    */
   mencionaMe?: boolean | undefined
+  /**
+   * The lit line was seen in this visit (a few seconds in view, with the window
+   * in front): its light fades out, and stays out. A boolean, for the memo.
+   */
+  mencaoVista?: boolean | undefined
 }): React.JSX.Element {
   const toast = useToast()
   /** The tags with this message's checked mentions: a role chip only where the core kept the role. */
@@ -267,7 +278,7 @@ export const MessageRow = memo(function MessageRow({
   }, [message.payload.mentions, mentionNames])
   return (
     <article
-      className={`${grouped ? "message grouped" : "message"}${mencionaMe ? " menciona-me" : ""}${destacada ? " destacada" : ""}${deslize.deslocamento ? " a-deslizar" : ""}`}
+      className={`${grouped ? "message grouped" : "message"}${mencionaMe ? (mencaoVista ? " menciona-me mencao-vista" : " menciona-me") : ""}${destacada ? " destacada" : ""}${deslize.deslocamento ? " a-deslizar" : ""}`}
       /* The line we jumped to gets focus (see `Timeline`), and only that one:
          with focus on each line, a click to read removed it from the box. */
       tabIndex={destacada ? -1 : undefined}
@@ -354,6 +365,7 @@ export const MessageRow = memo(function MessageRow({
             nome={citacaoNome ?? ""}
             texto={citacaoTexto ?? ""}
             perfil={citacaoPerfil}
+            mencionou={citacaoMencionou}
             onIr={onIrParaOriginal}
           />
         )}
@@ -628,6 +640,7 @@ function LinhaDeCitacao({
   nome,
   texto,
   perfil,
+  mencionou,
   onIr,
 }: {
   id: string
@@ -636,6 +649,8 @@ function LinhaDeCitacao({
   nome: string
   texto: string
   perfil: Profile | undefined
+  /** The reply mentioned the author of the original: "@" before the name. */
+  mencionou: boolean
   onIr: ((id: string) => void) | undefined
 }): React.JSX.Element {
   if (estado === "apagada" || estado === "ausente" || !onIr) {
@@ -658,6 +673,9 @@ function LinhaDeCitacao({
         <Avatar profile={perfil} fallback={autor?.[1] ?? "?"} />
       </span>
       <span className="message-citacao-nome">
+        {/* The visible reason a reply to me is lit: it pinged me. Without the "@",
+            a lit reply showed no reason at all (17/11/2026). */}
+        {mencionou && <span className="message-citacao-arroba">@</span>}
         <NomeDePessoa nome={nome} endereco={autor} />
       </span>
       <span className="message-citacao-texto">{texto}</span>
@@ -1017,6 +1035,20 @@ function TimelineInteira({
    * again, and the bar stayed on top of the page forever (12/11/2026).
    */
   const saltoDispensado = useRef(false)
+  /** Whether the last scroll left the view at the bottom, to see the move INTO it. See `onScroll`. */
+  const noFundoAoRolar = useRef(true)
+
+  /** Esc is done with the bar, like Discord. Only while it shows, and never over a key someone else took. */
+  useEffect(() => {
+    if (!mostrarSalto) return
+    const aoTeclar = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      saltoDispensado.current = true
+      setMostrarSalto(false)
+    }
+    document.addEventListener("keydown", aoTeclar)
+    return () => document.removeEventListener("keydown", aoTeclar)
+  }, [mostrarSalto])
 
   /**
    * Jump to the marker, and it is a GESTURE, never automatic.
@@ -1126,6 +1158,28 @@ function TimelineInteira({
   const itemCount = messages.length + pending.length
 
   /**
+   * Which lines are lit as a mention of me (17/11/2026, the owner: "it is a
+   * reply, but it stays marked forever"). A mention lights while it is unread:
+   * newer than this conversation's read mark AS IT WAS on entry. The room's mark
+   * (`marcaDeEntradaNaConversa`, the one the unread mention count uses) or, in a
+   * direct conversation, the channel's (`usePorLer`). It stays lit while the
+   * reader is here, fades after a few seconds in view (`useMencoesVistas`), and
+   * the next visit, a reload or another device of the account does not light it.
+   * Never my own lines. No mark (never been here): everything is unread.
+   */
+  const marcaDasMencoes = marcaDeEntradaNaConversa(conversaActual) ?? porLer.marca
+  const mencaoAcesa = (message: ChatMessage): boolean =>
+    message.sender !== me &&
+    mencionaAConta(message.payload.mentions, me) &&
+    (marcaDasMencoes === null || (message.payload.sentAt ?? message.payload.postedAt ?? 0) > marcaDasMencoes)
+  const acesasPorVer = messages
+    .slice(inicio)
+    .filter((message) => message.payload.id !== undefined && mencaoAcesa(message))
+    .map((message) => message.payload.id as string)
+    .join("\u0000")
+  const mencoesVistas = useMencoesVistas(container, conversaActual, acesasPorVer)
+
+  /**
    * Jump to the bottom now. No animation: the bottom may still be moving (an
    * image decoding), and an animation to a moving target ends short.
    */
@@ -1165,6 +1219,7 @@ function TimelineInteira({
     const guardada = positions.current.get(conversaActual)
     el.scrollTop = guardada && !guardada.noFundo ? guardada.top : el.scrollHeight
     ultimoTopo.current = el.scrollTop
+    noFundoAoRolar.current = isNearBottom(el)
     nearBottom.current = !guardada || guardada.noFundo || isNearBottom(el)
     setShowJump(false)
   }, [conversaActual])
@@ -1264,7 +1319,8 @@ function TimelineInteira({
       // No mark drawn: either there is nothing unread, or the mark is above the window.
       const primeira = porLerRef.current.primeira
       const acima = primeira !== null && inicioRef.current > 0 && mensagensRef.current.slice(0, inicioRef.current).some((m) => chaveDe(m) === primeira)
-      setMostrarSalto(el !== null && acima)
+      // Done with in this visit stays done, also when the window slid and dropped the mark.
+      setMostrarSalto(el !== null && acima && !saltoDispensado.current)
       return
     }
     const caixa = el.getBoundingClientRect()
@@ -1342,6 +1398,15 @@ function TimelineInteira({
     else if (el.scrollTop < ultimoTopo.current) nearBottom.current = false
     ultimoTopo.current = el.scrollTop
     if (nearBottom.current) setShowJump(false)
+    /*
+      Reading down to the end, with the window in front, is done with the unread
+      bar for this visit, like Discord. Only the move INTO the bottom counts: the
+      view that opens already at the bottom has not read what is above it, and a
+      window behind others has not read anything.
+    */
+    const noFundoAgora = isNearBottom(el)
+    if (noFundoAgora && !noFundoAoRolar.current && janelaAFrente()) saltoDispensado.current = true
+    noFundoAoRolar.current = noFundoAgora
     // Near the top of the window: draw the lines above, before the reader reaches the edge.
     if (inicioRef.current > 0 && el.scrollTop < el.clientHeight) alargarRef.current()
     reavaliarSalto()
@@ -1453,6 +1518,7 @@ function TimelineInteira({
 
         const pedido = pedidoDe?.(message) ?? null
         const chave = chaveDe(message)
+        const acesa = mencaoAcesa(message)
         /* The quote, stored as plain values for the line's memo. */
         const replyTo = message.payload.replyTo
         const citacao = replyTo !== undefined && citacaoDe ? citacaoDe(replyTo) : undefined
@@ -1494,7 +1560,8 @@ function TimelineInteira({
             {...(onVotar ? { onVotar: votar } : {})}
             reaccoes={message.payload.id !== undefined ? reaccoes?.get(message.payload.id) : undefined}
             etiquetas={etiquetasEstaveis}
-            mencionaMe={message.sender !== me && mencionaAConta(message.payload.mentions, me)}
+            mencionaMe={acesa}
+            mencaoVista={acesa && message.payload.id !== undefined && mencoesVistas.has(message.payload.id)}
             {...(onReagir ? { onReagir: reagir } : {})}
             {...(onPedirReaccao && message.payload.id !== undefined && message.payload.moderada !== true
               ? { onPedirReaccao: pedirReaccao }
@@ -1519,6 +1586,7 @@ function TimelineInteira({
                       : strings.respostas.vazia
             }
             citacaoPerfil={original ? directory.get(original.sender) : undefined}
+            citacaoMencionou={original !== undefined && (message.payload.mentions?.includes(original.sender) ?? false)}
             {...(onIrParaOriginal ? { onIrParaOriginal: irParaOriginal } : {})}
           />
         )

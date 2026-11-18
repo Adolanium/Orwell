@@ -1,5 +1,6 @@
 import { useId, useState, type ReactNode } from "react"
 import { Button } from "../../components/Button.js"
+import { CampoDeNome } from "../../components/CampoDeNome.js"
 import { Field } from "../../components/Field.js"
 import { Modal } from "../../components/Modal.js"
 import { strings } from "../../strings.js"
@@ -11,6 +12,7 @@ export function Prompt({
   hint,
   initialValue = "",
   confirmLabel,
+  nome = false,
   extra,
   onSubmit,
   onCancel,
@@ -23,6 +25,8 @@ export function Prompt({
   initialValue?: string
   /** The button verb, when "Confirm" does not say what happens. */
   confirmLabel?: string
+  /** The value is a display name (a channel nickname): the name field, 12 graphemes at most. */
+  nome?: boolean
   /** Another way to do the same thing, under the field (the official channel, in "Join with a link"). */
   extra?: ReactNode
   onSubmit: (value: string) => void
@@ -43,15 +47,26 @@ export function Prompt({
       }}
     >
       <h2 id={heading}>{title}</h2>
-      <Field label={label}>
-        <input
+      {nome ? (
+        <CampoDeNome
+          rotulo={label}
           value={value}
           placeholder={placeholder}
           autoFocus
           onFocus={(event) => event.target.select()}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={setValue}
         />
-      </Field>
+      ) : (
+        <Field label={label}>
+          <input
+            value={value}
+            placeholder={placeholder}
+            autoFocus
+            onFocus={(event) => event.target.select()}
+            onChange={(event) => setValue(event.target.value)}
+          />
+        </Field>
+      )}
       {hint && <p className="field-note">{hint}</p>}
       {extra}
       <div className="prompt-actions">

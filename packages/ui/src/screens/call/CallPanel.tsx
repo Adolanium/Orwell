@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { nomeVisivel } from "@enclave/client-core"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useNivelDeVoz } from "../../hooks/useNivelDeVoz.js"
 import { Call, type Participant } from "@enclave/client-core"
 import type { EnclaveBridge, Profile } from "../../bridge.js"
@@ -18,6 +19,7 @@ import {
 import { useElapsed } from "../../hooks/useElapsed.js"
 import { useEsperaPorFluxo } from "../../hooks/useEsperaPorFluxo.js"
 import { useLimiteDeVideo } from "../../hooks/useLimiteDeVideo.js"
+import { useMedia } from "../../hooks/useMedia.js"
 import { chaveDoVolumeDaMusica, useMusicaDaChamada, useMusicasCaladas } from "../../hooks/useMusicaDaChamada.js"
 import { anfitriaoDoAgente, fontesDeAudioDoAnfitriao } from "../../lib/fontesDeAudio.js"
 import { estadoDaPessoa, type AvisoDaChamada, type CaminhoDeMedia } from "../../lib/estadoDaChamada.js"
@@ -59,7 +61,7 @@ export function CallPanel({
   screenStream = null,
   semTransmitir = false,
   selfLabel,
-  selfProfile,
+  selfProfile: perfilProprio,
   nameFor,
   directory,
   micMuted = false,
@@ -210,6 +212,18 @@ export function CallPanel({
    */
   menuDaPessoa?: ((address: string) => Parameters<typeof itensDaPessoaEmVoz>[0] | null) | undefined
 }): React.JSX.Element {
+  /*
+    Our own portrait, by reference (17/11/2026). Since the media store our own
+    profile can hold `avatarRef` and no `avatarDataUrl`. Other people's profiles
+    reach us through `useDirectory`, which resolves the reference; ours comes raw,
+    and the card and the tile only read `avatarDataUrl`, so the call showed our
+    initial. Resolved here once, for both.
+  */
+  const retratoProprio = useMedia({ ...(perfilProprio.avatarRef ? { ref: perfilProprio.avatarRef } : {}) }, { visivel: true, tamanho: "original" })
+  const selfProfile = useMemo(
+    () => (perfilProprio.avatarDataUrl || !retratoProprio.src ? perfilProprio : { ...perfilProprio, avatarDataUrl: retratoProprio.src }),
+    [perfilProprio, retratoProprio.src],
+  )
   /** The menu open on a tile: whose, and where. */
   const [menuNoCartao, setMenuNoCartao] = useState<{ address: string; at: { x: number; y: number } } | null>(null)
   const [cameraOffLocal, setCameraOffLocal] = useState(false)
@@ -925,7 +939,9 @@ function LinhaDePresente({
   useNivelDeVoz(linha, calado ? null : voz)
   return (
     <li ref={linha} className="call-presente">
-      <span className="call-presente-nome">{nome}</span>
+      <span className="call-presente-nome" title={nomeVisivel(nome) !== nome ? nome : undefined}>
+        {nomeVisivel(nome)}
+      </span>
       {calado && (
         <span role="img" aria-label={strings.call.presenteCalado}>
           <MicIcon size={12} off />

@@ -1,7 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react"
 import type { Power } from "@enclave/protocol"
 import type { Profile } from "../../bridge.js"
-import { Andante } from "../../components/Andante.js"
 import { Avatar } from "../../components/Avatar.js"
 import { BotaoMais } from "../../components/BotaoMais.js"
 import { Button } from "../../components/Button.js"
@@ -253,9 +252,13 @@ function MemberPanelInteira({
   const linhaDe = (member: string): React.JSX.Element => {
     const profile = directory.get(member)
     const papel = roleFor?.(member) ?? null
+    const presenca = presenceFor?.(member)
+    const estado =
+      profile?.statusText?.trim() ||
+      (presenca === "busy" ? strings.activity.busy : presenca === "away" ? strings.activity.away : "")
     const labels = (
       <>
-        <Avatar profile={profile} fallback={member[1] ?? "?"} presence={presenceFor?.(member)}
+        <Avatar profile={profile} fallback={member[1] ?? "?"} presence={presenca}
           presenceTitle={presenceHint}
           emChamada={emChamada?.(member)}
         />
@@ -275,23 +278,26 @@ function MemberPanelInteira({
             {volumeDe(member) === 0 && (
               <MarcaDeChamada tipo="silenciado" nome={nameFor(member)} className="member-silenced" size={14} />
             )}
-            {/* The personal message NEXT TO the name, like in Messenger:
-                in italics and faded, after the name, and not on a line
-                below. When it does not fit, it scrolls like a news ticker (the
-                `Andante`), instead of cutting with ellipsis. */}
-            {profile?.statusText && <Andante className="member-status" texto={profile.statusText} />}
           </span>
-          {/* The role, when it exists. The address was here when there was no role, and
-              left because ids are not shown: it copies via the button next to the line.
-              
-              The role's color comes in by variable, and only when it exists:
-              without it the CSS rule falls back to accent, which is what this
-              line has always shown. What the color paints is the role's name,
-              which is still written here, whoever cannot tell the colors apart
-              reads the same thing they always did. */}
-          {papel && (
-            <span className="member-sub member-role" style={tintaDoPapel(papel.tint)}>
-              {papel.label}
+          {/* Line 2: the role, then the state (17/11/2026), as Discord puts the
+              custom status under the name. The state is the status text when there
+              is one, otherwise busy or away. It used to scroll NEXT to the name (the
+              `Andante`); now it is small and faded below, cut with "…", and whole
+              in the tooltip.
+
+              The role's colour comes in by variable, and only on the role: without
+              it the CSS rule falls back to accent. What the colour paints is the
+              role's name, still written, so whoever cannot tell colours apart reads
+              the same thing. No role and no state: no second line, as before. */}
+          {(papel || estado) && (
+            <span className="member-sub member-subline" title={[papel?.label, estado].filter(Boolean).join(" · ")}>
+              {papel && (
+                <span className="member-role" style={tintaDoPapel(papel.tint)}>
+                  {papel.label}
+                </span>
+              )}
+              {papel && estado && <span className="member-sub-sep"> · </span>}
+              {estado && <span className="member-estado">{estado}</span>}
             </span>
           )}
         </span>

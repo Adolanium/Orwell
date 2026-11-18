@@ -38,6 +38,23 @@ import { FRASE } from "./ambiente.mjs"
  * By default this downloads the file, ticks the box and continues, so scripts
  * written before it end where they always did. Pass `false` to stop on the step.
  */
+/**
+ * The display name limit, as the app counts it: 12 graphemes, trimmed (see
+ * `nomeDeApresentacao.ts` in the core). The field cuts a longer name without
+ * an error, so a script that typed one would go on with a name it did not
+ * choose and fail later, far from the cause. It fails here instead.
+ */
+export const NOME_MAX = 12
+
+export function confirmarNome(nome) {
+  const limpo = String(nome ?? "").trim()
+  const grafemas = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(limpo)].length
+  if (limpo === "" || grafemas > NOME_MAX) {
+    throw new Error(`display name must be 1 to ${NOME_MAX} characters, got ${grafemas}: ${JSON.stringify(nome)}`)
+  }
+  return nome
+}
+
 export async function criarConta(page, { nome, frase = FRASE, servidor, timeout = 60_000, memorizar = false, canalOficial = true, ficheiro = true } = {}) {
   const campoNome = page.getByPlaceholder("Como queres aparecer")
   // Since phase 8.1 Setup can open with "Do you use Orwell on another device?".
@@ -49,7 +66,7 @@ export async function criarConta(page, { nome, frase = FRASE, servidor, timeout 
     await naoCriar.click()
     await campoNome.waitFor({ timeout })
   }
-  await campoNome.fill(nome)
+  await campoNome.fill(confirmarNome(nome))
 
   if (servidor) {
     await page.getByRole("button", { name: "Opções avançadas" }).click()

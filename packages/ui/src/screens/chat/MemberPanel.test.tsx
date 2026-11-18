@@ -227,7 +227,7 @@ describe("MemberPanel — papéis", () => {
         roleFor: () => ({ label: "Moderador", tint: "#6ee7a8" }),
       }),
     )
-    const sub = container.querySelector(".member-sub")
+    const sub = container.querySelector(".member-sub .member-role")
     expect(sub?.getAttribute("style")).toContain("--role-tint: #6ee7a8")
     // The essential: whoever can't see the color reads the same word they always did.
     expect(sub?.textContent).toBe("Moderador")
@@ -237,7 +237,7 @@ describe("MemberPanel — papéis", () => {
     const { container } = render(
       panel({ members: ["@ana:s"], state: "ready", roleFor: () => ({ label: "Convidado" }) }),
     )
-    const sub = container.querySelector(".member-sub")
+    const sub = container.querySelector(".member-sub .member-role")
     expect(sub?.getAttribute("style")).toBeNull()
     expect(sub?.className).toContain("member-role")
   })
@@ -549,46 +549,81 @@ describe("MemberPanel — o id não se lê", () => {
         roleFor: () => ({ label: "Fundador", grupo: { id: "fundador", nome: "Fundador", ordem: 0 } }),
       }),
     )
-    const papel = document.querySelector(".member-sub.member-role")
+    const papel = document.querySelector(".member-sub")
     expect(papel?.textContent).toBe("Fundador")
-    expect(papel?.getAttribute("title")).toBeNull()
+    expect(papel?.querySelector(".member-role")?.textContent).toBe("Fundador")
   })
 })
 
 /**
- * The personal message, when it doesn't fit, scrolls as a footer (the `Andante`),
- * instead of cutting with ellipsis. jsdom doesn't measure
- * widths: without them it's a still copy; with widths faked not to fit, the tape
- * takes two copies and moves.
+ * The state appears in a subline after the role (17/11/2026).
+ *
+ * Line 1 is the name, cut at 12 graphemes. Line 2 is the role, then the
+ * state: the custom status text when there is one, otherwise busy or away.
+ * Small, faded, cut with "…" when it does not fit, and whole in the tooltip.
+ * It replaced the status that scrolled next to the name (the `Andante`).
  */
-describe("MemberPanel — a mensagem pessoal que não cabe", () => {
-  const comEstado = (): React.JSX.Element =>
-    panel({
-      members: ["@ana:s"],
-      nameFor: () => "Ana",
-      directory: new Map<string, Profile>([["@ana:s", { displayName: "Ana", donations: [], statusText: "a pintar o montado ao fim da tarde" }]]),
-    })
+describe("MemberPanel — o estado na linha de baixo, depois do cargo", () => {
+  const ESTADO = "a pintar o montado ao fim da tarde"
+  const comPerfil = (perfil: Partial<Profile>): Map<string, Profile> =>
+    new Map<string, Profile>([["@ana:s", { displayName: "Ana", donations: [], ...perfil }]])
+  const MODERADOR = { label: "Moderador", tint: "#6ee7a8" } as CargoDoMembro
 
-  it("num DOM sem larguras, uma cópia só e parada", () => {
-    const { container } = render(comEstado())
-    const estado = container.querySelector(".member-status")!
-    expect(estado.classList.contains("andante")).toBe(false)
-    expect(estado.querySelectorAll(".andante-fita > span")).toHaveLength(1)
-    expect(estado.getAttribute("title")).toBe("a pintar o montado ao fim da tarde")
+  it("cargo e estado: «Moderador · estado», o inteiro no title, e o nome sozinho na linha 1", () => {
+    const { container } = render(
+      panel({ members: ["@ana:s"], nameFor: () => "Ana", directory: comPerfil({ statusText: ESTADO }), roleFor: () => MODERADOR }),
+    )
+    const sub = container.querySelector(".member-sub")!
+    expect(sub.textContent).toBe(`Moderador · ${ESTADO}`)
+    expect(sub.getAttribute("title")).toBe(`Moderador · ${ESTADO}`)
+    expect(container.querySelector(".member-name")?.textContent).toBe("Ana")
+    // The role keeps its colour; the state does not take it.
+    expect(sub.querySelector(".member-role")?.getAttribute("style")).toContain("--role-tint: #6ee7a8")
+    expect(sub.querySelector(".member-estado")?.getAttribute("style")).toBeNull()
   })
 
-  it("sem largura que chegue, a fita leva duas cópias e anda", () => {
-    const largo = vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(400)
-    const estreito = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(120)
-    try {
-      const { container } = render(comEstado())
-      const estado = container.querySelector(".member-status")!
-      expect(estado.classList.contains("andante")).toBe(true)
-      expect(estado.querySelectorAll(".andante-fita > span")).toHaveLength(2)
-    } finally {
-      largo.mockRestore()
-      estreito.mockRestore()
-    }
+  it("sem cargo, só o estado", () => {
+    const { container } = render(panel({ members: ["@ana:s"], nameFor: () => "Ana", directory: comPerfil({ statusText: ESTADO }) }))
+    expect(container.querySelector(".member-sub")?.textContent).toBe(ESTADO)
+    expect(container.querySelector(".member-role")).toBeNull()
+  })
+
+  it("sem texto de estado, ocupado ou ausente", () => {
+    const { container } = render(
+      panel({
+        members: ["@ana:s", "@rui:s"],
+        nameFor: (a) => (a === "@ana:s" ? "Ana" : "Rui"),
+        presenceFor: (a) => (a === "@ana:s" ? "busy" : "away"),
+        roleFor: (a) => (a === "@rui:s" ? MODERADOR : null),
+      }),
+    )
+    const subs = [...container.querySelectorAll(".member-sub")].map((e) => e.textContent).sort()
+    expect(subs).toEqual([strings.activity.busy, `Moderador · ${strings.activity.away}`].sort())
+  })
+
+  it("o texto de estado ganha a ocupado", () => {
+    const { container } = render(
+      panel({ members: ["@ana:s"], nameFor: () => "Ana", directory: comPerfil({ statusText: ESTADO }), presenceFor: () => "busy" }),
+    )
+    expect(container.querySelector(".member-sub")?.textContent).toBe(ESTADO)
+  })
+
+  it("online sem estado nem cargo: não há linha de baixo", () => {
+    const { container } = render(panel({ members: ["@ana:s"], nameFor: () => "Ana", presenceFor: () => "active" }))
+    expect(container.querySelector(".member-sub")).toBeNull()
+  })
+
+  it("o estado já não anda ao lado do nome", () => {
+    const { container } = render(panel({ members: ["@ana:s"], nameFor: () => "Ana", directory: comPerfil({ statusText: ESTADO }) }))
+    expect(container.querySelector(".member-name .member-status, .member-name .andante")).toBeNull()
+    expect(container.querySelector(".member-name")?.textContent).not.toContain(ESTADO)
+  })
+
+  it("um nome antigo de 30 aparece com 12 e «…» na linha 1", () => {
+    const antigo = "Maria Eduarda Albuquerque Sous"
+    const { container } = render(panel({ members: ["@ana:s"], nameFor: () => antigo }))
+    expect(container.querySelector(".member-name")?.textContent).toBe("Maria Eduard…")
+    expect(container.querySelector(`.member-name [title="${antigo}"]`)).not.toBeNull()
   })
 })
 

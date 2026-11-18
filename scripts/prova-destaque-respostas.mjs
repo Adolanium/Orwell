@@ -64,6 +64,14 @@ async function abrir(motor, nome, browser = null, contexto = {}) {
   const b = browser ?? (await motor.launch({ headless: true }))
   if (!browser) browsers.push(b)
   const ctx = await b.newContext({ locale: "pt-PT", viewport: { width: 1440, height: 900 }, ...contexto })
+  /*
+    Since 17/11/2026 a lit line fades after a few seconds in view with the window
+    in front (`useMencoesVistas`). This proof measures how a lit line is DRAWN
+    (hover, touch, the bar, the jump), over many seconds, so the readers' window
+    is kept "behind" and nothing fades. The fade has its own proof:
+    `prova-mencao-vista.mjs`.
+  */
+  if (nome !== "ana") await ctx.addInitScript(() => Object.defineProperty(document, "hasFocus", { configurable: true, value: () => false }))
   const page = await ctx.newPage()
   page.on("pageerror", (erro) => registo.push(`${nome} PAGEERROR ${erro.message}`))
   page.on("console", (m) => {
@@ -312,6 +320,7 @@ try {
   check("a resposta R7 chega ao Bruno depois de 34 linhas", (await ate(() => linha(bruno.page, T.R7).isVisible(), 60_000)) >= 0)
   await espera(1500)
   const acesasAgora = await bruno.page.locator(".message.menciona-me").allInnerTexts()
+  // Since 17/11/2026 R1, R4 and M6 are read by now (a new visit to the room): only R7 may be lit.
   check("depois de mudar de sala, voltar e a janela deslizar, a acesa visível é a R7 e só as de menção",
     acesasAgora.some((t) => t.includes(T.R7)) && acesasAgora.every((t) => [T.R1, T.R4, T.M6, T.R7].some((k) => t.includes(k))),
     acesasAgora.map((t) => t.replace(/\s+/g, " ").slice(-40)).join(" | "))

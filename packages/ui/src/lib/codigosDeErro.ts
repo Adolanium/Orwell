@@ -337,6 +337,8 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "this device has not received this conversation yet": 611,
   "this conversation is waiting for the other person": 612,
   "this device does not know the account feed yet": 613,
+  // The display name stops at 12 graphemes on write (`nomeDeApresentacao.ts`).
+  "the display name is too long": 614,
 
   "this device has no account key": 701,
   "this server cannot pair devices": 702,

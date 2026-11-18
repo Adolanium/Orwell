@@ -32,7 +32,7 @@ const erros = []
 page.on("pageerror", (erro) => erros.push(String(erro)))
 
 await page.goto(URL, { waitUntil: "networkidle" })
-await criarContaEEntrar(page, { nome: "Régua da Procura", frase: "regua-da-procura-2026", servidor: SERVIDOR })
+await criarContaEEntrar(page, { nome: "Régua", frase: "regua-da-procura-2026", servidor: SERVIDOR })
 await page.locator(".chat-composer").waitFor({ timeout: 90_000 })
 
 const escrita = page.locator(".chat-composer input:not([type=file])").first()
@@ -87,7 +87,7 @@ const primeiro = await page.evaluate(() => {
 })
 check("encontra a mensagem pelo texto", (primeiro?.texto ?? "").includes("a agulha está aqui"), primeiro?.texto?.slice(0, 60))
 check("realça o termo, e realça-o como nó", primeiro?.marcas?.length === 1 && primeiro?.marcas[0] === "orçamento", JSON.stringify(primeiro?.marcas))
-check("diz quem escreveu", (primeiro?.quem ?? "").includes("Régua da Procura"), primeiro?.quem)
+check("diz quem escreveu", (primeiro?.quem ?? "").includes("Régua"), primeiro?.quem)
 
 // Without accents or capitals, it must match the same.
 await escrever("ORCAMENTO")

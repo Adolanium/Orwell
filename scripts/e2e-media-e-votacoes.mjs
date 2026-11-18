@@ -7,9 +7,9 @@
  * folder, a front end acting as Caddy, ports 8484 and 8485. It never points at
  * production, and it refuses to start if a port is taken (it kills nobody).
  *
- * **It needs the web build made with poll creation switched on.** Creating a
- * poll is hidden in the product (`MOSTRAR_VOTACOES` in `Composer.tsx`), so the
- * proof builds with that flag flipped by hand and puts it back afterwards.
+ * It runs on the plain web build. Polls are created in a polls room, not from
+ * the composer's "+" (`MOSTRAR_VOTACOES` in `Composer.tsx` stays off, and a check
+ * here holds it so): do not flip that flag for this proof.
  *
  * Ana (desktop) writes: an image, a file, a poll in the default room, a poll in
  * a POLLS ROOM "votacoes" (a room with `layout: "polls"`, no chat) holding three polls, one of
@@ -510,7 +510,17 @@ try {
   if (movel) await bp.getByRole("button", { name: "Abrir o painel lateral" }).tap().catch(() => {})
   await retratar(bp, "barra-com-sala-de-votacoes")
   const salaDeVotos = bp.locator(".room-row", { hasText: "votacoes" }).first()
-  check("a sala de votações está na barra como as outras salas, e arrasta-se", (await salaDeVotos.isVisible()) && (await salaDeVotos.getAttribute("draggable")) === "true")
+  // Rooms drag only for whoever may edit the channel (`onReorderRoom` is set only
+  // with `editaOCanal` in App.tsx): Ana, who created it, drags the polls room like
+  // any other; Bruno, a plain member, sees it in the tree but does not drag it.
+  const salaDeVotosDaAna = ana.page.locator(".room-row", { hasText: "votacoes" }).first()
+  check(
+    "a sala de votações está na barra como as outras salas, e arrasta-se (para quem edita o canal)",
+    (await salaDeVotos.isVisible()) &&
+      (await salaDeVotos.getAttribute("draggable")) === "false" &&
+      (await salaDeVotosDaAna.getAttribute("draggable")) === "true",
+    `Bruno: ${await salaDeVotos.getAttribute("draggable")}, Ana: ${await salaDeVotosDaAna.getAttribute("draggable")}`,
+  )
   check("e já não há linha fixa «Votações»", (await bp.locator(".room-votacoes").count()) === 0)
   await salaDeVotos.locator("button.room").click()
   await bp.locator(".votacoes-pagina-cartao").first().waitFor({ timeout: 15_000 })

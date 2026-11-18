@@ -5,6 +5,7 @@ import type { Profile } from "../../bridge.js"
 import { BotaoCopiarId } from "../../components/BotaoCopiarId.js"
 import { Button } from "../../components/Button.js"
 import { Enquadrar } from "../../components/Enquadrar.js"
+import { CampoDeNome } from "../../components/CampoDeNome.js"
 import { Field } from "../../components/Field.js"
 import { Interruptor } from "../../components/Interruptor.js"
 import { Modal } from "../../components/Modal.js"
@@ -16,19 +17,13 @@ import { strings, traduzirErro } from "../../strings.js"
 
 const DONATION_KINDS = ["url", "paypal", "kofi", "liberapay", "iban", "bitcoin", "monero", "outro"] as const
 
-/**
- * The name caps at 32 characters.
- *
- * Measured, not chosen to taste: in the people panel the column is 149 px,
- * which gives eighteen characters before the ellipsis. A 64-character name
- * appeared cut off everywhere you need to recognize someone at a glance, and
- * a name nobody reads in full is not a name, it is a sign.
- *
- * The schema still accepts 64 on read, on purpose, see `payload.ts`. Anyone
- * who already has a longer name is still read in full; what changes is what
- * gets written anew.
+/*
+ * The name caps at 12 graphemes (since 17/11/2026), in the core
+ * (`nomeDeApresentacao.ts`) and in the field (`CampoDeNome`). It was 32 up to
+ * 1.3.18. The schema still accepts 64 on read, on purpose, see `payload.ts`:
+ * anyone who already has a longer name keeps it, drawn cut with the whole name
+ * in a tooltip, and is not made to rename to save their bio.
  */
-const NAME_MAX = 32
 
 export function ProfileEditor({
   initial,
@@ -233,14 +228,12 @@ export function ProfileEditor({
           </p>
         )}
 
-        <Field label={strings.profileEditor.name}>
-          <input
-            value={draft.displayName}
-            maxLength={NAME_MAX}
-            placeholder={strings.profileEditor.namePlaceholder}
-            onChange={(event) => patch({ displayName: event.target.value })}
-          />
-        </Field>
+        <CampoDeNome
+          rotulo={strings.profileEditor.name}
+          value={draft.displayName}
+          placeholder={strings.profileEditor.namePlaceholder}
+          onChange={(displayName) => patch({ displayName })}
+        />
 
         {/* No Status field: status changes on the account card, through the "How you appear"
             menu and "Custom…". Two places for the same

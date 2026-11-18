@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import type { Activity, ConnectionState, Profile } from "../../bridge.js"
 import { Andante } from "../../components/Andante.js"
 import { atributosDoAnel, type EstadoDoAnel } from "../../components/Avatar.js"
+import { NomeDePessoa } from "../../components/NomeDePessoa.js"
 import { useMedia } from "../../hooks/useMedia.js"
 import { useToqueLongo } from "../../hooks/useToqueLongo.js"
 import { BellIcon, GearIcon, HangUpIcon, HeadphonesIcon, MicIcon } from "../../icons.js"
@@ -341,7 +342,9 @@ export function CartaoDaConta({
           {/* The name in its own element: `text-overflow` does not truncate text that is
               a direct child of a flex container. See `.me-name`. */}
           <span className="me-name">
-            <span className="me-name-text">{profile.displayName || strings.sidebar.pickName}</span>
+            <span className="me-name-text">
+              {profile.displayName ? <NomeDePessoa nome={profile.displayName} /> : strings.sidebar.pickName}
+            </span>
           </span>
           {mostraMensagem ? (
             <Andante className="me-mensagem" texto={mensagem} />

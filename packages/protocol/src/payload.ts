@@ -1039,7 +1039,7 @@ export const Payload = z.discriminatedUnion("t", [
      * Who may: the person themselves (`subject` equals the sender authenticated
      * by MLS) or whoever has `moderar`. The reader decides, when recording
      * (`apelidos.ts` in the core). Empty `nick` removes the nickname. Reading
-     * accepts 64, writing stops at 32 (`APELIDO_MAX`), by the `displayName` rule.
+     * accepts 64, writing stops at 12 graphemes (`APELIDO_MAX`), by the `displayName` rule.
      *
      * `.catch(undefined)`: an unreadable nickname doesn't take the sentence
      * down.
@@ -1221,7 +1221,8 @@ export const Payload = z.discriminatedUnion("t", [
   z.object({
     t: z.literal("profile"),
     /**
-     * Write stops at 32 (see `NAME_MAX` in the editor), but read accepts 64.
+     * Write stops at 12 graphemes (it was 32 up to 1.3.18; see `NOME_MAX` in
+     * the core), but read accepts 64.
      *
      * It's not an oversight. Tightening the read limit at the same time as the
      * write limit would reject profiles of people who already have a longer
