@@ -289,7 +289,13 @@ h3 {
   background: color-mix(in srgb, var(--bg-hover) 50%, transparent);
 }
 
-.message .avatar-wrap > .message-avatar {
+/* The author's face only: the line's own child, bare or in its button. A
+   descendant selector also caught the 16 px face in a reply's quote, which
+   sits in the same .message, and outweighed its rule (screens.css): it grew to
+   40 px and floated over the name (1.3.21). The :where() keeps the weight at
+   three classes, as before. */
+.message > .avatar-wrap > .message-avatar,
+.message > :where(.message-avatar-botao) > .avatar-wrap > .message-avatar {
   width: 40px;
   height: 40px;
   font-size: 16px;
