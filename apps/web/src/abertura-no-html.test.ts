@@ -20,12 +20,12 @@ interface Etiqueta {
   injectTo?: string
 }
 
-async function correr(): Promise<{ html: string; tags: Etiqueta[]; guiao: string }> {
+async function correr(contexto?: { bundle: Record<string, unknown> }): Promise<{ html: string; tags: Etiqueta[]; guiao: string }> {
   const plugin = aberturaNoHtml()
   ;(plugin.configResolved as (c: { base: string }) => void)({ base: "/app/" })
   await (plugin.buildStart as () => Promise<void>)()
   const fonte = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8")
-  const saida = (plugin.transformIndexHtml as (h: string) => { html: string; tags: Etiqueta[] })(fonte)
+  const saida = (plugin.transformIndexHtml as (h: string, c?: unknown) => { html: string; tags: Etiqueta[] })(fonte, contexto)
   let guiao = ""
   ;(plugin.generateBundle as unknown as (this: { emitFile: (f: { source: string }) => void }) => void).call({
     emitFile: (f) => {
@@ -75,7 +75,7 @@ describe("o splash no index.html", () => {
   it("o guião marca a língua pela regra do arranque: o endereço, a escolha guardada, e inglês sem escolha", async () => {
     const { guiao } = await correr()
     const marcar = (o: { href: string; guardada?: string; sistema: string[] }): string => {
-      const html = { lang: "pt" }
+      const html = { lang: "pt", dataset: {} as Record<string, string> }
       const correrGuiao = new Function("document", "navigator", "localStorage", "window", guiao) as (...a: unknown[]) => void
       correrGuiao(
         { documentElement: html },
@@ -92,5 +92,65 @@ describe("o splash no index.html", () => {
     expect(marcar({ href: "https://orwell.pt/app/", sistema: ["pt-PT"] })).toBe("en")
     expect(marcar({ href: "https://orwell.pt/app/", guardada: "pt", sistema: ["en-US"] })).toBe("pt")
     expect(marcar({ href: "https://orwell.pt/app/?lingua=en", guardada: "pt", sistema: ["pt-PT"] })).toBe("en")
+  })
+
+  it("o guião põe também o tema guardado na raiz, antes do primeiro frame (1.4)", async () => {
+    const { guiao } = await correr()
+    const tema = (prefs: string | null): string | undefined => {
+      const html = { lang: "pt", dataset: {} as Record<string, string> }
+      const correrGuiao = new Function("document", "navigator", "localStorage", "window", guiao) as (...a: unknown[]) => void
+      correrGuiao(
+        { documentElement: html },
+        { languages: ["en"], language: "en" },
+        { getItem: (chave: string) => (chave === "enclave.prefs" ? prefs : null) },
+        { location: { href: "https://orwell.pt/app/" } },
+      )
+      return html.dataset.theme
+    }
+    expect(tema(JSON.stringify({ tema: "claro" }))).toBe("claro")
+    expect(tema(JSON.stringify({ tema: "sistema" }))).toBe("sistema")
+    // Nothing stored, or junk: dark, the default.
+    expect(tema(null)).toBe("escuro")
+    expect(tema("{estragado")).toBe("escuro")
+  })
+
+  /*
+    The Aurora sheet is its own file since 1.3.20 (`folha-da-aurora.ts`). On
+    Aurora, the head script writes its link before the first paint; the build
+    hands it the hashed address on its own tag. The proof that the first frame
+    does not flash, in three engines: `scripts/provar-primeiro-quadro-aurora.mjs`.
+  */
+  const folhaDaAurora = { type: "asset", fileName: "assets/styles-aurora-AbC123.css", originalFileNames: ["../../packages/ui/src/styles-aurora.css"] }
+
+  it("no build, o guião leva o endereço da folha da Aurora na própria etiqueta", async () => {
+    const { tags } = await correr({ bundle: { "assets/styles-aurora-AbC123.css": folhaDaAurora } })
+    const guiao = tags.find((t) => t.tag === "script")
+    expect(guiao?.attrs?.["data-folha-aurora"]).toBe("/app/assets/styles-aurora-AbC123.css")
+  })
+
+  it("um build sem a folha da Aurora pára, em vez de sair com o Aurora sem pele", async () => {
+    await expect(correr({ bundle: {} })).rejects.toThrow(/folha da Aurora/)
+  })
+
+  it("o guião escreve a folha da Aurora só no Aurora, e só com o endereço", async () => {
+    const { guiao } = await correr()
+    const escrito = (tema: string, url: string | undefined): string[] => {
+      const html = { lang: "pt", dataset: {} as Record<string, string> }
+      const escritas: string[] = []
+      const correrGuiao = new Function("document", "navigator", "localStorage", "window", guiao) as (...a: unknown[]) => void
+      correrGuiao(
+        { documentElement: html, currentScript: { dataset: url ? { folhaAurora: url } : {} }, write: (h: string) => escritas.push(h) },
+        { languages: ["en"], language: "en" },
+        { getItem: (chave: string) => (chave === "enclave.prefs" ? JSON.stringify({ tema }) : null) },
+        { location: { href: "https://orwell.pt/app/" } },
+      )
+      return escritas
+    }
+    expect(escrito("aurora", "/app/assets/styles-aurora-AbC123.css")).toEqual([
+      '<link rel="stylesheet" id="folha-aurora" media="all" href="/app/assets/styles-aurora-AbC123.css">',
+    ])
+    expect(escrito("escuro", "/app/assets/styles-aurora-AbC123.css")).toEqual([])
+    expect(escrito("claro", "/app/assets/styles-aurora-AbC123.css")).toEqual([])
+    expect(escrito("aurora", undefined)).toEqual([])
   })
 })

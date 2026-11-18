@@ -2,7 +2,7 @@
 import type { spawn, SpawnOptions } from "node:child_process"
 import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:crypto"
 import { EventEmitter } from "node:events"
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -18,16 +18,24 @@ import {
   chavePublicaDe,
   dentroDosProgramas,
   ENDERECO_DA_ACTUALIZACAO_WINDOWS,
+  enderecoDoManifestoNaRelease,
+  escreverVista,
+  lerVista,
   guiaoDeElevacao,
   lancarComAdministrador,
   lerDiagnosticoDoArranque,
   lerManifestoWindows,
+  lerModoGuardado,
+  escreverModo,
+  MODO_POR_OMISSAO,
+  textosDaPergunta,
   mensagemDaActualizacao,
   SAIDA_DO_UAC_RECUSADO,
   type EstadoDoEcra,
   type ManifestoWindows,
   type PortasDoArranque,
   type RespostaDoUac,
+  type Vista,
 } from "./actualizacao-windows.js"
 import { CHAVE_PUBLICA_DE_ACTUALIZACOES } from "./chave-de-actualizacoes.js"
 import { codigoDoEstado, textoDoArranque } from "./ecra-de-arranque.js"
@@ -54,29 +62,73 @@ const SHA512 = createHash("sha512").update(INSTALADOR).digest("hex")
 const NOME = "Orwell-1.0.7-windows-x64.exe"
 
 function assinado(
-  campos: Partial<{ versao: string; nome: string; bytes: number; sha512: string }> = {},
+  campos: Partial<{ versao: string; nome: string; bytes: number; sha512: string; urgente: boolean }> = {},
   chave: KeyObject = PRIVADA,
 ): ManifestoWindows {
   return manifestoDeActualizacaoWindows(
     campos.versao ?? "1.0.7",
     { nome: campos.nome ?? NOME, bytes: campos.bytes ?? INSTALADOR.length, sha512: campos.sha512 ?? SHA512 },
     (mensagem: Buffer) => sign(null, mensagem, chave),
+    { urgente: campos.urgente ?? false },
   )
 }
 
-/** A fake server: the manifest and the installer, and nothing else. */
+
+
+/**
+ * What this device saw on GitHub, as the default of `portas`: the manifest of
+ * the last `servidor` seen long ago, so the install path is not held by the
+ * wait. The wait itself is proved in its own block.
+ */
+let vistaDoUltimoServidor: Vista | null = null
+
+/** A record kept in memory, the way `actualizacao-vista.json` is on disk. */
+function memoria(inicial: Vista | null): NonNullable<PortasDoArranque["vista"]> & { atual: () => Vista | null } {
+  let vista = inicial
+  return {
+    ler: async () => vista,
+    gravar: async (nova) => {
+      vista = nova
+    },
+    atual: () => vista,
+  }
+}
+
+/** A fake server: the manifest and the installer on orwell.pt, and the manifest on GitHub. */
 function servidor(
   manifesto: unknown,
-  opcoes: { instalador?: Buffer; pedaco?: number; pendurarDepoisDe?: number } = {},
-): { buscar: typeof fetch; pedidos: string[] } {
+  opcoes: {
+    instalador?: Buffer
+    pedaco?: number
+    pendurarDepoisDe?: number
+    /**
+     * GitHub's copy of the manifest, per request (the first, the second...):
+     * text, `null` for a 404, "em-baixo" for a 503, "sem-rede" for a thrown
+     * fetch. By default, the same bytes orwell.pt serves, every time.
+     */
+    noGithub?: string | null | "em-baixo" | "sem-rede" | ((pedido: number) => string | null | "em-baixo" | "sem-rede")
+  } = {},
+): { buscar: typeof fetch; pedidos: string[]; texto: string } {
   const pedidos: string[] = []
   const corpo = opcoes.instalador ?? INSTALADOR
   const pedaco = opcoes.pedaco ?? 16_384
+  const texto = typeof manifesto === "string" ? manifesto : JSON.stringify(manifesto, null, 2) + "\n"
+  const versao = (manifesto as { versao?: string } | null)?.versao ?? "0.0.0"
+  vistaDoUltimoServidor = { versao, hash: createHash("sha256").update(texto).digest("hex"), vistoEm: 1 }
+  let pedidosAoGithub = 0
   const buscar = (async (url: string, init?: RequestInit) => {
     pedidos.push(url)
     if (url === ENDERECO_DA_ACTUALIZACAO_WINDOWS) {
       if (manifesto === 404) return new Response("não há", { status: 404 })
-      return new Response(typeof manifesto === "string" ? manifesto : JSON.stringify(manifesto))
+      return new Response(texto)
+    }
+    if (url.startsWith("https://github.com/") || url.startsWith("https://api.github.com/")) {
+      const n = pedidosAoGithub++
+      const regra = typeof opcoes.noGithub === "function" ? opcoes.noGithub(n) : opcoes.noGithub
+      if (regra === "sem-rede") throw new TypeError("fetch failed")
+      if (regra === "em-baixo") return new Response("indisponível", { status: 503 })
+      if (url !== enderecoDoManifestoNaRelease(versao) || regra === null) return new Response("não há", { status: 404 })
+      return new Response(regra ?? texto)
     }
     let enviado = 0
     const sinal = init?.signal
@@ -99,7 +151,7 @@ function servidor(
     })
     return new Response(fluxo)
   }) as typeof fetch
-  return { buscar, pedidos }
+  return { buscar, pedidos, texto }
 }
 
 const pastas: string[] = []
@@ -130,6 +182,10 @@ function portas(
       throw new Error("uma instalação por utilizador não pede o UAC")
     },
     buscar,
+    // The install path these tests prove is "Automatically"; asking first is
+    // proved in its own block below, and is the default when nothing is said.
+    modo: "automaticamente",
+    vista: memoria(vistaDoUltimoServidor),
     estados,
     instalados,
     conteudoInstalado,
@@ -197,7 +253,8 @@ describe("o arranque, com duplos: só o manifesto bom instala", () => {
     expect(p.instalados).toHaveLength(1)
     expect(p.conteudoInstalado[0]?.equals(INSTALADOR)).toBe(true)
     // The installer comes from the SAME folder as the manifest, with the signed name.
-    expect(pedidos[1]).toBe(ENDERECO_DA_ACTUALIZACAO_WINDOWS.replace("actualizacao-windows.json", NOME))
+    // After the manifest and its two checks on GitHub (1.3.20), the installer.
+    expect(pedidos[3]).toBe(ENDERECO_DA_ACTUALIZACAO_WINDOWS.replace("actualizacao-windows.json", NOME))
     // The screen: look for, download with the bar rising to the end, install.
     expect(p.estados[0]).toEqual({ fase: "a-procurar" })
     const descargas = p.estados.filter((e) => e.fase === "a-descarregar")
@@ -323,7 +380,12 @@ describe("instalação para todos (Program Files)", () => {
     })
     expect(await arranqueComActualizacao(p)).toEqual({ accao: "sair", codigo: "a-instalar", versao: "1.0.7" })
     expect(vezes).toBe(1)
-    expect(pedidos).toEqual([ENDERECO_DA_ACTUALIZACAO_WINDOWS, `https://orwell.pt/transferencias/${NOME}`])
+    expect(pedidos).toEqual([
+      ENDERECO_DA_ACTUALIZACAO_WINDOWS,
+      enderecoDoManifestoNaRelease("1.0.7"),
+      enderecoDoManifestoNaRelease("1.0.7"),
+      `https://orwell.pt/transferencias/${NOME}`,
+    ])
     // The file that goes to UAC is the verified one, in full.
     expect(visto.conteudo).toEqual(INSTALADOR)
     // The UAC prompt appears after download, and "installing" only after "Yes".
@@ -533,5 +595,303 @@ describe("as peças à volta", () => {
     const codigo = codigoDoEstado({ fase: "a-descarregar", versao: "1.0.7", recebidos: 1, total: 2 })
     expect(codigo).toContain(JSON.stringify("A descarregar a versão 1.0.7"))
     expect(codigo).toContain('"50.0%"')
+  })
+})
+
+describe("perguntar antes de instalar (1.3.20)", () => {
+  /** A question that answers `resposta` and remembers which versions it was asked about. */
+  function pergunta(resposta: "instalar" | "mais-tarde"): { perguntar: (versao: string) => Promise<"instalar" | "mais-tarde">; perguntadas: string[] } {
+    const perguntadas: string[] = []
+    return {
+      perguntadas,
+      perguntar: async (versao) => {
+        perguntadas.push(versao)
+        return resposta
+      },
+    }
+  }
+
+  it("por omissão pergunta: sem modo, e com um ficheiro em falta, inválido ou estragado", async () => {
+    expect(MODO_POR_OMISSAO).toBe("perguntar")
+    for (const texto of [null, "", "{estragado", JSON.stringify({ modo: "sempre" }), JSON.stringify({})]) expect(lerModoGuardado(texto)).toBe("perguntar")
+    expect(lerModoGuardado(escreverModo("automaticamente"))).toBe("automaticamente")
+    expect(lerModoGuardado(escreverModo("perguntar"))).toBe("perguntar")
+
+    // No mode passed: the startup asks.
+    const { buscar } = servidor(assinado())
+    const { perguntar, perguntadas } = pergunta("mais-tarde")
+    const p = portas(buscar, { perguntar })
+    delete (p as Partial<PortasDoArranque>).modo
+    await arranqueComActualizacao(p)
+    expect(perguntadas).toEqual(["1.0.7"])
+  })
+
+  it('"Mais tarde" não descarrega nem executa nada, e entra na versão que tem', async () => {
+    const { buscar, pedidos } = servidor(assinado())
+    const { perguntar, perguntadas } = pergunta("mais-tarde")
+    const p = portas(buscar, { modo: "perguntar", perguntar })
+    const resultado = await arranqueComActualizacao(p)
+    expect(resultado).toEqual({ accao: "entrar", codigo: "adiada", versao: "1.0.7" })
+    expect(perguntadas).toEqual(["1.0.7"])
+    // The manifest and the two GitHub checks, and no installer.
+    expect(pedidos).toEqual([ENDERECO_DA_ACTUALIZACAO_WINDOWS, enderecoDoManifestoNaRelease("1.0.7"), enderecoDoManifestoNaRelease("1.0.7")])
+    expect(p.instalados).toEqual([])
+    expect(p.estados.some((e) => e.fase === "a-descarregar")).toBe(false)
+  })
+
+  it('"Instalar" segue o caminho de sempre: descarga, SHA-512, e o instalador verificado', async () => {
+    const { buscar } = servidor(assinado())
+    const { perguntar } = pergunta("instalar")
+    const p = portas(buscar, { modo: "perguntar", perguntar })
+    const resultado = await arranqueComActualizacao(p)
+    expect(resultado).toEqual({ accao: "sair", codigo: "a-instalar", versao: "1.0.7" })
+    expect(p.conteudoInstalado).toEqual([INSTALADOR])
+  })
+
+  it('"Instalar" numa instalação para todos continua a passar pelo UAC depois da descarga', async () => {
+    const { buscar } = servidor(assinado())
+    const { perguntar } = pergunta("instalar")
+    const pedidosDeUac: string[] = []
+    const p = portas(buscar, {
+      modo: "perguntar",
+      perguntar,
+      semAdministrador: () => false,
+      instalarComAdministrador: async (caminho): Promise<RespostaDoUac> => {
+        pedidosDeUac.push(readFileSync(caminho).equals(INSTALADOR) ? "verificado" : "outro")
+        return "aceite"
+      },
+    })
+    expect((await arranqueComActualizacao(p)).accao).toBe("sair")
+    expect(pedidosDeUac).toEqual(["verificado"])
+  })
+
+  it('"Automaticamente" não pergunta', async () => {
+    const { buscar } = servidor(assinado())
+    const { perguntar, perguntadas } = pergunta("mais-tarde")
+    const p = portas(buscar, { modo: "automaticamente", perguntar })
+    expect((await arranqueComActualizacao(p)).accao).toBe("sair")
+    expect(perguntadas).toEqual([])
+  })
+
+  it("um manifesto com a assinatura errada, de outra chave, nunca chega a perguntar", async () => {
+    const { perguntar, perguntadas } = pergunta("instalar")
+    for (const manifesto of [assinado({}, OUTRA), { ...assinado(), versao: "9.9.9" }, assinado({ versao: "1.0.6" }), "nada de json"]) {
+      const { buscar } = servidor(manifesto)
+      const p = portas(buscar, { modo: "perguntar", perguntar })
+      const resultado = await arranqueComActualizacao(p)
+      expect(resultado.accao).toBe("entrar")
+      expect(p.instalados).toEqual([])
+    }
+    expect(perguntadas).toEqual([])
+  })
+
+  it("sem a função que pergunta, perguntar vale como \"Mais tarde\": nada se instala sem resposta", async () => {
+    const { buscar, pedidos } = servidor(assinado())
+    const p = portas(buscar, { modo: "perguntar" })
+    expect(await arranqueComActualizacao(p)).toEqual({ accao: "entrar", codigo: "adiada", versao: "1.0.7" })
+    expect(pedidos).toEqual([ENDERECO_DA_ACTUALIZACAO_WINDOWS, enderecoDoManifestoNaRelease("1.0.7"), enderecoDoManifestoNaRelease("1.0.7")])
+  })
+
+  it("a pergunta diz a versão, em frases curtas, em português só com a língua escolhida", () => {
+    const pt = textosDaPergunta("1.3.21", "pt")
+    expect(pt.mensagem).toBe("Há uma versão nova: 1.3.21.")
+    expect(pt.botoes).toEqual(["Instalar", "Mais tarde"])
+    for (const lingua of ["en", null, "fr"]) expect(textosDaPergunta("1.3.21", lingua).botoes).toEqual(["Install", "Later"])
+  })
+
+  it('"adiada" é um código que o registo do arranque aceita', () => {
+    expect(lerDiagnosticoDoArranque({ quando: 1, codigo: "adiada", versao: "1.3.21" })).toEqual({ quando: 1, codigo: "adiada", versao: "1.3.21" })
+  })
+})
+
+describe("público, e visto por este aparelho há tempo bastante (1.3.20, revisão C2, opção A)", () => {
+  const HORA = 3_600_000
+  const T0 = Date.parse("2026-11-20T12:00:00Z")
+
+  /**
+   * One startup in "Ask first", at `t`, with this device's record `vista`.
+   * Says the code, whether it asked, whether it installed, and the record after.
+   */
+  async function arrancar(
+    manifesto: ManifestoWindows,
+    t: number,
+    vista: ReturnType<typeof memoria>,
+    opcoes: Parameters<typeof servidor>[1] = {},
+    modo: "perguntar" | "automaticamente" = "perguntar",
+  ): Promise<{ codigo: string; perguntou: boolean; instalou: boolean; pedidos: string[]; instalaEm?: number }> {
+    const { buscar, pedidos } = servidor(manifesto, opcoes)
+    let perguntou = false
+    const p = portas(buscar, {
+      modo,
+      agora: () => t,
+      vista,
+      perguntar: async () => {
+        perguntou = true
+        return "instalar"
+      },
+    })
+    const r = await arranqueComActualizacao(p)
+    return {
+      codigo: r.codigo,
+      perguntou,
+      instalou: p.instalados.length > 0,
+      pedidos,
+      ...(r.accao === "entrar" && r.instalaEm !== undefined ? { instalaEm: r.instalaEm } : {}),
+    }
+  }
+
+  const hashDe = (m: ManifestoWindows): string => createHash("sha256").update(JSON.stringify(m, null, 2) + "\n").digest("hex")
+
+  it("a primeira vista regista o manifesto e não pergunta nem instala", async () => {
+    const m = assinado()
+    const vista = memoria(null)
+    const r = await arrancar(m, T0, vista)
+    expect(r).toMatchObject({ codigo: "em-espera", perguntou: false, instalou: false, instalaEm: T0 + 72 * HORA })
+    expect(vista.atual()).toEqual({ versao: "1.0.7", hash: hashDe(m), vistoEm: T0 })
+    // Only GitHub's own address, never the API.
+    expect(r.pedidos).toEqual([ENDERECO_DA_ACTUALIZACAO_WINDOWS, enderecoDoManifestoNaRelease("1.0.7")])
+    expect(r.pedidos.some((u) => u.includes("api.github.com"))).toBe(false)
+  })
+
+  it("71 h depois não pergunta; 72 h depois pergunta e instala", async () => {
+    const m = assinado()
+    const vista = memoria({ versao: "1.0.7", hash: hashDe(m), vistoEm: T0 })
+    expect(await arrancar(m, T0 + 71 * HORA, vista)).toMatchObject({ codigo: "em-espera", perguntou: false, instalou: false })
+    expect(await arrancar(m, T0 + 72 * HORA, vista)).toMatchObject({ codigo: "a-instalar", perguntou: true, instalou: true })
+  })
+
+  it("a espera vale também em \"Automaticamente\"", async () => {
+    const m = assinado()
+    const vista = memoria({ versao: "1.0.7", hash: hashDe(m), vistoEm: T0 })
+    expect(await arrancar(m, T0 + 71 * HORA, vista, {}, "automaticamente")).toMatchObject({ codigo: "em-espera", instalou: false })
+    expect(await arrancar(m, T0 + 72 * HORA, vista, {}, "automaticamente")).toMatchObject({ codigo: "a-instalar", instalou: true })
+  })
+
+  it("urgente: 23 h não, 24 h sim, e nunca menos", async () => {
+    const m = assinado({ urgente: true })
+    const vista = memoria({ versao: "1.0.7", hash: hashDe(m), vistoEm: T0 })
+    expect(await arrancar(m, T0 + 23 * HORA, vista)).toMatchObject({ codigo: "em-espera", perguntou: false })
+    expect(await arrancar(m, T0 + 24 * HORA, vista)).toMatchObject({ codigo: "a-instalar", perguntou: true })
+    // The first sight of an urgent one: 24 h from now, not less.
+    const nova = memoria(null)
+    expect(await arrancar(m, T0, nova)).toMatchObject({ codigo: "em-espera", instalaEm: T0 + 24 * HORA })
+  })
+
+  it("um hash trocado recomeça a espera do zero", async () => {
+    const antigo = assinado()
+    const vista = memoria({ versao: "1.0.7", hash: hashDe(antigo), vistoEm: T0 })
+    // Another manifest of the same version, signed, now on both sides.
+    const trocado = assinado({ sha512: "b".repeat(128) })
+    const r = await arrancar(trocado, T0 + 100 * HORA, vista)
+    expect(r).toMatchObject({ codigo: "em-espera", perguntou: false, instalou: false, instalaEm: T0 + 100 * HORA + 72 * HORA })
+    expect(vista.atual()).toEqual({ versao: "1.0.7", hash: hashDe(trocado), vistoEm: T0 + 100 * HORA })
+  })
+
+  it("desaparecido do GitHub antes de instalar: não instala, e a espera recomeça", async () => {
+    const m = assinado()
+    const vista = memoria({ versao: "1.0.7", hash: hashDe(m), vistoEm: T0 })
+    // The first fetch of the startup finds it; the one right before installing does not.
+    const r = await arrancar(m, T0 + 80 * HORA, vista, { noGithub: (n) => (n === 0 ? undefined! : null) })
+    expect(r).toMatchObject({ codigo: "transparencia-em-falta", perguntou: false, instalou: false })
+    expect(vista.atual()).toBeNull()
+  })
+
+  it("diferente no GitHub do que o orwell.pt serve: nada, e o registo apaga-se", async () => {
+    const m = assinado()
+    const vista = memoria({ versao: "1.0.7", hash: hashDe(m), vistoEm: T0 })
+    const r = await arrancar(m, T0 + 80 * HORA, vista, { noGithub: JSON.stringify(m, null, 2) + "\n " })
+    expect(r).toMatchObject({ codigo: "transparencia-diferente", perguntou: false, instalou: false })
+    expect(vista.atual()).toBeNull()
+  })
+
+  it("um relógio que andou para trás do registo recomeça", async () => {
+    const m = assinado()
+    const vista = memoria({ versao: "1.0.7", hash: hashDe(m), vistoEm: T0 })
+    const r = await arrancar(m, T0 - HORA, vista)
+    expect(r).toMatchObject({ codigo: "em-espera", perguntou: false, instalou: false })
+    expect(vista.atual()?.vistoEm).toBe(T0 - HORA)
+  })
+
+  it("um registo inválido vale como nunca visto", () => {
+    const bom = escreverVista({ versao: "1.0.7", hash: "a".repeat(64), vistoEm: T0 })
+    expect(lerVista(bom)).toEqual({ versao: "1.0.7", hash: "a".repeat(64), vistoEm: T0 })
+    for (const mau of [
+      null,
+      "",
+      "{estragado",
+      JSON.stringify({ versao: "1.0", hash: "a".repeat(64), vistoEm: T0 }),
+      JSON.stringify({ versao: "1.0.7", hash: "xyz", vistoEm: T0 }),
+      JSON.stringify({ versao: "1.0.7", hash: "a".repeat(64), vistoEm: "ontem" }),
+      JSON.stringify({ versao: "1.0.7", hash: "a".repeat(64), vistoEm: -5 }),
+    ]) {
+      expect(lerVista(mau)).toBeNull()
+    }
+  })
+
+  it("com o GitHub em baixo ou sem rede, arranca a versão que tem, com código, e o registo fica", async () => {
+    const m = assinado()
+    const registo = { versao: "1.0.7", hash: hashDe(m), vistoEm: T0 }
+    for (const noGithub of ["em-baixo", "sem-rede"] as const) {
+      const vista = memoria(registo)
+      const r = await arrancar(m, T0 + 80 * HORA, vista, { noGithub })
+      expect(r).toMatchObject({ codigo: "transparencia-inacessivel", perguntou: false, instalou: false })
+      expect(vista.atual()).toEqual(registo)
+    }
+  })
+
+  it("um manifesto no GitHub maior do que o tecto não se lê inteiro, e não passa", async () => {
+    const m = assinado()
+    const vista = memoria({ versao: "1.0.7", hash: hashDe(m), vistoEm: T0 })
+    const r = await arrancar(m, T0 + 80 * HORA, vista, { noGithub: "x".repeat(40_000) })
+    expect(r).toMatchObject({ codigo: "transparencia-diferente", instalou: false })
+  })
+
+  it("o servidor não pode marcar urgente: o campo é assinado", async () => {
+    const r = await arrancar({ ...assinado(), urgente: true } as ManifestoWindows, T0, memoria(null))
+    expect(r).toMatchObject({ codigo: "assinatura-errada", perguntou: false, instalou: false })
+    expect(assinaturaValida(lerManifestoWindows(assinado())!, PUBLICA)).toBe(true)
+  })
+
+  it("um manifesto do orwell.pt com bytes que não são UTF-8 é recusado", async () => {
+    const { buscar } = servidor(assinado())
+    const estragado = (async (url: string, init?: RequestInit) =>
+      url === ENDERECO_DA_ACTUALIZACAO_WINDOWS ? new Response(new Uint8Array([0x7b, 0xff, 0x7d])) : buscar(url, init)) as typeof fetch
+    expect((await arranqueComActualizacao(portas(estragado))).codigo).toBe("manifesto-recusado")
+  })
+
+  it("o em-espera chega ao diagnóstico com a data, para o aviso no login", () => {
+    expect(lerDiagnosticoDoArranque({ quando: 1, codigo: "em-espera", versao: "1.0.7", instalaEm: T0 })).toEqual({
+      quando: 1,
+      codigo: "em-espera",
+      versao: "1.0.7",
+      instalaEm: T0,
+    })
+  })
+})
+
+describe("o instalador verificado é o que corre (revisão M5)", () => {
+  it.each([
+    ["para todos, antes do UAC", false, "a-pedir-autorizacao"],
+    ["por utilizador, antes de correr", true, "a-instalar"],
+  ] as const)("trocado na pasta temporária depois de verificado (%s): não corre", async (_nome, semAdministrador, fase) => {
+    const { buscar } = servidor(assinado())
+    const corridos: string[] = []
+    const p = portas(buscar, {
+      semAdministrador: () => semAdministrador,
+      // Another program of the same user swaps the file while the screen says what comes next.
+      mostrar: (estado) => {
+        if (estado.fase === fase) writeFileSync(join(p.pasta, NOME), "MZ outro programa")
+      },
+      instalar: async (caminho) => {
+        corridos.push(caminho)
+      },
+      instalarComAdministrador: async (caminho): Promise<RespostaDoUac> => {
+        corridos.push(caminho)
+        return "aceite"
+      },
+    })
+    const r = await arranqueComActualizacao(p)
+    expect(r).toEqual({ accao: "entrar", codigo: "soma-errada", versao: "1.0.7" })
+    expect(corridos).toEqual([])
   })
 })

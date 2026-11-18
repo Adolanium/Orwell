@@ -70,7 +70,7 @@ const PEDACOS = new RegExp(`${ENDERECOS.source}|(${MENTION_ADDRESS.source})|(${T
  *   only where the role is in there: a role written by someone without the
  *   permission reads as plain text, as the receiver judged it.
  * - `salaDe`: the room's current name, or `null` when this account does not see it
- *   (or it no longer exists): then the chip says "private room", never the name.
+ *   (or it no longer exists): then the chip says `#sala-sem-acesso`, never the name.
  * - `onSala`: open the room. Absent: the chip is not a button.
  */
 export interface Etiquetas {
@@ -249,7 +249,7 @@ function desenharEtiqueta(pedaco: string, indice: number, etiquetas: Etiquetas):
   if (!vista) {
     return (
       <span key={indice} className="mention mention-sala mention-sala-privada">
-        #{strings.etiquetas.salaPrivada}
+        #{strings.etiquetas.semAcesso}
       </span>
     )
   }

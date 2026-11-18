@@ -209,10 +209,20 @@ export class ArmazemDeMedia {
 
   /** Encrypts now, marks the sha in the inventory, and writes in the background. */
   absorver(bytes: Uint8Array, ref: RefDeMedia, sha: string): void {
+    void this.absorverConfirmado(bytes, ref, sha)
+  }
+
+  /**
+   * `absorver`, and then says whether THIS blob reached the disk. False when it
+   * was not written: already in the inventory (another blob under that sha),
+   * a sealed or failing store, or a lock meanwhile. The archive pages wait for
+   * true before the vault references them (review of 1.3.18, I2).
+   */
+  absorverConfirmado(bytes: Uint8Array, ref: RefDeMedia, sha: string): Promise<boolean> {
     const inventario = this.#inventario
-    if (inventario?.has(sha)) return
+    if (inventario?.has(sha)) return Promise.resolve(false)
     // Sealed: the blob is not written, and the reference stays (it comes back from another device).
-    if (this.#selado) return
+    if (this.#selado) return Promise.resolve(false)
     let blob: Uint8Array | null = null
     try {
       if (inventario) blob = cifrarBlob(bytes, fromBase64(ref.k), fromBase64(ref.n), sha, ref.c)
@@ -221,16 +231,20 @@ export class ArmazemDeMedia {
     }
     if (!inventario || !blob) {
       this.#falhou(sha, "media store failed")
-      return
+      return Promise.resolve(false)
     }
     const tecto = this.#tectoEfectivo()
     if (ref.c === "original" && tecto > 0 && blob.length > tecto) {
       this.#falhou(sha, "media store is full")
-      return
+      return Promise.resolve(false)
     }
 
     const agora = this.#agora()
-    this.#escrever(sha, blob, { bytes: blob.length, classe: ref.c, ultimoUso: agora, escritoEm: agora })
+    const entrada: Entrada = { bytes: blob.length, classe: ref.c, ultimoUso: agora, escritoEm: agora }
+    return this.#escrever(sha, blob, entrada).then(
+      () => this.#inventario === inventario && inventario.get(sha) === entrada && !this.#pendentes.has(sha),
+      () => false,
+    )
   }
 
   /**

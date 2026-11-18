@@ -69,14 +69,25 @@ export function aberturaNoHtml(): Plugin {
         resposta.end(guiao)
       })
     },
-    transformIndexHtml(html) {
+    transformIndexHtml(html, contexto) {
       const vazio = '<div id="root"></div>'
       if (!html.includes(vazio)) throw new Error(`abertura: o index.html já não tem ${vazio}`)
+      // The Aurora sheet's hashed address, for the head script (`lingua-cedo.ts`).
+      // In the build it is the asset of `folha-da-aurora.ts`'s `?url` import; in
+      // dev there is none, and the entry loads it before React draws.
+      const aurora = contexto?.bundle
+        ? Object.values(contexto.bundle).find((f) => f.type === "asset" && f.originalFileNames.some((n) => n.endsWith("styles-aurora.css")))
+        : undefined
+      if (contexto?.bundle && !aurora) throw new Error("abertura: o bundle não tem a folha da Aurora (styles-aurora.css)")
       return {
         html: html.replace(vazio, `<div id="root">${aberturaEmHtml(textos)}</div>`),
         tags: [
           { tag: "style", children: folhaDasLinguas(textos.map((t) => t.lingua)), injectTo: "head" },
-          { tag: "script", attrs: { src: `${base}${ficheiro}` }, injectTo: "head" },
+          {
+            tag: "script",
+            attrs: { src: `${base}${ficheiro}`, ...(aurora ? { "data-folha-aurora": `${base}${aurora.fileName}` } : {}) },
+            injectTo: "head",
+          },
         ],
       }
     },

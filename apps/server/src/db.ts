@@ -111,6 +111,18 @@ export function openDatabase(path: string): DatabaseSync {
     -- reclama nem publica key packages, e não volta a nenhum manifesto da conta.
     -- O que ensina ao operador: quantos aparelhos cada conta tirou, e em que
     -- minuto. Nada que o manifesto antigo não ensinasse já.
+    -- N-01: the pairing window of each device key that logged in outside its
+    -- account's manifest (Gateway.JANELA_DE_EMPARELHAMENTO_MS). One row per key,
+    -- written when the window opens and never reopened: a key whose window ran
+    -- out without a manifest naming it does not log in again. What it tells the
+    -- operator: how many devices each account paired, and when.
+    CREATE TABLE IF NOT EXISTS pairing_windows (
+      address    TEXT NOT NULL,
+      device_key TEXT NOT NULL,
+      opened_at  INTEGER NOT NULL,
+      PRIMARY KEY (address, device_key)
+    );
+
     CREATE TABLE IF NOT EXISTS revoked_devices (
       address        TEXT NOT NULL,
       device_key     TEXT NOT NULL,
@@ -169,6 +181,9 @@ export function openDatabase(path: string): DatabaseSync {
       address TEXT NOT NULL,
       PRIMARY KEY (channel, address)
     );
+    -- By account: partilhamCanal (the age vote) looked for an account's channels
+    -- with a full scan (M5 of the 1.3.20 review).
+    CREATE INDEX IF NOT EXISTS subscriptions_by_address ON subscriptions (address);
 
     -- Which *servers* a channel reaches. Federation routes on this, never on
     -- remote user addresses, so a peer never learns our membership list.

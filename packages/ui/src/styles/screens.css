@@ -123,7 +123,7 @@
   width: 3px;
   height: 0;
   border-radius: 0 3px 3px 0;
-  background: var(--accent);
+  background: var(--accent-deep);
   transition: height var(--dur) var(--ease);
 }
 
@@ -620,7 +620,7 @@
 .me-audio-btn.off:hover {
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
   background: color-mix(in srgb, var(--danger) 12%, transparent);
-  color: color-mix(in srgb, var(--danger) 82%, #fff);
+  color: color-mix(in srgb, var(--danger) 82%, var(--titulo));
 }
 
 /* The written status row, below the bar, only while being edited. */
@@ -857,7 +857,7 @@
   bottom: 25%;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: var(--accent);
+  background: var(--accent-deep);
 }
 
 /* Unread shows first, before read: the full name, against the gray of the rest.
@@ -1094,12 +1094,12 @@
   gap: var(--space-2);
   padding: var(--space-4);
   font-size: var(--font-md);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: none;
   transition: background-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
 
 .sidebar-primary:hover:not(:disabled) {
-  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow: none;
 }
 
 /* --------------------------------------- voice rooms: life, and moving people */
@@ -1245,7 +1245,7 @@
   top: -2px;
   height: 2px;
   border-radius: var(--radius-full);
-  background: var(--accent);
+  background: var(--accent-deep);
 }
 
 .room-row[draggable="true"] {
@@ -1293,7 +1293,7 @@
   right: 0;
   height: 2px;
   border-radius: var(--radius-full);
-  background: var(--accent);
+  background: var(--accent-deep);
 }
 
 .room-category.antes::before {
@@ -2421,7 +2421,11 @@ numbers again. */
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: var(--space-5) var(--space-5) var(--space-3);
+  /* The side padding, named: each message row reaches back into it edge to
+     edge (`.message` in `pele.css`), and must reach exactly this far, or the
+     row is wider than the scroller and it slides sideways. */
+  --timeline-lado: var(--space-5);
+  padding: var(--space-5) var(--timeline-lado) var(--space-3);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -2805,7 +2809,11 @@ numbers again. */
 .message-media .post-images {
   --altura-maxima-da-imagem: 260px;
   margin-top: var(--space-2);
-  max-width: 420px;
+  /* As wide as the images ask, never the whole row: since 1.4 the message body
+     fills the row instead of measuring its content, and a grid of `auto` width
+     took the full 420, stretching an image the reserved height had made 390. */
+  width: fit-content;
+  max-width: min(420px, 100%);
   /* In chat the frame follows the image: fixed aspect ratio is feed-only. */
   aspect-ratio: auto;
   grid-auto-rows: auto;
@@ -3274,7 +3282,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 }
 
 .call-head-btn[aria-pressed="true"] {
-  background: var(--accent);
+  background: var(--accent-deep);
   border-color: var(--accent);
   color: var(--on-accent);
   font-weight: 600;
@@ -3410,7 +3418,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 }
 
 .call-person-marcas > .screen-badge {
-  background: var(--accent);
+  background: var(--accent-deep);
   color: var(--on-accent);
 }
 
@@ -3452,12 +3460,10 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   /* The panel tint, no filter (see `paineis.css`): the aurora shows between and
      around the cards, and shows through below them. */
   background-color: var(--painel-tinta);
-  background-image: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--indigo) 10%, transparent), transparent 60%);
-  box-shadow:
-    inset 0 0 0 1px rgb(var(--brilho-cor) / 0.18),
-    inset 6px 6px 18px rgb(var(--brilho-cor) / 0.12),
-    inset -6px -8px 20px rgb(var(--sombra-cor) / 0.25),
-    0 12px 40px rgb(var(--sombra-cor) / 0.35);
+  background-image: none;
+  /* Flat, like every card of the skin: the glass bevel (inner light and
+     shade, a 40 px drop) read as a grey smudge on the light theme. */
+  box-shadow: var(--sombra-1);
   transition: border-color var(--dur-fast) var(--ease);
 }
 
@@ -3630,7 +3636,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   border: 1.5px solid var(--accent);
   background: rgb(10 14 26 / 0.7);
   color: var(--accent);
-  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: none;
 }
 
 /* The triangle sits at the eye center, not the box center: it pulls slightly. */
@@ -3905,6 +3911,30 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   background: var(--fundo);
 }
 
+/*
+  What sits over a picture (a camera, a shared screen, a face): a dark scrim
+  with light text, in both themes, because the picture under it does not
+  change with the theme. The text tiers are re-pointed here to the fixed
+  light values (`--midia-*` in `tokens.css`), so the rules below keep their
+  role names and read light on the scrim in the light theme too. Contrast in
+  `tokens.contraste.test.ts`.
+*/
+.call-chip-labels,
+.chip-volume,
+.call-palco-label,
+.call-palco-inteiro,
+.call-espectadores,
+.call-oferta-ver {
+  --titulo: var(--midia-titulo);
+  --texto: var(--midia-texto);
+  --text: var(--midia-texto);
+  --secundario: var(--midia-secundario);
+  --apagado: var(--midia-secundario);
+  --text-dim: var(--midia-secundario);
+  --text-faint: var(--midia-secundario);
+  --discreto: var(--midia-secundario);
+}
+
 /* The name and status, in a dark label at bottom-left. */
 .call-chip-labels {
   position: absolute;
@@ -3916,7 +3946,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   flex-direction: column;
   padding: var(--space-2) 10px;
   border-radius: var(--radius-md);
-  background: rgba(6, 9, 20, 0.78);
+  background: var(--midia-veu);
 }
 
 .call-chip-name {
@@ -3969,7 +3999,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   align-items: center;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
-  background: rgba(6, 9, 20, 0.78);
+  background: var(--midia-veu);
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease);
 }
@@ -4000,7 +4030,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   width: 13px;
   height: 13px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-deep);
   cursor: pointer;
 }
 
@@ -4009,7 +4039,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   height: 13px;
   border: none;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-deep);
   cursor: pointer;
 }
 
@@ -4091,7 +4121,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   bottom: 14px;
   padding: 6px 12px;
   border-radius: var(--radius-md);
-  background: rgba(6, 9, 20, 0.85);
+  background: var(--midia-veu-forte);
   color: var(--titulo);
   font-size: var(--font-sm);
   font-weight: 600;
@@ -4129,7 +4159,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   justify-content: center;
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: var(--radius-md);
-  background: rgba(6, 9, 20, 0.85);
+  background: var(--midia-veu-forte);
   color: var(--titulo);
   cursor: pointer;
 }
@@ -4167,7 +4197,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   gap: 6px;
   padding: 0 var(--space-4);
   border-radius: var(--radius-md);
-  background: rgba(6, 9, 20, 0.85);
+  background: var(--midia-veu-forte);
   color: var(--secundario);
   font-size: var(--font-sm);
 }
@@ -4182,7 +4212,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   padding: 0 var(--space-4);
   border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   border-radius: var(--radius-md);
-  background: rgba(6, 9, 20, 0.85);
+  background: var(--midia-veu-forte);
   color: var(--titulo);
   font: inherit;
   font-size: var(--font-sm);
@@ -4324,7 +4354,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   width: min(300px, 100%);
   height: 1px;
   transform: translateX(-50%);
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acento) 28%, transparent), transparent);
+  background: transparent;
   pointer-events: none;
 }
 
@@ -4495,9 +4525,9 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 
 .call-btn.hangup {
   border: none;
-  background: var(--danger);
+  background: var(--danger-fill);
   color: var(--on-danger);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--danger) 22%, transparent);
+  box-shadow: none;
 }
 
 .call-btn.hangup:hover {
@@ -5459,7 +5489,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
 }
 
 .carrossel-pontos .ponto.agora {
-  background: var(--accent);
+  background: var(--accent-deep);
 }
 
 /**
@@ -6075,7 +6105,7 @@ button.tag-pill[aria-pressed="true"] {
   width: 13px;
   height: 13px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-deep);
   cursor: pointer;
 }
 
@@ -6084,7 +6114,7 @@ button.tag-pill[aria-pressed="true"] {
   height: 13px;
   border: none;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-deep);
   cursor: pointer;
 }
 
@@ -6694,7 +6724,7 @@ button.tag-pill[aria-pressed="true"] {
   border: 1px solid var(--accent-deep);
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-deep));
-  box-shadow: 0 10px 28px rgb(0 0 0 / 0.45);
+  box-shadow: var(--sombra-2);
 }
 
 .call-dock:active {
@@ -6839,11 +6869,12 @@ button.tag-pill[aria-pressed="true"] {
 /* Density is a spacing multiplier, applied where the eye actually notices. */
 [data-density="compacta"] .timeline {
   gap: 0;
-  padding: var(--space-3) var(--space-5) var(--space-2);
+  padding: var(--space-3) var(--timeline-lado) var(--space-2);
 }
 
+/* Only the height: the sides are the row's reach into the timeline padding. */
 [data-density="compacta"] .message {
-  padding: 1px 0;
+  padding-block: 1px;
 }
 
 [data-density="compacta"] .feed,
@@ -7095,7 +7126,7 @@ button.tag-pill[aria-pressed="true"] {
 
 .setup-dots li.current {
   width: 20px;
-  background: var(--accent);
+  background: var(--accent-deep);
 }
 
 .setup-form {
@@ -7558,7 +7589,8 @@ button.tag-pill[aria-pressed="true"] {
   }
 
   .timeline {
-    padding: var(--space-4) var(--space-4) var(--space-3);
+    --timeline-lado: var(--space-4);
+    padding: var(--space-4) var(--timeline-lado) var(--space-3);
   }
 
   .chat-composer {
@@ -7645,7 +7677,7 @@ button.tag-pill[aria-pressed="true"] {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
+  box-shadow: none;
 }
 
 .notif-corpo {
@@ -7711,8 +7743,8 @@ button.tag-pill[aria-pressed="true"] {
   bottom: 30px;
   width: 2px;
   border-radius: var(--radius-full);
-  background: var(--accent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--accent-deep);
+  box-shadow: none;
 }
 
 .notif-evento {
@@ -7726,8 +7758,8 @@ button.tag-pill[aria-pressed="true"] {
   width: 12px;
   height: 12px;
   border-radius: var(--radius-full);
-  background: var(--accent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent);
+  background: var(--accent-deep);
+  box-shadow: none;
 }
 
 /* A single event needs no line. */
@@ -7829,7 +7861,7 @@ button.tag-pill[aria-pressed="true"] {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-deep);
   flex: none;
 }
 
@@ -8034,19 +8066,119 @@ button.tag-pill[aria-pressed="true"] {
   background: var(--accent-soft);
 }
 
-/* Eight columns, the same number the arrows count in EmojiPicker.tsx. */
+/* The search box and the skin tone button, on one line, like Discord. */
+.emoji-procura {
+  flex: none;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.emoji-procura .emoji-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.emoji-tom {
+  flex: none;
+  width: 40px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.emoji-tom:hover,
+.emoji-tom[aria-expanded="true"] {
+  border-color: var(--accent-deep);
+}
+
+.emoji-tons {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  animation: emoji-tons-entra var(--dur-fast) var(--ease);
+}
+
+.emoji-tom-opcao {
+  width: 34px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.emoji-tom-opcao:hover {
+  background: var(--bg-hover);
+}
+
+.emoji-tom-opcao.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+@keyframes emoji-tons-entra {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The list is virtual (`EmojiPicker.tsx`): the inner block has the height of
+   the whole catalog, and only the rows in view are placed in it, by `top`.
+   The two heights below are the ones the code counts with. */
 .emoji-grid {
   flex: 1;
-  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  position: relative;
+  /* The rows in view only: layout of one row never moves the others. */
+  contain: strict;
+  min-height: 180px;
+}
+
+.emoji-lista {
+  position: relative;
+}
+
+/* Eight columns, the same number the arrows count in EmojiPicker.tsx. 36 px cells and a 4 px gap: 40 px a row. */
+.emoji-linha {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 40px;
   display: grid;
   grid-template-columns: repeat(8, 1fr);
-  gap: var(--space-1);
-  align-content: start;
+  gap: var(--space-2);
+  align-items: start;
+}
+
+.emoji-cabecalho {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 28px;
+  margin: 0;
+  padding: 8px 2px 0;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  user-select: none;
 }
 
 .emoji-cell {
-  aspect-ratio: 1;
+  height: 36px;
   border: none;
   background: transparent;
   border-radius: var(--radius-sm);
@@ -8069,7 +8201,9 @@ button.tag-pill[aria-pressed="true"] {
 }
 
 .emoji-empty {
-  grid-column: 1 / -1;
+  position: absolute;
+  inset: 0 0 auto;
+  margin: 0;
   padding: var(--space-6) 0;
   text-align: center;
   font-size: var(--font-sm);
@@ -8093,6 +8227,13 @@ button.tag-pill[aria-pressed="true"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The emoji under the mouse, big, before its name: Discord's preview. */
+.emoji-hint-glifo {
+  margin-right: var(--space-3);
+  font-size: 22px;
+  vertical-align: middle;
 }
 
 .emoji-close {
@@ -8814,7 +8955,7 @@ button.tag-pill[aria-pressed="true"] {
   height: 18px;
   padding: 0 var(--space-2);
   border-radius: var(--radius-full);
-  background: var(--accent);
+  background: var(--accent-deep);
   color: var(--on-accent);
   font-size: 11px;
   font-weight: 700;
@@ -8949,7 +9090,7 @@ button.tag-pill[aria-pressed="true"] {
   height: 18px;
   padding: 0 var(--space-2);
   border-radius: var(--radius-full);
-  background: var(--accent);
+  background: var(--accent-deep);
   color: var(--on-accent);
   font-size: 11px;
   font-weight: 700;
@@ -10517,11 +10658,14 @@ button.message-citacao:focus-visible {
 }
 
 /* "Sync account", in Help and diagnostics: the button, the subtitle and,
-   below it, the text of what it did. */
+   below it, the text of what it did. The button stretches like every action
+   of a settings card (the card is a stretching column): aligned to the start,
+   it shrank to its text and sat apart from the other buttons on the page
+   (`SincronizarConta.alinhamento.test.tsx`). */
 .reparacao {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: var(--space-2);
 }
 
@@ -10711,7 +10855,7 @@ button.message-citacao:focus-visible {
   position: absolute;
   inset: 0;
   transform-origin: left center;
-  background: linear-gradient(90deg, var(--indigo), var(--accent));
+  background: var(--accent-deep);
   transition: transform 90ms linear;
 }
 
@@ -10992,6 +11136,24 @@ button.message-citacao:focus-visible {
   margin-top: var(--space-4);
 }
 
+/* Its title ("Igual aos outros membros") is a heading inside the card: the
+   size of the card's own title, never bigger, with air before the note. Left
+   to the browser it was 18.7 px against 14, touching the note. The card in
+   the selector is weight, not place: the Aurora theme's reset (`* { margin:
+   0 }`, scoped) and its note rule must not win here, as they never styled
+   this title. The note under a heading does not hug it like it hugs a field
+   (`.field-note`, `components.css`). */
+.settings-card .estado-sincronia h3 {
+  margin-bottom: var(--space-2);
+  font-size: var(--font-base);
+  font-weight: 600;
+  color: var(--titulo);
+}
+
+.settings-card .estado-sincronia h3 + .field-note {
+  margin-top: 0;
+}
+
 .estado-sincronia-lista {
   display: grid;
   gap: var(--space-2);
@@ -11232,7 +11394,7 @@ button.message-citacao:focus-visible {
   border: 1px solid color-mix(in srgb, var(--acento) 18%, transparent);
   border-radius: 12px;
   background: var(--poco);
-  box-shadow: inset 0 0 24px color-mix(in srgb, var(--acento) 6%, transparent);
+  box-shadow: none;
 }
 
 .audio-visor-tempo {
@@ -11255,7 +11417,7 @@ button.message-citacao:focus-visible {
   position: absolute;
   inset: 0;
   color: var(--acento);
-  text-shadow: 0 0 10px color-mix(in srgb, var(--acento) 45%, transparent);
+  text-shadow: none;
 }
 
 .audio-visor:not(.a-tocar) .audio-visor-digitos {
@@ -11316,7 +11478,7 @@ button.message-citacao:focus-visible {
   height: 12px;
   border-radius: 3px;
   background: var(--acento);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--acento) 55%, transparent);
+  box-shadow: none;
 }
 
 .partilhar-audio .sheet-body input[type="range"]::-moz-range-thumb {
@@ -11370,7 +11532,7 @@ button.message-citacao:focus-visible {
   border: 0;
   background: var(--acento);
   color: var(--on-accent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--acento) 30%, transparent);
+  box-shadow: none;
 }
 
 .audio-tecla.principal:hover:not(:disabled) {
@@ -12017,10 +12179,288 @@ button.message-citacao:focus-visible {
   }
 }
 
-/* Slower, never stopped, see the reduced-motion rule of the house. */
+/* A chip that arrives while the line is on screen pops in, and a count that
+   changes rolls in from below. Only transform and opacity: the compositor runs
+   them, and the line around does not lay out again. See `FichasDeReaccao`. */
+.reaccao.nova {
+  animation: reaccao-entra 220ms var(--ease) both;
+}
+
+.reaccao-n.mudou {
+  display: inline-block;
+  animation: reaccao-conta 200ms var(--ease) both;
+}
+
+@keyframes reaccao-entra {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes reaccao-conta {
+  from {
+    opacity: 0;
+    transform: translateY(60%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The calm versions: three times the time, a third of the distance. */
+@keyframes reaccao-entra-calma {
+  from {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes reaccao-conta-calma {
+  from {
+    opacity: 0;
+    transform: translateY(20%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes emoji-tons-entra-calma {
+  from {
+    opacity: 0;
+    transform: translateY(-1px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The same emoji font as the chips (see `fontes.css`), for every other place a
+   reaction emoji shows. In the hover bar only the quick reactions group, not the
+   whole bar: the bar is a 1.3.19 element, and in Aurora it keeps 1.3.19's font,
+   tooltips included (aurora.test). */
+.msg-rapidas,
+.menu-reaccoes,
+.quem-reagiu,
+.rapidas-casas {
+  font-family: var(--fonte-com-emoji);
+}
+
+/* The quick reactions of the hover bar, grouped. The bar is in every line and
+   only fades in on hover (`opacity`, so it is still laid out): three colour
+   emoji per line, shaped and laid out for nothing, cost the big case 15 to 60 %
+   on channel switch, menus and a burst of 200. Their rendering is skipped
+   until the bar shows. The buttons stay in the DOM for tests and tools. */
+.msg-actions .msg-rapidas {
+  display: flex;
+  gap: 1px;
+  content-visibility: hidden;
+}
+
+.message:hover .msg-actions .msg-rapidas,
+.message:focus-within .msg-actions .msg-rapidas {
+  content-visibility: visible;
+}
+
+/* The quick reactions of the hover bar: the emoji itself, at the bar's size. */
+.msg-actions button.msg-rapida {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.msg-actions button.msg-rapida[aria-pressed="true"] {
+  background: var(--accent-soft);
+}
+
+/* The quick reactions on top of the message menu, like Discord: one row of
+   round buttons, then a line, then the entries. */
+.menu-reaccoes {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.context-menu .menu-reaccoes button.menu-reaccao {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-full);
+  background: var(--bg-raised);
+  font-size: 22px;
+  line-height: 1;
+  color: var(--text-dim);
+}
+
+.context-menu .menu-reaccoes button.menu-reaccao.minha {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Who reacted: the emoji tabs on the side, the people on the right. */
+.sheet.quem-reagiu {
+  width: min(440px, calc(100vw - 2 * var(--space-5)));
+  padding: var(--space-6);
+  gap: var(--space-4);
+}
+
+.sheet.quem-reagiu h2 {
+  margin: 0;
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+
+.quem-reagiu-corpo {
+  display: flex;
+  gap: var(--space-4);
+  min-height: 0;
+  max-height: min(360px, 60vh);
+}
+
+.quem-reagiu-separadores {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  overflow-y: auto;
+}
+
+.quem-reagiu-separador {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 72px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+.quem-reagiu-separador > span:first-child {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.quem-reagiu-separador.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.quem-reagiu-pessoas {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.quem-reagiu-pessoa {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.quem-reagiu-pessoa .avatar {
+  flex: none;
+}
+
+.quem-reagiu-nome {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quem-reagiu-pe {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Settings: the three slots. A slot left empty shows the most used emoji, faint. */
+.rapidas-casas {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.rapidas-casa {
+  position: relative;
+}
+
+.rapidas-emoji {
+  width: 52px;
+  height: 52px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rapidas-emoji:hover {
+  border-color: var(--accent-deep);
+}
+
+.rapidas-emoji.automatica {
+  border-style: dashed;
+  opacity: 0.6;
+}
+
+.rapidas-limpar {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  background: var(--bg-side);
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Slower, never stopped, see the reduced-motion rule of the house. `!important`
+   against the universal rule in `base.css`, which would zero them all. */
 @media (prefers-reduced-motion: reduce) {
   .reaccao {
-    transition-duration: 360ms;
+    transition-duration: 360ms !important;
+  }
+
+  .reaccao.nova {
+    animation: reaccao-entra-calma 660ms var(--ease) both !important;
+  }
+
+  .reaccao-n.mudou {
+    animation: reaccao-conta-calma 600ms var(--ease) both !important;
+  }
+
+  .emoji-tons {
+    animation: emoji-tons-entra-calma 450ms var(--ease) !important;
   }
 }
 
@@ -12070,10 +12510,10 @@ button.message-citacao:focus-visible {
 /* A message that mentions me (me, @all, or a role I hold): lit like Discord,
    a soft ground and a bar on the left.
 
-   The line has no side padding, so the bar used to sit on the first 3 px of the
-   face. The lit line now reaches 8 px into the timeline's own padding and pads
-   the same 8 px back: the bar sits clear of the face, and the face and text stay
-   in the same column as the unlit lines around it.
+   Every row reaches 16 px into the timeline's own padding and pads the same
+   16 px back (`pele.css`, 1.4), and the lit line says the same here: the bar
+   sits at the row's edge, clear of the face, and the face and text stay in the
+   same column as the unlit lines around it.
 
    `:hover` is named here because the skin (`pele.css`, loaded later) clears the
    hover ground of every line with a rule of the same weight, and the lit ground
@@ -12082,8 +12522,8 @@ button.message-citacao:focus-visible {
    that way. The hover keeps the rest ground; only a real pointer darkens it a
    little, like Discord. */
 .message.menciona-me {
-  margin-inline-start: calc(-1 * var(--space-3));
-  padding-inline-start: var(--space-3);
+  margin-inline-start: calc(-1 * var(--space-5));
+  padding-inline-start: var(--space-5);
   background: color-mix(in srgb, var(--accent) 9%, transparent);
   box-shadow: inset 3px 0 0 var(--accent);
 }
@@ -12501,4 +12941,11 @@ button.message-citacao:focus-visible {
   .votacoes-pagina-cartao .votacao-opcao {
     padding: var(--space-4) var(--space-3);
   }
+}
+
+/* The start of what this device holds (17/11/2026): a line, where the list used to simply stop. */
+.timeline-inicio-do-aparelho {
+  margin: 8px auto 4px;
+  max-width: 60ch;
+  text-align: center;
 }

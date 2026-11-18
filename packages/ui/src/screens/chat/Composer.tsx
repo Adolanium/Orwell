@@ -331,7 +331,7 @@ export function Composer({
         ? []
         : mencao.sinal === "#"
           ? sugerirMencoes(salas, mencao.procura)
-          : sugerirEtiquetas(mentionable, cargos, mencao.procura, podeMencionarTodos),
+          : sugerirEtiquetas(mentionable, cargos, mencao.procura, podeMencionarTodos, salas),
     [mencao, dispensada, mentionable, podeMencionarTodos, cargos, salas],
   )
   const aSugerir = sugestoes.length > 0

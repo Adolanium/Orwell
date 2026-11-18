@@ -9,6 +9,7 @@ import { comCabecalho, semCabecalho, versaoDoFicheiro, type VersaoDoFicheiroDoCo
 import { registarFicha, type FichaDoCanal, type FichaQueChega } from "./tipoDoCanal.js"
 import { acabarSelo, comecarSelo, comprimentoDoFim, type SeloEmCurso, type SeloPorFazer } from "./seloDoCofre.js"
 import type { ArmazemDeMedia } from "./armazem/armazem.js"
+import type { PaginaDoArquivo } from "./armazem/conversaArquivada.js"
 import { decifrarBlob } from "./armazem/blob.js"
 import {
   cabecaDoContentor,
@@ -578,6 +579,28 @@ export interface VaultContents {
    * banner, pinned, and profiles.
    */
   estadoDoCanal: Record<string, StoredChatMessage[]>
+  /**
+   * Conversation the cap pushed out of `history`, waiting to fill an archive
+   * page (17/11/2026). See `armazem/conversaArquivada.ts`. Absent: nothing waiting.
+   */
+  porArquivar?: Record<string, StoredChatMessage[]>
+  /**
+   * The index of the archived conversation per channel, oldest page first: each
+   * page is a blob in the media store, with its key in `media`. See
+   * `armazem/conversaArquivada.ts`. Absent in an older vault: what the cap took was lost.
+   */
+  arquivoDaConversa?: Record<string, PaginaDoArquivo[]>
+  /**
+   * The amendments the ledger cap pushed out, kept for the archive (review of
+   * 1.3.18, I3). The ledger keeps 2 000 per channel; the archive, 20 000
+   * messages. Past the cap a tombstone or an edit left before the message it
+   * amends, and "Load older" showed a deleted message, or an edited one with
+   * its first text. `apagadas`: who deleted each id, every distinct sender (the
+   * reader checks that one of them could); `edicoes`: the last edit of each id
+   * by each sender (the reader takes the author's). Absent: nothing pushed out.
+   * See `apagadoNoArquivo` and `edicaoNoArquivo`.
+   */
+  emendasArquivadas?: Record<string, EmendasArquivadas>
   /**
    * LEGACY from version 2: the bytes of the post videos, by SHA-256
    * (26/10/2026). Only the migration to the store reads it, and deletes it at
@@ -1346,20 +1369,98 @@ function porOrdem(list: readonly StoredChatMessage[]): StoredChatMessage[] {
  * (written by hand in a test, or by an old path) does not count and does not
  * evict: its place is the state book, and the migration takes it.
  */
-function apararConversa(list: StoredChatMessage[]): void {
+function apararConversa(list: StoredChatMessage[]): StoredChatMessage[] {
   let comuns = 0
   for (const entry of list) if (tipoDoEstado(entry) === null) comuns += 1
   let tirar = Math.max(0, comuns - HISTORY_MAX_PER_CHANNEL)
-  if (tirar === 0) return
+  if (tirar === 0) return []
+  const tiradas: StoredChatMessage[] = []
   let escrita = 0
   for (const entry of list) {
     if (tirar > 0 && tipoDoEstado(entry) === null) {
       tirar -= 1
+      tiradas.push(entry)
       continue
     }
     list[escrita++] = entry
   }
   list.length = escrita
+  return tiradas
+}
+
+/** What the archive still needs from the amendments the ledger let go. See `VaultContents.emendasArquivadas`. */
+export interface EmendasArquivadas {
+  /**
+   * Who sent a tombstone for each id. A list of distinct senders since 1.3.20
+   * (I4 of its review): keeping only the first let a member with no right to
+   * delete cover the moderator's tombstone that came after. A single string is
+   * a vault from before, read as a list of one.
+   */
+  apagadas: Record<string, string | string[]>
+  /**
+   * The last edit of each id by each sender, keyed `${id}|${sender}` since 1.3.20
+   * (I4): keyed by id alone, another member's edit sent after the author's took
+   * its place. A key with no `|` is a vault from before.
+   */
+  edicoes: Record<string, StoredChatMessage>
+}
+
+/** Distinct senders of tombstones kept per id: enough for the author and the moderators, and a cap. */
+export const REMETENTES_DE_LAPIDE_MAX = 8
+
+/**
+ * Was this archived message deleted, by its author or by someone who may moderate?
+ * The folds' rule, for the amendments the ledger let go.
+ */
+export function apagadoNoArquivo(
+  emendas: EmendasArquivadas | undefined,
+  entrada: StoredChatMessage,
+  podeModerar: (quem: string) => boolean,
+): boolean {
+  const id = entrada.payload["id"]
+  if (typeof id !== "string" || emendas === undefined) return false
+  const guardado = emendas.apagadas[id]
+  const quem = typeof guardado === "string" ? [guardado] : (guardado ?? [])
+  return quem.some((remetente) => remetente === entrada.sender || podeModerar(remetente))
+}
+
+/** The last edit of this archived message by its author, if the ledger let one go. */
+export function edicaoNoArquivo(emendas: EmendasArquivadas | undefined, entrada: StoredChatMessage): StoredChatMessage | undefined {
+  const id = entrada.payload["id"]
+  if (typeof id !== "string" || emendas === undefined) return undefined
+  const doAutor = emendas.edicoes[`${id}|${entrada.sender}`]
+  if (doAutor !== undefined) return doAutor
+  // A vault from before: the one edit kept by id counts only if it is the author's.
+  const antiga = emendas.edicoes[id]
+  return antiga !== undefined && antiga.sender === entrada.sender ? antiga : undefined
+}
+
+/** As many as the archive holds messages: each id counts once. */
+export const EMENDAS_ARQUIVADAS_MAX = 20_000
+
+/** Keep an amendment the ledger is letting go, for the archive. */
+function guardarEmendaArquivada(contents: VaultContents, channel: string, entry: StoredChatMessage): void {
+  const alvo = entry.payload["target"]
+  if (typeof alvo !== "string") return
+  contents.emendasArquivadas ??= {}
+  const emendas = (contents.emendasArquivadas[channel] ??= { apagadas: {}, edicoes: {} })
+  // Oldest first out, past the cap (insertion order).
+  const aparar = (registo: Record<string, unknown>): void => {
+    const ids = Object.keys(registo)
+    for (const id of ids.slice(0, Math.max(0, ids.length - EMENDAS_ARQUIVADAS_MAX))) delete registo[id]
+  }
+  if (entry.payload["t"] === "redact") {
+    // Every distinct sender: who may delete is decided when reading (`apagadoNoArquivo`).
+    const guardado = emendas.apagadas[alvo]
+    const quem = typeof guardado === "string" ? [guardado] : (guardado ?? [])
+    if (!quem.includes(entry.sender) && quem.length < REMETENTES_DE_LAPIDE_MAX) emendas.apagadas[alvo] = [...quem, entry.sender]
+    aparar(emendas.apagadas)
+  } else if (entry.payload["t"] === "edit") {
+    // Per sender: the ledger lets them go oldest first, so a later edit by the same
+    // sender replaces an earlier one, and one by someone else sits beside it.
+    emendas.edicoes[`${alvo}|${entry.sender}`] = entry
+    aparar(emendas.edicoes)
+  }
 }
 
 /** The `id`s still stored in a channel: what a tombstone must keep blocking. */
@@ -1485,6 +1586,8 @@ function apararEstado(contents: VaultContents, channel: string): void {
         if (entry.payload["t"] !== fase) continue
         const alvo = entry.payload["target"]
         if (fase === "redact" && typeof alvo === "string" && alvos.has(alvo)) continue
+        // Its target may be in the archive: keep what it says there.
+        guardarEmendaArquivada(contents, channel, entry)
       } else if (fase !== "resto") {
         continue
       }
@@ -1506,7 +1609,15 @@ function apararEstado(contents: VaultContents, channel: string): void {
  */
 function enforceHistoryLimits(contents: VaultContents, channel: string): void {
   const conversa = contents.history[channel]
-  if (conversa) apararConversa(conversa)
+  if (conversa) {
+    // Out of the vault, not out of the device (17/11/2026): what the cap takes waits for
+    // an archive page in the media store. See `armazem/conversaArquivada.ts`.
+    const tiradas = apararConversa(conversa).filter((entrada) => !entrada.herdado)
+    if (tiradas.length > 0) {
+      contents.porArquivar ??= {}
+      ;(contents.porArquivar[channel] ??= []).push(...tiradas)
+    }
+  }
   apararEstado(contents, channel)
 }
 

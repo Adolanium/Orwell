@@ -36,6 +36,27 @@ export function AvisoDeActualizacao({
 }): React.JSX.Element | null {
   if (!aviso) return null
 
+  /*
+    Windows, during the wait before it installs by itself (1.3.20): only the
+    date, and no way to the site. A download from the site would skip the
+    signature, GitHub and the wait, which is the whole point of waiting.
+  */
+  if (aviso.emVerificacaoAte !== undefined) {
+    const quando = new Date(aviso.emVerificacaoAte).toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" })
+    return (
+      <div className="aviso-versao" role="status" aria-live="polite">
+        <h2 className="aviso-versao-titulo">{strings.actualizacao.titulo}</h2>
+        <p className="aviso-versao-versoes">{strings.actualizacao.emVerificacao(quando)}</p>
+        <p className="aviso-versao-nota">{strings.actualizacao.emVerificacaoNota}</p>
+        <div className="aviso-versao-gestos">
+          <Button variant="ghost" onClick={onDispensar} title={strings.actualizacao.dispensarTitulo(aviso.disponivel)}>
+            {strings.actualizacao.dispensar}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     /*
       `status` not `alert`: this is information not an emergency. An

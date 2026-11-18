@@ -137,6 +137,8 @@ export const en: Traducao = {
     webTexto: "New version. Reload to continue.",
     webDetalhe: "This tab no longer sends or receives.",
     webRecarregar: "Reload",
+    emVerificacao: (quando: string): string => `New version in verification. It installs from ${quando}.`,
+    emVerificacaoNota: "The app installs it by itself, or asks you first. You do not need to download it.",
   },
 
   separadores: {
@@ -399,6 +401,7 @@ export const en: Traducao = {
     discard: "Discard",
     newMessages: "↓ New messages",
     loadOlder: "Load older",
+    inicioDoAparelho: "No older messages on this device. Messages from before it joined cannot be read here.",
     joinPending: "Request sent. Waiting for somebody in the channel to accept you…",
     joined: (name: string): string => `You joined ${name}`,
     joinedOpaco: "You joined the channel.",
@@ -1523,6 +1526,13 @@ export const en: Traducao = {
     language: "Language",
     languageNote:
       "Changes the language of the app. Messages are not translated.",
+    tema: "Theme",
+    temas: { escuro: "Dark", claro: "Light", sistema: "System", aurora: "Aurora" },
+    temaNota: "System follows your device's theme. Only changes this device.",
+    instalarActualizacoes: "Install updates",
+    modosDeActualizacao: { perguntar: "Ask first", automaticamente: "Automatically" },
+    actualizacoesNota:
+      "With \"Ask first\", the app asks when it opens and a new version is ready. A new version installs at least 24 hours after this device sees it public on GitHub, usually 72 hours. For this, the app contacts GitHub when there is a new version. Only changes this device.",
     account: "Account",
     editProfile: "Edit profile",
     notifications: "Notifications",
@@ -2071,10 +2081,13 @@ export const en: Traducao = {
     title: "Emoji",
     searchLabel: "Search emoji by name",
     searchPlaceholder: "Search…",
-    recents: "Recent",
+    recents: "Frequently used",
     results: "Results",
     noResults: "No emoji with that name.",
     close: "Close",
+    tom: (nome: string) => `Skin tone: ${nome}`,
+    tomTitulo: "Skin tone",
+    tons: ["No tone", "Light", "Medium-light", "Medium", "Medium-dark", "Dark"] as readonly string[],
     categorias: {
       rostos: "Faces",
       gestos: "Gestures and people",
@@ -2161,6 +2174,7 @@ export const en: Traducao = {
   },
 
   votacao: {
+    semVotoContaNova: "You can vote 5 days after you create your account.",
     criar: "Create poll",
     titulo: "New poll",
     perguntaLabel: "Question",
@@ -2530,7 +2544,8 @@ export const en: Traducao = {
   },
   etiquetas: {
     cargo: "role",
-    salaPrivada: "private room",
+    semAcesso: "no-access",
+    seccaoCanais: "Channels",
     irParaSala: (nome: string) => `Open the room ${nome}`,
   },
   reaccoes: {
@@ -2542,9 +2557,22 @@ export const en: Traducao = {
         : nomes.length <= 3
           ? `${Array.from(nomes).slice(0, -1).join(", ")} and ${nomes[nomes.length - 1]} reacted with ${emoji}`
         : `${Array.from(nomes).slice(0, 3).join(", ")} and ${nomes.length - 3} more reacted with ${emoji}`,
-    rotulo: (emoji: string, n: number, minha: boolean) =>
-      `${emoji}: ${n} ${n === 1 ? "reaction" : "reactions"}${minha ? ", including yours. Tap to remove." : ". Tap to add yours."}`,
+    rotulo: (emoji: string, n: number, minha: boolean, troca = false) =>
+      `${emoji}: ${n} ${n === 1 ? "reaction" : "reactions"}${minha ? ", including yours. Tap to remove." : troca ? ". Tap to change yours to this one." : ". Tap to add yours."}`,
     falhou: "The reaction did not go out. Try again.",
+    rapida: (emoji: string, minha: boolean, troca = false) => (minha ? `Remove ${emoji}` : troca ? `Change to ${emoji}` : `Add ${emoji}`),
+    verReaccoes: "See reactions",
+    titulo: "Reactions",
+    separador: (emoji: string, n: number) => `${emoji}: ${n} ${n === 1 ? "person" : "people"}`,
+    lista: (emoji: string) => `Who reacted with ${emoji}`,
+    fechar: "Close",
+    rapidasTitulo: "Quick reactions",
+    rapidasNota:
+      "These three show when you hover a message and on a long press. An empty slot shows the emoji you use most.",
+    casa: (n: number, emoji: string | null) => (emoji ? `Slot ${n}: ${emoji}. Tap to change.` : `Slot ${n}: empty. Tap to choose.`),
+    escolherCasa: (n: number) => `Quick reaction for slot ${n}`,
+    limparCasa: (n: number) => `Empty slot ${n}`,
+    repor: "Use my most used",
   },
   transmissao: {
     ecra: "Sharing the screen",
@@ -2732,6 +2760,7 @@ export const errosEn: Record<string, FraseDeErro> = {
   "this vault is from the beta": "This vault is from a beta version. It does not open in this version.",
   "this account file is from the beta": "This file is from a beta version. It cannot go into this version.",
   "clipboard unavailable": "Could not copy. Select the text and copy it with the keyboard.",
+  "could not save the update choice": "Could not save the choice. Try again.",
   "clipboard text is invalid": "Could not copy this text.",
   "this device cannot remember the session": "This device has nowhere safe to keep the session.",
   "this vault has no passphrase to remember": "This account has no password on this device. There is no session to remember.",
@@ -3105,6 +3134,7 @@ export const errosEn: Record<string, FraseDeErro> = {
   "media store is full": "The image storage on this device is full. New images are not stored here.",
   "media store failed": "Could not store the image on this device.",
   "media blob is damaged": "The image on this device is damaged. Use \"Fetch\" to get it again.",
+  "conversation archive page is missing": "A page of older messages did not open on this device. Tap again to go on to the earlier ones.",
 
   /* Friends and feed. */
   "too many friend lists in a row":
@@ -3140,6 +3170,7 @@ export const errosEn: Record<string, FraseDeErro> = {
       ? `The device left the account, but it is still in ${detalhe["channels"].length} channels. Revoke again to finish.`
       : "The device left the account, but it is still in some channels. Revoke again to finish.",
   "device-revoked": "This device was removed from the account on another device.",
+  "pairing-unfinished": "The pairing did not finish. Pair this device again.",
   "account-channel-foreign":
     "The account channel had a device that is not of this account. This device left that channel. The state passes again when the channel is made again.",
   "this call server does not carry music": "This call server does not carry music yet. The call goes on without it.",

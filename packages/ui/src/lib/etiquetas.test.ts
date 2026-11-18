@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { aplicarMencoesComTodos, inserirMencao, MENCAO_TODOS } from "./mentions.js"
+import { aplicarMencoesComTodos, inserirMencao, MENCAO_TODOS, sugerirMencoes } from "./mentions.js"
 import {
   candidatoDeCargo,
   candidatoDeSala,
   etiquetaEmCurso,
   salaDoToken,
+  SALAS_NO_ARROBA,
   sugerirEtiquetas,
   tokenDeSala,
 } from "./etiquetas.js"
@@ -56,5 +57,53 @@ describe("etiquetas: @ pessoas e cargos, # salas", () => {
       corpo: `${ANA.address} @all`,
       mentions: [ANA.address, MENCAO_TODOS],
     })
+  })
+})
+
+describe("ligar salas: @ traz a secção Canais, # só salas (17/11/2026)", () => {
+  const SALAS = [GERAL, ANUNCIOS]
+
+  it("@ mostra as salas depois das pessoas, dos cargos e de @all", () => {
+    expect(sugerirEtiquetas([ANA], [PORTEIRO], "", true, SALAS).map((c) => c.name)).toEqual([
+      "Ana",
+      "Porteiro",
+      "all",
+      "anúncios",
+      "geral",
+    ])
+  })
+
+  it("@an encontra a pessoa e a sala, e a pessoa vem primeiro (o Enter leva a primeira)", () => {
+    expect(sugerirEtiquetas([ANA], [PORTEIRO], "an", false, SALAS).map((c) => c.name)).toEqual(["Ana", "anúncios"])
+    expect(sugerirEtiquetas([ANA], [PORTEIRO], "ger", false, SALAS).map((c) => c.name)).toEqual(["geral"])
+  })
+
+  it("no @, as salas não comem o lugar das pessoas: no máximo três", () => {
+    const muitas = Array.from({ length: 20 }, (_, i) => candidatoDeSala({ room: `forum-s-${i}`, name: `sala ${i}` }))
+    const pessoas = Array.from({ length: 20 }, (_, i) => ({ address: `@p${i}-b-c-d:s`, name: `Pessoa ${i}` }))
+    const lista = sugerirEtiquetas(pessoas, [], "", false, muitas)
+    expect(lista.filter((c) => c.tipo === "sala")).toHaveLength(SALAS_NO_ARROBA)
+    expect(lista.filter((c) => c.tipo === undefined)).toHaveLength(6)
+  })
+
+  it("uma sala escolhida no @ viaja como <#id>, sem o nome e sem menção", () => {
+    const { texto, pick } = inserirMencao("vejam @anu", 6, 10, ANUNCIOS)
+    expect(texto).toBe("vejam #anúncios ")
+    const enviado = aplicarMencoesComTodos(texto, [pick], true)
+    expect(enviado).toEqual({ corpo: "vejam <#forum-alfa-beta> ", mentions: [] })
+    expect(enviado.corpo).not.toContain("anúncios")
+  })
+
+  it("com 200 salas e 400 pessoas, cada tecla responde em menos de 50 ms", () => {
+    const salas = Array.from({ length: 200 }, (_, i) => candidatoDeSala({ room: `forum-a${i}-b${i}`, name: `sala número ${i}` }))
+    const pessoas = Array.from({ length: 400 }, (_, i) => ({ address: `@p${i}-b-c-d:s`, name: `Pessoa ${i}` }))
+    let pior = 0
+    for (const procura of ["", "s", "sa", "sal", "sala", "sala n", "sala número 1", "pe", "zz"]) {
+      const inicio = performance.now()
+      sugerirEtiquetas(pessoas, [PORTEIRO], procura, true, salas)
+      sugerirMencoes(salas, procura)
+      pior = Math.max(pior, performance.now() - inicio)
+    }
+    expect(pior).toBeLessThan(50)
   })
 })

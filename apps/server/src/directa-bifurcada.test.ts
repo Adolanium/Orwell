@@ -121,6 +121,50 @@ describe("a directa aberta pelos dois lados no mesmo instante", () => {
     }, 120_000)
   }
 
+  /*
+   * The part of the window the first fix did not cover (final review of 1.3.19,
+   * I2). The channel stops being empty at Ana's `room.created`, and her Welcome
+   * leaves only after the echo of her commit: a claim that lands in between
+   * says "used", with no Welcome in Bruno's socket yet. Here the server holds
+   * the live delivery of Ana's Welcome to Bruno for 600 ms, as a slow network
+   * would, and Bruno opens once the Welcome is stored and still on its way.
+   */
+  it("quem perde a estreia espera pelo Welcome que ainda vem a caminho, e entra sem pedir lugar", async () => {
+    const [ana, bruno] = await contas("Ana", "Bruno")
+    const dm = moradaDirecta(chaveDeConta(ana!.session.identity), bruno!.session.identity.signingPublicKey, ana!.address, bruno!.address)
+    const gateway = servidor.enclave.gateway
+    const original = gateway.broadcast.bind(gateway)
+    gateway.broadcast = (channel, message, recipient) => {
+      if (channel === dm && recipient === bruno!.address && message.t === "channel.event" && message.kind === "welcome") {
+        setTimeout(() => original(channel, message, recipient), 600)
+        return 1
+      }
+      return original(channel, message, recipient)
+    }
+    const pedidos: string[] = []
+    const sessao = bruno!.session as unknown as { requestRejoin: (canal: string) => void }
+    const pedir = sessao.requestRejoin.bind(bruno!.session)
+    sessao.requestRejoin = (canal) => {
+      pedidos.push(canal)
+      pedir(canal)
+    }
+    try {
+      const abertaA = ana!.session.openDirect(bruno!.address)
+      await ate(() => servidor.enclave.store.hasWelcomeFor(dm, bruno!.address), "o Welcome da Ana está guardado", 15_000, 1)
+      expect(await bruno!.session.openDirect(ana!.address)).toBe(dm)
+      expect(await abertaA).toBe(dm)
+      expect(pedidos).not.toContain(dm)
+      for (let i = 0; i < 5; i++) {
+        await Promise.all([ana!.session.send(dm, mensagem(`da Ana ${i}`)), bruno!.session.send(dm, mensagem(`do Bruno ${i}`))])
+        await new Promise((pronto) => setTimeout(pronto, 100))
+      }
+      await ate(() => leu(bruno!, dm, "da Ana 4") && leu(ana!, dm, "do Bruno 4"), "cada um lê o do outro", 30_000)
+      expect(bruno!.avisos).not.toContain("channel-readopted")
+    } finally {
+      gateway.broadcast = original
+    }
+  }, 120_000)
+
   it("dois pedidos de amizade cruzados sem directa aberta dão «amigos» dos dois lados", async () => {
     const [ana, bruno] = await contas("Ana", "Bruno")
     // What the interface does when you click "Request friend": it opens the DM and sends the request.
@@ -200,7 +244,7 @@ describe("uma terceira conta não chega à directa de duas", () => {
     // The name that 0.9 used: claiming it does not touch the opaque address.
     const local = (conta: ContaDeTeste): string => conta.address.slice(1, conta.address.indexOf(":"))
     const [a, b] = [local(ana!), local(bruno!)].sort()
-    const intrusa = await Cliente.ligar(servidor.url, ic)
+    const intrusa = await Cliente.ligarComCadeia(servidor.url, ic)
     try {
       intrusa.enviar({ t: "channel.claim", channel: `!dm-${a}.${b}:${servidor.casa}` })
       await intrusa.proximoDe("channel.claim.result")

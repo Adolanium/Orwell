@@ -206,14 +206,14 @@ describe("o código curto", () => {
     expect(lida?.channel).toBe(canal)
 
     // The short code for this invite, as the app will show it: from the list.
-    const anaCrua = await Cliente.ligar(servidor.url, ana!.session.identity)
+    const anaCrua = await Cliente.ligarComCadeia(servidor.url, ana!.session.identity)
     crus.push(anaCrua)
     anaCrua.enviar({ t: "invite.list", channel: canal })
     const lista = await anaCrua.proximoDe("invite.list.result")
     const codigoCurto = lista.invites[0]?.codigoCurto
     expect(codigoCurto && eCodigoCurto(codigoCurto)).toBe(true)
 
-    const brunoCru = await Cliente.ligar(servidor.url, bruno!.session.identity)
+    const brunoCru = await Cliente.ligarComCadeia(servidor.url, bruno!.session.identity)
     crus.push(brunoCru)
     const resposta = await resolver(brunoCru, codigoCurto as string)
     expect(resposta).toEqual({ t: "invite.resolved", codigo: codigoCurto, channel: canal, codeHash: hashDe(lida!.code) })

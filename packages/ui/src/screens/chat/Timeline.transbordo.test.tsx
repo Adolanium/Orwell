@@ -178,3 +178,41 @@ describe("uma imagem por descodificar já ocupa a caixa final", () => {
     }
   }, 30_000)
 })
+
+describe("a linha da mensagem vai de ponta a ponta sem sair da conversa", () => {
+  it.each([
+    [1280, "confortavel"],
+    [1280, "compacta"],
+    [390, "confortavel"],
+    [390, "compacta"],
+  ])("a %ipx, densidade %s: a linha ocupa a largura da conversa e o texto fica na margem dela", async (largura, densidade) => {
+    // Since 1.4 each row reaches into the timeline's side padding and pads the
+    // same back. The reach and the padding are one value (`--timeline-lado`):
+    // the phone has a smaller padding, and the compact density used to zero
+    // the row's side padding, so the text slid into the margin.
+    const page = await browser.newPage({ viewport: { width: largura, height: 844 } })
+    try {
+      await page.setContent(
+        `<!doctype html><html data-density="${densidade}"><head><style>${folhas()}</style></head><body>${desenho()}</body></html>`,
+      )
+      const medida = await page.evaluate(() => {
+        const timeline = document.querySelector(".timeline")!
+        const caixa = timeline.getBoundingClientRect()
+        const lado = Number.parseFloat(getComputedStyle(timeline).paddingLeft)
+        const linha = document.querySelector('[data-mensagem="m1"]')!.getBoundingClientRect()
+        const corpo = document.querySelector('[data-mensagem="m1"] .message-body')!.getBoundingClientRect()
+        const cara = document.querySelector('[data-mensagem="m1"] .avatar-wrap, [data-mensagem="m1"] .message-gutter')
+        const inicio = (cara ?? document.querySelector('[data-mensagem="m1"] .message-body')!).getBoundingClientRect().left
+        return {
+          linhaEsquerda: Math.round(linha.left - caixa.left),
+          linhaDireita: Math.round(caixa.right - linha.right),
+          inicio: Math.round(inicio - caixa.left - lado),
+          corpoDentro: corpo.right <= caixa.right - lado + 0.5,
+        }
+      })
+      expect(medida).toEqual({ linhaEsquerda: 0, linhaDireita: 0, inicio: 0, corpoDentro: true })
+    } finally {
+      await page.close()
+    }
+  }, 30_000)
+})

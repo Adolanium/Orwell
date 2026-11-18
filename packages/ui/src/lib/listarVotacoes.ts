@@ -74,11 +74,13 @@ export function listarVotacoes(ctx: {
   existentes: ReadonlySet<string>
   salas: readonly SalaDaPagina[]
   modera: (quem: string) => boolean
+  /** See `votosDe`: the 5-day rule. Absent: every vote counts. */
+  podeContar?: (quem: string, at: number) => boolean
 }): VotacaoListada[] {
   const doCanal = ctx.messages.filter((message) => message.channel === ctx.channel)
   const salas = new Map(ctx.salas.map((sala) => [sala.room, sala]))
   const fechos = fechosDe(doCanal, ctx.modera)
-  const escolhas = votosDe(doCanal, fechos)
+  const escolhas = votosDe(doCanal, fechos, ctx.podeContar)
   const vivas = comEmendas(
     doCanal.filter((message) => ["message", "edit", "redact"].includes(message.payload.t)),
     { modera: ctx.modera },

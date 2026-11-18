@@ -275,6 +275,14 @@ export function shasReferenciados(contents: VaultContents): Set<string> {
       }
     }
   }
+  // The archived conversation (17/11/2026): each page's blob, and the media its messages reference.
+  for (const indice of Object.values(contents.arquivoDaConversa ?? {})) {
+    for (const pagina of indice) {
+      vivos.add(pagina.sha)
+      for (const sha of pagina.media) vivos.add(sha)
+    }
+  }
+  for (const entradas of Object.values(contents.porArquivar ?? {})) for (const entrada of entradas) doPayload(entrada?.payload)
   for (const perfil of Object.values(contents.directory ?? {})) doPayload(perfil.payload)
   for (const meta of Object.values(contents.spaceMeta ?? {})) doPayload(meta.payload)
   for (const salas of Object.values(contents.channelRooms ?? {})) for (const sala of Object.values(salas)) doPayload(sala.payload)

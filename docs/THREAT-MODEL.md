@@ -141,8 +141,9 @@ the account, or whose memory an older build dropped, could accept a revoked
 device. Inviters admit only devices in the manifest they verified, and the
 in-group `device.revoke` message is the other half of the defence.
 
-**Revocation cuts reading from the next epoch.** Only a device with the account
-key can revoke (`packages/client-core/src/revogacao.ts`). The server then refuses
+**Revocation cuts reading from the next epoch.** Only a device in the account's
+current manifest, and not revoked, can change the manifest and revoke
+(`packages/client-core/src/revogacao.ts`). The server then refuses
 that device's login and key packages and never lets a manifest add it back, and
 its leaf is removed from every channel. What it already had, it keeps. Online,
 it is told `device-revoked` and erases its remembered session.
@@ -156,12 +157,23 @@ secret and exchange keys encrypted under a key derived from it.
   (`palavrasDoSas`); a third connection burns the box. **Nothing is signed or
   published until a person confirms the words match on both screens.** A server
   in the middle never has the secret.
-- **A paired device never holds the account key.** It cannot certify devices,
-  sign a manifest or revoke, which is what makes revoking a stolen phone stick.
-  The cost: losing the device with the account key loses the account's
-  authority.
-- **A paired device cannot start a conversation with someone new** (Error 609),
-  because a direct address needs the account private key.
+- **The paired phone holds the account key (since 1.3.16).** Pairing sends the
+  account's private key inside the encrypted box, after the words are confirmed
+  (`emparelhar.ts`); phones paired earlier get it over the account channel
+  (`chaveDaConta.ts`). Every device of the account is equal: each can certify a
+  device and sign a manifest.
+- **A removed phone stays out.** For an account with a manifest, only a device
+  in it, and not revoked, logs in (`Gateway.#finishAuth`); a login with the
+  account key alone is refused. The one exception is pairing: a device outside
+  the manifest gets two minutes, only while an active device of the account has
+  a pairing box open, and only once per device key. In that window it has no
+  seat, no Welcome and cannot publish a manifest.
+- **What a removed phone keeps:** what it already received, and the account
+  key, with what the key derives (the addresses of the direct conversations).
+  It cannot log in, fetch, send or publish through this server.
+- **A stolen phone that has not been removed has full authority**, including
+  removing the computer. The defence is to remove it early (Settings ›
+  Devices). There is no rotation of the account key.
 - **A new device reads from the commit that seated it.** Importing a vault file
   into a second device instead of pairing breaks channels for good.
 
@@ -521,6 +533,27 @@ see, which the vault of 1.3.14 kept inside its seal:
 Planned for 1.3.16 (a store format change): the name on disk becomes an HMAC of
 the `sha` under a secret kept in the vault, so a known file can no longer be
 confirmed; inside the vault the blobs stay addressed by `sha`.
+
+## The attested age of an account, for votes (from 1.3.20)
+
+Only accounts created 5 days ago or more vote in polls. A vote is an encrypted,
+padded MLS event, so the server cannot enforce the rule: each client does, with
+an age the homeserver signs.
+
+- **The source.** The homeserver signs `{address, criadaEm, servidor, keyId}`
+  with its federation key, under its own context (`orwell:account-age:v1`).
+  `criadaEm` is the first registration the server has for the account. A date
+  the account writes about itself is never used.
+- **The check.** Each client asks its homeserver (`account.age.get`), checks the
+  signature and pins the first key per server for the session. A vote counts
+  when it was cast at least 5 days after `criadaEm`. An unknown age does not
+  vote.
+- **What it reveals.** Any member can learn an account's creation date, and the
+  server learns which accounts a member asks about.
+- **Limits.** A homeserver can sign old dates for its own new accounts; the lie
+  is signed, but no client can catch it. Accounts on another server have an
+  unknown age in this version. Older clients count every vote, so two versions
+  can show two totals for the same poll.
 
 ## Other known limits
 

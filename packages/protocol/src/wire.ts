@@ -3,6 +3,7 @@ import { z } from "zod"
 import { toBase64 } from "./canonical.js"
 import { APARELHOS_POR_CONTA } from "./identity.js"
 import { CodigoCurto } from "./ligacao-curta.js"
+import { AtestacaoDeIdade } from "./idade-da-conta.js"
 import { DeviceManifestWire, RevogadosNoManifesto } from "./manifest.js"
 import { PAIR_ID_PATTERN, PAIR_PAYLOAD_MAX_CHARS } from "./pair.js"
 import { SELO_DO_CONVITE_MAX_CARACTERES } from "./selo-do-convite.js"
@@ -1141,6 +1142,15 @@ const TramasDoClienteSemCofre = z.discriminatedUnion("t", [
   z.object({ t: z.literal("manifest.get"), address: Address }),
 
   /**
+   * The age of an account of this server, attested (17/11/2026). Answers with
+   * `account.age.result`. Only accounts that vote 5 days after they are created
+   * (see `idade-da-conta.ts`): the server signs the first registration with its
+   * federation key, and each client checks the signature. A server without this
+   * frame drops it by schema, and the client counts the votes as before.
+   */
+  z.object({ t: z.literal("account.age.get"), address: Address }),
+
+  /**
    * Open a pairing box. **Requires an authenticated account**: it is the device that HAS the account
    * (the computer) that opens it, because it is the one that will sign the certificate. The
    * `pairId` is the digest of the secret (`pairIdDe`); the secret never comes on the wire.
@@ -1676,6 +1686,20 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
   z.object({ t: z.literal("manifest.result"), address: Address, manifest: DeviceManifestWire.nullable() }),
 
   /**
+   * The attested age of an account (17/11/2026). `atestacao` is `null` for an
+   * address of another server or one this server never saw. `chave` is this
+   * server's federation key, the same one `/keys` publishes; the client pins the
+   * first one it sees per server, so a server that changes it mid-session is
+   * not believed.
+   */
+  z.object({
+    t: z.literal("account.age.result"),
+    address: Address,
+    atestacao: AtestacaoDeIdade.nullable(),
+    chave: z.object({ keyId: z.string().min(1).max(64), key: z.string().min(1).max(100) }).nullable(),
+  }),
+
+  /**
    * The verdict of a `manifest.publish`. One frame only, with `ok`, following the
    * pattern of `link.preview.result`: the client waits for one kind of response,
    * and two possible frames would be two waits, one of them left hanging.
@@ -1774,6 +1798,13 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
      * 1.3.16 drops the field. A copy replaced by an import gets no manifest.
      */
     manifest: DeviceManifestWire.optional(),
+    /**
+     * With `device-revoked` (1.3.20): the device was never in the account's
+     * manifest and got no pairing window (N-01). It was not removed: its pairing
+     * did not finish, or it was never the account's. A client before 1.3.20 drops
+     * the field and shows the removal.
+     */
+    pairingUnfinished: z.literal(true).optional(),
   }),
   z.object({ t: z.literal("pong") }),
 ])

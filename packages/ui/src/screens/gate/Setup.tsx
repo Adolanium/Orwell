@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { TextoDeErro } from "../../components/TextoDeErro.js"
 import { parseServerName } from "@enclave/protocol"
+import { nomeValido } from "@enclave/client-core"
 import { useBridge } from "../../App.js"
 import { Button } from "../../components/Button.js"
 import { CampoDeNome } from "../../components/CampoDeNome.js"
@@ -332,7 +333,10 @@ export function Setup({
    */
   const pronto =
     passo === "nome"
-      ? name.trim().length > 0
+      ? /* The display-name rule (12 graphemes, `nomeValido`): the field cuts
+           what is typed, but not while a keyboard composes, and Android's
+           composes every word. */
+        nomeValido(name)
       : /*
              The password pages don't lock by state.
 
@@ -362,7 +366,7 @@ export function Setup({
     }
 
     if (passo === "nome") {
-      if (name.trim().length === 0) return
+      if (!nomeValido(name)) return
       setServerError(null)
       try {
         serverRef.current = parseServerName(server.trim())

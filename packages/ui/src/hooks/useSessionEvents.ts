@@ -88,6 +88,8 @@ export function useSessionEvents(bridge: EnclaveBridge, handlers: SessionEventHa
             : {}),
           // The device was removed, with the proof the core checked (1.3.16): only the exact `true`.
           ...(event.code === "device-revoked" && event.removido === true ? { removido: true as const } : {}),
+          // Never in the manifest (1.3.20): the pairing did not finish. Only the exact `true`.
+          ...(event.code === "device-revoked" && event.emparelhamentoPorAcabar === true ? { emparelhamentoPorAcabar: true as const } : {}),
         })
       }),
       bridge.on.epoch((raw) => handlers.onEpoch((raw as { channel?: string }).channel ?? "")),

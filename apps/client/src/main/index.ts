@@ -37,6 +37,7 @@ import {
   globalShortcut,
   ipcMain,
   Menu,
+  nativeTheme,
   session as electronSession,
   shell,
   systemPreferences,
@@ -60,11 +61,21 @@ import {
   lancarComAdministrador,
   lancarInstalador,
   lerDiagnosticoDoArranque,
+  escreverModo,
+  escreverVista,
+  FICHEIRO_DA_VISTA,
+  FICHEIRO_DO_MODO,
+  lerVista,
+  lerModoGuardado,
+  modoValido,
+  textosDaPergunta,
   type EstadoDoEcra,
+  type ModoDeActualizacao,
   type ResultadoDoArranque,
 } from "./actualizacao-windows.js"
 import { CHAVE_PUBLICA_DE_ACTUALIZACOES } from "./chave-de-actualizacoes.js"
-import { codigoDoEstado, HTML_DO_ARRANQUE } from "./ecra-de-arranque.js"
+import { codigoDoEstado, CORES_DO_ARRANQUE, htmlDoArranque } from "./ecra-de-arranque.js"
+import { escreverTema, FICHEIRO_DO_TEMA, FUNDO_DA_JANELA, lerTemaGuardado, temaValido, temaVisto, type TemaEscolhido } from "./tema-da-janela.js"
 import { CANAIS_DE_ATALHOS, DEFINICOES_DE_ACESSIBILIDADE, criarAtalhosGlobais } from "./atalhos.js"
 import { montarBandeja, sanearAviso, type Bandeja } from "./bandeja.js"
 import { ligarCanais, type RegistarLeitura, type Resposta } from "./canais.js"
@@ -214,6 +225,52 @@ function mediaATrazer(id: unknown): MediaATrazer {
   to another.
   */
 const FICHEIRO_DAS_CONTAS = join(app.getPath("userData"), "contas.json")
+
+/*
+  The theme the windows open with (`tema-da-janela.ts`). Read once, before any
+  window: the renderer reports each change through `tema:definir`, and the
+  file serves the next start.
+  */
+const CAMINHO_DO_TEMA = join(app.getPath("userData"), FICHEIRO_DO_TEMA)
+let temaEscolhido: TemaEscolhido = (() => {
+  try {
+    return lerTemaGuardado(readFileSync(CAMINHO_DO_TEMA, "utf8"))
+  } catch {
+    return lerTemaGuardado(null)
+  }
+})()
+const temaNoEcra = () => temaVisto(temaEscolhido, nativeTheme.shouldUseDarkColors)
+
+/*
+  How this device takes a new version on Windows: ask first (the default) or
+  by itself (`actualizacao-windows.ts`). Read once, before any window, like
+  the theme; Settings writes it through `actualizacao:definir-modo`.
+  */
+const CAMINHO_DO_MODO = join(app.getPath("userData"), FICHEIRO_DO_MODO)
+let modoDeActualizacao: ModoDeActualizacao = (() => {
+  try {
+    return lerModoGuardado(readFileSync(CAMINHO_DO_MODO, "utf8"))
+  } catch {
+    return lerModoGuardado(null)
+  }
+})()
+/** Only the packaged Windows app updates itself; elsewhere the choice is not offered. */
+const actualizaSozinha = (): boolean => app.isPackaged && process.platform === "win32"
+
+/*
+  The app's language, as the page last said it (`lingua:definir`), for the one
+  question asked before any window. Nothing stored is English, the app's rule
+  until the person chooses.
+  */
+const CAMINHO_DA_LINGUA = join(app.getPath("userData"), "lingua.json")
+let linguaGuardada: string | null = (() => {
+  try {
+    const lingua = (JSON.parse(readFileSync(CAMINHO_DA_LINGUA, "utf8")) as { lingua?: unknown } | null)?.lingua
+    return lingua === "pt" || lingua === "en" ? lingua : null
+  } catch {
+    return null
+  }
+})()
 const contas: ContasDoAparelho = new ContasDoAparelho({
   lerLista: () => {
     try {
@@ -356,6 +413,38 @@ async function actualizarNoArranque(): Promise<{ sair: boolean; ecra: BrowserWin
         pasta: PASTA_DA_ACTUALIZACAO,
         mostrar,
         semAdministrador: instaladaPorUtilizador,
+        modo: modoDeActualizacao,
+        // When this device first saw the manifest public on GitHub: the wait counts from there.
+        vista: {
+          ler: async () => {
+            try {
+              return lerVista(await readFile(join(app.getPath("userData"), FICHEIRO_DA_VISTA), "utf8"))
+            } catch {
+              return null
+            }
+          },
+          gravar: async (vista) => {
+            const caminho = join(app.getPath("userData"), FICHEIRO_DA_VISTA)
+            if (vista) await writeFile(caminho, escreverVista(vista), "utf8")
+            else await rm(caminho, { force: true })
+          },
+        },
+        // "Ask first": a plain box over the startup screen, only after the
+        // manifest, signature and version passed. Closing it is "Later".
+        perguntar: async (versao) => {
+          const texto = textosDaPergunta(versao, linguaGuardada)
+          const { response } = await dialog.showMessageBox(janela, {
+            type: "question",
+            title: texto.titulo,
+            message: texto.mensagem,
+            detail: texto.detalhe,
+            buttons: texto.botoes,
+            defaultId: 0,
+            cancelId: 1,
+            noLink: true,
+          })
+          return response === 0 ? "instalar" : "mais-tarde"
+        },
         // Downloaded by Node, not the browser, the file doesn't carry the "from Internet" mark, so SmartScreen doesn't block it. The defense is the Ed25519 signature, which has already passed by now.
         instalar: (caminho) => lancarInstalador(caminho, ARGUMENTOS_DO_INSTALADOR, spawn),
         // Program Files: the same installer with `/allusers`, through UAC. The PowerShell is the system one, by full path.
@@ -391,7 +480,8 @@ function abrirEcraDeArranque(): { janela: BrowserWindow; mostrar: (estado: Estad
     fullscreenable: false,
     center: true,
     show: false,
-    backgroundColor: "#080c1a",
+    // The page's own background: the dark art is fused into it.
+    backgroundColor: CORES_DO_ARRANQUE[temaNoEcra()].fundo,
     webPreferences: {
       // Our page and script-free, and even so everything is locked down: the same hardening as the main window.
       contextIsolation: true,
@@ -405,7 +495,7 @@ function abrirEcraDeArranque(): { janela: BrowserWindow; mostrar: (estado: Estad
   ecra.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
   ecra.webContents.on("will-navigate", (event) => event.preventDefault())
   ecra.once("ready-to-show", () => ecra.show())
-  const carregado = ecra.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(HTML_DO_ARRANQUE)}`).catch(() => {})
+  const carregado = ecra.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlDoArranque(temaNoEcra()))}`).catch(() => {})
 
   // The bar updates at most ten times a second: a 100 MB download is thousands of chunks, and one `executeJavaScript` per chunk just burned CPU.
   let ultimaPintura = 0
@@ -445,7 +535,7 @@ function createWindow(): BrowserWindow {
     height: 800,
     minWidth: 940,
     minHeight: 560,
-    backgroundColor: "#080c1a",
+    backgroundColor: FUNDO_DA_JANELA[temaNoEcra()],
     show: false,
     webPreferences: {
       preload: asset("preload", "index.cjs"),
@@ -810,13 +900,29 @@ function registerIpc(window: BrowserWindow): void {
     It's to our server, not a third party, no credentials and no referrer, and
     it's not logged here.
     */
-  tratar(CANAIS_DE_ACTUALIZACAO.verificar, async () =>
-    verificarActualizacao({
+  tratar(CANAIS_DE_ACTUALIZACAO.verificar, async () => {
+    const aviso = await verificarActualizacao({
       instalada: app.getVersion(),
       sistema: process.platform,
       dispensada: await versaoDispensada(),
-    }),
-  )
+    })
+    /*
+      Windows, while this device waits before installing this version by
+      itself (review I1): the notice says "in verification, from <date>", and
+      no longer sends anyone to the site, whose installer skips every check.
+    */
+    if (aviso && actualizaSozinha()) {
+      try {
+        const diag = lerDiagnosticoDoArranque(JSON.parse(await readFile(FICHEIRO_DO_ARRANQUE, "utf8")))
+        if (diag?.codigo === "em-espera" && diag.versao === aviso.disponivel && diag.instalaEm !== undefined) {
+          return { ...aviso, emVerificacaoAte: diag.instalaEm }
+        }
+      } catch {
+        // No startup record: the plain notice.
+      }
+    }
+    return aviso
+  })
 
   tratar(CANAIS_DE_ACTUALIZACAO.dispensar, async (_event, versao: string) => {
     // Validated on this side, not the other: the renderer is the untrusted part, and
@@ -842,6 +948,25 @@ function registerIpc(window: BrowserWindow): void {
       return lerDiagnosticoDoArranque(JSON.parse(await readFile(FICHEIRO_DO_ARRANQUE, "utf8")))
     } catch {
       return null
+    }
+  })
+
+  /*
+    "Install updates" in Settings: ask first or automatically. Offered only
+    where the app updates itself (packaged Windows). The value is validated
+    here, the untrusted side being the renderer, and written for the next start.
+  */
+  tratar(CANAIS_DE_ACTUALIZACAO.modo, async () => ({ disponivel: actualizaSozinha(), modo: modoDeActualizacao }))
+
+  tratar(CANAIS_DE_ACTUALIZACAO.definirModo, async (_event, valor: unknown) => {
+    if (!actualizaSozinha()) return { ok: false }
+    if (valor !== "perguntar" && valor !== "automaticamente") return { ok: false }
+    try {
+      await writeFile(CAMINHO_DO_MODO, escreverModo(modoValido(valor)), "utf8")
+      modoDeActualizacao = modoValido(valor)
+      return { ok: true }
+    } catch {
+      return { ok: false }
     }
   })
 
@@ -941,6 +1066,39 @@ function registerIpc(window: BrowserWindow): void {
     if (detalhes.isMainFrame && !detalhes.isSameDocument) atalhos.libertar()
   })
   app.on("will-quit", () => atalhos.libertar())
+
+  /*
+    The theme, reported by the renderer each time it is set (`renderer/main.tsx`).
+    Fire and forget: the window takes the colour now (what shows on resize),
+    and the file serves the next start. Only the three known values pass.
+  */
+  /*
+    The language, reported by the renderer like the theme (`renderer/tema.ts`).
+    Only "pt" and "en" pass; the file serves the update question at the next start.
+  */
+  ipcMain.on("lingua:definir", (evento, valor: unknown) => {
+    if (evento.sender !== window.webContents) return
+    if (valor !== "pt" && valor !== "en") return
+    if (valor === linguaGuardada) return
+    linguaGuardada = valor
+    void writeFile(CAMINHO_DA_LINGUA, `${JSON.stringify({ lingua: valor })}\n`, "utf8").catch(() => {})
+  })
+
+  // "System" follows the OS while the app is open too (review M7): the
+  // window's own colour shows on resize.
+  nativeTheme.on("updated", () => {
+    if (temaEscolhido === "sistema" && !window.isDestroyed()) window.setBackgroundColor(FUNDO_DA_JANELA[temaNoEcra()])
+  })
+
+  ipcMain.on("tema:definir", (evento, valor: unknown) => {
+    if (evento.sender !== window.webContents) return
+    const tema = temaValido(valor)
+    if (tema !== valor) return
+    window.setBackgroundColor(FUNDO_DA_JANELA[temaVisto(tema, nativeTheme.shouldUseDarkColors)])
+    if (tema === temaEscolhido) return
+    temaEscolhido = tema
+    void writeFile(CAMINHO_DO_TEMA, escreverTema(tema), "utf8").catch(() => {})
+  })
 
   tratar("clipboard:write", async (_event, texto: unknown) => {
     if (typeof texto !== "string" || texto.length > 100_000) throw new Error("clipboard text is invalid")
@@ -1362,6 +1520,9 @@ function registerIpc(window: BrowserWindow): void {
   // Plaintext history crosses to the renderer the same way live messages do:
   // decrypted in the main process, never as ciphertext.
   tratar("channel:history", (_event, channel: string) => session.history(channel))
+  // The conversation older than the vault, from the media store, by the same path (17/11/2026).
+  tratar("channel:conversa-arquivada", (_event, channel: string, cursor?: number | null) => session.conversaArquivada(channel, cursor))
+  tratar("channel:tem-conversa-arquivada", (_event, channel: string) => session.temConversaArquivada(channel))
 
   tratar("channel:forget", async (_event, channel: string) => {
     await session.forgetChannel(channel)
@@ -1440,6 +1601,12 @@ function registerIpc(window: BrowserWindow): void {
       return { ok: true }
     },
   )
+  // The attested age of an account: only accounts 5 days old vote. See `idade-da-conta.ts`.
+  // The rule is read after the answer: before `hello.ok` the capabilities are empty.
+  tratar("votacao:idade", async (_event, address: string) => {
+    const criadaEm = await session.idadeDaConta(address)
+    return { regra: session.suportaIdadeAtestada, criadaEm }
+  })
 
   tratar("social:react", async (_event, channel: string, target: string, emoji: string, remove?: boolean) => {
     await session.reactToPost(channel, target, emoji, remove)

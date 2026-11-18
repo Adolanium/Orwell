@@ -1,3 +1,5 @@
+import { useContext } from "react"
+import { SemVotoContext } from "./semVoto.js"
 import { strings } from "../strings.js"
 import { useAgora } from "../hooks/useAgora.js"
 import { formatarDataEHora } from "../lib/format.js"
@@ -55,6 +57,9 @@ export function Votacao({
   const fechada = fechoEm !== null && fechoEm <= agora
   // A closed poll reads and does not vote: the same shape as an old host without `onVote`.
   const aVotar = fechada ? undefined : onVote
+  // An account younger than 5 days: the options show as buttons, off, with the reason below.
+  const semVoto = useContext(SemVotoContext)
+  const desligada = aVotar !== undefined && semVoto !== null
 
   return (
     <section className="votacao">
@@ -91,6 +96,7 @@ export function Votacao({
                   aria-pressed={escolhida}
                   aria-label={rotulo}
                   title={rotulo}
+                  disabled={desligada}
                   onClick={() => aVotar(indice)}
                 >
                   {conteudo}
@@ -114,6 +120,8 @@ export function Votacao({
           )
         })}
       </ul>
+
+      {desligada && <p className="hint votacao-sem-voto">{semVoto}</p>}
 
       <p className="votacao-rodape">
         <span>{total === 0 ? strings.votacao.semVotos : strings.votacao.total(total)}</span>

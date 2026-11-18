@@ -578,7 +578,10 @@ export class ConvidadoDeEmparelhamento {
       return
     }
     if (frame.t === "error") {
-      if (frame.fatal) this.#terminar("sem-ligacao")
+      // After the certificate the box may be gone (the computer gave up), and the
+      // server then closes this socket with `login-timeout`: the close handler
+      // already notes it (`#caixaFechada`), and the pairing itself did not fail.
+      if (frame.fatal && this.#fase !== "certificado") this.#terminar("sem-ligacao")
       return
     }
     if (!frame.t.startsWith("pair.") || !("pairId" in frame) || frame.pairId !== this.pairId) return

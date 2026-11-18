@@ -192,6 +192,8 @@ const SO_NA_SECRETARIA: Record<string, string> = {
   "actualizacao.dispensar": "idem",
   "actualizacao.abrir": "idem",
   "actualizacao.diagnostico": "idem: a actualização automática só existe na aplicação instalada",
+  "actualizacao.modo": "idem: perguntar antes ou instalar sozinha é escolha da aplicação do Windows (1.3.20)",
+  "actualizacao.definirModo": "idem",
 
   /*
     Global keyboard shortcuts (mute with the window hidden). A page can't listen

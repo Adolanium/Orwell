@@ -44,6 +44,8 @@ export interface SessionStatus {
    * removed this device. The app signs out and erases this device's vault.
    */
   removido?: true | undefined
+  /** Only in `device-revoked` (1.3.20): never in the manifest, so the pairing did not finish. */
+  emparelhamentoPorAcabar?: true | undefined
 }
 
 export interface RoutingContext {
@@ -111,8 +113,9 @@ export function fraseDoStatus(status: SessionStatus, labelFor: (channel: string)
     case "invite-rejected":
       return translateError(chaveDoConviteRecusado(status.detail))
     case "device-revoked":
-      // The account removed this device from another device. The UI takes the person to the gate.
-      return translateError("device-revoked")
+      // The account removed this device from another device, or its pairing did not
+      // finish (never in the manifest). The UI takes the person to the gate.
+      return translateError(status.emparelhamentoPorAcabar ? "pairing-unfinished" : "device-revoked")
     case "account-suspended":
       // The account is suspended on this server. The interface shows the full warning.
       return translateError("account-suspended")

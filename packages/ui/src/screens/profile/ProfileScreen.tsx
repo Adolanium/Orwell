@@ -1,11 +1,12 @@
 import { useId, useState } from "react"
+import { LinhaDoEstado } from "../../components/LinhaDoEstado.js"
 import type { ConnectionState, Profile } from "../../bridge.js"
 import type { ChatMessage } from "../../types.js"
 import { Button } from "../../components/Button.js"
 import { ConnectionBanner } from "../../components/ConnectionBanner.js"
 import { Modal } from "../../components/Modal.js"
 import { LockIcon } from "../../icons.js"
-import { connectionLabel, formatStamp, nomeEmFalta } from "../../lib/format.js"
+import { formatStamp, nomeEmFalta } from "../../lib/format.js"
 import { strings } from "../../strings.js"
 import { PostDetail } from "../social/PostDetail.js"
 import { RoomIcon } from "../../components/RoomIcon.js"
@@ -148,7 +149,7 @@ export function ProfileScreen({
         />
       </div>
 
-      <footer className="statusbar">{connectionLabel(connection)}</footer>
+      <LinhaDoEstado connection={connection} />
 
       {open && (
         <Modal className="sheet narrow" labelledBy={heading} onClose={() => setOpen(null)}>

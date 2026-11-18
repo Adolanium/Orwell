@@ -321,3 +321,18 @@ describe("ORW-134-08: um transporte por sentido com pedidos em paralelo", () => 
     await motor.sair(outro)
   })
 })
+
+describe("ORW-134-07 (revisão final, I1): uma entrada cancelada não fecha o router por baixo de outra", () => {
+  it("A e B entram no mesmo âmbito novo, A sai a meio: B fica num âmbito vivo e tem transporte", async () => {
+    const chave = `kI1-${unico()}`
+    const [a, b] = [`aI1-${unico()}`, `bI1-${unico()}`]
+    // Both wait on the same router creation; A's socket drops in that wait.
+    const entradaA = motor.entrar(chave, a)
+    const entradaB = motor.entrar(chave, b)
+    void motor.sair(a)
+    expect(await entradaA.then(() => "entrou", () => "recusada")).toBe("recusada")
+    await entradaB
+    await expect(motor.criarTransporte(chave, b, "envio")).resolves.toMatchObject({ id: expect.any(String) })
+    await motor.sair(b)
+  })
+})

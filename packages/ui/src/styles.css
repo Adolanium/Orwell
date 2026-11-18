@@ -42,3 +42,6 @@
 @import "./styles/cargosEPermissoes.css";
 @import "./styles/mediaLazy.css";
 @import "./styles/ficheiroDaConta.css";
+/* The "Aurora" theme (the 1.3.19 skin) is NOT here: it is its own sheet,
+   `styles-aurora.css`, in the document only for whoever chose it
+   (`folha-da-aurora.ts`). */

@@ -1149,6 +1149,8 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       },
       members: async (channel) => session.membersOf(channel),
       history: async (channel) => session.history(channel),
+      conversaArquivada: async (channel, cursor) => session.conversaArquivada(channel, cursor),
+      temConversaArquivada: async (channel) => session.temConversaArquivada(channel),
       forget: async (channel) => {
         await session.forgetChannel(channel)
         return { ok: true }
@@ -1330,6 +1332,11 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       votar: async (channel, target, opcao, retirar) => {
         await session.voteOnPoll(channel, target, opcao, retirar)
         return { ok: true }
+      },
+      // The rule is read after the answer: before `hello.ok` the capabilities are empty.
+      idadeDaConta: async (address) => {
+        const criadaEm = await session.idadeDaConta(address)
+        return { regra: session.suportaIdadeAtestada, criadaEm }
       },
     },
 

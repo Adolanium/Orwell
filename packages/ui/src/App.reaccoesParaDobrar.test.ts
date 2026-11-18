@@ -28,4 +28,15 @@ describe("as reacções em memória, para a dobra (16/11/2026)", () => {
     ]
     expect(dobrarReaccoes(reaccoesParaDobrar(emMemoria, CANAL), ANA).get("m1")).toEqual([{ emoji: "👍", quem: [ANA], minha: true }])
   })
+
+  it("um envio nosso sem eco não ganha a uma troca que outro aparelho da conta fez depois", () => {
+    // One reaction per person: the phone switched Ana's 👍 to 🥳 after this device sent the 👍.
+    const emMemoria: ChatMessage[] = [
+      { channel: CANAL, seq: 5, sender: BRUNO, payload: { t: "message", id: "m1", body: "olá", sentAt: 1 } },
+      { channel: CANAL, seq: -1, sender: ANA, payload: reaccao(false) },
+      { channel: CANAL, seq: 7, sender: ANA, payload: { t: "reaction", target: "m1", emoji: "🥳", remove: false } },
+      { channel: CANAL, seq: 8, sender: ANA, payload: reaccao(true) },
+    ]
+    expect(dobrarReaccoes(reaccoesParaDobrar(emMemoria, CANAL), ANA).get("m1")).toEqual([{ emoji: "🥳", quem: [ANA], minha: true }])
+  })
 })

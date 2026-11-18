@@ -470,37 +470,51 @@ export interface FichaDeReaccao {
 /**
  * Chat reactions (`reaction`) of each message: target → chips.
  *
- * The payload has no `id` and no timestamp, so the rule is server order alone:
- * the last act of each (sender, target, emoji) wins, and `remove` takes the
- * person off. The same act twice (vault and network) changes nothing, because
- * this is a table of who has what, never a counter. Chips keep the order in which
- * each emoji first appeared on the message; a chip with nobody left goes away.
+ * One reaction per person per message. The payload has no `id` and no
+ * timestamp, so the rule is server order alone, which every client computes the
+ * same way:
+ * - a press makes that emoji the person's reaction on the message, replacing
+ *   whatever they had;
+ * - a removal takes the person off only if it removes the emoji they have now. A
+ *   removal of an older emoji changes nothing: this client switches by sending
+ *   the new emoji first and the removal of the old one after, so clients up to
+ *   1.3.19, which keep one reaction per emoji, also end with one;
+ * - an older client that left two presses shows, here, only the later one.
+ *
+ * The same act twice (vault and network) changes nothing, because this is a
+ * table of who has what, never a counter. Chips keep the order in which each
+ * emoji first appeared on the message; people, the order of their press; a chip
+ * with nobody left goes away.
  *
  * A reaction on a deleted message is left here on purpose: the line is gone
  * from the conversation fold, so nothing draws it.
  */
 export function dobrarReaccoes(entradas: readonly EntradaDeDobra[], me: string | null): Map<string, FichaDeReaccao[]> {
-  /** target → emoji → sender → pressed */
-  const porAlvo = new Map<string, Map<string, Map<string, boolean>>>()
+  /** target → the emoji in order of first appearance, and each person's current reaction with its press order. */
+  const porAlvo = new Map<string, { emojis: Set<string>; pessoas: Map<string, { emoji: string; ordem: number }> }>()
+  let ordem = 0
   for (const entrada of porOrdemDoServidor(entradas)) {
     if (entrada.payload.t !== "reaction") continue
     const alvo = texto(campo(entrada, "target"))
     const emoji = texto(campo(entrada, "emoji"))
     if (!alvo || !emoji) continue
-    const porEmoji = porAlvo.get(alvo) ?? new Map<string, Map<string, boolean>>()
-    const porPessoa = porEmoji.get(emoji) ?? new Map<string, boolean>()
-    const premido = campo(entrada, "remove") !== true
-    // Re-inserting moves the person to the end; a removal followed by a press counts as a new press.
-    if (!premido || porPessoa.get(entrada.sender) !== true) porPessoa.delete(entrada.sender)
-    porPessoa.set(entrada.sender, premido)
-    porEmoji.set(emoji, porPessoa)
-    porAlvo.set(alvo, porEmoji)
+    const doAlvo = porAlvo.get(alvo) ?? { emojis: new Set<string>(), pessoas: new Map<string, { emoji: string; ordem: number }>() }
+    porAlvo.set(alvo, doAlvo)
+    const actual = doAlvo.pessoas.get(entrada.sender)
+    if (campo(entrada, "remove") === true) {
+      if (actual?.emoji === emoji) doAlvo.pessoas.delete(entrada.sender)
+      continue
+    }
+    doAlvo.emojis.add(emoji)
+    // Pressing the emoji one already has keeps the place; a new one goes to the end.
+    if (actual?.emoji !== emoji) doAlvo.pessoas.set(entrada.sender, { emoji, ordem: ordem++ })
   }
   const fichas = new Map<string, FichaDeReaccao[]>()
-  for (const [alvo, porEmoji] of porAlvo) {
+  for (const [alvo, { emojis, pessoas }] of porAlvo) {
+    const porOrdem = [...pessoas].sort(([, a], [, b]) => a.ordem - b.ordem)
     const lista: FichaDeReaccao[] = []
-    for (const [emoji, porPessoa] of porEmoji) {
-      const quem = [...porPessoa].filter(([, premido]) => premido).map(([pessoa]) => pessoa)
+    for (const emoji of emojis) {
+      const quem = porOrdem.filter(([, reaccao]) => reaccao.emoji === emoji).map(([pessoa]) => pessoa)
       if (quem.length > 0) lista.push({ emoji, quem, minha: me !== null && quem.includes(me) })
     }
     if (lista.length > 0) fichas.set(alvo, lista)

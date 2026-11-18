@@ -16,6 +16,10 @@
  *
  *   <glyph> <Portuguese name> | <search words, normalized, deduplicated>
  *
+ * And, apart, the skin tones: for each emoji that takes them, the five variants
+ * with the same tone on every person in it (light to dark). Mixed tones, as in
+ * a couple with two different tones, stay out: the picker offers one tone.
+ *
  * The search words are: our own synonyms, then CLDR Portuguese words, then the
  * English name and English words. Portuguese comes first so that a Portuguese
  * search ranks Portuguese matches ahead of English ones.
@@ -78,8 +82,13 @@ function carregarAnotacoes(raiz, ficheiros) {
   return mapa
 }
 
+/** The five skin tone modifiers, light to dark. */
+const TONS = [0x1f3fb, 0x1f3fc, 0x1f3fd, 0x1f3fe, 0x1f3ff]
+
 function lerTabela(raiz) {
   const emojis = []
+  /** Base glyph without VS16 -> the five uniform-tone variants, in `TONS` order. */
+  const tons = new Map()
   let grupo = ""
   for (const linha of ler(`emoji-test-${VERSAO_UNICODE}.txt`, raiz).split("\n")) {
     const g = /^# group: (.+)$/.exec(linha)
@@ -89,11 +98,22 @@ function lerTabela(raiz) {
     }
     const m = /^([0-9A-F ]+?)\s*; fully-qualified\s+# (\S+) E[\d.]+ (.+)$/.exec(linha)
     if (!m) continue
-    const char = String.fromCodePoint(...m[1].trim().split(" ").map((c) => parseInt(c, 16)))
-    if (TOM_DE_PELE.test(char)) continue
+    const pontos = m[1].trim().split(" ").map((c) => parseInt(c, 16))
+    const char = String.fromCodePoint(...pontos)
+    if (TOM_DE_PELE.test(char)) {
+      // Uniform tone only: every modifier in the sequence is the same one.
+      const usados = new Set(pontos.filter((p) => TONS.includes(p)))
+      if (usados.size !== 1) continue
+      const tom = TONS.indexOf([...usados][0])
+      const base = String.fromCodePoint(...pontos.filter((p) => !TONS.includes(p))).replace(VS16, "")
+      const lista = tons.get(base) ?? []
+      lista[tom] = char
+      tons.set(base, lista)
+      continue
+    }
     emojis.push({ char, grupo, nomeEn: m[3] })
   }
-  return emojis
+  return { emojis, tons }
 }
 
 function lerManuais(raiz) {
@@ -114,7 +134,7 @@ function lerManuais(raiz) {
 
 /** Everything the generator learned, for the report and for the tests. */
 export function construir(raiz = RAIZ) {
-  const tabela = lerTabela(raiz)
+  const { emojis: tabela, tons: tonsPorBase } = lerTabela(raiz)
   const manuais = lerManuais(raiz)
   const pt = carregarAnotacoes(raiz, [
     { nome: `cldr-${VERSAO_CLDR}-annotations-pt-PT.json`, chave: "annotations" },
@@ -128,6 +148,8 @@ export function construir(raiz = RAIZ) {
   ])
 
   const usados = new Set()
+  /** `<glyph> <light> <medium-light> <medium> <medium-dark> <dark>`, in catalog order. */
+  const tons = []
   const porCategoria = Object.fromEntries(CATEGORIAS.map(([id]) => [id, []]))
   const semNomePt = []
   for (const { char, grupo, nomeEn } of tabela) {
@@ -157,15 +179,17 @@ export function construir(raiz = RAIZ) {
     for (const p of cldrPt?.palavras ?? []) juntar(p)
     juntar(cldrEn?.nome ?? nomeEn)
     for (const p of cldrEn?.palavras ?? []) juntar(p)
+    const variantes = tonsPorBase.get(id)
+    if (variantes && variantes.filter(Boolean).length === TONS.length) tons.push(`${char} ${variantes.join(" ")}`)
     porCategoria[categoria[0]].push({ char, linha: termos.length ? `${char} ${nome} | ${termos.join(" ")}` : `${char} ${nome}` })
   }
   const orfaos = [...manuais.keys()].filter((k) => !usados.has(k))
-  return { porCategoria, semNomePt, orfaos, manuais: manuais.size }
+  return { porCategoria, tons, semNomePt, orfaos, manuais: manuais.size }
 }
 
 /** The whole text of `emoji.gen.ts`. */
 export function gerar(raiz = RAIZ) {
-  const { porCategoria } = construir(raiz)
+  const { porCategoria, tons } = construir(raiz)
   const blocos = Object.entries(porCategoria).map(
     ([id, lista]) => `  ${id}: [\n${lista.map((e) => `    ${JSON.stringify(e.linha)},`).join("\n")}\n  ],`,
   )
@@ -180,6 +204,11 @@ export const CLDR_VERSION = ${JSON.stringify(VERSAO_CLDR)}
 export const EMOJI_LINES = {
 ${blocos.join("\n")}
 } as const
+
+// Skin tones. Line format: <glyph> <light> <medium-light> <medium> <medium-dark> <dark>
+export const EMOJI_TONE_LINES = [
+${tons.map((linha) => `  ${JSON.stringify(linha)},`).join("\n")}
+] as const
 `
 }
 
@@ -198,9 +227,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     console.log(`${DESTINO} is up to date.`)
   } else {
     writeFileSync(alvo, texto)
-    const { porCategoria, semNomePt, orfaos, manuais } = construir()
+    const { porCategoria, tons, semNomePt, orfaos, manuais } = construir()
     const contagens = Object.entries(porCategoria).map(([id, l]) => `${id}=${l.length}`)
     console.log(`Wrote ${DESTINO}: ${Object.values(porCategoria).flat().length} emojis (${contagens.join(", ")})`)
+    console.log(`Emojis with skin tones: ${tons.length}`)
     console.log(`Manual names used: ${manuais - orfaos.length}/${manuais}. Without a Portuguese name (English used): ${semNomePt.length}`)
     if (orfaos.length) console.log(`Manual entries not in the Unicode table (dropped): ${orfaos.join(" ")}`)
   }

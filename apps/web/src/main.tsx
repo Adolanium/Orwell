@@ -2,7 +2,7 @@ import { mostrarFaixa } from "./faixa.js"
 import { marcarArranque } from "@enclave/client-core"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
-import { App, arrancarLingua, OutroSeparador, Splash, strings, tocarSomDeActualizacao } from "@enclave/ui"
+import { App, arrancarLingua, folhaDaAuroraPronta, OutroSeparador, Splash, strings, tocarSomDeActualizacao } from "@enclave/ui"
 import "@enclave/ui/styles.css"
 import { createBrowserBridge, ouvirBloqueios, type PonteDoBrowser } from "./bridge.js"
 import { armazenamentoDoSeparador, lerAmigoDeArranque, lerConviteDeArranque, lerEmparelhamentoDeArranque } from "./convite-arranque.js"
@@ -122,6 +122,13 @@ function bloquearPorVersao(): void {
   tocarSomDeActualizacao()
   void posse.largar()
 }
+
+// The Aurora sheet follows the theme from here on (`folha-da-aurora.ts`). On
+// Aurora the head script already wrote it before the first paint, and a module
+// runs only after the sheets above it loaded. No `await` in this file (the
+// invite rule, `convite-arranque.test.ts`): in dev, where the head has no
+// address for it, Aurora's first frame can come before its sheet.
+void folhaDaAuroraPronta()
 
 const raiz = createRoot(root)
 /*

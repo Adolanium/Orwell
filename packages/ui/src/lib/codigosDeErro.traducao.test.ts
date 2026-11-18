@@ -186,3 +186,15 @@ describe("a cifra do emissor a tentar outra vez (449)", () => {
     expect(translateError("your media is not going out yet", { fonte: "musica" })).toContain("música")
   })
 })
+
+describe("um emparelhamento que não terminou (M1 da revisão da 1.3.20)", () => {
+  it("o device-revoked sem o aparelho no manifesto diz que o emparelhamento não terminou, e a remoção continua igual", () => {
+    const base = { detail: "", level: "error" as const, code: "device-revoked", route: "toast" as const }
+    expect(fraseDoStatus({ ...base, emparelhamentoPorAcabar: true }, (canal) => canal)).toBe(
+      "Erro 719\nO emparelhamento não terminou. Volta a emparelhar este aparelho.",
+    )
+    expect(fraseDoStatus(base, (canal) => canal)).toBe("Erro 748\nEste aparelho foi tirado da conta noutro aparelho.")
+    definirLingua("en")
+    expect(fraseDoStatus({ ...base, emparelhamentoPorAcabar: true }, (canal) => canal)).toBe("Error 719\nThe pairing did not finish. Pair this device again.")
+  })
+})

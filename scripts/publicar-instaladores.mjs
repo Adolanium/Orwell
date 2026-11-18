@@ -16,9 +16,19 @@
  * with the update private key. Without it, it refuses to publish. See
  * `apps/client/src/main/actualizacao-windows.ts`.
  *
+ * And (1.3.20) puts that same signed manifest, byte for byte, as an asset of the
+ * GitHub release of the version, prepared as a DRAFT, then publishes the
+ * release (releases are immutable once published), before the VPS gets it: the
+ * installed app only installs a manifest it also finds there, and only 72 hours
+ * after the release went public (24 with `--urgente`). See "Público, e não de
+ * imediato" in `docs/PUBLICAR-A-APP.md`.
+ *
  * Usage:
  *   node scripts/publicar-instaladores.mjs            # only prepare and show
- *   node scripts/publicar-instaladores.mjs --enviar   # and copy to the VPS
+ *   node scripts/publicar-instaladores.mjs --enviar   # and publish: asset into the draft release, publish it, then the VPS
+ *   ... --urgente                                     # a fix: the signed manifest says wait 24 h, not 72
+ *   ... --alvo <sha>                                  # the public copy's commit the draft release points at
+ *   ... --forcar-cadencia                             # publish although the previous Windows version is under 72 h
  */
 import { createHash, createPrivateKey, createPublicKey, sign, verify } from "node:crypto"
 import { execFile } from "node:child_process"
@@ -31,6 +41,10 @@ import {
   manifestoDeActualizacaoWindows,
   manifestoDeVersao,
   mensagemDaActualizacaoWindows,
+  instaladoresMudados,
+  cadenciaDoWindows,
+  publicarManifestoNaRelease,
+  textoDasSomas,
 } from "./instaladores.mjs"
 import { entradaDaVersao, lerNovidades } from "./gerar-novidades.mjs"
 import { FICHEIROS, paginaDeTransferencias, tamanhoHumano } from "./pagina-de-transferencias.mjs"
@@ -40,6 +54,21 @@ const RAIZ = join(dirname(fileURLToPath(import.meta.url)), "..")
 const ORIGEM = join(RAIZ, ".verify-data/instaladores")
 const SAIDA = join(ORIGEM, "publicar")
 const ENVIAR = process.argv.includes("--enviar")
+/** A fix that may install 24 hours after the public release instead of 72.
+ *  Signed into the manifest; the app never waits less than 24. */
+const URGENTE = process.argv.includes("--urgente")
+/** Publish even though the previous Windows version is less than 72 h old (see `cadenciaDoWindows`). */
+const FORCAR_CADENCIA = process.argv.includes("--forcar-cadencia")
+/** The public repository whose release carries the manifest. The same
+ *  `REPOSITORIO_PUBLICO` as `apps/client/src/main/actualizacao-windows.ts`. */
+const REPOSITORIO_PUBLICO = "magnuslab-sudo/Orwell"
+/** The commit of this version's public copy: the draft release must point at it (review I2). */
+const ALVO = (() => {
+  const i = process.argv.indexOf("--alvo")
+  return i > 0 ? process.argv[i + 1] : undefined
+})()
+/** The installers' SHA-256 sums, as a file of the GitHub release (review I1). */
+const NOME_DAS_SOMAS = "somas-sha256.txt"
 
 /** The server (`ORWELL_SSH`, user@host), optional SSH key (`ORWELL_SSH_KEY`),
  *  and the path that Caddy serves at `/transferencias/`. */
@@ -158,8 +187,30 @@ if (divergentes.length > 0) {
 }
 
 /*
-  The Windows signature, before writing anything.
-  
+  A version already published on GitHub is burnt (review M8): its manifest and
+  sums are public and immutable. Installers rebuilt after that have other
+  hashes and can never match them. Stop before anything else, and keep
+  `.verify-data/instaladores/` as it is until the VPS has the files.
+*/
+const marcaDePublicada = join(ORIGEM, `publicada-${versao}.json`)
+{
+  let publicadas = null
+  try {
+    publicadas = JSON.parse(await readFile(marcaDePublicada, "utf8"))
+  } catch {
+    // Not published yet: the usual path.
+  }
+  const mudados = instaladoresMudados(publicadas, ficheiros)
+  if (mudados.length > 0) {
+    console.error(`A ${versao} já está publicada no GitHub com outros instaladores (${mudados.map((f) => f.nome).join(", ")}).`)
+    console.error("Foram reconstruídos depois: as somas públicas já não lhes servem. Publica uma versão nova.")
+    process.exit(6)
+  }
+}
+
+/*
+  The Windows signature, before writing anything at all.
+
   Without the private key nothing is published: a new version without
   `actualizacao-windows.json` left whoever has the app installed seeing the old
   one forever, in silence. Refusing here is cheap; finding out later is not.
@@ -180,7 +231,7 @@ if (windows) {
     console.error("Se a chave se perdeu, lê scripts/gerar-chave-de-actualizacoes.mjs antes de gerar outra.")
     process.exit(4)
   }
-  manifestoWindows = manifestoDeActualizacaoWindows(versao, windows, (mensagem) => sign(null, mensagem, privada))
+  manifestoWindows = manifestoDeActualizacaoWindows(versao, windows, (mensagem) => sign(null, mensagem, privada), { urgente: URGENTE })
 
   const fonteDaPublica = await readFile(join(RAIZ, "apps/client/src/main/chave-de-actualizacoes.ts"), "utf8")
   const x = /CHAVE_PUBLICA_DE_ACTUALIZACOES = "([A-Za-z0-9_-]{43})"/.exec(fonteDaPublica)?.[1]
@@ -273,10 +324,73 @@ if (!ENVIAR) {
   process.exit(0)
 }
 
-if (!VPS) {
-  console.error("Falta ORWELL_SSH (utilizador@anfitriao) para enviar.")
-  process.exit(2)
+/*
+  The public release FIRST, before anything reaches the VPS.
+
+  The installed Windows app (1.3.20) only installs a signed manifest that it
+  also finds, byte for byte, as the asset `actualizacao-windows.json` of the
+  public release `v<version>` on GitHub, and only once that release has been
+  public for 72 hours (24 if urgent). The repository's releases are
+  immutable: a published one takes no new asset. So the release is prepared
+  as a DRAFT (with its notes in English, by a person), this puts the asset in
+  it and PUBLISHES it, which starts the 72 hours, and then reads the asset
+  back from the public address and compares. See `publicarManifestoNaRelease`
+  in `scripts/instaladores.mjs`, where this is tested.
+*/
+if (manifestoWindows) {
+  if (!ALVO || !/^[0-9a-f]{40}$/.test(ALVO)) {
+    console.error("Falta --alvo <sha>: o commit da cópia pública desta versão, para onde aponta o rascunho da release.")
+    console.error("Nada foi enviado.")
+    process.exit(5)
+  }
+  const tag = `v${versao}`
+  /*
+    The cadence (review N3): the previous published release, read from GitHub,
+    must be at least 72 h old, unless urgent or forced.
+  */
+  {
+    const { stdout } = await correr("gh", ["release", "list", "--repo", REPOSITORIO_PUBLICO, "--limit", "10", "--json", "tagName,publishedAt,isDraft"])
+    const anterior = JSON.parse(stdout)
+      .filter((r) => !r.isDraft && r.tagName !== tag && r.publishedAt)
+      .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))[0]
+    const cadencia = cadenciaDoWindows({
+      anterior: anterior ? { tag: anterior.tagName, publicadaEm: anterior.publishedAt } : null,
+      agora: Date.now(),
+      urgente: URGENTE,
+      forcar: FORCAR_CADENCIA,
+    })
+    if (!cadencia.ok) {
+      console.error(cadencia.porque)
+      console.error("Nada foi enviado.")
+      process.exit(7)
+    }
+  }
+  const caminhoDoManifesto = join(SAIDA, NOME_DO_MANIFESTO_WINDOWS)
+  const caminhoDasSomas = join(SAIDA, NOME_DAS_SOMAS)
+  await writeFile(caminhoDasSomas, textoDasSomas(ficheiros), "utf8")
+  const resultado = await publicarManifestoNaRelease({
+    tag,
+    repositorio: REPOSITORIO_PUBLICO,
+    alvo: ALVO,
+    ficheiros: [
+      { nome: NOME_DO_MANIFESTO_WINDOWS, caminho: caminhoDoManifesto, bytes: await readFile(caminhoDoManifesto) },
+      { nome: NOME_DAS_SOMAS, caminho: caminhoDasSomas, bytes: await readFile(caminhoDasSomas) },
+    ],
+    gh: async (argumentos) => (await correr("gh", argumentos)).stdout,
+    buscar: fetch,
+  })
+  if (!resultado.ok) {
+    console.error(resultado.porque)
+    console.error("Nada foi enviado para o VPS.")
+    process.exit(5)
+  }
+  // The version is burnt from here on: these exact files are public and immutable (review M8).
+  await writeFile(marcaDePublicada, `${JSON.stringify(Object.fromEntries(ficheiros.map((f) => [f.nome, f.soma])), null, 2)}\n`, "utf8")
+  const horas = URGENTE ? 24 : 72
+  console.log(`\nrelease ${tag}: ${resultado.publicouAgora ? "publicada agora" : "já estava publicada"}, imutável, manifesto e somas conferidos.`)
+  console.log(`cada app do Windows instala-a ${horas} h depois de a ver no GitHub${URGENTE ? " (urgente)" : ""}.`)
 }
+
 console.log("\na enviar para o VPS...")
 await correr("ssh", [...CHAVE, VPS, `mkdir -p ${DESTINO}`])
 /*

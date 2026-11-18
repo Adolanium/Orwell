@@ -43,6 +43,14 @@ function ler(channel: string, ...argumentos: unknown[]): unknown {
 }
 
 contextBridge.exposeInMainWorld("enclaveHost", {
+  /** The colour theme, so the windows open in it next time. See `tema:definir` in main. */
+  tema: {
+    definir: (tema: string) => ipcRenderer.send("tema:definir", tema),
+  },
+  /** The app's language, for the update question before the window. See `lingua:definir` in main. */
+  lingua: {
+    definir: (lingua: string) => ipcRenderer.send("lingua:definir", lingua),
+  },
   /** Write only (the Copy buttons). See `clipboard:write` in main and `ui/lib/copiar.ts`. */
   clipboard: {
     write: (texto: string) => ipcRenderer.invoke("clipboard:write", texto),
@@ -220,6 +228,8 @@ contextBridge.exposeInMainWorld("enclaveHost", {
     dispensar: (versao: string) => ipcRenderer.invoke(CANAIS_DE_ACTUALIZACAO.dispensar, versao),
     abrir: () => ipcRenderer.invoke(CANAIS_DE_ACTUALIZACAO.abrir),
     diagnostico: () => ipcRenderer.invoke(CANAIS_DE_ACTUALIZACAO.diagnostico),
+    modo: () => ipcRenderer.invoke(CANAIS_DE_ACTUALIZACAO.modo),
+    definirModo: (modo: string) => ipcRenderer.invoke(CANAIS_DE_ACTUALIZACAO.definirModo, modo),
   },
   channels: {
     list: () => ipcRenderer.invoke("channel:list"),
@@ -346,6 +356,8 @@ this channel.
     buzz: (channel: string) => ipcRenderer.invoke("channel:buzz", channel),
     members: (channel: string) => ipcRenderer.invoke("channel:members", channel),
     history: (channel: string) => ipcRenderer.invoke("channel:history", channel),
+    conversaArquivada: (channel: string, cursor?: number | null) => ipcRenderer.invoke("channel:conversa-arquivada", channel, cursor),
+    temConversaArquivada: (channel: string) => ipcRenderer.invoke("channel:tem-conversa-arquivada", channel),
     forget: (channel: string) => ipcRenderer.invoke("channel:forget", channel),
     leave: (channel: string) => ipcRenderer.invoke("channel:leave", channel),
     safetyNumber: (channel: string, address: string) =>
@@ -402,6 +414,7 @@ this channel.
   votacoes: {
     votar: (channel: string, target: string, opcao: number, retirar?: boolean) =>
       ipcRenderer.invoke("votacao:votar", channel, target, opcao, retirar),
+    idadeDaConta: (address: string) => ipcRenderer.invoke("votacao:idade", address),
   },
   notifications: {
     list: () => ipcRenderer.invoke("notifications:list"),

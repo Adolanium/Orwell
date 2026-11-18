@@ -86,11 +86,18 @@ export function votosDe(
   messages: ChatMessage[],
   /** The closing instant of each poll (`fechosDe`). A vote stamped later does not count. */
   fechos?: ReadonlyMap<string, number>,
+  /**
+   * May this voter's vote, stamped `at`, count? (17/11/2026: only accounts
+   * created 5 days ago or more vote, by an age their homeserver signs, see
+   * `idade-da-conta.ts`.) A vote refused here is out of the count AND of the list
+   * of who voted, and does not replace that person's earlier vote. Absent: all count.
+   */
+  podeContar?: (quem: string, at: number) => boolean,
 ): Map<string, Map<string, number>> {
   // The rule lives in the core (`votosQueContam`), so the vault keeps exactly the vote this
   // counts (review of 1.3.19, I1): the highest `at` not after the close, ties by thread order.
   const votos = new Map<string, Map<string, number>>()
-  for (const [alvo, porPessoa] of votosQueContam(messages, (message) => message, fechos)) {
+  for (const [alvo, porPessoa] of votosQueContam(messages, (message) => message, fechos, podeContar)) {
     const escolhas = new Map<string, number>()
     for (const [quem, { payload }] of porPessoa) {
       if (!payload.remove && typeof payload.vote === "number") escolhas.set(quem, payload.vote)

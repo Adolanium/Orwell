@@ -70,6 +70,20 @@ export function codigoDoEstado(estado: EstadoDoEcra): string {
 const MARCA_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true">${TARJAS_DO_ARRANQUE.map((d) => `<path d="${d}"/>`).join("")}</svg>`
 
 /**
+ * The splash colours of each theme. Dark is the approved design, with the
+ * art fused into its background; light has no light version of that art (the
+ * original lives outside the repository), so it shows the banners large in
+ * the art's place, in the light theme's colours.
+ */
+const ARRANQUE_ESCURO = { fundo: "#080c1a", texto: "#e6ecff", detalhe: "#9aa6c8", pista: "#1b2340", marca: "#7a85f5" }
+export const CORES_DO_ARRANQUE = {
+  escuro: ARRANQUE_ESCURO,
+  claro: { fundo: "#f2f3f5", texto: "#2e3338", detalhe: "#5c5e66", pista: "#d4d7dc", marca: "#5865f2" },
+  // Aurora is the 1.3.19 skin, and the approved splash is its night.
+  aurora: ARRANQUE_ESCURO,
+} as const
+
+/**
  * The page as a `data:` URL. Direction B ("Banners"):
  * illustration at the top, wordmark, text and bar below.
  *
@@ -78,7 +92,11 @@ const MARCA_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true">${TARJAS_DO_ARRAN
  * network. Text and bar remain HTML, because they change per phase. The window
  * is 320×400 (`index.ts`); positions below are from the approved design.
  */
-export const HTML_DO_ARRANQUE = `<!doctype html>
+export function htmlDoArranque(tema: keyof typeof CORES_DO_ARRANQUE): string {
+  const cor = CORES_DO_ARRANQUE[tema]
+  const fundo = tema !== "claro" ? `${cor.fundo} url("${ARTE_DO_ARRANQUE}") top center / 320px 280px no-repeat` : cor.fundo
+  const arte = tema === "claro" ? `\n  <div class="arte" aria-hidden="true">${MARCA_SVG}</div>` : ""
+  return `<!doctype html>
 <html lang="pt">
 <head>
 <meta charset="utf-8">
@@ -86,25 +104,31 @@ export const HTML_DO_ARRANQUE = `<!doctype html>
 <title>Orwell</title>
 <style>
   @font-face { font-family: "Space Grotesk"; font-weight: 300 700; src: url("${FONTE_DO_ARRANQUE}") format("woff2"); }
-  html, body { margin: 0; height: 100%; overflow: hidden; color: #e6ecff;
-    background: #080c1a url("${ARTE_DO_ARRANQUE}") top center / 320px 280px no-repeat;
+  html, body { margin: 0; height: 100%; overflow: hidden; color: ${cor.texto};
+    background: ${fundo};
     font: 14px/1.4 "Space Grotesk", "Segoe UI", system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
   body { position: relative; -webkit-app-region: drag; }
+  .arte { position: absolute; top: 72px; left: 0; right: 0; display: flex; justify-content: center; }
+  .arte svg { width: 128px; height: 128px; fill: ${cor.marca}; }
   .marca { position: absolute; top: 264px; left: 0; right: 0; display: flex; justify-content: center;
     align-items: center; gap: 0.06em; font-size: 22px; font-weight: 600; line-height: 1; letter-spacing: 0.01em; }
-  .marca svg { width: 1.04em; height: 1.04em; fill: #7a85f5; flex: none; }
+  .marca svg { width: 1.04em; height: 1.04em; fill: ${cor.marca}; flex: none; }
   #titulo { position: absolute; top: 302px; left: 12px; right: 12px; text-align: center; font-weight: 500; line-height: 20px; }
   #barra { position: absolute; top: 334px; left: 60px; width: 200px; height: 6px; border-radius: 3px;
-    background: #1b2340; overflow: hidden; }
-  #cheio { width: 0; height: 100%; background: #7a85f5; transition: width 120ms linear; }
-  #detalhe { position: absolute; top: 350px; left: 12px; right: 12px; text-align: center; color: #9aa6c8;
+    background: ${cor.pista}; overflow: hidden; }
+  #cheio { width: 0; height: 100%; background: ${cor.marca}; transition: width 120ms linear; }
+  #detalhe { position: absolute; top: 350px; left: 12px; right: 12px; text-align: center; color: ${cor.detalhe};
     font-size: 12px; min-height: 17px; }
 </style>
 </head>
-<body>
+<body>${arte}
   <div class="marca" role="img" aria-label="Orwell">${MARCA_SVG}<span aria-hidden="true">rwell</span></div>
   <div id="titulo">A procurar actualizações</div>
   <div id="barra" hidden><div id="cheio"></div></div>
   <div id="detalhe"></div>
 </body>
 </html>`
+}
+
+/** The approved dark page, as it always was. */
+export const HTML_DO_ARRANQUE = htmlDoArranque("escuro")

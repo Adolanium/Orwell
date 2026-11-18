@@ -218,6 +218,9 @@ export const pt = {
     /** The small line underneath, in the pill (choice B, 28 October 2026). */
     webDetalhe: "Este separador já não envia nem recebe.",
     webRecarregar: "Recarregar",
+    /** Windows, while this device waits before installing by itself (1.3.20). No download button. */
+    emVerificacao: (quando: string): string => `Versão nova em verificação. Instala-se a partir de ${quando}.`,
+    emVerificacaoNota: "A app instala-a sozinha, ou pergunta-te antes. Não precisas de a descarregar.",
   },
 
   /**
@@ -758,6 +761,8 @@ export const pt = {
     discard: "Descartar",
     newMessages: "↓ Novas mensagens",
     loadOlder: "Carregar mais antigas",
+    /** The top of a conversation when "load older" reached the start of what this device holds (17/11/2026). */
+    inicioDoAparelho: "Não há mensagens mais antigas neste aparelho. As de antes de ele entrar não se lêem aqui.",
     joinPending: "Pedido enviado. À espera que alguém do canal te aceite…",
     joined: (name: string): string => `Entraste em ${name}`,
     /** With opaque addresses (1.0) and no name from the seal nor published: no name. */
@@ -2956,6 +2961,15 @@ export const pt = {
      */
     languageNote:
       "Muda a língua da app. As mensagens não são traduzidas.",
+    /* The colour theme: a choice about this device, beside the language. */
+    tema: "Tema",
+    temas: { escuro: "Escuro", claro: "Claro", sistema: "Sistema", aurora: "Aurora" },
+    temaNota: "Em Sistema, segue o tema do teu aparelho. Só muda este aparelho.",
+    /* Windows only: how a new version installs (`InstalarActualizacoes.tsx`). */
+    instalarActualizacoes: "Instalar actualizações",
+    modosDeActualizacao: { perguntar: "Perguntar antes", automaticamente: "Automaticamente" },
+    actualizacoesNota:
+      "Com \"Perguntar antes\", a app pergunta ao abrir quando há uma versão nova. Uma versão nova só se instala pelo menos 24 horas depois de este aparelho a ver pública no GitHub, em regra 72 horas. Para isso, a app contacta o GitHub quando há uma versão nova. Só muda este aparelho.",
     account: "Conta",
     /* The door to the profile editor from Settings: it used to be only through
        the account card, and whoever came here looking for the name did not find it. */
@@ -3875,10 +3889,15 @@ export const pt = {
     title: "Emojis",
     searchLabel: "Procurar emoji pelo nome",
     searchPlaceholder: "Procurar…",
-    recents: "Recentes",
+    recents: "Usados com frequência",
     results: "Resultados",
     noResults: "Nenhum emoji com esse nome.",
     close: "Fechar",
+    /** The skin tone button: its name says the tone now. */
+    tom: (nome: string) => `Tom de pele: ${nome}`,
+    tomTitulo: "Tom de pele",
+    /** The six tones, in the order the picker and `withTone` count them (0 to 5). */
+    tons: ["Sem tom", "Claro", "Médio-claro", "Médio", "Médio-escuro", "Escuro"] as readonly string[],
     /** The tab labels of `components/emoji.ts`, by each category's `id`. */
     categorias: {
       rostos: "Rostos",
@@ -4010,6 +4029,8 @@ export const pt = {
     be lying.
   */
   votacao: {
+    /* An account younger than 5 days (17/11/2026): the options are off, and this says why. */
+    semVotoContaNova: "Só podes votar 5 dias depois de criares a conta.",
     /** The entry in the `+` menu, in the conversation, and the feed button. */
     criar: "Criar votação",
     titulo: "Nova votação",
@@ -4507,8 +4528,13 @@ export const pt = {
   etiquetas: {
     /** Next to a role in the `@` list. */
     cargo: "cargo",
-    /** A room tag the reader cannot see, or that no longer exists. */
-    salaPrivada: "sala privada",
+    /**
+     * A room link the reader cannot open: no access, deleted, or never there. One
+     * neutral word for the three, so the link tells nothing about the room.
+     */
+    semAcesso: "sala-sem-acesso",
+    /** Heading of the rooms in the `@` and `#` lists. */
+    seccaoCanais: "Canais",
     /** Label of a room chip: where it goes. */
     irParaSala: (nome: string) => `Abrir a sala ${nome}`,
   },
@@ -4526,9 +4552,27 @@ export const pt = {
           ? `${Array.from(nomes).slice(0, -1).join(", ")} e ${nomes[nomes.length - 1]} reagiram com ${emoji}`
           : `${Array.from(nomes).slice(0, 3).join(", ")} e mais ${nomes.length - 3} reagiram com ${emoji}`,
     /** Label of a chip for the screen reader. */
-    rotulo: (emoji: string, n: number, minha: boolean) =>
-      `${emoji}: ${n} ${n === 1 ? "reacção" : "reacções"}${minha ? ", incluindo a tua. Toca para retirar." : ". Toca para juntar a tua."}`,
+    /** `troca`: I already reacted with another emoji, and a tap switches mine to this one. */
+    rotulo: (emoji: string, n: number, minha: boolean, troca = false) =>
+      `${emoji}: ${n} ${n === 1 ? "reacção" : "reacções"}${minha ? ", incluindo a tua. Toca para retirar." : troca ? ". Toca para mudar a tua para esta." : ". Toca para juntar a tua."}`,
     falhou: "A reacção não saiu. Tenta outra vez.",
+    /** A quick reaction (hover bar and long-press menu): the verb says what a press does. */
+    rapida: (emoji: string, minha: boolean, troca = false) => (minha ? `Retirar ${emoji}` : troca ? `Mudar para ${emoji}` : `Juntar ${emoji}`),
+    /** The message menu entry and the title of the list of who reacted. */
+    verReaccoes: "Ver reacções",
+    titulo: "Reacções",
+    /** A tab of that list: the emoji and how many. */
+    separador: (emoji: string, n: number) => `${emoji}: ${n} ${n === 1 ? "pessoa" : "pessoas"}`,
+    lista: (emoji: string) => `Quem reagiu com ${emoji}`,
+    fechar: "Fechar",
+    /** Settings, Account. */
+    rapidasTitulo: "Reacções rápidas",
+    rapidasNota:
+      "Estas três aparecem quando passas o rato numa mensagem e no toque longo. Uma casa vazia mostra o emoji que usas mais.",
+    casa: (n: number, emoji: string | null) => (emoji ? `Casa ${n}: ${emoji}. Toca para mudar.` : `Casa ${n}: vazia. Toca para escolher.`),
+    escolherCasa: (n: number) => `Reacção rápida da casa ${n}`,
+    limparCasa: (n: number) => `Esvaziar a casa ${n}`,
+    repor: "Usar as que uso mais",
   },
   /**
    * The broadcast sign next to the face of whoever, in a voice room, shares
@@ -4760,6 +4804,7 @@ export const errosPt: Record<string, FraseDeErro> = {
   "this vault is from the beta": "Este cofre é de uma versão do beta. Não abre nesta versão.",
   "this account file is from the beta": "Este ficheiro é de uma versão do beta. Não pode entrar nesta versão.",
   "clipboard unavailable": "Não foi possível copiar. Selecciona o texto e copia-o com o teclado.",
+  "could not save the update choice": "Não foi possível guardar a escolha. Tenta de novo.",
   "clipboard text is invalid": "Não foi possível copiar este texto.",
   "this device cannot remember the session": "Este aparelho não tem onde guardar a sessão com segurança.",
   "this vault has no passphrase to remember": "Esta conta não tem palavra-passe neste aparelho. Não há sessão para memorizar.",
@@ -5140,6 +5185,7 @@ export const errosPt: Record<string, FraseDeErro> = {
   "media store is full": "O armazenamento de imagens deste aparelho está cheio. As imagens novas não ficam guardadas aqui.",
   "media store failed": "Não foi possível guardar a imagem neste aparelho.",
   "media blob is damaged": "A imagem neste aparelho está danificada. Usa \"Trazer\" para a ter outra vez.",
+  "conversation archive page is missing": "Uma página de mensagens antigas não abriu neste aparelho. Toca outra vez para passar às anteriores.",
 
   /* Amizades e feed. */
   "too many friend lists in a row":
@@ -5176,6 +5222,7 @@ export const errosPt: Record<string, FraseDeErro> = {
       ? `O aparelho saiu da conta, mas ainda está em ${detalhe["channels"].length} canais. Revoga outra vez para acabar.`
       : "O aparelho saiu da conta, mas ainda está em alguns canais. Revoga outra vez para acabar.",
   "device-revoked": "Este aparelho foi tirado da conta noutro aparelho.",
+  "pairing-unfinished": "O emparelhamento não terminou. Volta a emparelhar este aparelho.",
   "account-channel-foreign":
     "O canal da conta tinha um aparelho que não é desta conta. Este aparelho saiu desse canal. O estado volta a passar quando o canal for refeito.",
   // Music in the call (phase 9): the call goes on; the person knows what failed.

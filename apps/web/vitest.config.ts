@@ -14,6 +14,9 @@ import { defineConfig } from "vitest/config"
  * `jsdom` because the bridge touches `window` and media elements.
  */
 export default defineConfig({
+  // `@enclave/ui` imports its Aurora sheet with `?url` (`folha-da-aurora.ts`),
+  // a file outside this package: let the test server read the monorepo.
+  server: { fs: { allow: ["../.."] } },
   test: {
     environment: "jsdom",
   },

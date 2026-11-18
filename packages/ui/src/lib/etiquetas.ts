@@ -91,22 +91,33 @@ export function etiquetaEmCurso(
   return { inicio, procura, sinal: antes[inicio] === "#" ? "#" : "@" }
 }
 
+/** How many rooms `@` shows, under its "Channels" heading. `#` shows them all. */
+export const SALAS_NO_ARROBA = 3
+
 /**
- * What `@` suggests: people first, then roles, then `@all`, like Discord.
+ * What `@` suggests: people first, then roles, then `@all`, then rooms, like Discord.
  *
  * People first because Enter takes the first item, and an `@` followed by Enter
- * must not notify a whole role. Two roles at most, so people keep the list.
+ * must not notify a whole role. Two roles at most, so people keep the list. The
+ * rooms (17/11/2026) come last and do not take places from people: they add up to
+ * `SALAS_NO_ARROBA` rows under their own heading. `#` is the full room list.
  */
 export function sugerirEtiquetas(
   pessoas: readonly MentionCandidate[],
   cargos: readonly MentionCandidate[],
   procura: string,
   podeMencionarTodos: boolean,
+  salas: readonly MentionCandidate[] = [],
   limite = MENTION_LIMIT,
 ): MentionCandidate[] {
   const alvo = dobrar(procura)
   const comTodos = podeMencionarTodos && PALAVRAS_DE_TODOS.some((palavra) => palavra.startsWith(alvo))
   const deCargo = sugerirMencoes(cargos, procura, 2)
   const reserva = deCargo.length + (comTodos ? 1 : 0)
-  return [...sugerirMencoes(pessoas, procura, limite - reserva), ...deCargo, ...(comTodos ? [CANDIDATO_TODOS] : [])]
+  return [
+    ...sugerirMencoes(pessoas, procura, limite - reserva),
+    ...deCargo,
+    ...(comTodos ? [CANDIDATO_TODOS] : []),
+    ...sugerirMencoes(salas, procura, SALAS_NO_ARROBA),
+  ]
 }

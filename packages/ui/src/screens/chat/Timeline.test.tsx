@@ -74,6 +74,23 @@ describe("Timeline", () => {
     await user.click(button)
     expect(onLoadOlder).toHaveBeenCalledTimes(1)
   })
+
+  /*
+    Only after "load older" reached the start of what this device holds
+    (17/11/2026): the list used to simply stop there, and a day the vault had
+    not kept looked like a day nobody spoke.
+  */
+  it("quando 'Carregar mais antigas' chega ao início do aparelho, o topo diz que não há mais", () => {
+    render(timeline({ messages: [messageOf(1, "olá")], hasStoredHistory: true, canLoadOlder: false, inicioDoAparelho: true }))
+    expect(screen.getByRole("note").textContent).toBe(strings.chat.inicioDoAparelho)
+    expect(screen.queryByText(strings.chat.loadOlder)).toBeNull()
+  })
+
+  it("enquanto há mais para carregar, só o botão, sem a linha", () => {
+    render(timeline({ messages: [messageOf(1, "olá")], hasStoredHistory: true, canLoadOlder: true, onLoadOlder: noop, inicioDoAparelho: true }))
+    expect(screen.queryByText(strings.chat.inicioDoAparelho)).toBeNull()
+    expect(screen.getByText(strings.chat.loadOlder)).toBeTruthy()
+  })
 })
 
 /**

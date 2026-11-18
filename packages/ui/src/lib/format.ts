@@ -645,13 +645,31 @@ export function chaveDoDia(at: number): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
 }
 
+/**
+ * One formatter per locale and form, kept (1.3.20). Building an
+ * `Intl.DateTimeFormat` costs far more than formatting with it, and every line
+ * drawn asks for its full date (the hover on its time): in a profile of the
+ * scroll up a room, building them was the costliest function of the app's own
+ * code. The language can change while the app runs, so the locale is in the key.
+ */
+const formatadoresDaLingua = new Map<string, Intl.DateTimeFormat>()
+function formatadorDaLingua(forma: string, opcoes: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const chave = `${localeDaLingua()} ${forma}`
+  let f = formatadoresDaLingua.get(chave)
+  if (!f) {
+    f = new Intl.DateTimeFormat(localeDaLingua(), opcoes)
+    formatadoresDaLingua.set(chave, f)
+  }
+  return f
+}
+
 /** The day separator: "12 de novembro de 2026" / "November 12, 2026". */
 export function formatarDia(at: number): string {
-  return new Intl.DateTimeFormat(localeDaLingua(), { day: "numeric", month: "long", year: "numeric" }).format(at)
+  return formatadorDaLingua("dia", { day: "numeric", month: "long", year: "numeric" }).format(at)
 }
 
 /** Full date and time, for the hover on a message's time. */
 export function formatarDataEHora(at: number | undefined): string {
   if (!at) return ""
-  return new Intl.DateTimeFormat(localeDaLingua(), { dateStyle: "full", timeStyle: "short" }).format(at)
+  return formatadorDaLingua("data-e-hora", { dateStyle: "full", timeStyle: "short" }).format(at)
 }

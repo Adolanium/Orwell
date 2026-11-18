@@ -1,10 +1,13 @@
 import { nomeVisivel } from "@enclave/client-core"
+import { LinhaDoEstado } from "../../components/LinhaDoEstado.js"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useEstavel } from "../../hooks/useEstavel.js"
 import { copiarTexto } from "../../lib/copiar.js"
 import type { FichaDeReaccao, Participant } from "@enclave/client-core"
 import { NomeDePessoa } from "../../components/NomeDePessoa.js"
 import { EmojiPicker } from "../../components/EmojiPicker.js"
+import { QuemReagiu } from "./QuemReagiu.js"
+import { lembrarEmoji, useReaccoesRapidas } from "../../lib/emojiFrequentes.js"
 import { useEcraLargo } from "../../hooks/useEcraLargo.js"
 import type { Etiquetas } from "../../components/RichText.js"
 import type { MentionCandidate } from "../../lib/mentions.js"
@@ -19,11 +22,12 @@ import { Button } from "../../components/Button.js"
 import { ConnectionBanner } from "../../components/ConnectionBanner.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { useToast } from "../../components/Toast.js"
-import { CameraIcon, MicIcon, PeopleIcon, PinIcon, SearchIcon } from "../../icons.js"
+import { CameraIcon, MicIcon, PeopleIcon, PinIcon, SearchIcon, SmileyIcon } from "../../icons.js"
 import type { CargoDoMembro } from "../../lib/agruparMembros.js"
-import { connectionLabel, isDirect, serverOf } from "../../lib/format.js"
+import { isDirect, serverOf } from "../../lib/format.js"
 import { strings, traduzirErro } from "../../strings.js"
 import { RoomIcon } from "../../components/RoomIcon.js"
+import { RoomGlyph } from "../../components/SidebarIcons.js"
 import { SeloOficial } from "../../components/SeloOficial.js"
 import { Vozes } from "../../components/Vozes.js"
 import type { AvisoDaChamada, CaminhoDeMedia } from "../../lib/estadoDaChamada.js"
@@ -119,6 +123,7 @@ export function ChatScreen({
   onConvidar,
   hasStoredHistory,
   canLoadOlder,
+  inicioDoAparelho,
   onLoadOlder,
   labelFor,
   iconFor,
@@ -295,6 +300,8 @@ export function ChatScreen({
   onConvidar: (modo?: "endereco" | "link") => void
   hasStoredHistory: boolean
   canLoadOlder: boolean
+  /** "Load older" reached the start of what this device holds. See `Timeline`. */
+  inicioDoAparelho?: boolean
   onLoadOlder: () => void
   /** Display name for a channel: the other person for a DM, else its slug. */
   labelFor: (channel: string) => string
@@ -647,6 +654,20 @@ export function ChatScreen({
   const ehDirecta = active !== null && isDirect(active)
 
   /**
+   * The open room, for the header: its name and its kind (for the glyph), and
+   * the channel's topic. Optional calls: a host (or a test bridge) without
+   * rooms or meta draws the header the old way, with the channel's name.
+   * A room this version cannot find by id still has a name (`nomeDaSala`),
+   * and reads as a text room, like `RoomGlyph` reads an unknown layout.
+   */
+  const salaNoTopo: { nome: string; kind: "text" | "voice"; layout?: string | undefined } | null = (() => {
+    if (active === null || ehDirecta || !nomeDaSala) return null
+    const sala = bridge.channels.rooms?.(active)?.find((candidata) => candidata.room === activeRoom)
+    return { nome: sala?.name ?? nomeDaSala(activeRoom), kind: sala?.kind ?? "text", layout: sala?.layout }
+  })()
+  const topicoNoTopo = salaNoTopo && active !== null ? bridge.channels.meta?.(active)?.topic?.trim() || null : null
+
+  /**
    * The call for this channel, and how it displays. See `vistaDaChamada`.
    *
    * In the voice room, "Room conversation" opens its conversation below the
@@ -690,6 +711,12 @@ export function ChatScreen({
     message.payload.moderada !== true
   /** The message whose reaction picker is open, or nothing. One picker for the whole conversation. */
   const [aReagir, setAReagir] = useState<ChatMessage | null>(null)
+  /** The message whose list of who reacted is open, and the emoji it opened on. */
+  const [aVerReaccoes, setAVerReaccoes] = useState<{ message: ChatMessage; emoji: string | null } | null>(null)
+  const reaccoesRapidas = useReaccoesRapidas()
+  /** The chips of a message, if it has any. */
+  const fichasDe = (message: ChatMessage): readonly FichaDeReaccao[] =>
+    (message.payload.id !== undefined ? reaccoes?.get(message.payload.id) : undefined) ?? []
   /** The link to a message of this channel, for "Copy message link". `null` with no account or no id. */
   const ligacaoDe = (message: ChatMessage): string | null =>
     address !== null && message.payload.id !== undefined
@@ -721,7 +748,8 @@ export function ChatScreen({
       (message.sender === address && (bridge.channels.editMessage || bridge.channels.deleteMessage) !== undefined) ||
       (podeModerar && message.payload.id !== undefined && bridge.channels.deleteMessage !== undefined) ||
       podeDenunciar(message) ||
-      podeReagir(message))
+      podeReagir(message) ||
+      fichasDe(message).length > 0)
 
   /**
    * The shake lives in the conversation frame, not in the whole window.
@@ -742,24 +770,44 @@ export function ChatScreen({
             {/* A direct conversation is people, and the form says so: a round marker
                 instead of the `@` borrowed from here before. Same rule as the
                 sidebar, so the top and the list speak the same language. */}
-            <RoomIcon
-              channel={active}
-              label={labelFor(active)}
-              size={26}
-              icon={iconFor?.(active)}
-              round={isDirect(active)}
-              official={oficial}
-            />
-            {/* A direct is titled with the other person's name: cut like every name,
-                whole in the tooltip. A channel name is not a display name. */}
-            {isDirect(active) ? (
-              <h1>
-                <NomeDePessoa nome={labelFor(active)} />
-              </h1>
+            {/* Where you are, the way a Discord user looks for it: in a
+                community, the open room (glyph and name) is the heading, and
+                the community and its topic follow quietly on the same line. A
+                direct conversation is a person: their face and name. */}
+            {salaNoTopo ? (
+              <>
+                <span className="topbar-glifo" aria-hidden="true">
+                  <RoomGlyph kind={salaNoTopo.kind} layout={salaNoTopo.layout} size={20} />
+                </span>
+                <h1>{salaNoTopo.nome}</h1>
+                {oficial && <SeloOficial />}
+                <span className="topbar-contexto" title={topicoNoTopo ? `${labelFor(active)} · ${topicoNoTopo}` : labelFor(active)}>
+                  <span className="topbar-comunidade">{labelFor(active)}</span>
+                  {topicoNoTopo && <span className="topbar-topico">{topicoNoTopo}</span>}
+                </span>
+              </>
             ) : (
-              <h1>{labelFor(active)}</h1>
+              <>
+                <RoomIcon
+                  channel={active}
+                  label={labelFor(active)}
+                  size={26}
+                  icon={iconFor?.(active)}
+                  round={isDirect(active)}
+                  official={oficial}
+                />
+                {/* A direct is titled with the other person's name: cut like every name,
+                    whole in the tooltip. A channel name is not a display name. */}
+                {isDirect(active) ? (
+                  <h1>
+                    <NomeDePessoa nome={labelFor(active)} />
+                  </h1>
+                ) : (
+                  <h1>{labelFor(active)}</h1>
+                )}
+                {oficial && <SeloOficial />}
+              </>
             )}
-            {oficial && <SeloOficial />}
             {/* Wide screen: the history progress lives here, beside the name. */}
             {ecraLargo && <BarraDoHistorico estado={historicoDosIrmaos} noTopo />}
             {/* The lock and "Open" left the header
@@ -1049,6 +1097,7 @@ export function ChatScreen({
             directory={directory}
             hasStoredHistory={hasStoredHistory}
             canLoadOlder={canLoadOlder}
+            inicioDoAparelho={inicioDoAparelho}
             onLoadOlder={onLoadOlder}
             onOpenProfile={onOpenProfile}
             pedidoDe={pedidoDe}
@@ -1060,6 +1109,7 @@ export function ChatScreen({
             etiquetas={etiquetas}
             {...(onReagir ? { onReagir } : {})}
             {...(onReagir && responderAqui ? { onPedirReaccao: setAReagir } : {})}
+            onVerReaccoes={(message: ChatMessage, emoji: string) => setAVerReaccoes({ message, emoji })}
             /*
               The message menu always exists: "Copy text" is for everyone and the
               first entry. The "⋯" that appears on hover opens the same
@@ -1198,6 +1248,47 @@ export function ChatScreen({
         <ContextMenu
           at={menuDaMensagem.at}
           onClose={() => setMenuDaMensagem(null)}
+          /* The quick reactions on top, like Discord, and the way to the picker.
+             On a phone this is the long press: the fastest way to react. */
+          topo={
+            podeReagir(menuDaMensagem.message) && onReagir ? (
+              <div className="menu-reaccoes" role="group" aria-label={strings.reaccoes.titulo}>
+                {reaccoesRapidas.map((emoji) => {
+                  const minha = fichasDe(menuDaMensagem.message).some((ficha) => ficha.emoji === emoji && ficha.minha)
+                  return (
+                    <button
+                      key={emoji}
+                      type="button"
+                      role="menuitem"
+                      className={minha ? "menu-reaccao minha" : "menu-reaccao"}
+                      aria-label={strings.reaccoes.rapida(emoji, minha, !minha && fichasDe(menuDaMensagem.message).some((ficha) => ficha.minha))}
+                      onClick={() => {
+                        const message = menuDaMensagem.message
+                        setMenuDaMensagem(null)
+                        if (!minha) lembrarEmoji(emoji)
+                        onReagir(message, emoji)
+                      }}
+                    >
+                      {emoji}
+                    </button>
+                  )
+                })}
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-reaccao menu-reaccao-mais"
+                  aria-label={strings.reaccoes.outra}
+                  onClick={() => {
+                    const message = menuDaMensagem.message
+                    setMenuDaMensagem(null)
+                    setAReagir(message)
+                  }}
+                >
+                  <SmileyIcon size={18} />
+                </button>
+              </div>
+            ) : undefined
+          }
           items={[
             /* Copy first, for everyone and all messages with text:
                the gesture done most often and the only one that changes nothing. */
@@ -1242,6 +1333,10 @@ export function ChatScreen({
                and it is the way to the picker without a hover button. */
             ...(podeReagir(menuDaMensagem.message)
               ? [{ label: strings.reaccoes.reagir, onSelect: () => setAReagir(menuDaMensagem.message) }]
+              : []),
+            /* Who reacted: on a phone there is no hover, and this is the way to the names. */
+            ...(fichasDe(menuDaMensagem.message).length > 0
+              ? [{ label: strings.reaccoes.verReaccoes, onSelect: () => setAVerReaccoes({ message: menuDaMensagem.message, emoji: null }) }]
               : []),
             /* Reply, right after copy: the other everyday
                gesture, and the phone menu (long press) is this one. */
@@ -1368,8 +1463,19 @@ export function ChatScreen({
 
       {/* The reaction picker: the same emoji picker as the input box. Picking an
           emoji already pressed by me releases it, like tapping the chip. */}
+      {aVerReaccoes && fichasDe(aVerReaccoes.message).length > 0 && (
+        <QuemReagiu
+          fichas={fichasDe(aVerReaccoes.message)}
+          inicial={aVerReaccoes.emoji}
+          nameFor={nameFor}
+          directory={directory}
+          onClose={() => setAVerReaccoes(null)}
+        />
+      )}
+
       {aReagir && onReagir && (
         <EmojiPicker
+          titulo={strings.reaccoes.reagir}
           onPick={(emoji) => {
             const message = aReagir
             setAReagir(null)
@@ -1409,8 +1515,10 @@ export function ChatScreen({
         />
       )}
 
-      {/* A quiet line of connection state, nothing more: errors go to toasts. */}
-      <footer className="statusbar">{connectionLabel(connection)}</footer>
+      {/* A quiet line of connection state, only when there is something to say:
+          "connected" under every conversation was noise. Errors go to toasts,
+          and the banner above the conversation carries the outages. */}
+      <LinhaDoEstado connection={connection} />
     </main>
   )
 }

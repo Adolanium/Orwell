@@ -1,5 +1,45 @@
 [
   {
+    "versao": "1.3.20",
+    "nome": "Carmelo",
+    "data": "2026-11-18",
+    "nota": "Light theme and flat redesign by edtimer · gate name limit found by viniciussilva2504 · optional Windows updates suggested by Kafein",
+    "itens": [
+      {
+        "tipo": "nova",
+        "texto": "Themes: Dark (the default), Light, System and Aurora, the previous look. Choose one in Settings › Account."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Reactions work like on Discord: one per person per message. Another emoji switches yours; the same emoji takes it back."
+      },
+      {
+        "tipo": "nova",
+        "texto": "\"@\" and \"#\" link to rooms in a message."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "The app is faster when you switch channels, open menus and scroll."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Long conversations keep their old messages. What no longer fits on the device goes to an encrypted archive, and \"Load older\" reads it."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Only accounts 5 days old or more can vote in polls."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "The name at signup has 12 characters at most, the same rule as the display name."
+      },
+      {
+        "tipo": "fix",
+        "texto": "A new device always gets every channel, also when its first invite does not open."
+      }
+    ]
+  },
+  {
     "versao": "1.3.19",
     "nome": "Carmelo",
     "data": "2026-11-17",

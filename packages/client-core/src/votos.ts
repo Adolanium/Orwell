@@ -86,11 +86,16 @@ export function fechosDasVotacoes<T>(
  * vote's own timestamp, so every device with the same events counts the same. A tie
  * goes to the later item in `itens`, which the caller gives in thread order. A
  * removal (`remove`) is a vote too: it is what says "no vote".
+ *
+ * `podeContar`: may this voter's vote, stamped `at`, count (the 5-day rule, see
+ * `idade-da-conta.ts`)? A vote refused here is out, and does not replace that
+ * person's earlier vote. Absent: all count.
  */
 export function votosQueContam<T>(
   itens: readonly T[],
   ler: (item: T) => EventoDeVoto,
   fechos?: ReadonlyMap<string, number>,
+  podeContar?: (quem: string, at: number) => boolean,
 ): Map<string, Map<string, T>> {
   const porAlvo = new Map<string, Map<string, { item: T; at: number }>>()
   for (const item of itens) {
@@ -98,6 +103,7 @@ export function votosQueContam<T>(
     if (!voto) continue
     const fecho = fechos?.get(voto.alvo)
     if (fecho !== undefined && voto.at > fecho) continue
+    if (podeContar && !podeContar(voto.quem, voto.at)) continue
     const porPessoa = porAlvo.get(voto.alvo) ?? new Map<string, { item: T; at: number }>()
     const conhecido = porPessoa.get(voto.quem)
     if (!conhecido || voto.at >= conhecido.at) porPessoa.set(voto.quem, { item, at: voto.at })

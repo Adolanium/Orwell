@@ -14,6 +14,7 @@ import {
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { sha256 } from "@noble/hashes/sha2.js"
 import { WebSocket } from "ws"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { buildServer, type Enclave } from "./app.js"
@@ -268,7 +269,7 @@ describe("gateway: revogar um aparelho", () => {
     a.client.close()
   })
 
-  it("um 0.5.7 corta o telemóvel pelo tecto (sem `revoke`): o telemóvel continua ligado e volta a entrar (I2)", async () => {
+  it("um 0.5.7 corta o telemóvel pelo tecto (sem `revoke`): o telemóvel continua ligado, e só volta a entrar quando um manifesto o puser (I2, N-01)", async () => {
     const { computador, telemovel } = conta()
     const a = await entrar(computador)
     const b = await entrar(telemovel)
@@ -280,15 +281,16 @@ describe("gateway: revogar um aparelho", () => {
     expect(enclave.store.isDeviceRevoked(computador.address, telemovel.deviceSigningPublicKey)).toBe(false)
     b.client.close()
     await b.client.esperarFecho()
-    // A new connection gets in, and the next manifest can put it back.
+    // Out of the manifest, a new connection does not get in (N-01), and it is not revoked: the next manifest puts it back.
+    expect((await entrar(telemovel)).resposta).toMatchObject({ t: "error", code: "device-revoked" })
+    expect((await publicar(a.client, manifesto(computador, 3, [computador, telemovel]))).ok).toBe(true)
     const outraVez = await entrar(telemovel)
     expect(outraVez.resposta.t).toBe("auth.ok")
-    expect((await publicar(a.client, manifesto(computador, 3, [computador, telemovel]))).ok).toBe(true)
     a.client.close()
     outraVez.client.close()
   })
 
-  it("um telemóvel removido, com a chave da conta, certifica um aparelho novo e não o consegue publicar", async () => {
+  it("um telemóvel removido, com a chave da conta, certifica um aparelho novo e não entra (N-01)", async () => {
     // Since 1.3.16 the phone has the account key. Removed, it keeps it.
     const { computador, telemovel } = conta()
     const a = await entrar(computador)
@@ -297,21 +299,17 @@ describe("gateway: revogar um aparelho", () => {
 
     // Its own device does not log in again.
     expect((await entrar(telemovel)).resposta).toMatchObject({ t: "error", code: "device-revoked" })
-    // With the key it certifies a NEW device key. The server lets it log in (a phone before `pronto` is outside the manifest too)...
+    // With the key it certifies a NEW device key. Until 1.3.19 the server let it log in; now the
+    // manifest says who logs in, and no active device has a pairing box open (N-01).
     const fantasma = identityFromPrivateKey(telemovel.signingPrivateKey, HOME)
     const f = await entrar(fantasma)
-    expect(f.resposta.t).toBe("auth.ok")
-    // ...but no manifest it publishes is accepted: not the new device, not itself back, not the computer out.
-    expect(await publicar(f.client, manifesto(computador, 3, [computador, fantasma]))).toMatchObject({ ok: false, reason: "not-yours" })
-    expect(await publicar(f.client, manifesto(computador, 3, [fantasma]), [computador])).toMatchObject({ ok: false, reason: "not-yours" })
-    expect(await publicar(f.client, manifesto(computador, 3, [computador, telemovel]))).toMatchObject({ ok: false, reason: "not-yours" })
+    expect(f.resposta).toMatchObject({ t: "error", code: "device-revoked" })
     expect(enclave.store.deviceManifestOf(computador.address)?.version).toBe(2)
     expect(enclave.store.isDeviceRevoked(computador.address, computador.deviceSigningPublicKey)).toBe(false)
     // And the computer stayed connected.
     await a.client.sync()
     expect(a.client.fechado).toBe(false)
     a.client.close()
-    f.client.close()
   })
 
   it("qualquer aparelho activo acrescenta aparelhos: o telemóvel no manifesto também", async () => {
@@ -325,11 +323,14 @@ describe("gateway: revogar um aparelho", () => {
     b.client.close()
   })
 
-  it("um aparelho que ainda não está no manifesto entra (o emparelhado antes do pronto)", async () => {
+  it("um aparelho que ainda não está no manifesto entra, com a caixa de emparelhamento aberta (o emparelhado antes do pronto)", async () => {
     const { computador, telemovel, novo } = conta()
     const a = await entrar(computador)
     expect((await publicar(a.client, manifesto(computador, 1, [computador, telemovel]))).ok).toBe(true)
     expect((await publicar(a.client, manifesto(computador, 2, [computador]), [telemovel])).ok).toBe(true)
+    // The pairing box the computer opens first (N-01: the window opens only with one).
+    a.client.send({ t: "pair.open", pairId: toBase64(sha256(crypto.getRandomValues(new Uint8Array(32)))).slice(0, 22) })
+    await a.client.nextOf("pair.opened")
     const c = await entrar(novo)
     expect(c.resposta.t).toBe("auth.ok")
     // And adding it later is not refused.

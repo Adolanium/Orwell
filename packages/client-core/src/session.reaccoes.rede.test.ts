@@ -81,26 +81,23 @@ describe("reacções às mensagens, entre clientes reais", () => {
     await bruno!.session.reactToMessage(canal, ALVO, "👍")
     await bruno!.session.reactToMessage(canal, ALVO, "🎉")
 
-    const esperado = (souBruno: boolean): FichaDeReaccao[] => [
-      { emoji: "👍", quem: [ana!.address, bruno!.address].sort(), minha: true },
-      { emoji: "🎉", quem: [bruno!.address], minha: souBruno },
+    // One reaction per person: Bruno's 🎉 replaces his 👍.
+    const esperado = (souAna: boolean): FichaDeReaccao[] => [
+      { emoji: "👍", quem: [ana!.address], minha: souAna },
+      { emoji: "🎉", quem: [bruno!.address], minha: !souAna },
     ]
-    await ate(() => fichasDe(bruno!, canal, ALVO).length === 2 && fichasDe(bruno!, canal, ALVO)[0]!.quem.length === 2, "o Bruno vê as duas fichas", 30_000)
-    await ate(() => fichasDe(ana!, canal, ALVO)[1]?.emoji === "🎉", "a Ana vê a ficha do Bruno", 30_000)
-    await ate(() => fichasDe(telemovel, canal, ALVO)[0]?.quem.length === 2, "o telemóvel da Ana vê as fichas", 30_000)
-    expect(fichasDe(ana!, canal, ALVO)).toEqual(esperado(false))
-    expect(fichasDe(bruno!, canal, ALVO)).toEqual(esperado(true))
+    const igual = (conta: ContaDeTeste, souAna: boolean): boolean =>
+      JSON.stringify(fichasDe(conta, canal, ALVO)) === JSON.stringify(esperado(souAna))
+    await ate(() => igual(bruno!, false), "o Bruno vê a troca dele", 30_000)
+    await ate(() => igual(ana!, true), "a Ana vê a troca do Bruno", 30_000)
     // The second device of the same account counts the reaction as mine.
-    expect(fichasDe(telemovel, canal, ALVO)).toEqual(esperado(false))
+    await ate(() => igual(telemovel, true), "o telemóvel da Ana vê as fichas", 30_000)
 
     // Ana takes hers back from the phone: it leaves everywhere.
     await telemovel.session.reactToMessage(canal, ALVO, "👍", true)
-    const semAAna = [
-      { emoji: "👍", quem: [bruno!.address] },
-      { emoji: "🎉", quem: [bruno!.address] },
-    ]
+    const semAAna = [{ emoji: "🎉", quem: [bruno!.address] }]
     for (const conta of [ana!, bruno!, telemovel]) {
-      await ate(() => fichasDe(conta, canal, ALVO)[0]?.quem.length === 1, `${conta.nome} vê a reacção retirada`, 30_000)
+      await ate(() => fichasDe(conta, canal, ALVO).length === 1, `${conta.nome} vê a reacção retirada`, 30_000)
       expect(fichasDe(conta, canal, ALVO).map(({ emoji, quem }) => ({ emoji, quem }))).toEqual(semAAna)
     }
     expect(fichasDe(ana!, canal, ALVO).some((ficha) => ficha.minha)).toBe(false)
@@ -140,20 +137,18 @@ describe("reacções às mensagens, entre clientes reais", () => {
     await ana!.session.reactToMessage(canal, ALVO, "👍")
     await bruno!.session.reactToMessage(canal, ALVO, "👍")
     await ate(() => fichasDe(telemovel, canal, ALVO)[0]?.quem.length === 2, "o telemóvel vê os dois 👍", 30_000)
+    // The phone switches Ana's 👍 to 🎉; the computer sees the switch.
     await telemovel.session.reactToMessage(canal, ALVO, "🎉")
-    await ate(() => fichasDe(ana!, canal, ALVO).length === 2, "o computador vê a 🎉 do telemóvel", 30_000)
+    await ate(() => fichasDe(ana!, canal, ALVO).length === 2 && fichasDe(ana!, canal, ALVO)[1]?.minha === true, "o computador vê a 🎉 do telemóvel", 30_000)
 
     // Ana takes hers back on the computer; the phone sees it live. The phone's
     // deferred write does not reach the disk before the reload.
     const janela = Vault.JANELA_DA_GRAVACAO_MS
     Vault.JANELA_DA_GRAVACAO_MS = 60_000
     const discoAntes = telemovel.backend.escritas
-    await ana!.session.reactToMessage(canal, ALVO, "👍", true)
-    await ate(() => fichasDe(telemovel, canal, ALVO)[0]?.quem.length === 1, "o telemóvel vê a retirada", 30_000)
-    const esperado = [
-      { emoji: "👍", quem: [bruno!.address], minha: false },
-      { emoji: "🎉", quem: [ana!.address], minha: true },
-    ]
+    await ana!.session.reactToMessage(canal, ALVO, "🎉", true)
+    await ate(() => fichasDe(telemovel, canal, ALVO).length === 1, "o telemóvel vê a retirada", 30_000)
+    const esperado = [{ emoji: "👍", quem: [bruno!.address], minha: false }]
     expect(fichasDe(telemovel, canal, ALVO)).toEqual(esperado)
 
     // The page reloads right away: what the disk holds now, no flush.
@@ -172,6 +167,43 @@ describe("reacções às mensagens, entre clientes reais", () => {
     // Recovery brings the removal again: the anchor on disk is from before it.
     await ate(() => JSON.stringify(fichasDe(depois, canal, ALVO)) === JSON.stringify(esperado), "o telemóvel recarregado tem as mesmas fichas", 30_000)
   }, 180_000)
+
+  it("uma reacção por pessoa: trocar manda a nova e depois a retirada da antiga; um cliente antigo com duas conta a última", async () => {
+    const [ana, bruno] = await contasDeTeste(servidor, ["Ana", "Bruno"])
+    abertas.push(ana!, bruno!)
+    const canal = await canalComTodos(servidor, ana!, [bruno!])
+    const ALVO = "pergunta-do-bruno-0003"
+    await mensagemDoBruno(bruno!, ana!, canal, ALVO)
+
+    // The switch: two frames of the old shape, the new one first.
+    await ana!.session.reactToMessage(canal, ALVO, "👍")
+    await ana!.session.reactToMessage(canal, ALVO, "🎉")
+    const actosDaAna = (): { emoji: unknown; remove: unknown }[] =>
+      entradasDoCanal(bruno!.vault.contents, canal)
+        .filter((e) => e.sender === ana!.address && e.payload.t === "reaction")
+        .sort((a, b) => a.seq - b.seq)
+        .map((e) => ({ emoji: (e.payload as { emoji?: unknown }).emoji, remove: (e.payload as { remove?: unknown }).remove }))
+    await ate(() => actosDaAna().length === 3, "o Bruno recebe os três actos da Ana", 30_000)
+    expect(actosDaAna()).toEqual([
+      { emoji: "👍", remove: false },
+      { emoji: "🎉", remove: false },
+      { emoji: "👍", remove: true },
+    ])
+    expect(fichasDe(bruno!, canal, ALVO)).toEqual([{ emoji: "🎉", quem: [ana!.address], minha: false }])
+
+    // Bruno as a client up to 1.3.19 would: two presses, no removal. Ana counts the later one.
+    await bruno!.session.send(canal, { t: "reaction", target: ALVO, emoji: "👀", remove: false })
+    await bruno!.session.send(canal, { t: "reaction", target: ALVO, emoji: "❤️", remove: false })
+    await ate(() => fichasDe(ana!, canal, ALVO).some((f) => f.emoji === "❤️"), "a Ana vê o ❤️ do Bruno", 30_000)
+    expect(fichasDe(ana!, canal, ALVO)).toEqual([
+      { emoji: "🎉", quem: [ana!.address], minha: true },
+      { emoji: "❤️", quem: [bruno!.address], minha: false },
+    ])
+
+    // Pressing one's own current emoji again changes nothing; taking it back leaves none.
+    await ana!.session.reactToMessage(canal, ALVO, "🎉", true)
+    await ate(() => fichasDe(bruno!, canal, ALVO).every((f) => f.emoji !== "🎉"), "a retirada chega ao Bruno", 30_000)
+  }, 120_000)
 
   it("numa conversa directa também", async () => {
     const [ana, bruno] = await contasDeTeste(servidor, ["Ana", "Bruno"])

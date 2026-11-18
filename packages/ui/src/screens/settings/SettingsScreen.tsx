@@ -1,4 +1,5 @@
 import { temAnfitriaoDeAvisos } from "../../lib/notifications.js"
+import { LinhaDoEstado } from "../../components/LinhaDoEstado.js"
 import { marcarFicheiroTratado } from "../../lib/ficheiroDaConta.js"
 import { useEffect, useId, useRef, useState } from "react"
 import { copiarTexto } from "../../lib/copiar.js"
@@ -9,6 +10,7 @@ import { Button } from "../../components/Button.js"
 import { ApagarConta } from "../../components/ConfirmarDestruicao.js"
 import { ConnectionBanner } from "../../components/ConnectionBanner.js"
 import { Interruptor } from "../../components/Interruptor.js"
+import { ReaccoesRapidas } from "./ReaccoesRapidas.js"
 import { CartaoDaSessao } from "./CartaoDaSessao.js"
 import { EstadoDaSincronia } from "./EstadoDaSincronia.js"
 import { SincronizarConta } from "./SincronizarConta.js"
@@ -21,15 +23,16 @@ import { useToast } from "../../components/Toast.js"
 import { usePreferenciaDeLingua } from "../../hooks/useLingua.js"
 import { useCamaras } from "../../hooks/useCamaras.js"
 import { useMicrofones } from "../../hooks/useMicrofones.js"
-import { readPrefs, REGRAS_DE_PEDIDOS, usePrefs } from "../../hooks/usePrefs.js"
+import { readPrefs, REGRAS_DE_PEDIDOS, TEMAS, usePrefs } from "../../hooks/usePrefs.js"
+import { prepararFolhaDaAurora } from "../../folha-da-aurora.js"
 import { CopyIcon, SetaParaTrasIcon } from "../../icons.js"
 import { diagnosticsSnapshot, formatDiagnostics } from "../../lib/diagnostics.js"
-import { connectionLabel } from "../../lib/format.js"
 import { formatarBytes } from "../../lib/ficheiros.js"
 import { prefsDeMediaParaONucleo } from "../../lib/mediaPrefs.js"
 import { VERSAO_DA_APP } from "../../lib/versao.js"
 import { SeccaoDeSons } from "../../sons/SeccaoDeSons.js"
 import { Aparelhos } from "./Aparelhos.js"
+import { InstalarActualizacoes } from "./InstalarActualizacoes.js"
 import { AvisosComAppFechada } from "./AvisosComAppFechada.js"
 import { AtalhosDeVoz } from "./AtalhosDeVoz.js"
 import { fraseDoCampo } from "../gate/fraseDoCampo.js"
@@ -485,6 +488,38 @@ export function SettingsScreen({
               </div>
               <p className="field-note">{strings.settings.languageNote}</p>
             </section>
+
+            {/*
+              The colour theme. Like the language, a choice about this device:
+              it is not sent to the account. "System" follows the OS live
+              (`tokens.css`); the choice applies at once (`applyPrefs`).
+              */}
+            <section className="card settings-card">
+              <h2>{strings.settings.tema}</h2>
+              <div className="choice-row">
+                {TEMAS.map((tema) => (
+                  <button
+                    key={tema}
+                    className={prefs.tema === tema ? "chip on" : "chip"}
+                    aria-pressed={prefs.tema === tema}
+                    onClick={() => setPreferencia({ tema })}
+                    // The Aurora sheet is its own file (`folha-da-aurora.ts`):
+                    // fetched when the pointer or focus reaches its button, so
+                    // the click usually finds it ready.
+                    {...(tema === "aurora" ? { onPointerEnter: () => prepararFolhaDaAurora(), onFocus: () => prepararFolhaDaAurora() } : {})}
+                  >
+                    {strings.settings.temas[tema]}
+                  </button>
+                ))}
+              </div>
+              <p className="field-note">{strings.settings.temaNota}</p>
+            </section>
+
+            {/* The three quick reactions of the hover bar and the long press. */}
+            <ReaccoesRapidas
+              escolhidas={prefs.reaccoesRapidas}
+              onMudar={(reaccoesRapidas) => setPreferencia({ reaccoesRapidas })}
+            />
           </>
         )}
 
@@ -841,6 +876,9 @@ export function SettingsScreen({
           <>
             <Aparelhos />
 
+            {/* How a new version installs: only in the packaged Windows app. */}
+            <InstalarActualizacoes />
+
             {/*
               This device, below the account's device list: backup and account
               deletion on this device are actions on one of those devices, and
@@ -1007,7 +1045,7 @@ export function SettingsScreen({
       {comoFunciona && <FolhaComoFunciona onClose={() => setComoFunciona(false)} />}
       {comunicarErro && <ComunicarErro bridge={bridge} connection={connection} onClose={() => setComunicarErro(false)} />}
 
-      <footer className="statusbar">{connectionLabel(connection)}</footer>
+      <LinhaDoEstado connection={connection} />
     </main>
   )
 }

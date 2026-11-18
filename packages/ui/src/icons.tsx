@@ -60,7 +60,10 @@ function Riscado({ risco, children }: { risco: string | null; children: React.Re
 export function ChatIcon(props: IconProps): React.JSX.Element {
   return (
     <Svg {...props}>
-      <path d="M20 12a7.5 7.5 0 0 1-7.5 7.5H8l-4 3v-3.6A7.5 7.5 0 0 1 12.5 4.5 7.5 7.5 0 0 1 20 12Z" />
+      {/* A rounded bubble with the tail at the bottom left. The arcs have the
+          radii their end points need: too small, and the browser stretches
+          them past the left edge of the box (test: icons.chat). */}
+      <path d="M20 11.5c0 4.14-3.58 7.5-8 7.5-1.13 0-2.2-.22-3.18-.6L4 20l1.3-3.7A7.2 7.2 0 0 1 4 11.5C4 7.36 7.58 4 12 4s8 3.36 8 7.5Z" />
     </Svg>
   )
 }

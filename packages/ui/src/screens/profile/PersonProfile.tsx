@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react"
+import { LinhaDoEstado } from "../../components/LinhaDoEstado.js"
 import type { ConnectionState, Profile } from "../../bridge.js"
 import type { ChatMessage } from "../../types.js"
 import type { EstadoDaAmizade } from "../../hooks/useAmizade.js"
@@ -9,7 +10,7 @@ import { BotaoCopiarId } from "../../components/BotaoCopiarId.js"
 import { DistintivoDeEmbaixador } from "../../components/DistintivoDeEmbaixador.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { SetaParaTrasIcon } from "../../icons.js"
-import { connectionLabel, formatStamp, nomeEmFalta } from "../../lib/format.js"
+import { formatStamp, nomeEmFalta } from "../../lib/format.js"
 import { strings } from "../../strings.js"
 import { PedidoCard } from "../chat/PedidoCard.js"
 import { ContextMenu, type MenuItem } from "../overlays/ContextMenu.js"
@@ -625,7 +626,7 @@ export function PersonProfile({
         )}
       </div>
 
-      {connection && <footer className="statusbar">{connectionLabel(connection)}</footer>}
+      {connection && <LinhaDoEstado connection={connection} />}
 
       {menuAberto && (
         <ContextMenu

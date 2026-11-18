@@ -188,23 +188,42 @@ describe("a conversa desenha uma janela, e não as linhas todas", () => {
       }
     })
 
+    /*
+      Since 1.3.20 a screen the lines already FILL grows after the frame is
+      painted (the lines it adds are above the view): the growth waits for the
+      next frame and a task. These tests let that pass before they look.
+    */
+    const depoisDosQuadros = async (): Promise<void> => {
+      // Until a frame and a task go by with nothing new drawn.
+      for (let k = 0; k < 8; k++) {
+        const antes = linhas().length
+        await act(async () => {
+          await new Promise<void>((pronto) => requestAnimationFrame(() => setTimeout(pronto, 0)))
+        })
+        if (linhas().length === antes) return
+      }
+    }
+
     for (const [nome, altura] of [
       ["1440p", 1300],
       ["4K", 2050],
     ] as const) {
-      it(`a ${nome}: as linhas desenhadas passam de duas alturas, sem barra nem scroll`, () => {
+      it(`a ${nome}: as linhas desenhadas passam de duas alturas, sem barra nem scroll`, async () => {
         ecra(altura)
         render(<Timeline {...props({ messages: muitas(300) })} />)
+        await depoisDosQuadros()
         expect(linhas().length * ALTURA).toBeGreaterThanOrEqual(2 * altura)
         expect(linhas().at(-1)).toBe("linha 300")
       })
 
-      it(`a ${nome}: preso ao fundo, o que chega não apara e volta a crescer a cada mensagem`, () => {
+      it(`a ${nome}: preso ao fundo, o que chega não apara e volta a crescer a cada mensagem`, async () => {
         ecra(altura)
         const { rerender } = render(<Timeline {...props({ messages: muitas(300) })} />)
+        await depoisDosQuadros()
         const desenhadas: number[] = []
         for (let n = 301; n <= 340; n++) {
           rerender(<Timeline {...props({ messages: muitas(n) })} />)
+          await depoisDosQuadros()
           desenhadas.push(linhas().length)
         }
         expect(linhas().at(-1)).toBe("linha 340")
@@ -213,6 +232,24 @@ describe("a conversa desenha uma janela, e não as linhas todas", () => {
         expect(Math.max(...desenhadas) * ALTURA).toBeLessThan(2 * altura + 2 * 40 * ALTURA)
       })
     }
+
+    it("com o ecrã já cheio, o primeiro quadro tem só a janela, e cresce depois dele (1.3.20)", async () => {
+      // 30 lines of 40 px fill a 1000 px scroller, short of two heights.
+      ecra(1000)
+      render(<Timeline {...props({ messages: muitas(300) })} />)
+      expect(linhas()).toHaveLength(30)
+      expect(linhas().at(-1)).toBe("linha 300")
+      await depoisDosQuadros()
+      expect(linhas().length * ALTURA).toBeGreaterThanOrEqual(2 * 1000)
+      expect(linhas().at(-1)).toBe("linha 300")
+    })
+
+    it("com o ecrã por encher, cresce antes do primeiro quadro: o topo nunca aparece vazio", () => {
+      ecra(1300)
+      render(<Timeline {...props({ messages: muitas(300) })} />)
+      expect(linhas().length * ALTURA).toBeGreaterThan(1300)
+    })
+
 
     it("com poucas linhas num ecrã alto, desenha todas e mostra 'Carregar mais antigas'", () => {
       ecra(2050)

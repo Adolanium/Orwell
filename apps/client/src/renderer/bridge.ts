@@ -73,6 +73,8 @@ interface CanaisDoAnfitriao {
   buzz?: CanaisDaInterface["buzz"]
   members?: CanaisDaInterface["members"]
   history?: CanaisDaInterface["history"]
+  conversaArquivada?: CanaisDaInterface["conversaArquivada"]
+  temConversaArquivada?: CanaisDaInterface["temConversaArquivada"]
   forget?: CanaisDaInterface["forget"]
   leave?: NonNullable<CanaisDaInterface["leave"]>
   safetyNumber?: CanaisDaInterface["safetyNumber"]
@@ -131,6 +133,10 @@ interface CanaisDoAnfitriao {
 }
 
 interface HostApi {
+  /** The colour theme, reported to the main process (`renderer/tema.ts`). Optional: tests and older preloads lack it. */
+  tema?: { definir: (tema: string) => void }
+  /** The app's language, reported to the main process (`renderer/tema.ts`). Optional for the same reason. */
+  lingua?: { definir: (lingua: string) => void }
   vault: {
     status: EnclaveBridge["vault"]["status"]
     create: (passphrase: string | null) => Promise<{ ok: boolean }>
@@ -409,6 +415,8 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
     buzz: pedido("buzz", canais.buzz),
     members: pedido("members", canais.members),
     history: pedido("history", canais.history),
+    conversaArquivada: pedido("conversaArquivada", canais.conversaArquivada),
+    temConversaArquivada: pedido("temConversaArquivada", canais.temConversaArquivada),
     forget: pedido("forget", canais.forget),
     leave: pedido("leave", canais.leave),
     safetyNumber: pedido("safetyNumber", canais.safetyNumber),

@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { LinhaDoEstado } from "../../components/LinhaDoEstado.js"
 import { copiarTexto } from "../../lib/copiar.js"
 import { AnexosDoItem } from "../../components/AnexoAPedido.js"
 import { TextoDeErro } from "../../components/TextoDeErro.js"
@@ -31,7 +32,6 @@ import { compressImage, IMAGE_BUDGETS, resumoDaReducao, type CompressedImage } f
 import { ACEITA_VIDEO, formatarDuracao, lerVideo, validarAntesDeLer } from "../../lib/videos.js"
 import { VideoIcon } from "../../components/VideoDaPublicacao.js"
 import {
-  connectionLabel,
   donationsOf,
   extractTags,
   filterByTag,
@@ -1023,7 +1023,7 @@ export function Social({
         })}
       </div>
 
-      <footer className="statusbar">{connectionLabel(connection)}</footer>
+      <LinhaDoEstado connection={connection} />
 
       {postMenu && (
         <ContextMenu

@@ -28,6 +28,7 @@
 import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import http from "node:http"
+import { contasDeTesteAntigas } from "./servidor-descartavel.mjs"
 import net from "node:net"
 import { tmpdir } from "node:os"
 import { extname, join, normalize } from "node:path"
@@ -204,6 +205,8 @@ if (!(await servidorDePe())) {
   console.error("O homeserver não arrancou:\n" + registoDoServidor.slice(-2000))
   await arrumar(2)
 }
+// The accounts of this disposable server are born 30 days old, so they vote (1.3.17, the 5-day rule).
+contasDeTesteAntigas(join(dados, "enclave.sqlite"))
 
 let passo = 0
 async function retratar(page, nome) {

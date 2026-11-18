@@ -4,6 +4,7 @@ import {
   aparelhosRevogados,
   CODIGO_CURTO_CARACTERES,
   COFRE_BALDE_BYTES,
+  CORTE_DA_1_0,
   DeviceManifestWire,
   fromBase64,
   toBase64,
@@ -383,6 +384,30 @@ export class Store {
     )
   }
 
+  /** When this device key's pairing window opened, in ms, or `null` if it never had one. See `pairing_windows`. */
+  janelaDoAparelho(address: string, deviceKey: string): number | null {
+    const row = this.#db
+      .prepare("SELECT opened_at FROM pairing_windows WHERE address = ? AND device_key = ?")
+      .get(address, deviceKey) as { opened_at: number } | undefined
+    return row ? row.opened_at : null
+  }
+
+  /** How many pairing windows this account opened since `desde` (ms). See `Gateway.JANELAS_POR_DIA`. */
+  janelasDesde(address: string, desde: number): number {
+    const row = this.#db
+      .prepare("SELECT COUNT(*) AS n FROM pairing_windows WHERE address = ? AND opened_at >= ?")
+      .get(address, desde) as { n: number }
+    return Number(row.n)
+  }
+
+  /** Open this device key's pairing window, once: a second call keeps the first time. */
+  abrirJanela(address: string, deviceKey: string, agora: number): number {
+    this.#db
+      .prepare("INSERT OR IGNORE INTO pairing_windows (address, device_key, opened_at) VALUES (?, ?, ?)")
+      .run(address, deviceKey, agora)
+    return this.janelaDoAparelho(address, deviceKey) ?? agora
+  }
+
   // ------------------------------------------------------------------ suspensions
 
   /**
@@ -458,6 +483,26 @@ export class Store {
       )
       .run(address, chave, marca)
     return { geracao: this.posseDoAparelho(address, deviceKey), subiu: true }
+  }
+
+  /**
+   * When this account was first seen, in milliseconds, or `null` for an account
+   * this server never registered (17/11/2026, the attested age that gates votes).
+   *
+   * The earliest record the server has: the account row, or a device added
+   * before it (a row moved between databases). A row with no usable minute takes
+   * the 1.0 cut-off, which is older than any account the product has today.
+   */
+  criadaEmDe(address: string): number | null {
+    const row = this.#db
+      .prepare(
+        `SELECT a.created_minute AS conta, (SELECT MIN(added_minute) FROM devices d WHERE d.address = a.address) AS aparelho
+         FROM accounts a WHERE a.address = ?`,
+      )
+      .get(address) as { conta: number | null; aparelho: number | null } | undefined
+    if (!row) return null
+    const minutos = [row.conta, row.aparelho].filter((m): m is number => typeof m === "number" && m > 0)
+    return minutos.length > 0 ? Math.min(...minutos) * 60_000 : CORTE_DA_1_0
   }
 
   /** The most recent manifest this account published, as it came, or `null`. */
@@ -1021,6 +1066,21 @@ export class Store {
       address: string
     }[]
     return rows.map((row) => row.address)
+  }
+
+  /**
+   * Do these two accounts share a channel on this server (M4, review of 1.3.18)?
+   * Only then does one learn the other's age. A scan by address (the key is
+   * channel first); `account.age.get` has its own per-minute cap.
+   */
+  partilhamCanal(a: string, b: string): boolean {
+    const row = this.#db
+      .prepare(
+        `SELECT 1 AS ok FROM subscriptions s1 JOIN subscriptions s2 ON s2.channel = s1.channel AND s2.address = ?
+         WHERE s1.address = ? LIMIT 1`,
+      )
+      .get(b, a) as { ok: number } | undefined
+    return row !== undefined
   }
 
   /**

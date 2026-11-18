@@ -25,7 +25,7 @@ import {
 } from "./lib/conviteDeArranque.js"
 import type { StartupPairing } from "./lib/emparelhamentoDeArranque.js"
 import { ConviteChegado } from "./screens/overlays/ConviteChegado.js"
-import { CARGO_TODOS, comSoLeitura, eMoradaOpaca, moradaDeSala, parseServerName, soLeituraDe, type AvisoDeSuspensao, type Power } from "@enclave/protocol"
+import { CARGO_TODOS, comSoLeitura, eMoradaOpaca, moradaDeSala, parseServerName, podeVotar as podeVotarPelaIdade, soLeituraDe, type AvisoDeSuspensao, type Power } from "@enclave/protocol"
 import { candidatoDeCargo, candidatoDeSala } from "./lib/etiquetas.js"
 import type { Activity, ChannelRoom, ConnectionState, EnclaveBridge, Profile, StartupFriend } from "./bridge.js"
 import type { ChatMessage, MessageExtras, SocialDraft, Stage, View } from "./types.js"
@@ -70,6 +70,8 @@ import { NOME_POR_OMISSAO, nomeDaSala, useRooms } from "./hooks/useRooms.js"
 import { useSpaceMeta } from "./hooks/useSpaceMeta.js"
 import { countUnreads, useUnreads } from "./hooks/useUnreads.js"
 import { apurar, corpoDaVotacao, fechosDe, semVotacoesDeSalasApagadas, votacaoDe, votosDe, type Apuramento, type Votacao } from "./lib/votacoes.js"
+import { SemVotoContext } from "./components/semVoto.js"
+import { useIdadesDosVotantes } from "./hooks/useIdadesDosVotantes.js"
 import { NovaVotacao } from "./screens/overlays/NovaVotacao.js"
 import { SalaDeVotacoes } from "./screens/chat/SalaDeVotacoes.js"
 import { EscolherSalaDeVotacoes } from "./screens/chat/EscolherSalaDeVotacoes.js"
@@ -298,15 +300,23 @@ export function toChatMessage(channel: string, entry: StoredChatMessage): ChatMe
 /**
  * A channel's reactions in memory, ready for `dobrarReaccoes`.
  *
- * A send of ours that is still in flight has no `seq` and no mark: it goes last,
- * it is the newest thing on screen. One read from the vault keeps its own mark
- * (`apos`). Putting that one last too made an old press win over a later
- * removal, and the chip came back on reload (16/11/2026).
+ * A send of ours has no `seq` (it never comes back with one on this device). One
+ * read from the vault keeps its own mark (`apos`, the highest `seq` seen when it
+ * left). One still in flight gets the same mark here: the highest `seq` of this
+ * channel before it in memory, which is arrival order. It was "last of all", and
+ * with one reaction per person that made this device's old press win over a
+ * switch another device of the account made later.
  */
 export function reaccoesParaDobrar(messages: readonly ChatMessage[], channel: string): ChatMessage[] {
-  return messages
-    .filter((message) => message.channel === channel && message.payload.t === "reaction")
-    .map((message) => (message.seq < 0 && message.apos === undefined ? { ...message, apos: Number.MAX_SAFE_INTEGER } : message))
+  const reaccoes: ChatMessage[] = []
+  let maior = -1
+  for (const message of messages) {
+    if (message.channel !== channel) continue
+    if (message.seq > maior) maior = message.seq
+    if (message.payload.t !== "reaction") continue
+    reaccoes.push(message.seq < 0 && message.apos === undefined ? { ...message, apos: maior } : message)
+  }
+  return reaccoes
 }
 
 /** A poll vote: a `post.reaction` with a numeric `vote` (see `votosDe`). */
@@ -599,6 +609,8 @@ function Shell({
    * to the gate, and the gate says why, with the code. See `handleStatus`.
    */
   const [aparelhoRevogado, setAparelhoRevogado] = useState(false)
+  /** The same refusal, for a device that was never in the manifest: its pairing did not finish (1.3.20). */
+  const [emparelhamentoPorAcabar, setEmparelhamentoPorAcabar] = useState(false)
   /**
    * The same revocation, read instantly. On cold startup the order is: the
    * silent attempt opens the vault, `connect()` gets `device-revoked`, the core
@@ -2367,6 +2379,7 @@ function Shell({
     if (status.code === "device-revoked") {
       aparelhoRevogadoRef.current = true
       setAparelhoRevogado(true)
+      setEmparelhamentoPorAcabar(status.emparelhamentoPorAcabar === true)
       /*
         Removed in Settings › Devices on another device, with the proof the core
         checked (`removido`, 12/11/2026): the account becomes
@@ -3158,6 +3171,7 @@ function Shell({
     aparelhoRevogadoRef.current = false
     aparelhoRemovidoRef.current = false
     setAparelhoRevogado(false)
+    setEmparelhamentoPorAcabar(false)
     contaSuspensaRef.current = false
     setAvisoDeSuspensao(null)
     void bridge.vault
@@ -3498,7 +3512,9 @@ function Shell({
         semeados.current.add(channel)
         if (entries.length === 0) continue
         hadStored.add(channel)
-        older.set(channel, entries.length > MEMORY_PER_CHANNEL)
+        // Past the vault, the archived conversation (17/11/2026) also counts as older.
+        const arquivada = entries.length > MEMORY_PER_CHANNEL || (await bridge.channels.temConversaArquivada?.(channel).catch(() => false)) === true
+        older.set(channel, arquivada)
         for (const entry of entries.slice(-MEMORY_PER_CHANNEL)) seeded.push(toChatMessage(channel, entry))
       } catch {
         // A channel whose history cannot be read simply starts empty.
@@ -3721,21 +3737,90 @@ function Shell({
     void seedStored(channels)
   }, [stage, channels, seedStored])
 
-  /** Page older stored messages into state, newest missing slice first. */
+  /**
+   * Where the archived conversation of each channel was left (17/11/2026): absent,
+   * not started; a number, the next page; `null`, its end. See `conversaArquivada`.
+   */
+  const cursorDoArquivo = useRef(new Map<string, number | null>())
+  /** Channels whose "load older" reached the start of what this device holds: the timeline says so. */
+  const [inicioDoAparelho, setInicioDoAparelho] = useState<ReadonlySet<string>>(() => new Set())
+
+  /*
+    The archive grows while the app is open (17/11/2026): a long catch-up pushes
+    past the vault cap what arrives, and the channel was seeded before that, with
+    nothing older. Asked again every fifty server events of the open channel (the
+    newest `seq`: the count in memory stops at its own cap), never after "load
+    older" reached its start.
+  */
+  const lotesDoActivo = useMemo(
+    () => (active ? Math.floor(messages.reduce((maior, message) => (message.channel === active && message.seq > maior ? message.seq : maior), 0) / 50) : 0),
+    [active, messages],
+  )
+  useEffect(() => {
+    if (!active || cursorDoArquivo.current.get(active) === null || olderAvailable.get(active) === true) return
+    const canal = active
+    void bridge.channels
+      .temConversaArquivada?.(canal)
+      .then((tem) => {
+        if (tem && cursorDoArquivo.current.get(canal) !== null) setOlderAvailable((current) => new Map(current).set(canal, true))
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `olderAvailable` is read, not a trigger
+  }, [active, lotesDoActivo, bridge])
+
+  /**
+   * Page older stored messages into state, newest missing slice first: the
+   * vault, then the conversation archived past it, page by page. Never a silent
+   * stop: the end says it is the end, and a page that does not open says so.
+   */
   const loadOlder = useCallback(
     (channel: string) => {
+      const known = (): Set<string> => new Set(messagesRef.current.filter((message) => message.channel === channel).map(keyOf))
+      const acrescentar = (page: ChatMessage[]): void => {
+        if (page.length > 0) setMessages((current) => [...page, ...current])
+      }
+      const doArquivo = async (): Promise<void> => {
+        const ler = bridge.channels.conversaArquivada
+        const cursor = cursorDoArquivo.current.get(channel)
+        if (!ler || cursor === null) {
+          setOlderAvailable((current) => new Map(current).set(channel, false))
+          setInicioDoAparelho((actual) => new Set(actual).add(channel))
+          return
+        }
+        try {
+          const { entradas, seguinte, falhou } = await ler(channel, cursor)
+          cursorDoArquivo.current.set(channel, seguinte)
+          // A page that does not open: say it; the cursor already goes past it.
+          if (falhou) pushToast(traduzirErro(new Error("conversation archive page is missing")), "error")
+          const vistas = known()
+          acrescentar(entradas.map((entry) => toChatMessage(channel, entry)).filter((message) => !vistas.has(keyOf(message))))
+          setOlderAvailable((current) => new Map(current).set(channel, seguinte !== null))
+          if (seguinte === null) setInicioDoAparelho((actual) => new Set(actual).add(channel))
+        } catch (error) {
+          // A page that does not open: say it, and the next tap goes past it.
+          if (typeof cursor === "number") cursorDoArquivo.current.set(channel, cursor > 0 ? cursor - 1 : null)
+          pushToast(traduzirErro(error as Error), "error")
+        }
+      }
       void bridge.channels
         .history(channel)
         .then((entries) => {
-          const known = new Set(
-            messagesRef.current.filter((message) => message.channel === channel).map(keyOf),
-          )
+          const vistas = known()
           const missing = entries
             .map((entry) => toChatMessage(channel, entry))
-            .filter((message) => !known.has(keyOf(message)))
+            .filter((message) => !vistas.has(keyOf(message)))
           const page = missing.slice(-HISTORY_PAGE)
-          setOlderAvailable((current) => new Map(current).set(channel, missing.length > page.length))
-          if (page.length > 0) setMessages((current) => [...page, ...current])
+          if (page.length === 0) return doArquivo()
+          acrescentar(page)
+          // The vault is exhausted with this page: the archive decides what comes next.
+          if (missing.length > page.length) {
+            setOlderAvailable((current) => new Map(current).set(channel, true))
+            return
+          }
+          return bridge.channels.temConversaArquivada?.(channel).then((tem) => {
+            setOlderAvailable((current) => new Map(current).set(channel, tem))
+            if (!tem) setInicioDoAparelho((actual) => new Set(actual).add(channel))
+          })
         })
         .catch((error: Error) => pushToast(traduzirErro(error), "error"))
     },
@@ -4084,6 +4169,33 @@ function Shell({
     [active, trazerTudoDoCofre, pushToast],
   )
 
+  /** The 5-day rule: the signed ages of the open channel's voters. See `useIdadesDosVotantes`. */
+  const { idades, regraDaIdade } = useIdadesDosVotantes({
+    ler: bridge.votacoes?.idadeDaConta,
+    active,
+    address,
+    messages,
+    connection,
+  })
+  const podeContarVoto = useMemo(
+    () =>
+      !bridge.votacoes?.idadeDaConta || regraDaIdade === false
+        ? undefined
+        : (quem: string, at: number): boolean => {
+            const criadaEm = idades.get(quem)
+            // A vote stamped in the future waits for its time: otherwise a new account
+            // could date its vote 5 days ahead and count today.
+            return criadaEm !== undefined && podeVotarPelaIdade(criadaEm, at) && at <= Date.now() + 60_000
+          },
+    [bridge, regraDaIdade, idades],
+  )
+  /** This account, younger than 5 days: the options are off, with the reason. */
+  const semVoto = useMemo(() => {
+    if (!podeContarVoto || !address || regraDaIdade !== true) return null
+    const minha = idades.get(address)
+    return minha === undefined || podeVotarPelaIdade(minha, Date.now()) ? null : strings.votacao.semVotoContaNova
+  }, [podeContarVoto, address, regraDaIdade, idades])
+
   /**
    * Where "Polls" in the channel menu leads (the fixed sidebar row is gone, 17/11/2026).
    *
@@ -4126,9 +4238,10 @@ function Shell({
             existentes: salasExistentes,
             salas: [{ room: activeRoom, name: salaAberta.name, fechada: false }],
             modera: (quem) => bridge.channels.mayModerate?.(active, quem) ?? false,
+            ...(podeContarVoto ? { podeContar: podeContarVoto } : {}),
           })
         : [],
-    [active, salaAberta, messages, salasApagadas, address, salasExistentes, activeRoom, bridge],
+    [active, salaAberta, messages, salasApagadas, address, salasExistentes, activeRoom, bridge, podeContarVoto],
   )
   /** Open the polls of a channel: from the always-visible row in the sidebar and from the channel menu. */
   const abrirVotacoes = (channel: string): void => {
@@ -4255,7 +4368,7 @@ function Shell({
     if (!active) return new Map<string, Apuramento>()
     const doCanal = messages.filter((message) => message.channel === active)
     const fechos = fechosDe(doCanal, (quem) => bridge.channels.mayModerate?.(active, quem) ?? false)
-    const escolhas = votosDe(doCanal, fechos)
+    const escolhas = votosDe(doCanal, fechos, podeContarVoto)
     const porVotacao = new Map<string, Apuramento>()
     for (const message of doCanal) {
       const votacao = votacaoDe(message.payload)
@@ -4264,7 +4377,7 @@ function Shell({
       porVotacao.set(id, apurar(escolhas.get(id), votacao.options.length, address, fechos.get(id) ?? null))
     }
     return porVotacao
-  }, [messages, active, address, bridge])
+  }, [messages, active, address, bridge, podeContarVoto])
 
   /**
    * The reaction chips of the open channel, by the id of the message.
@@ -6239,7 +6352,7 @@ function Shell({
    *
    * **Only rooms this account sees.** The text rooms of the visible groups (the
    * same filter as the sidebar, `quemVe`) and the default room. A room outside
-   * that list is never suggested, and its chip reads "private room": the name
+   * that list is never suggested, and its chip reads `#sala-sem-acesso`: the name
    * stays with those who see it. Voice and AFK rooms stay out: opening them is
    * joining a call, not reading.
    *
@@ -7179,7 +7292,7 @@ function Shell({
     // One line, and discreet: the gate remains the gate. It only says that the
     // link was read and that it was not lost because there was still no open account.
     const avisoDoConvite = aparelhoRevogado
-      ? translateError("device-revoked")
+      ? translateError(emparelhamentoPorAcabar ? "pairing-unfinished" : "device-revoked")
       : conviteInvalido
         ? strings.invite.gateInvalid
         : conviteAEspera || conviteCurtoAEspera
@@ -7485,6 +7598,7 @@ function Shell({
       }}
       hasStoredHistory={active !== null && seededChannels.has(active)}
       canLoadOlder={active !== null && olderAvailable.get(active) === true}
+      inicioDoAparelho={active !== null && inicioDoAparelho.has(active)}
       onLoadOlder={() => active && loadOlder(active)}
       labelFor={labelFor}
       iconFor={iconFor}
@@ -8036,7 +8150,8 @@ function Shell({
               onVoltar={() => setEscolhaDeVotacoes(null)}
             />
           ) : (
-            (ecraDasVotacoes ?? ecraDosTickets ?? ecraDaConversa)
+            /* The 5-day rule reaches the poll cards of the conversation and of the polls room. */
+            <SemVotoContext.Provider value={semVoto}>{ecraDasVotacoes ?? ecraDosTickets ?? ecraDaConversa}</SemVotoContext.Provider>
           )
         ) : (
           <Social

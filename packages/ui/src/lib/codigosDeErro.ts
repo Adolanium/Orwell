@@ -23,6 +23,7 @@
  *   5xx  files and images
  *   6xx  friends, feed and profile
  *   7xx  devices and pairing
+ *   8xx  updates of the desktop app (1.3.20)
  *   900  any error not in this table
  *
  * A code is never reused. When an error ships, the number is free and stays
@@ -322,6 +323,7 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "media store is full": 520,
   "media store failed": 521,
   "media blob is damaged": 522,
+  "conversation archive page is missing": 523,
 
   "a friend request is already pending": 601,
   "that person is blocked": 602,
@@ -358,6 +360,9 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "the server refused the device list": 716,
   "this account already has four devices": 717,
   "this device is not on the account's list": 718,
+  // The `status` "device-revoked" with `emparelhamentoPorAcabar` (1.3.20): the server
+  // never had this device in the manifest (N-01). Key matches the code style of "device-revoked".
+  "pairing-unfinished": 719,
   // 720-739: account state across devices (agent A, `session.ts`).
   "read mark channel is invalid": 720,
   "read mark time is invalid": 721,
@@ -394,6 +399,9 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "this server does not send notifications when the app is closed": 790,
   "the browser refused the notification subscription": 791,
   "the server refused the notification subscription": 792,
+  // "Install updates" in Settings (Windows, `InstalarActualizacoes.tsx`): the
+  // choice did not reach `userData` (disk full, folder without permissions).
+  "could not save the update choice": 801,
 }
 
 /**

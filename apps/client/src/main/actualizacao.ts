@@ -133,6 +133,10 @@ export const CANAIS_DE_ACTUALIZACAO = {
   /** The outcome of startup auto-update (Windows). See
    *  `actualizacao-windows.ts`. */
   diagnostico: "actualizacao:diagnostico",
+  /** "Install updates: ask first / automatically" (Windows, 1.3.20). See
+   *  `actualizacao-windows.ts`. */
+  modo: "actualizacao:modo",
+  definirModo: "actualizacao:definir-modo",
 } as const
 
 /** Where the interface sends whoever wants to update. Constant, for the same

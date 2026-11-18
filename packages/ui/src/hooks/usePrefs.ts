@@ -3,6 +3,7 @@ import type { Activity } from "../bridge.js"
 import { ATALHOS_POR_OMISSAO, lerMapaDeAtalhos, type MapaDeAtalhos } from "../lib/atalhosDeVoz.js"
 import { alternarSilencio, lerSilenciados } from "../lib/silenciados.js"
 import { temAnfitriaoDeAvisos } from "../lib/notifications.js"
+import { PREFS_KEY, TEMA_POR_OMISSAO, temaValido, type Tema } from "../tema-cedo.js"
 
 /**
  * Appearance preferences, persisted locally.
@@ -16,7 +17,7 @@ import { temAnfitriaoDeAvisos } from "../lib/notifications.js"
  * See `lib/preferenciasDaConta.ts`, which also documents what stays here only.
  */
 
-export const PREFS_KEY = "enclave.prefs"
+export { PREFS_KEY }
 
 /**
  * Tells the page that preferences changed in this same tab.
@@ -51,12 +52,18 @@ export const ACCENTS = [
 
 export type Density = "confortavel" | "compacta"
 
+// The theme type and its tolerant read live in `tema-cedo.ts`, which imports
+// nothing so the web can run it before the first frame. See `Tema` there.
+export { aplicarTemaCedo, TEMAS, type Tema } from "../tema-cedo.js"
+
 export interface Prefs {
   /** The activity chosen for this device. Read before the first connect, so
    * an invisible account never flashes online on reload. */
   activity: Activity
   accent: number
   density: Density
+  /** The colour theme of this device. See `Tema`. */
+  tema: Tema
   /**
    * System alerts. ON by default (the requirement:
    * "notifications on by default at 100 percent"). On the browser they only
@@ -173,6 +180,18 @@ export interface Prefs {
    * from anywhere else.
    */
   emojiRecents: string[]
+  /**
+   * How often each emoji was used, for "Frequently used" and the quick
+   * reactions. See `lib/emojiFrequentes.ts`. Same privacy as the recents.
+   */
+  emojiUsos: { e: string; n: number; t: number }[]
+  /** The skin tone the picker draws: 0 is the default yellow, 1 light to 5 dark. */
+  tomDePele: number
+  /**
+   * The three quick reactions the person pinned in Settings, slot by slot.
+   * An empty string is an empty slot: it shows the next most used emoji.
+   */
+  reaccoesRapidas: string[]
   /** The keyboard shortcuts for voice commands. See `lib/atalhosDeVoz.ts`. */
   atalhosDeVoz: MapaDeAtalhos
   /**
@@ -337,6 +356,7 @@ export const DEFAULT_PREFS: Prefs = {
    * changing the default never touches anyone who already picked a colour,    * only fresh installs. */
   accent: 4,
   density: "confortavel",
+  tema: TEMA_POR_OMISSAO,
   notifications: true,
   avisosDaAppRevistos: false,
   notifyPreview: true,
@@ -377,6 +397,9 @@ export const DEFAULT_PREFS: Prefs = {
   inputDeviceId: "",
   inputGain: 1,
   emojiRecents: [],
+  emojiUsos: [],
+  tomDePele: 0,
+  reaccoesRapidas: ["", "", ""],
   atalhosDeVoz: ATALHOS_POR_OMISSAO,
   frasesVistas: [],
   volumeDaEmissao: 1,
@@ -410,11 +433,39 @@ export const DEFAULT_PREFS: Prefs = {
  * and does not enter-the list is read into `aria-label`s and buttons, and an
  * absurd value there is an absurd button.
  */
+/** Text short enough to be one emoji: the protocol's own cap for a reaction. */
+function emojiCredivel(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 32 && !/\s/.test(value)
+}
+
+/** The use counts, from any registry. Junk does not enter; the cap is `lib/emojiFrequentes.ts`'s. */
+function readEmojiUsos(value: unknown): Prefs["emojiUsos"] {
+  if (!Array.isArray(value)) return []
+  const vistos = new Set<string>()
+  const usos: Prefs["emojiUsos"] = []
+  for (const entry of value) {
+    const { e, n, t } = (entry ?? {}) as { e?: unknown; n?: unknown; t?: unknown }
+    if (!emojiCredivel(e) || vistos.has(e)) continue
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 1) continue
+    if (typeof t !== "number" || !Number.isFinite(t) || t < 0) continue
+    vistos.add(e)
+    usos.push({ e, n, t })
+    if (usos.length >= 48) break
+  }
+  return usos
+}
+
+/** The three pinned quick reactions. Anything else in a slot reads as an empty slot. */
+function readReaccoesRapidas(value: unknown): string[] {
+  const lista = Array.isArray(value) ? value : []
+  return [0, 1, 2].map((i) => (emojiCredivel(lista[i]) ? (lista[i] as string) : ""))
+}
+
 function readEmojiRecents(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   const seen = new Set<string>()
   for (const entry of value) {
-    if (typeof entry !== "string" || entry.length === 0 || entry.length > 16) continue
+    if (!emojiCredivel(entry)) continue
     seen.add(entry)
     if (seen.size >= EMOJI_RECENTS_MAX) break
   }
@@ -495,6 +546,7 @@ export function readPrefs(storage: Pick<Storage, "getItem"> = localStorage): Pre
       activity,
       accent,
       density,
+      tema: temaValido(parsed?.tema),
       // On by factory default; on the desktop app, on once after review
       // (see `avisosDaAppRevistos`). After that, only an explicit `false` turns them off.
       notifications:
@@ -543,6 +595,12 @@ export function readPrefs(storage: Pick<Storage, "getItem"> = localStorage): Pre
           ? parsed.inputGain
           : 1,
       emojiRecents: readEmojiRecents(parsed?.emojiRecents),
+      emojiUsos: readEmojiUsos(parsed?.emojiUsos),
+      tomDePele:
+        typeof parsed?.tomDePele === "number" && Number.isInteger(parsed.tomDePele) && parsed.tomDePele >= 0 && parsed.tomDePele <= 5
+          ? parsed.tomDePele
+          : 0,
+      reaccoesRapidas: readReaccoesRapidas(parsed?.reaccoesRapidas),
       atalhosDeVoz: lerMapaDeAtalhos(parsed?.atalhosDeVoz),
       frasesVistas: lerFrasesVistas(parsed?.frasesVistas),
       // Outside 0-1 defaults to 1: the music comes out as played. A value read from
@@ -658,10 +716,11 @@ export function writePrefs(prefs: Prefs, storage: Pick<Storage, "setItem"> = loc
  * screen. The argument stays the whole object so the caller does not change.
  */
 export function applyPrefs(prefs: Prefs): void {
-  const origem = ACCENTS[DEFAULT_PREFS.accent] ?? ACCENTS[0]
-  document.documentElement.style.setProperty("--acento", origem.accent)
-  document.documentElement.style.setProperty("--accent", origem.accent)
-  document.documentElement.style.setProperty("--accent-deep", origem.deep)
+  // The brand colours live in `tokens.css`, per theme. Until 1.4 this wrote the
+  // cyan accent inline on the root, which would beat the light theme block:
+  // clear it, for a page that still carries it from before.
+  for (const nome of ["--acento", "--accent", "--accent-deep"]) document.documentElement.style.removeProperty(nome)
+  document.documentElement.dataset.theme = prefs.tema
   document.documentElement.dataset.density = DEFAULT_PREFS.density
   // The mirror of the camera itself is CSS (`[data-espelho]` in `screens.css`):
   // only the screen of the person viewing themselves changes, and the video that
@@ -685,6 +744,9 @@ export type PreferenciaDaFase4 =
   | "mostrarOnline"
   | "overlayDeJogoLigada"
   | "opacidadeDaOverlay"
+  | "reaccoesRapidas"
+  | "tomDePele"
+  | "tema"
 
 export function usePrefs(): {
   prefs: Prefs
@@ -1007,33 +1069,3 @@ export function useApresentacao(
   return { visivel: elegivel && channel !== null && !vistos.has(channel), dispensar }
 }
 
-/**
- * Recently used emojis, for the picker.
- *
- * Has its own hook instead of going into `usePrefs` because the message box at
- * the bottom of the chat screen needs this, and threading the preference down
- * hand by hand would mean crossing components that have nothing to do with emojis.
- *
- * Write merges over what is ON DISK, never over this hook's snapshot. Same reason
- * as `choose` above: settings are open somewhere else at the same time, and
- * writing the old snapshot over would erase a choice someone just made.
- *
- * Write happens OUTSIDE the updater, unlike `choose`. Picking an emoji closes the
- * picker in the same batch of updates, and an updater from a component that
- * unmounts may never run. With write inside, the just-picked emoji would not show
- * in recents next time. Here disk is written now; `setRecents` only affects what
- * stays on screen.
- */
-export function useEmojiRecents(): { recents: string[]; remember: (char: string) => void } {
-  const [recents, setRecents] = useState<string[]>(() => readPrefs().emojiRecents)
-
-  const remember = useCallback((char: string) => {
-    const disk = readPrefs()
-    // Reusing an emoji promotes it instead of duplicating it.
-    const next = [char, ...disk.emojiRecents.filter((entry) => entry !== char)].slice(0, EMOJI_RECENTS_MAX)
-    writePrefs({ ...disk, emojiRecents: next })
-    setRecents(next)
-  }, [])
-
-  return { recents, remember }
-}

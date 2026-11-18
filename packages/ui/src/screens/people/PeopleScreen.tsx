@@ -1,4 +1,5 @@
 import { useContext, useMemo, useState } from "react"
+import { LinhaDoEstado } from "../../components/LinhaDoEstado.js"
 import { copiarTexto } from "../../lib/copiar.js"
 import type { ConnectionState, Profile } from "../../bridge.js"
 import { Andante } from "../../components/Andante.js"
@@ -13,7 +14,7 @@ import { QrCode } from "../../components/QrCode.js"
 import { useToast } from "../../components/Toast.js"
 import { useToqueLongo } from "../../hooks/useToqueLongo.js"
 import type { FriendTie } from "@enclave/protocol"
-import { connectionLabel, formatRelative, formatStamp, nomeEmFalta, serverOf } from "../../lib/format.js"
+import { formatRelative, formatStamp, nomeEmFalta, serverOf } from "../../lib/format.js"
 import { enderecoColado } from "../../lib/friendship.js"
 import { ligacaoCurtaDeAmigo } from "../../lib/ligacaoDeAmigo.js"
 import type { PeopleTab } from "./FriendsBar.js"
@@ -416,7 +417,7 @@ export function PeopleScreen({
         )}
       </div>
 
-      <footer className="statusbar">{connectionLabel(connection)}</footer>
+      <LinhaDoEstado connection={connection} />
     </main>
   )
 }

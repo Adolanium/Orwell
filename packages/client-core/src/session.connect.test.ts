@@ -393,6 +393,33 @@ describe("connect, on an account that has been used", () => {
  * the screen of whoever invited them, with nothing on their side that sends it
  * back.
  */
+describe("o erro fatal do servidor no login", () => {
+  /*
+   * `login-timeout` (1.3.19): the server closes a socket that did not log in
+   * within 30 s. A tab or a phone frozen mid-handshake reads it on waking and
+   * then connects fine, so it goes to the log, not to a toast ("Erro 212").
+   * Every other fatal error still interrupts (final review of 1.3.19, M1).
+   */
+  for (const [code, rota] of [["login-timeout", "log"], ["address-taken", "toast"]] as const) {
+    it(`${code} vai para ${rota === "log" ? "o registo" : "o aviso"}`, async () => {
+      const { session } = await loadedSession()
+      FakeSocket.reply = (frame) => {
+        if (frame.t === "auth.begin") return [{ t: "error", code, message: "closed", fatal: true }]
+        return baseReply(frame)
+      }
+      const statuses: { code?: string; detail?: string; route?: string }[] = []
+      session.on("status", (event) => statuses.push(event))
+      // Not awaited: a refused login retries with backoff, and the status is what is measured.
+      void session.connect().catch(() => {})
+      const achar = () => statuses.find((status) => status.code === "server-error" && status.detail?.startsWith(code))
+      for (let i = 0; i < 100 && !achar(); i++) await new Promise((pronto) => setTimeout(pronto, 10))
+      const erro = achar()
+      session.disconnect()
+      expect(erro?.route).toBe(rota)
+    })
+  }
+})
+
 describe("a posse do aparelho no login", () => {
   /*
     An imported vault is a copy of the device that exported it. Login claims

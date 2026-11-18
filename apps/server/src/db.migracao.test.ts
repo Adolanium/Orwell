@@ -330,3 +330,33 @@ describe("a coluna channel_activity.seq_floor numa base da 1.3.7", () => {
     openDatabase(caminho).close()
   })
 })
+
+/**
+ * The `subscriptions_by_address` index (M5 of the 1.3.20 review). The table has the
+ * key `(channel, address)`, and `partilhamCanal` looks up an account's channels: a
+ * full scan per voter without this index. A database from before gets it on open,
+ * with its rows, and the query plan uses it.
+ */
+describe("o índice subscriptions_by_address numa base de antes", () => {
+  it("aparece ao abrir, as linhas ficam, e partilhamCanal usa-o", () => {
+    const antiga = new DatabaseSync(caminho)
+    antiga.exec("CREATE TABLE IF NOT EXISTS subscriptions (channel TEXT NOT NULL, address TEXT NOT NULL, PRIMARY KEY (channel, address))")
+    antiga.exec("INSERT INTO subscriptions (channel, address) VALUES ('!sala:localhost', '@ana:localhost'), ('!sala:localhost', '@rui:localhost')")
+    antiga.close()
+
+    const db = openDatabase(caminho)
+    const indices = (db.prepare("PRAGMA index_list(subscriptions)").all() as { name: string }[]).map((i) => i.name)
+    expect(indices).toContain("subscriptions_by_address")
+    expect(new Store(db).partilhamCanal("@ana:localhost", "@rui:localhost")).toBe(true)
+    const plano = (
+      db
+        .prepare(
+          `EXPLAIN QUERY PLAN SELECT 1 AS ok FROM subscriptions s1 JOIN subscriptions s2 ON s2.channel = s1.channel AND s2.address = ? WHERE s1.address = ? LIMIT 1`,
+        )
+        .all("@rui:localhost", "@ana:localhost") as { detail: string }[]
+    ).map((linha) => linha.detail)
+    expect(plano.some((detalhe) => detalhe.includes("subscriptions_by_address"))).toBe(true)
+    db.close()
+    openDatabase(caminho).close()
+  })
+})

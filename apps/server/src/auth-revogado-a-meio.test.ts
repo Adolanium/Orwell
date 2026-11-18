@@ -13,6 +13,7 @@ import {
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { sha256 } from "@noble/hashes/sha2.js"
 import { WebSocket } from "ws"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { buildServer, type Enclave } from "./app.js"
@@ -247,13 +248,35 @@ describe("aparelho revogado entre auth.begin e auth.finish (ORW-134-01)", () => 
     a.client.close()
   })
 
+  it("revogado a meio, um auth.finish com assumirPosse não sobe a geração de posse (M3)", async () => {
+    const { computador, telemovel } = conta()
+    const a = await entrar(computador)
+    expect((await publicar(a.client, manifesto(computador, 1, [computador, telemovel]))).ok).toBe(true)
+    const b = await pedirDesafio(telemovel)
+    expect(
+      enclave.store.putDeviceManifest(manifesto(computador, 2, [computador]), [toBase64(telemovel.deviceSigningPublicKey)]).ok,
+    ).toBe(true)
+    const antes = enclave.store.posseDoAparelho(computador.address, telemovel.deviceSigningPublicKey)
+    b.client.send({
+      t: "auth.finish",
+      signature: toBase64(signWithDevice(telemovel, fromBase64(b.nonce))),
+      assumirPosse: "marca-de-uma-importacao",
+    })
+    expect(await b.client.next()).toMatchObject({ t: "error", code: "device-revoked" })
+    // The revoked device wrote nothing on its way out.
+    expect(enclave.store.posseDoAparelho(computador.address, telemovel.deviceSigningPublicKey)).toBe(antes)
+    a.client.close()
+  })
+
   it("um aparelho ainda fora do manifesto acaba o login através de uma publicação que não o revoga", async () => {
     const { computador, telemovel, novo } = conta()
     const a = await entrar(computador)
     expect(a.resposta.t).toBe("auth.ok")
     expect((await publicar(a.client, manifesto(computador, 1, [computador, telemovel]))).ok).toBe(true)
 
-    // The device being paired is in no manifest yet.
+    // The device being paired is in no manifest yet, and the computer has its pairing box open (N-01).
+    a.client.send({ t: "pair.open", pairId: toBase64(sha256(crypto.getRandomValues(new Uint8Array(32)))).slice(0, 22) })
+    await a.client.nextOf("pair.opened")
     const c = await pedirDesafio(novo)
     expect((await publicar(a.client, manifesto(computador, 2, [computador]), [telemovel])).ok).toBe(true)
     await c.client.sync()

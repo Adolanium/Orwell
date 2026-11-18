@@ -162,7 +162,10 @@ export async function criarCanal(page, nome) {
   await page.getByRole("button", { name: "Criar canal" }).first().click()
   await page.locator("form.prompt input").first().fill(nome)
   await page.locator("form.prompt button.primary").first().click()
-  await page.getByRole("heading", { name: nome }).waitFor({ timeout: 30_000 })
+  // Since 1.3.20 the top bar's heading is the room ("geral"), and the channel's
+  // name sits beside it (`.topbar-comunidade`); before, the heading was the channel.
+  const exacto = new RegExp(`^${nome.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`)
+  await page.locator("h1, .topbar-comunidade").filter({ hasText: exacto }).first().waitFor({ timeout: 30_000 })
 }
 
 export async function abrirCanal(page, nome) {

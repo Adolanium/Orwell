@@ -41,6 +41,41 @@
  * main window exists. That's what guarantees it never updates mid-call: there's
  * no session, no vault open, no call.
  *
+ * ## Public, and not at once (1.3.20)
+ *
+ * The signature proves the manifest came from our key. It cannot prove the
+ * key was not stolen, or used under pressure, by someone who also holds the
+ * GitHub account. Two more checks make sure that even then an update can be
+ * neither secret nor immediate:
+ *
+ *  6. transparency: the very bytes of the signed manifest must be the asset
+ *     `actualizacao-windows.json` of the GitHub release `v<version>` of the
+ *     public repository, downloaded from `github.com` (and GitHub's own
+ *     redirect to its asset host), never from orwell.pt. Compared as raw bytes
+ *     (SHA-256). Only the asset: no API, no `published_at`;
+ *  7. a wait counted on THIS device: from the first time this device saw this
+ *     manifest (these bytes) published there (`actualizacao-vista.json` in
+ *     `userData`: version, hash, when). 72 hours, 24 for a manifest signed
+ *     `urgente`, never less. A release's own date proves nothing: a repository
+ *     kept private and opened at the last minute still shows an old date (the
+ *     review of 18/11/2026, C2, option A). Before
+ *     installing, the asset is fetched again and must still be the same.
+ *
+ * A different hash, an asset gone, or a clock that went back before the
+ * recorded moment: the wait starts again. GitHub unreachable: the app starts
+ * the version it has, and the record stays. The time is the device's own clock:
+ * whoever moves their own clock only fools themselves.
+ *
+ * ## Ask first, or install by itself (1.3.20)
+ *
+ * The person chooses, in Settings, per device: "Ask first" (the default) or
+ * "Automatically". Asking comes AFTER every check above that needs no
+ * download (manifest, signature, a greater version): a fake or old manifest
+ * never reaches the question. "Later" starts the version installed and
+ * downloads nothing; the new version notice on login stays as it is.
+ * "Install" is the path below, unchanged. The choice is kept in `userData`
+ * (`actualizacoes.json`), because it is read here, before any window.
+ *
  * ## All-users install (Program Files)
  *
  * Today's installer always installs per-user (`recursos/installer.nsh`).
@@ -56,7 +91,7 @@
  */
 import type { spawn } from "node:child_process"
 import { createHash, createPublicKey, verify, type KeyObject } from "node:crypto"
-import { createWriteStream } from "node:fs"
+import { createReadStream, createWriteStream } from "node:fs"
 import { mkdir, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { maisRecente } from "./actualizacao.js"
@@ -80,10 +115,25 @@ const PASTA_DAS_DESCARGAS = "https://orwell.pt/transferencias/"
  *  the same; the test that signs with one and verifies with the other proves it. */
 export const PREFIXO_DA_ASSINATURA = "orwell-actualizacao-windows-v1"
 
+/** The public repository whose releases make an update public. A constant:
+ *  the manifest cannot point the check somewhere else. Its name never changes
+ *  (a renamed account or repository frees the name for anyone to take). */
+export const REPOSITORIO_PUBLICO = "magnuslab-sudo/Orwell"
+/** The manifest as published in that release. Built here, from the version only. */
+export const NOME_DO_MANIFESTO_NA_RELEASE = "actualizacao-windows.json"
+export const enderecoDoManifestoNaRelease = (versao: string): string =>
+  `https://github.com/${REPOSITORIO_PUBLICO}/releases/download/v${versao}/${NOME_DO_MANIFESTO_NA_RELEASE}`
+/** How long this device must have seen the manifest public before it installs, in hours. */
+export const ESPERA_HORAS = 72
+/** The floor for a signed `urgente` manifest. Never less. */
+export const ESPERA_URGENTE_HORAS = 24
+
 /** The timeouts. The check is short because whoever opens the app is waiting;
  *  download only starts if there's a new version, and then what matters is it doesn't stop. */
 export interface Prazos {
   verificacaoMs: number
+  /** The manifest from GitHub. */
+  transparenciaMs: number
   semDadosMs: number
   descargaMs: number
 }
@@ -91,6 +141,7 @@ export interface Prazos {
 export const PRAZOS: Readonly<Prazos> = {
   /** The entire manifest, from the request to the last byte. */
   verificacaoMs: 8_000,
+  transparenciaMs: 8_000,
   /** No new byte during this window: the download gives up. */
   semDadosMs: 30_000,
   /** The cap on the entire download. A ~100 MB installer over a slow connection fits;
@@ -119,6 +170,8 @@ export interface ManifestoWindows {
   bytes: number
   sha512: string
   assinatura: string
+  /** Signed: a fix that may install after 24 hours instead of 72. */
+  urgente?: true
 }
 
 /**
@@ -142,10 +195,23 @@ export type CodigoDaActualizacao =
   | "instalador-falhou"
   | "arranque-falhou"
   | "a-instalar"
+  /** "Ask first", and the person said "Later": nothing was downloaded. */
+  | "adiada"
+  /** GitHub could not be reached: no install, the record stays. */
+  | "transparencia-inacessivel"
+  /** No manifest in a release of this version on GitHub: no install, the wait starts again. */
+  | "transparencia-em-falta"
+  /** GitHub's manifest is not the one orwell.pt served (or too big): no install, the wait starts again. */
+  | "transparencia-diferente"
+  /** Seen public, but not yet for 72 hours (24 if urgent) on this device. */
+  | "em-espera"
 
 /** The message being signed. See `mensagemDaActualizacaoWindows` in the script. */
-export function mensagemDaActualizacao(m: Pick<ManifestoWindows, "versao" | "ficheiro" | "bytes" | "sha512">): string {
-  return [PREFIXO_DA_ASSINATURA, `versao=${m.versao}`, `ficheiro=${m.ficheiro}`, `bytes=${m.bytes}`, `sha512=${m.sha512}`].join("\n")
+export function mensagemDaActualizacao(m: Pick<ManifestoWindows, "versao" | "ficheiro" | "bytes" | "sha512" | "urgente">): string {
+  const linhas = [PREFIXO_DA_ASSINATURA, `versao=${m.versao}`, `ficheiro=${m.ficheiro}`, `bytes=${m.bytes}`, `sha512=${m.sha512}`]
+  // Only when set, so every manifest signed before 1.3.20 keeps its message.
+  if (m.urgente) linhas.push("urgente=1")
+  return linhas.join("\n")
 }
 
 /** The manifest, validated field by field, or `null`. Nothing passes here without the
@@ -159,7 +225,15 @@ export function lerManifestoWindows(cru: unknown): ManifestoWindows | null {
     return null
   if (typeof d.sha512 !== "string" || !SHA512.test(d.sha512)) return null
   if (typeof d.assinatura !== "string" || !ASSINATURA.test(d.assinatura)) return null
-  return { versao: d.versao, ficheiro: d.ficheiro, bytes: d.bytes, sha512: d.sha512, assinatura: d.assinatura }
+  if (d.urgente !== undefined && typeof d.urgente !== "boolean") return null
+  return {
+    versao: d.versao,
+    ficheiro: d.ficheiro,
+    bytes: d.bytes,
+    sha512: d.sha512,
+    assinatura: d.assinatura,
+    ...(d.urgente === true ? { urgente: true as const } : {}),
+  }
 }
 
 /** The public key, as written (`x` from an Ed25519 JWK). */
@@ -228,10 +302,119 @@ export interface PortasDoArranque {
   prazos?: Partial<Prazos>
   /** The timeout clock, so tests don't wait 30 seconds. */
   agora?: () => number
+  /**
+   * The person's choice for this device (`lerModoGuardado`). Missing is
+   * "perguntar": a new version is never installed without asking unless the
+   * person chose so.
+   */
+  modo?: ModoDeActualizacao
+  /**
+   * Asks whether to install this version now. Called only with "perguntar",
+   * and only for a manifest that passed every check. Missing, with
+   * "perguntar", reads as "mais-tarde": no question, no install.
+   */
+  perguntar?: (versao: string) => Promise<RespostaDaPergunta>
+  /**
+   * When this device first saw a manifest public on GitHub
+   * (`actualizacao-vista.json`). `ler` returns `null` for nothing or junk
+   * (`lerVista`). Missing, nothing is ever recorded, so nothing ever installs.
+   */
+  vista?: { ler: () => Promise<Vista | null>; gravar: (vista: Vista | null) => Promise<void> }
+}
+
+/** This device saw this manifest (`hash`, SHA-256 of its bytes) on GitHub at `vistoEm`. */
+export interface Vista {
+  versao: string
+  hash: string
+  vistoEm: number
+}
+
+/** The file in `userData` that keeps it. */
+export const FICHEIRO_DA_VISTA = "actualizacao-vista.json"
+
+/** The stored record, validated: anything else reads as "never seen". */
+export function lerVista(texto: string | null): Vista | null {
+  if (!texto) return null
+  try {
+    const d = JSON.parse(texto) as Record<string, unknown> | null
+    if (!d || typeof d !== "object") return null
+    if (typeof d.versao !== "string" || !VERSAO.test(d.versao)) return null
+    if (typeof d.hash !== "string" || !/^[0-9a-f]{64}$/.test(d.hash)) return null
+    if (typeof d.vistoEm !== "number" || !Number.isFinite(d.vistoEm) || d.vistoEm <= 0) return null
+    return { versao: d.versao, hash: d.hash, vistoEm: d.vistoEm }
+  } catch {
+    return null
+  }
+}
+
+export function escreverVista(vista: Vista): string {
+  return `${JSON.stringify(vista)}\n`
+}
+
+/** How this device takes a new version: ask first (the default), or by itself. */
+export type ModoDeActualizacao = "perguntar" | "automaticamente"
+export const MODO_POR_OMISSAO: ModoDeActualizacao = "perguntar"
+/** The answer to "A new version is ready". */
+export type RespostaDaPergunta = "instalar" | "mais-tarde"
+
+/** The file in `userData` that keeps the choice. */
+export const FICHEIRO_DO_MODO = "actualizacoes.json"
+
+/** Anything that is not a known mode reads as the default: ask. */
+export function modoValido(valor: unknown): ModoDeActualizacao {
+  return valor === "automaticamente" ? "automaticamente" : MODO_POR_OMISSAO
+}
+
+/** The stored file, tolerant: missing or junk is "perguntar". */
+export function lerModoGuardado(texto: string | null): ModoDeActualizacao {
+  if (!texto) return MODO_POR_OMISSAO
+  try {
+    return modoValido((JSON.parse(texto) as { modo?: unknown } | null)?.modo)
+  } catch {
+    return MODO_POR_OMISSAO
+  }
+}
+
+export function escreverModo(modo: ModoDeActualizacao): string {
+  return `${JSON.stringify({ modo })}\n`
+}
+
+/**
+ * The question's words, in the app's language: English until the person
+ * chooses (the rule of `arrancarLingua`), so anything but "pt" is English.
+ * Short active sentences (STE100). Button 0 installs, button 1 is "Later",
+ * and "Later" is also what closing the box means.
+ */
+export function textosDaPergunta(versao: string, lingua: string | null): {
+  titulo: string
+  mensagem: string
+  detalhe: string
+  botoes: [string, string]
+} {
+  return lingua === "pt"
+    ? {
+        titulo: "Orwell",
+        mensagem: `Há uma versão nova: ${versao}.`,
+        detalhe: "Instalar agora? A app fecha e abre de novo. Com \"Mais tarde\", abre a versão que tens.",
+        botoes: ["Instalar", "Mais tarde"],
+      }
+    : {
+        titulo: "Orwell",
+        mensagem: `A new version is ready: ${versao}.`,
+        detalhe: "Install it now? The app closes and opens again. \"Later\" opens the version you have.",
+        botoes: ["Install", "Later"],
+      }
 }
 
 export type ResultadoDoArranque =
-  | { accao: "entrar"; codigo: Exclude<CodigoDaActualizacao, "a-instalar">; versao?: string; detalhe?: string }
+  | {
+      accao: "entrar"
+      codigo: Exclude<CodigoDaActualizacao, "a-instalar">
+      versao?: string
+      detalhe?: string
+      /** With `em-espera`: from when it may install (ms), for the login notice. */
+      instalaEm?: number
+    }
   | { accao: "sair"; codigo: "a-instalar"; versao: string }
 
 /** Headers for a request that doesn't need to identify itself or its origin. */
@@ -239,7 +422,37 @@ const PEDIDO_ANONIMO = { credentials: "omit", referrerPolicy: "no-referrer", cac
 
 type Procura =
   | { codigo: "em-dia" | "sem-manifesto" | "sem-rede" | "manifesto-recusado" | "assinatura-errada"; versao?: string }
-  | { codigo: "ha"; manifesto: ManifestoWindows }
+  | { codigo: "ha"; manifesto: ManifestoWindows; bytes: Uint8Array }
+
+/**
+ * The body, up to `max` bytes, or `null` if it is bigger. The declared length
+ * is checked before reading, and the stream is cut at the first byte over: a
+ * server cannot make the app hold more than `max` in memory.
+ */
+async function lerComTecto(resposta: Response, max: number): Promise<Uint8Array | null> {
+  if (Number(resposta.headers.get("content-length") ?? 0) > max) return null
+  if (!resposta.body) return new Uint8Array(0)
+  const leitor = resposta.body.getReader()
+  const partes: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await leitor.read()
+    if (done) break
+    total += value.byteLength
+    if (total > max) {
+      await leitor.cancel().catch(() => {})
+      return null
+    }
+    partes.push(value)
+  }
+  const tudo = new Uint8Array(total)
+  let em = 0
+  for (const parte of partes) {
+    tudo.set(parte, em)
+    em += parte.byteLength
+  }
+  return tudo
+}
 
 /** Fetch the manifest and decide if there's a new version. Never throws. */
 async function procurar(portas: PortasDoArranque, buscar: typeof fetch, prazoMs: number): Promise<Procura> {
@@ -251,13 +464,14 @@ async function procurar(portas: PortasDoArranque, buscar: typeof fetch, prazoMs:
     // separately so it doesn't look like a failure in the log.
     if (resposta.status === 404) return { codigo: "sem-manifesto" }
     if (!resposta.ok) return { codigo: "manifesto-recusado" }
-    if (Number(resposta.headers.get("content-length") ?? 0) > MANIFESTO_MAX_BYTES) return { codigo: "manifesto-recusado" }
-    const texto = await resposta.text()
-    if (texto.length > MANIFESTO_MAX_BYTES) return { codigo: "manifesto-recusado" }
+    // The raw bytes, kept: they are what GitHub's copy must match. Decoded only
+    // afterwards, and strictly: a byte that is not UTF-8 refuses the manifest.
+    const bytes = await lerComTecto(resposta, MANIFESTO_MAX_BYTES)
+    if (!bytes) return { codigo: "manifesto-recusado" }
 
     let cru: unknown
     try {
-      cru = JSON.parse(texto)
+      cru = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))
     } catch {
       return { codigo: "manifesto-recusado" }
     }
@@ -267,11 +481,41 @@ async function procurar(portas: PortasDoArranque, buscar: typeof fetch, prazoMs:
     // version is also fake, and the log should say so.
     if (!assinaturaValida(manifesto, portas.chave)) return { codigo: "assinatura-errada", versao: manifesto.versao }
     if (!maisRecente(manifesto.versao, portas.instalada)) return { codigo: "em-dia", versao: manifesto.versao }
-    return { codigo: "ha", manifesto }
+    return { codigo: "ha", manifesto, bytes }
   } catch {
     // No network, DNS failure, cert rejected, timeout: all the same to the
     // user launching the app.
     return { codigo: "sem-rede" }
+  } finally {
+    clearTimeout(prazo)
+  }
+}
+
+type NoGithub = { ok: true } | { ok: false; codigo: "transparencia-inacessivel" | "transparencia-em-falta" | "transparencia-diferente" }
+
+const sha256 = (dados: Uint8Array): string => createHash("sha256").update(dados).digest("hex")
+
+/**
+ * Is this exact manifest the asset of the GitHub release of its version?
+ * Never throws.
+ *
+ * One request, to an address built here from the version, on `github.com`;
+ * GitHub answers with a redirect to its own asset host, under TLS. The body is
+ * capped before it is read, and compared as raw bytes with what orwell.pt
+ * served.
+ */
+async function noGithub(manifesto: ManifestoWindows, servido: Uint8Array, buscar: typeof fetch, prazoMs: number): Promise<NoGithub> {
+  const controlo = new AbortController()
+  const prazo = setTimeout(() => controlo.abort(), prazoMs)
+  try {
+    const resposta = await buscar(enderecoDoManifestoNaRelease(manifesto.versao), { ...PEDIDO_ANONIMO, signal: controlo.signal })
+    if (resposta.status === 404) return { ok: false, codigo: "transparencia-em-falta" }
+    if (!resposta.ok) return { ok: false, codigo: "transparencia-inacessivel" }
+    const publicado = await lerComTecto(resposta, MANIFESTO_MAX_BYTES)
+    if (!publicado || sha256(publicado) !== sha256(servido)) return { ok: false, codigo: "transparencia-diferente" }
+    return { ok: true }
+  } catch {
+    return { ok: false, codigo: "transparencia-inacessivel" }
   } finally {
     clearTimeout(prazo)
   }
@@ -366,6 +610,13 @@ async function descarregar(
   }
 }
 
+/** The SHA-512 of a file on disk, read in a stream. */
+async function sha512DoFicheiro(caminho: string): Promise<string> {
+  const soma = createHash("sha512")
+  for await (const pedaco of createReadStream(caminho)) soma.update(pedaco as Buffer)
+  return soma.digest("hex")
+}
+
 /**
  * The entire startup: check, download, verify, install. Never throws.
  *
@@ -384,6 +635,42 @@ export async function arranqueComActualizacao(portas: PortasDoArranque): Promise
       return { accao: "entrar", codigo: procura.codigo, ...(procura.versao ? { versao: procura.versao } : {}) }
     }
     const { manifesto } = procura
+    const versao = manifesto.versao
+    const agora = portas.agora ?? Date.now
+
+    // Public, and seen long enough by this device: before any question or
+    // download, in both modes.
+    const publico = await noGithub(manifesto, procura.bytes, buscar, prazos.transparenciaMs)
+    if (!publico.ok) {
+      // Gone or different: whatever was seen no longer counts. Unreachable: keep it.
+      if (publico.codigo !== "transparencia-inacessivel") await portas.vista?.gravar(null)
+      return { accao: "entrar", codigo: publico.codigo, versao }
+    }
+    const hash = sha256(procura.bytes)
+    const espera = (manifesto.urgente ? ESPERA_URGENTE_HORAS : ESPERA_HORAS) * 3_600_000
+    const vista = portas.vista ? await portas.vista.ler() : null
+    const t = agora()
+    // Never seen, another version or other bytes, or a clock that went back
+    // before the record: this is the first time, and the wait starts now.
+    if (!vista || vista.versao !== versao || vista.hash !== hash || t < vista.vistoEm) {
+      await portas.vista?.gravar({ versao, hash, vistoEm: t })
+      return { accao: "entrar", codigo: "em-espera", versao, instalaEm: t + espera }
+    }
+    if (t - vista.vistoEm < espera) return { accao: "entrar", codigo: "em-espera", versao, instalaEm: vista.vistoEm + espera }
+
+    // The wait is over: still there, still the same, right before going on.
+    const aindaPublico = await noGithub(manifesto, procura.bytes, buscar, prazos.transparenciaMs)
+    if (!aindaPublico.ok) {
+      if (aindaPublico.codigo !== "transparencia-inacessivel") await portas.vista?.gravar(null)
+      return { accao: "entrar", codigo: aindaPublico.codigo, versao }
+    }
+
+    // Ask first (the default): only now, after the manifest, the signature and
+    // the version have passed. "Later" downloads nothing.
+    if ((portas.modo ?? MODO_POR_OMISSAO) === "perguntar") {
+      const resposta = portas.perguntar ? await portas.perguntar(manifesto.versao) : "mais-tarde"
+      if (resposta !== "instalar") return { accao: "entrar", codigo: "adiada", versao: manifesto.versao }
+    }
 
     // Ask before download, answer after: UAC shows when the file is
     // already on disk and verified, never before.
@@ -395,13 +682,26 @@ export async function arranqueComActualizacao(portas: PortasDoArranque): Promise
       return { accao: "entrar", codigo: descarga.codigo, versao: manifesto.versao }
     }
 
+    /*
+      Checked again immediately before it runs (review M5): the file waited in
+      the user's temp folder, where another program of the same user can
+      write, and for an all-users install the next step gives it admin rights.
+    */
+    const aindaOMesmo = async (): Promise<boolean> => {
+      if ((await sha512DoFicheiro(descarga.caminho)) === manifesto.sha512) return true
+      await rm(portas.pasta, { recursive: true, force: true }).catch(() => {})
+      return false
+    }
+
     try {
       if (semAdministrador) {
         portas.mostrar({ fase: "a-instalar", versao: manifesto.versao })
+        if (!(await aindaOMesmo())) return { accao: "entrar", codigo: "soma-errada", versao: manifesto.versao }
         await portas.instalar(descarga.caminho)
       } else {
         // The message before the UAC window: whoever sees it knows where it comes from.
         portas.mostrar({ fase: "a-pedir-autorizacao", versao: manifesto.versao })
+        if (!(await aindaOMesmo())) return { accao: "entrar", codigo: "soma-errada", versao: manifesto.versao }
         const resposta = await portas.instalarComAdministrador(descarga.caminho)
         // Said "No": they enter with the version they have. We ask again on the
         // next startup, because the new version is still there.
@@ -453,6 +753,11 @@ const CODIGOS: ReadonlySet<string> = new Set<CodigoDaActualizacao>([
   "instalador-falhou",
   "arranque-falhou",
   "a-instalar",
+  "adiada",
+  "transparencia-inacessivel",
+  "transparencia-em-falta",
+  "transparencia-diferente",
+  "em-espera",
 ])
 
 /** What the interface receives for "Send log". */
@@ -460,6 +765,8 @@ export interface DiagnosticoDoArranque {
   quando: number
   codigo: CodigoDaActualizacao
   versao?: string
+  /** With `em-espera`: from when the version may install (ms). The login notice says it. */
+  instalaEm?: number
 }
 
 /** The file of the last startup, validated. An unknown code or a version without proper
@@ -470,7 +777,13 @@ export function lerDiagnosticoDoArranque(cru: unknown): DiagnosticoDoArranque | 
   if (typeof d.quando !== "number" || !Number.isFinite(d.quando)) return null
   if (typeof d.codigo !== "string" || !CODIGOS.has(d.codigo)) return null
   const versao = typeof d.versao === "string" && VERSAO.test(d.versao) ? d.versao : undefined
-  return { quando: d.quando, codigo: d.codigo as CodigoDaActualizacao, ...(versao ? { versao } : {}) }
+  const instalaEm = typeof d.instalaEm === "number" && Number.isFinite(d.instalaEm) && d.instalaEm > 0 ? d.instalaEm : undefined
+  return {
+    quando: d.quando,
+    codigo: d.codigo as CodigoDaActualizacao,
+    ...(versao ? { versao } : {}),
+    ...(instalaEm !== undefined ? { instalaEm } : {}),
+  }
 }
 
 /**
@@ -499,6 +812,7 @@ export async function arranqueComDiagnostico(
     quando: agora(),
     codigo: resultado.codigo,
     ...(resultado.versao ? { versao: resultado.versao } : {}),
+    ...(resultado.accao === "entrar" && resultado.instalaEm !== undefined ? { instalaEm: resultado.instalaEm } : {}),
   }
   try {
     await gravar(registo)

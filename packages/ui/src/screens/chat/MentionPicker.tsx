@@ -1,4 +1,5 @@
 import { NomeDePessoa } from "../../components/NomeDePessoa.js"
+import { Fragment } from "react"
 import { Avatar } from "../../components/Avatar.js"
 import type { Profile } from "../../bridge.js"
 import { MENCAO_TODOS, type MentionCandidate } from "../../lib/mentions.js"
@@ -52,60 +53,69 @@ export function MentionPicker({
   return (
     <ul className="mention-picker" role="listbox">
       {candidatos.map((candidato, indice) => (
-        <li key={candidato.address}>
-          <button
-            type="button"
-            role="option"
-            aria-selected={indice === escolhido}
-            className={indice === escolhido ? "mention-option escolhido" : "mention-option"}
-            onMouseDown={(event) => {
-              event.preventDefault()
-              onEscolher(candidato)
-            }}
-            onMouseEnter={() => onApontar(indice)}
-          >
-            {/* Hidden from who listens: without a published profile, the face is the name's
-                initial, and a screen reader would say "A, Ana". The image adds
-                nothing to the name that comes next. */}
-            {candidato.tipo === "sala" ? (
-              // A room: the hash, the name, and no face.
-              <>
-                <span className="mention-sinal" aria-hidden="true">
-                  <HashIcon size={14} />
-                </span>
-                <span className="mention-name">{candidato.name}</span>
-              </>
-            ) : candidato.tipo === "cargo" ? (
-              // A role: its colour, the name with `@`, and what it is.
-              <>
-                <span className="mention-cor-do-cargo" aria-hidden="true" style={tintaDoPapel(candidato.cor)} />
-                <span className="mention-name">@{candidato.name}</span>
-                <span className="mention-hint">{strings.etiquetas.cargo}</span>
-              </>
-            ) : candidato.address === MENCAO_TODOS ? (
-              // `@all` is not a person: no face, and with what it does written next to it.
-              <>
-                <span className="mention-name">@{candidato.name}</span>
-                <span className="mention-hint">{strings.chat.mencionarTodos}</span>
-              </>
-            ) : (
-              <>
-                <span aria-hidden="true">
-                  <Avatar
-                    profile={directory?.get(candidato.address)}
-                    fallback={candidato.name.slice(0, 1)}
-                    presence={presenceFor?.(candidato.address)}
-                    emChamada={emChamada?.(candidato.address)}
-                  />
-                </span>
-                <span className="mention-name">
-                  {/* Drawn cut at 12 like every name; the search above still reads the whole one. */}
-                  <NomeDePessoa nome={candidato.name} endereco={candidato.address} />
-                </span>
-              </>
-            )}
-          </button>
-        </li>
+        <Fragment key={candidato.address}>
+          {/* The rooms come under their own heading (17/11/2026). It is not an option:
+              the arrows and Enter walk the options only. */}
+          {candidato.tipo === "sala" && candidatos[indice - 1]?.tipo !== "sala" && (
+            <li role="presentation" className="mention-seccao">
+              {strings.etiquetas.seccaoCanais}
+            </li>
+          )}
+          <li>
+            <button
+              type="button"
+              role="option"
+              aria-selected={indice === escolhido}
+              className={indice === escolhido ? "mention-option escolhido" : "mention-option"}
+              onMouseDown={(event) => {
+                event.preventDefault()
+                onEscolher(candidato)
+              }}
+              onMouseEnter={() => onApontar(indice)}
+            >
+              {/* Hidden from who listens: without a published profile, the face is the name's
+                  initial, and a screen reader would say "A, Ana". The image adds
+                  nothing to the name that comes next. */}
+              {candidato.tipo === "sala" ? (
+                // A room: the hash, the name, and no face.
+                <>
+                  <span className="mention-sinal" aria-hidden="true">
+                    <HashIcon size={14} />
+                  </span>
+                  <span className="mention-name">{candidato.name}</span>
+                </>
+              ) : candidato.tipo === "cargo" ? (
+                // A role: its colour, the name with `@`, and what it is.
+                <>
+                  <span className="mention-cor-do-cargo" aria-hidden="true" style={tintaDoPapel(candidato.cor)} />
+                  <span className="mention-name">@{candidato.name}</span>
+                  <span className="mention-hint">{strings.etiquetas.cargo}</span>
+                </>
+              ) : candidato.address === MENCAO_TODOS ? (
+                // `@all` is not a person: no face, and with what it does written next to it.
+                <>
+                  <span className="mention-name">@{candidato.name}</span>
+                  <span className="mention-hint">{strings.chat.mencionarTodos}</span>
+                </>
+              ) : (
+                <>
+                  <span aria-hidden="true">
+                    <Avatar
+                      profile={directory?.get(candidato.address)}
+                      fallback={candidato.name.slice(0, 1)}
+                      presence={presenceFor?.(candidato.address)}
+                      emChamada={emChamada?.(candidato.address)}
+                    />
+                  </span>
+                  <span className="mention-name">
+                    {/* Drawn cut at 12 like every name; the search above still reads the whole one. */}
+                    <NomeDePessoa nome={candidato.name} endereco={candidato.address} />
+                  </span>
+                </>
+              )}
+            </button>
+          </li>
+        </Fragment>
       ))}
     </ul>
   )

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { DESTINO, RAIZ, gerar } from "../../../../scripts/gerar-emojis.mjs"
-import { CATEGORIES, findEmoji, fold, searchEmoji } from "./emoji.js"
+import { CATEGORIES, findEmoji, fold, searchEmoji, takesTone, withTone } from "./emoji.js"
 
 const ALL = CATEGORIES.flatMap((category) => category.emojis)
 
@@ -151,5 +151,36 @@ describe("catálogo completo (Unicode 15.0)", () => {
 
   it("o ficheiro gerado está em dia com os dados (senão: node scripts/gerar-emojis.mjs)", () => {
     expect(readFileSync(`${RAIZ}/${DESTINO}`, "utf8") === gerar()).toBe(true)
+  })
+})
+
+describe("tons de pele", () => {
+  it("dá os cinco tons a quem os tem, do claro ao escuro", () => {
+    expect([1, 2, 3, 4, 5].map((tom) => withTone("👍", tom))).toEqual(["👍🏻", "👍🏼", "👍🏽", "👍🏾", "👍🏿"])
+    expect(withTone("👍", 0)).toBe("👍")
+    expect(takesTone("👍")).toBe(true)
+  })
+
+  it("põe o mesmo tom em todas as pessoas de uma sequência", () => {
+    expect(withTone("🧑‍🤝‍🧑", 3)).toBe("🧑🏽‍🤝‍🧑🏽")
+    expect(withTone("☝️", 1)).toBe("☝🏻")
+  })
+
+  it("deixa como está o que não leva tom", () => {
+    expect(takesTone("🍺")).toBe(false)
+    expect(withTone("🍺", 4)).toBe("🍺")
+    expect(withTone("👍", 9)).toBe("👍")
+  })
+
+  it("encontra o nome de um glifo com tom", () => {
+    expect(findEmoji("👍🏾")?.char).toBe("👍")
+  })
+
+  it("cabe tudo no tecto do protocolo (32 unidades), com e sem tom", () => {
+    const longos = ALL.flatMap((emoji) => [emoji.char, ...[1, 2, 3, 4, 5].map((tom) => withTone(emoji.char, tom))]).filter(
+      (char) => char.length > 32,
+    )
+    expect(longos).toEqual([])
+    expect(ALL.filter((emoji) => takesTone(emoji.char)).length).toBe(305)
   })
 })

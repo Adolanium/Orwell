@@ -49,7 +49,7 @@ describe("reacções na conversa", () => {
   it("desenha uma ficha por emoji com a contagem, e a minha marcada", () => {
     render(timeline({ reaccoes: new Map([["m1", fichas]]), onReagir: noop }))
     const minha = screen.getByRole("button", { name: strings.reaccoes.rotulo("👍", 2, true) })
-    const outra = screen.getByRole("button", { name: strings.reaccoes.rotulo("🎉", 1, false) })
+    const outra = screen.getByRole("button", { name: strings.reaccoes.rotulo("🎉", 1, false, true) })
     expect(minha.getAttribute("aria-pressed")).toBe("true")
     expect(outra.getAttribute("aria-pressed")).toBe("false")
     expect(minha.textContent).toContain("2")
@@ -61,7 +61,7 @@ describe("reacções na conversa", () => {
     const user = userEvent.setup()
     const onReagir = vi.fn()
     render(timeline({ reaccoes: new Map([["m1", fichas]]), onReagir }))
-    await user.click(screen.getByRole("button", { name: strings.reaccoes.rotulo("🎉", 1, false) }))
+    await user.click(screen.getByRole("button", { name: strings.reaccoes.rotulo("🎉", 1, false, true) }))
     expect(onReagir).toHaveBeenCalledWith(mensagem, "🎉")
   })
 

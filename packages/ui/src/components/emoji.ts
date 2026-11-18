@@ -33,7 +33,7 @@
  */
 
 import { EMOJI_CATEGORY_TABS, type EmojiCategoryId } from "./emoji-categorias.js"
-import { EMOJI_LINES } from "./emoji.gen.js"
+import { EMOJI_LINES, EMOJI_TONE_LINES } from "./emoji.gen.js"
 
 export interface Emoji {
   /** The glyph. Never normalized: normalizing would break ZWJ sequences. */
@@ -115,8 +115,40 @@ const BY_CHAR = new Map(ALL.map((emoji) => [emoji.char, emoji]))
  * or typed by a keyboard that leaves it out. */
 const BY_BASE = new Map(ALL.map((emoji) => [emoji.char.replace(VS16, ""), emoji]))
 
+/**
+ * The skin tones: base glyph -> the five variants, light to dark, with the same
+ * tone on every person in the emoji. Only emojis that take a tone are here.
+ */
+const TONES = new Map<string, readonly string[]>(
+  EMOJI_TONE_LINES.map((line) => {
+    const [base = "", ...variants] = line.split(" ")
+    return [base, variants]
+  }),
+)
+
+/** From a toned glyph back to its base record, for the name. */
+const BY_TONED = new Map<string, Emoji>()
+for (const [base, variants] of TONES) {
+  const emoji = BY_CHAR.get(base)
+  if (emoji) for (const variant of variants) BY_TONED.set(variant, emoji)
+}
+
 export function findEmoji(char: string): Emoji | undefined {
-  return BY_CHAR.get(char) ?? BY_BASE.get(char.replace(VS16, ""))
+  return BY_CHAR.get(char) ?? BY_BASE.get(char.replace(VS16, "")) ?? BY_TONED.get(char)
+}
+
+/** Does this emoji take a skin tone? */
+export function takesTone(char: string): boolean {
+  return TONES.has(char)
+}
+
+/**
+ * The glyph in a skin tone. `tone` is 0 (the default yellow) to 5 (dark).
+ * An emoji that takes no tone stays as it is.
+ */
+export function withTone(char: string, tone: number): string {
+  if (tone < 1 || tone > 5) return char
+  return TONES.get(char)?.[tone - 1] ?? char
 }
 
 /**

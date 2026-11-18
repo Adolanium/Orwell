@@ -1,5 +1,6 @@
 import {
   accountIdFromSigningKey,
+  mensagemDaAtestacao,
   podeEstrearCanal,
   fromBase64,
   parseAddress,
@@ -20,6 +21,7 @@ import {
   CAPACIDADE_ESTREIA_DA_DIRECTA,
   CAPACIDADE_LIGACOES_CURTAS,
   CAPACIDADE_BUGS,
+  CAPACIDADE_IDADE_ATESTADA,
   CAPACIDADE_MORADAS_OPACAS,
   CAPACIDADE_RESGATE_POR_PROVA,
   CAPACIDADE_REVOGACAO,
@@ -45,6 +47,8 @@ import { currentMinute } from "./db.js"
 import { endpointPermitido, type CarteiroDoPush } from "./push.js"
 import { validarP256dh } from "./push-cifra.js"
 import type { Store } from "./store.js"
+import type { ServerKeypair } from "./config.js"
+import { ed25519 } from "@noble/curves/ed25519.js"
 import type { Federation } from "./federation.js"
 import { fetchLinkPreview } from "./link-preview.js"
 import { RecusaDeMedia, type MotorDeMedia } from "./media.js"
@@ -64,6 +68,13 @@ interface Connection {
   pingsSemPong: number
   /** Closes the connection that has not logged in in time. See `PRAZO_DO_LOGIN_MS`. */
   prazoDoLogin: ReturnType<typeof setTimeout> | null
+  /**
+   * A device outside its account's manifest, logged in through the pairing
+   * window: no seat, no manifest, and closed as revoked when the window ends
+   * unless a manifest names it. `null` for every other connection. See
+   * `JANELA_DE_EMPARELHAMENTO_MS`.
+   */
+  janela: ReturnType<typeof setTimeout> | null
   /**
    * Who this CONNECTION is, for the media engine.
    *
@@ -283,6 +294,12 @@ export class Gateway {
     this.#push = push
   }
 
+  /** The federation key, which also signs account ages (`account.age.get`). Absent: no attestation. */
+  #chaveDoServidor: ServerKeypair | null = null
+  attachChaveDoServidor(chave: ServerKeypair): void {
+    this.#chaveDoServidor = chave
+  }
+
   /**
    * What this server can do, told to the client in `hello.ok`.
    *
@@ -326,6 +343,9 @@ export class Gateway {
       // Takes bug reports at `ROTA_DOS_BUGS` (`bugs.ts`). A client that does not
       // see this hides the "Report a bug" button.
       CAPACIDADE_BUGS,
+      // Signs the age of its accounts (`account.age.get`, `idade-da-conta.ts`).
+      // Only announced with the key attached: a promise the server can keep.
+      ...(this.#chaveDoServidor ? [CAPACIDADE_IDADE_ATESTADA] : []),
       // Forwards `channel.sinal` to the other connected members of a channel,
       // without storing it. Only to connections that announced it in `hello`.
       // See `CAPACIDADE_SINAL_EFEMERO` and `#sinal`.
@@ -435,6 +455,9 @@ export class Gateway {
    */
   static PRAZO_DO_LOGIN_MS = 30_000
 
+  /** One UTC day: account ages are signed to the day (`account.age.get`). */
+  static readonly DIA_MS = 86_400_000
+
   accept(socket: WebSocket): void {
     const connection: Connection = {
       socket,
@@ -442,6 +465,7 @@ export class Gateway {
       batimento: null,
       pingsSemPong: 0,
       prazoDoLogin: null,
+      janela: null,
       address: null,
       deviceKey: null,
       pending: null,
@@ -542,6 +566,7 @@ export class Gateway {
       clearTimeout(connection.prazoDoLogin)
       connection.prazoDoLogin = null
     }
+    this.#fecharJanela(connection)
     this.#connections.delete(connection)
     this.#porId.delete(connection.id)
     this.#baldesDoSinal.delete(`ligacao|${connection.id}`)
@@ -1419,6 +1444,15 @@ export class Gateway {
         // Devices this manifest revoked that are connected now are dropped at once,
         // not on their next connect: until then they could claim key packages,
         // publish others, and ask for seats in channels.
+        // The devices this manifest names that are in their pairing window are
+        // devices of the account now: the window closes and they keep their seats.
+        if (resultado.ok) {
+          const nomeados = new Set(frame.manifest.devices.map((device) => device.deviceKey))
+          for (const outra of this.#connections) {
+            if (outra.address !== quem || outra.janela === null || outra.deviceKey === null) continue
+            if (nomeados.has(toBase64(outra.deviceKey))) this.#fecharJanela(outra)
+          }
+        }
         // So are the logins still waiting on their challenge: they have no
         // `address` yet, and finishing would hand a revoked device `auth.ok`
         // (ORW-134-01). `#finishAuth` checks again; this closes them now.
@@ -1439,6 +1473,40 @@ export class Gateway {
             if (revogados.has(toBase64(outra.deviceKey))) this.#fecharRevogado(outra)
           }
         }
+        return
+      }
+
+      case "account.age.get": {
+        // Its own bucket: opening a poll with a hundred voters asks a hundred ages at once,
+        // and sharing the manifests' 60 dropped the rest and the minute's manifests too.
+        if (!this.#dentroDoTecto("idades", connection.address as string, Gateway.IDADES_POR_MINUTO)) return
+        const chave = this.#chaveDoServidor
+        // Only about itself, or someone it shares a channel with: otherwise this was
+        // an oracle of which accounts exist, and when each was made (M4).
+        const quem = connection.address as string
+        const partilha = frame.address === quem || this.store.partilhamCanal(quem, frame.address)
+        const exacta = chave && partilha ? this.store.criadaEmDe(frame.address) : null
+        // The rule needs the day, not the minute: rounded UP to the next UTC midnight,
+        // so the rule never counts a day early, and accounts made the same day look alike.
+        const criadaEm = exacta === null ? null : Math.ceil(exacta / Gateway.DIA_MS) * Gateway.DIA_MS
+        const daqui = (() => {
+          try {
+            return parseAddress(frame.address).server === this.config.serverName
+          } catch {
+            return false
+          }
+        })()
+        if (!chave || criadaEm === null || !daqui) {
+          this.#send(connection, { t: "account.age.result", address: frame.address, atestacao: null, chave: null })
+          return
+        }
+        const corpo = { address: frame.address, criadaEm, servidor: this.config.serverName, keyId: chave.keyId }
+        this.#send(connection, {
+          t: "account.age.result",
+          address: frame.address,
+          atestacao: { ...corpo, assinatura: toBase64(ed25519.sign(mensagemDaAtestacao(corpo), chave.privateKey)) },
+          chave: { keyId: chave.keyId, key: toBase64(chave.publicKey) },
+        })
         return
       }
 
@@ -1486,6 +1554,8 @@ export class Gateway {
         return
 
       case "welcome.resync":
+        // A Welcome is a seat. See `JANELA_DE_EMPARELHAMENTO_MS`.
+        if (connection.janela !== null) return
         if (!this.#dentroDoTecto("resyncs", connection.address as string, Gateway.RESYNCS_POR_MINUTO)) return
         for (const event of this.store.pendingWelcomes(connection.address as string, 200)) {
           this.#send(connection, {
@@ -1612,6 +1682,11 @@ export class Gateway {
     const recusar = (reason: RazaoDeRecusaDoPush): void => this.#send(connection, { t: "push.subscribed", ok: false, reason })
     if (!this.#push) return recusar("push-off")
     if (connection.deviceKey === null) return recusar("no-device")
+    // In the pairing window (N-01) the device is not the account's yet. A row
+    // written here outlived the window, and woke a removed phone on every message
+    // to the account (I2 of the 1.3.20 review). The client subscribes again on its
+    // next connection.
+    if (connection.janela !== null) return recusar("no-device")
     if (!this.#dentroDoTecto("push-subscricoes", quem, Gateway.PUSH_SUBSCRICOES_POR_MINUTO)) return recusar("rate-limited")
     // Without this list any client could make the server POST to any URL.
     if (!endpointPermitido(frame.endpoint, this.#push.servicos)) return recusar("endpoint-not-allowed")
@@ -1964,6 +2039,12 @@ export class Gateway {
         return
       }
       if (this.#recusarRevogado(connection)) return
+      // In the pairing window (N-01) the device is not the account's yet: read only.
+      // No client writes here while pairing (I2 of the 1.3.20 review).
+      if (connection.janela !== null && frame.t !== "cofre.get") {
+        recusar("cofre-sem-lugar", "not a device of the account yet")
+        return
+      }
     } else if (!this.#mayReach(connection, escopo.slice("canal:".length))) {
       recusar("cofre-sem-lugar", "this account has no seat in the channel")
       return
@@ -2448,7 +2529,24 @@ export class Gateway {
       return
     }
 
+    // Without the chain, `signingKey` is the account key itself, and since 1.3.16
+    // a removed phone keeps it. Every client logs in with the chain since
+    // 11/08/2026 (before 1.0); once the account has a manifest, the manifest says
+    // who logs in, and a login with no device in it has nothing to check (N-01).
+    if (!chain && this.store.deviceManifestOf(address) !== null) {
+      this.#send(connection, {
+        t: "error",
+        code: "chain-required",
+        message: "this account logs in with a device of its manifest",
+        fatal: true,
+      })
+      connection.socket.close()
+      return
+    }
+
     connection.address = null
+    // Logged out now: a window from an earlier login on this socket ends with it (M3).
+    this.#fecharJanela(connection)
     connection.challenge = crypto.getRandomValues(new Uint8Array(32))
     connection.pending = { address, signingKey, accountKey, comCadeia: chain !== undefined }
     this.#send(connection, { t: "auth.challenge", nonce: toBase64(connection.challenge) })
@@ -2487,6 +2585,30 @@ export class Gateway {
       this.#fecharSuspensa(connection)
       return
     }
+    // Again, here: the revocation may have landed after `#beginAuth` issued the
+    // challenge, and a challenge asked for while approved must not log in a
+    // device the account removed since (ORW-134-01). Only with the chain, as in
+    // `#beginAuth`: a device not yet in the manifest is not revoked, and pairs.
+    // Before ownership: a revoked device writes nothing, not even a generation.
+    if (pending.comCadeia && this.store.isDeviceRevoked(pending.address, pending.signingKey)) {
+      this.#fecharRevogado(connection, pending.address)
+      return
+    }
+    // N-01: outside the manifest, only through the pairing window. After the
+    // signature, so nobody burns another device's window with its public key.
+    // Before ownership, as the revocation above: a device refused here writes
+    // nothing, not even a generation.
+    let fimDaJanela: number | null = null
+    if (pending.comCadeia) {
+      const manifesto = this.store.deviceManifestOf(pending.address)
+      if (manifesto !== null && !manifesto.devices.some((device) => device.deviceKey === toBase64(pending.signingKey))) {
+        fimDaJanela = this.#janelaPara(pending.address, toBase64(pending.signingKey), manifesto)
+        if (fimDaJanela === null) {
+          this.#fecharRevogado(connection, pending.address, false)
+          return
+        }
+      }
+    }
     /*
       Which copy of this device speaks for it (see `auth.finish` in the
       protocol). After the signature: bumping the generation takes ownership
@@ -2513,14 +2635,6 @@ export class Gateway {
       this.#fecharCopiaSubstituida(connection)
       return
     }
-    // Again, here: the revocation may have landed after `#beginAuth` issued the
-    // challenge, and a challenge asked for while approved must not log in a
-    // device the account removed since (ORW-134-01). Only with the chain, as in
-    // `#beginAuth`: a device not yet in the manifest is not revoked, and pairs.
-    if (pending.comCadeia && this.store.isDeviceRevoked(pending.address, pending.signingKey)) {
-      this.#fecharRevogado(connection, pending.address)
-      return
-    }
     this.store.registerDevice(pending.address, pending.signingKey)
 
     connection.address = pending.address
@@ -2528,6 +2642,7 @@ export class Gateway {
       clearTimeout(connection.prazoDoLogin)
       connection.prazoDoLogin = null
     }
+    if (fimDaJanela !== null) this.#armarJanela(connection, fimDaJanela)
     // With a chain, `signingKey` is the device key; without one it is the
     // account key, and the connection has no known device. See `Connection.deviceKey`.
     connection.deviceKey = pending.comCadeia ? pending.signingKey : null
@@ -2720,6 +2835,8 @@ export class Gateway {
    * using the product.
    */
   static readonly MANIFESTOS_POR_MINUTO = 60
+  /** `account.age.get` per account per minute: one per voter of the polls on screen. */
+  static readonly IDADES_POR_MINUTO = 600
 
   static readonly ESTREIAS_POR_MINUTO = 60
   /**
@@ -3027,6 +3144,8 @@ export class Gateway {
   #isSeated(connection: Connection, channel: string): boolean {
     const address = connection.address
     if (!address) return false
+    // In the pairing window the device is not yet the account's. See `JANELA_DE_EMPARELHAMENTO_MS`.
+    if (connection.janela !== null) return false
     if (connection.channels.has(channel)) return true
     // No name grants a seat: in 0.9 the owner had a seat in `!feed-<id>` just
     // because the name was theirs. The opaque wall of 1.0 belongs to its owner
@@ -3096,7 +3215,7 @@ export class Gateway {
    */
   #mayReach(connection: Connection, channel: string): boolean {
     if (this.#isSeated(connection, channel)) return true
-    if (!connection.address) return false
+    if (!connection.address || connection.janela !== null) return false
     // The cap comes before the decision because the decision leaves a mark:
     // first use of a channel stores a subscription or a claim, at the request
     // of someone with no seat anywhere yet. See `#dentroDoTecto`.
@@ -3129,7 +3248,7 @@ export class Gateway {
   }
 
   #mayAsk(connection: Connection, channel: string): boolean {
-    if (!connection.address) return false
+    if (!connection.address || connection.janela !== null) return false
     if (this.config.commonRoom && channel === this.config.commonRoom) return true
     return this.#mayReach(connection, channel)
   }
@@ -3340,7 +3459,7 @@ export class Gateway {
       if (!connection.address) continue
 
       if (recipient) {
-        if (connection.address !== recipient) continue
+        if (connection.address !== recipient || connection.janela !== null) continue
       } else if (!connection.channels.has(channel)) {
         continue
       }
@@ -3437,15 +3556,19 @@ export class Gateway {
    * removed from the account on another device). A 0.5.7 client handles any fatal code the same way,
    * so the new code does not break it.
    */
-  #fecharRevogado(connection: Connection, address: string | null = connection.address): void {
+  #fecharRevogado(connection: Connection, address: string | null = connection.address, comProva = true): void {
     // The manifest that removed it goes along (1.3.16): the client erases its vault only with this proof.
-    const manifest = address !== null ? this.store.deviceManifestOf(address) : null
+    // Not for a device that was never in it (`comProva` false, the pairing window): that one was not
+    // removed, its pairing did not finish, and the client only locks.
+    const manifest = address !== null && comProva ? this.store.deviceManifestOf(address) : null
     this.#send(connection, {
       t: "error",
       code: "device-revoked",
       message: "this device was removed from the account",
       fatal: true,
       ...(manifest !== null ? { manifest } : {}),
+      // Never in the manifest: the client says the pairing did not finish (M1 of the 1.3.20 review).
+      ...(comProva ? {} : { pairingUnfinished: true as const }),
     })
     connection.socket.close()
   }
@@ -3482,6 +3605,81 @@ export class Gateway {
   #fecharCopiaSubstituida(connection: Connection): void {
     this.#send(connection, { t: "error", code: "device-revoked", message: "this copy of the device was replaced by an imported one", fatal: true })
     connection.socket.close()
+  }
+
+  /**
+   * How long a device outside its account's manifest may stay logged in
+   * (N-01): the pairing window.
+   *
+   * Since 1.3.16 the paired phone holds the account key, and a removed phone
+   * keeps it: it can certify a new device key, and the chain checks out. So for
+   * an account with a manifest, the manifest is the list of who logs in. The
+   * exception is pairing itself: the computer publishes the manifest on
+   * `pronto` (`emparelhar.ts`), with the phone already logged in. Two minutes
+   * cover the phone writing its vault, connecting and publishing its key
+   * packages, which takes seconds.
+   *
+   * What keeps a removed phone from living in this window:
+   * - it opens only while an ACTIVE device of the account (in the manifest, not
+   *   revoked) has a pairing box open, which the removed phone cannot do;
+   * - once per device key, for good (`pairing_windows`): a key closed at the end
+   *   of its window never gets another;
+   * - in the window there is no seat in any channel, no Welcome, no seat
+   *   request, and no manifest (`#aparelhoActivo` is false outside it);
+   * - at the end, unless a manifest names it, it is closed as revoked.
+   *
+   * Not `readonly`, so tests can shorten it.
+   */
+  static JANELA_DE_EMPARELHAMENTO_MS = 2 * 60_000
+
+  /** The end of this device's window, or `null` when it gets none. See `JANELA_DE_EMPARELHAMENTO_MS`. */
+  #janelaPara(address: string, deviceKey: string, manifesto: DeviceManifestWire): number | null {
+    const agora = Date.now()
+    const aberta = this.store.janelaDoAparelho(address, deviceKey)
+    if (aberta !== null) {
+      // Its own window, again: a phone whose network dropped. Never a second one.
+      const fim = aberta + Gateway.JANELA_DE_EMPARELHAMENTO_MS
+      return fim > agora ? fim : null
+    }
+    let caixaDeUmActivo = false
+    for (const caixa of this.#caixas.values()) {
+      if (caixa.anfitriao.address === address && this.#aparelhoActivo(caixa.anfitriao, manifesto)) {
+        caixaDeUmActivo = true
+        break
+      }
+    }
+    if (!caixaDeUmActivo) return null
+    /*
+      No cap per account. One was tried (M4 of the 1.3.20 review) and was a denial
+      of service: a removed phone spending the windows with new keys while the owner
+      had a box open locked the real guest out for a day (N1 of the confirmation).
+      What bounds the rows is the box: windows only open while an active device of
+      the account has one open.
+    */
+    return this.store.abrirJanela(address, deviceKey, agora) + Gateway.JANELA_DE_EMPARELHAMENTO_MS
+  }
+
+  #armarJanela(connection: Connection, fim: number): void {
+    // A second `auth.finish` on the same socket: the first timer, firing, would set
+    // `janela` to null under the second one (M3 of the 1.3.20 review).
+    this.#fecharJanela(connection)
+    connection.janela = setTimeout(() => {
+      connection.janela = null
+      if (!this.#connections.has(connection) || connection.address === null || connection.deviceKey === null) return
+      const manifesto = this.store.deviceManifestOf(connection.address)
+      const chave = toBase64(connection.deviceKey)
+      if (manifesto !== null && manifesto.devices.some((device) => device.deviceKey === chave)) return
+      // Nothing of the window outlives it (I2 of the 1.3.20 review).
+      this.store.deletePushSubscription(connection.address, connection.deviceKey)
+      this.#fecharRevogado(connection, connection.address, false)
+    }, Math.max(0, fim - Date.now()))
+    connection.janela.unref?.()
+  }
+
+  #fecharJanela(connection: Connection): void {
+    if (connection.janela === null) return
+    clearTimeout(connection.janela)
+    connection.janela = null
   }
 
   /** The connection's device is in this manifest of its account, and not revoked. */

@@ -55,6 +55,7 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
   const key = loadOrCreateServerKey(config.dataDir)
 
   const gateway = new Gateway(store, config)
+  gateway.attachChaveDoServidor(key)
   const federation = new Federation(store, config, key, gateway)
   gateway.attachFederation(federation)
 

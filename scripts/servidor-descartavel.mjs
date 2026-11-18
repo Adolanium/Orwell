@@ -18,6 +18,7 @@ import net from "node:net"
 import { tmpdir } from "node:os"
 import { extname, join, normalize } from "node:path"
 import { fileURLToPath } from "node:url"
+import { DatabaseSync } from "node:sqlite"
 
 export const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const SERVIDOR_JS = join(RAIZ, "apps/server/dist/main.js")
@@ -44,7 +45,22 @@ export async function portaLivre(porta) {
  *   same server, same name (origin is the same, name comes from it). Without
  *   `distAntiga`, nothing changes.
  */
-export async function levantarServidor({ frente: PORTA_DA_FRENTE, servidor: PORTA_DO_SERVIDOR, sfu = 0, dist = DIST_WEB, distAntiga = null, servidorJs = SERVIDOR_JS, etiqueta = "fase7" }) {
+/**
+ * Each account this disposable database registers from now on is born 30 days
+ * old, so it votes (1.3.17: only accounts 5 days old vote, by the age the server
+ * signs). A trigger in the test database, never in the server code.
+ */
+export function contasDeTesteAntigas(base) {
+  const db = new DatabaseSync(base)
+  try {
+    db.exec(`CREATE TRIGGER IF NOT EXISTS contas_de_teste_antigas AFTER INSERT ON accounts
+      BEGIN UPDATE accounts SET created_minute = NEW.created_minute - 43200 WHERE address = NEW.address; END;`)
+  } finally {
+    db.close()
+  }
+}
+
+export async function levantarServidor({ frente: PORTA_DA_FRENTE, servidor: PORTA_DO_SERVIDOR, sfu = 0, dist = DIST_WEB, distAntiga = null, servidorJs = SERVIDOR_JS, etiqueta = "fase7", contasAntigas = true }) {
   for (const [o_que, caminho] of [["a web construída", join(dist, "index.html")], ["o servidor construído", servidorJs], ...(distAntiga ? [["a web antiga", join(distAntiga, "index.html")]] : [])]) {
     if (!existsSync(caminho)) throw new Error(`Falta ${o_que}: ${caminho}. Corre \`npm run build\` primeiro.`)
   }
@@ -124,6 +140,15 @@ export async function levantarServidor({ frente: PORTA_DA_FRENTE, servidor: PORT
     fechar()
     throw new Error("O homeserver não arrancou:\n" + registo.texto.slice(-2000))
   }
+  /*
+    Votes count only for accounts created 5 days ago or more (1.3.17, the
+    server signs the age, see `idade-da-conta.ts`). Every account of a disposable
+    server is minutes old, so by default each new account is born 30 days old,
+    by a trigger in the disposable database: the guiões that vote keep voting.
+    Never in the server code. `contasAntigas: false` leaves the real dates, for
+    the proof of the rule itself.
+  */
+  if (contasAntigas) contasDeTesteAntigas(join(dados, "enclave.sqlite"))
   return {
     NOME,
     APP: `http://${NOME}/app/?lingua=pt`,

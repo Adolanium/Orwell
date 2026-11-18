@@ -32,6 +32,7 @@ import { NomeDePessoa } from "../../components/NomeDePessoa.js"
 import { podeResponder, resumoDoOriginal, type Citacao } from "../../lib/respostas.js"
 import { mencionaMe as mencionaAConta } from "../../lib/mentions.js"
 import { marcaDeEntradaNaConversa } from "../../lib/porLerPorSala.js"
+import { lembrarEmoji, useReaccoesRapidas } from "../../lib/emojiFrequentes.js"
 
 /** A key pressed in a field is not a shortcut: R for "reply" only counts outside them. */
 function emCampoDeTexto(alvo: EventTarget | null): boolean {
@@ -82,6 +83,7 @@ export const MessageRow = memo(function MessageRow({
   reaccoes,
   onReagir,
   onPedirReaccao,
+  onVerReaccoes,
   etiquetas,
   mencionaMe = false,
   mencaoVista = false,
@@ -209,6 +211,8 @@ export const MessageRow = memo(function MessageRow({
   onReagir?: ((message: ChatMessage, emoji: string) => void) | undefined
   /** Open the emoji picker for this message. Stable. Absent: no React button. */
   onPedirReaccao?: ((message: ChatMessage) => void) | undefined
+  /** Open the list of who reacted, on one emoji. Stable. Absent: right-click on a chip is the system's. */
+  onVerReaccoes?: ((message: ChatMessage, emoji: string) => void) | undefined
   /** Roles and rooms. Stable by construction (see `Timeline`), like the callbacks above. */
   etiquetas?: Omit<Etiquetas, "mencoes"> | undefined
   /** The reply mentions the author of the original ("@ Mention" on): the quote says "@Name", like Discord. */
@@ -235,6 +239,8 @@ export const MessageRow = memo(function MessageRow({
   const deslize = useDeslizarParaResponder(responderAqui)
   /* The same menu, with the finger down. See `useToqueLongo`. */
   const aoDedo = useToqueLongo()
+  /** The emoji that already had chips when this line mounted: they do not animate. */
+  const fichasDoInicio = useRef<ReadonlySet<string>>(new Set((reaccoes ?? []).map((ficha) => ficha.emoji)))
 
   /**
    * Images on one side, files on the other.
@@ -488,38 +494,15 @@ stays, that is why it travels. */}
         {/* The reactions, like Discord: one chip per emoji with the count, mine
             marked, a tap presses or releases mine, and the names on hover. */}
         {reaccoes && reaccoes.length > 0 && (
-          <div className="message-reaccoes">
-            {reaccoes.map((ficha) => (
-              <button
-                key={ficha.emoji}
-                type="button"
-                className={ficha.minha ? "reaccao minha" : "reaccao"}
-                aria-pressed={ficha.minha}
-                aria-label={strings.reaccoes.rotulo(ficha.emoji, ficha.quem.length, ficha.minha)}
-                data-tip={strings.reaccoes.quem(ficha.quem.map((quem) => (nameFor ? nameFor(quem) : nomeEmFalta(quem))), ficha.emoji)}
-                disabled={!onReagir}
-                onClick={onReagir ? () => onReagir(message, ficha.emoji) : undefined}
-              >
-                <span className="reaccao-emoji" aria-hidden="true">
-                  {ficha.emoji}
-                </span>
-                <span className="reaccao-n" aria-hidden="true">
-                  {ficha.quem.length}
-                </span>
-              </button>
-            ))}
-            {onPedirReaccao && (
-              <button
-                type="button"
-                className="reaccao reaccao-mais"
-                aria-label={strings.reaccoes.outra}
-                data-tip={strings.reaccoes.outra}
-                onClick={() => onPedirReaccao(message)}
-              >
-                <SmileyIcon size={14} />
-              </button>
-            )}
-          </div>
+          <FichasDeReaccao
+            message={message}
+            reaccoes={reaccoes}
+            iniciais={fichasDoInicio.current}
+            nameFor={nameFor}
+            onReagir={onReagir}
+            onPedirReaccao={onPedirReaccao}
+            onVerReaccoes={onVerReaccoes}
+          />
         )}
       </div>
 
@@ -538,6 +521,9 @@ stays, that is why it travels. */}
           in `components.css`. */}
       {((message.payload.body ?? "") !== "" || onMessageMenu || responderAqui || onPedirReaccao) && (
         <div className="msg-actions">
+          {/* The three quick reactions, before "React", like Discord. Only where a
+              reaction can be added: the same rule as the React button. */}
+          {onPedirReaccao && onReagir && <ReaccoesRapidas message={message} reaccoes={reaccoes} onReagir={onReagir} />}
           {onPedirReaccao && (
             <button
               type="button"
@@ -596,6 +582,162 @@ stays, that is why it travels. */}
     </article>
   )
 })
+
+/**
+ * The quick reactions of the hover bar: the person's three (see
+ * `lib/emojiFrequentes.ts`). One press adds it, or takes it back if it is
+ * already mine, like a chip.
+ *
+ * Its own component, reading the three from a store: when the three change (the
+ * person reacted with something new), only these bars redraw, never the line
+ * around them, whose memo saves 399 redraws per arriving message.
+ */
+export const ReaccoesRapidas = memo(function ReaccoesRapidas({
+  message,
+  reaccoes,
+  onReagir,
+}: {
+  message: ChatMessage
+  reaccoes: readonly FichaDeReaccao[] | undefined
+  onReagir: (message: ChatMessage, emoji: string) => void
+}): React.JSX.Element {
+  const rapidas = useReaccoesRapidas()
+  return (
+    // One group, so the hidden bar can skip laying out its emoji (see `.msg-rapidas`).
+    <span className="msg-rapidas">
+      {rapidas.map((emoji) => {
+        const minha = reaccoes?.some((ficha) => ficha.emoji === emoji && ficha.minha) === true
+        // One reaction per person: with another one of mine, this one switches.
+        const rotulo = strings.reaccoes.rapida(emoji, minha, !minha && reaccoes?.some((ficha) => ficha.minha) === true)
+        return (
+          <button
+            key={emoji}
+            type="button"
+            className="msg-rapida"
+            data-tip={rotulo}
+            data-tip-side="end"
+            aria-label={rotulo}
+            aria-pressed={minha}
+            onClick={() => {
+              if (!minha) lembrarEmoji(emoji)
+              onReagir(message, emoji)
+            }}
+          >
+            {emoji}
+          </button>
+        )
+      })}
+    </span>
+  )
+})
+
+/**
+ * The chips under a message.
+ *
+ * A chip that arrives while the line is on screen enters with a small animation,
+ * and a count that changes rolls in; the chips already there when the line
+ * mounted (`iniciais`) do not move, or every chip would bounce each time a
+ * conversation opens.
+ *
+ * Right-click on a chip, or a long press with a finger, opens the list of who
+ * reacted, on that emoji. Both stop there: the message menu does not open too.
+ */
+function FichasDeReaccao({
+  message,
+  reaccoes,
+  iniciais,
+  nameFor,
+  onReagir,
+  onPedirReaccao,
+  onVerReaccoes,
+}: {
+  message: ChatMessage
+  reaccoes: readonly FichaDeReaccao[]
+  /** The emoji that had chips when the line mounted. */
+  iniciais: ReadonlySet<string>
+  nameFor: ((address: string) => string) | undefined
+  onReagir: ((message: ChatMessage, emoji: string) => void) | undefined
+  onPedirReaccao: ((message: ChatMessage) => void) | undefined
+  onVerReaccoes: ((message: ChatMessage, emoji: string) => void) | undefined
+}): React.JSX.Element {
+  /** The count of each chip at the last draw; `null` before the first. */
+  const contagens = useRef<Map<string, number> | null>(null)
+  const antes = contagens.current
+  useEffect(() => {
+    contagens.current = new Map(reaccoes.map((ficha) => [ficha.emoji, ficha.quem.length]))
+  })
+  const aoDedo = useToqueLongo()
+  return (
+    <div className="message-reaccoes">
+      {reaccoes.map((ficha) => {
+        const n = ficha.quem.length
+        // The class stays on the element: the animation runs once, when the chip mounts.
+        const nova = !iniciais.has(ficha.emoji)
+        const mudou = antes !== null && antes.has(ficha.emoji) && antes.get(ficha.emoji) !== n
+        const verQuem = onVerReaccoes ? () => onVerReaccoes(message, ficha.emoji) : undefined
+        const toque = aoDedo(verQuem)
+        return (
+          <button
+            key={ficha.emoji}
+            type="button"
+            className={`reaccao${ficha.minha ? " minha" : ""}${nova ? " nova" : ""}`}
+            aria-pressed={ficha.minha}
+            aria-label={strings.reaccoes.rotulo(ficha.emoji, n, ficha.minha, !ficha.minha && reaccoes.some((outra) => outra.minha))}
+            data-tip={strings.reaccoes.quem(ficha.quem.map((quem) => (nameFor ? nameFor(quem) : nomeEmFalta(quem))), ficha.emoji)}
+            disabled={!onReagir}
+            onClick={
+              onReagir
+                ? () => {
+                    if (!ficha.minha) lembrarEmoji(ficha.emoji)
+                    onReagir(message, ficha.emoji)
+                  }
+                : undefined
+            }
+            onContextMenu={
+              verQuem
+                ? (event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    verQuem()
+                  }
+                : undefined
+            }
+            {...toque}
+            /* The line has its own long press (the message menu), and both hooks
+               share nothing: without this, the line's timer would win. */
+            onPointerDown={
+              toque.onPointerDown
+                ? (event) => {
+                    event.stopPropagation()
+                    toque.onPointerDown?.(event)
+                  }
+                : undefined
+            }
+          >
+            <span className="reaccao-emoji" aria-hidden="true">
+              {ficha.emoji}
+            </span>
+            {/* A new key on a new count: the number rolls in once, see the stylesheet. */}
+            <span key={mudou ? `n${n}` : "n"} className={mudou ? "reaccao-n mudou" : "reaccao-n"} aria-hidden="true">
+              {n}
+            </span>
+          </button>
+        )
+      })}
+      {onPedirReaccao && (
+        <button
+          type="button"
+          className="reaccao reaccao-mais"
+          aria-label={strings.reaccoes.outra}
+          data-tip={strings.reaccoes.outra}
+          onClick={() => onPedirReaccao(message)}
+        >
+          <SmileyIcon size={14} />
+        </button>
+      )}
+    </div>
+  )
+}
 
 /**
  * The "edited" mark, under the message (12/11/2026).
@@ -730,6 +872,7 @@ function TimelineInteira({
   directory,
   hasStoredHistory = false,
   canLoadOlder = false,
+  inicioDoAparelho = false,
   onLoadOlder,
   onOpenProfile,
   pedidoDe,
@@ -740,6 +883,7 @@ function TimelineInteira({
   reaccoes,
   onReagir,
   onPedirReaccao,
+  onVerReaccoes,
   etiquetas,
   fixadas,
   destacada = null,
@@ -836,6 +980,13 @@ function TimelineInteira({
   hasStoredHistory?: boolean
   /** Stored messages older than the ones shown exist and can be paged in. */
   canLoadOlder?: boolean
+  /**
+   * "Load older" reached the start of what this device holds (17/11/2026). The
+   * top of the list then says so in a line, instead of simply stopping: above it
+   * is what this device never read (before it joined) or what an older version
+   * did not keep.
+   */
+  inicioDoAparelho?: boolean | undefined
   onLoadOlder?: () => void
   /** Click on a mention: that person's profile, which the shell draws. */
   onOpenProfile?: ((address: string) => void) | undefined
@@ -869,6 +1020,8 @@ function TimelineInteira({
   onReagir?: ((message: ChatMessage, emoji: string) => void) | undefined
   /** Open the emoji picker for a message. */
   onPedirReaccao?: ((message: ChatMessage) => void) | undefined
+  /** Open the list of who reacted to a message, on one emoji. */
+  onVerReaccoes?: ((message: ChatMessage, emoji: string) => void) | undefined
   /** Roles and rooms as chips. Its identity may change on every render: the rows get a stable proxy. */
   etiquetas?: Omit<Etiquetas, "mencoes"> | undefined
   /** Vote for an option in a poll on this conversation. */
@@ -963,6 +1116,9 @@ function TimelineInteira({
   const pedirReaccaoRef = useRef(onPedirReaccao)
   pedirReaccaoRef.current = onPedirReaccao
   const pedirReaccao = useCallback((message: ChatMessage) => pedirReaccaoRef.current?.(message), [])
+  const verReaccoesRef = useRef(onVerReaccoes)
+  verReaccoesRef.current = onVerReaccoes
+  const verReaccoes = useCallback((message: ChatMessage, emoji: string) => verReaccoesRef.current?.(message, emoji), [])
   /**
    * The tags, through a reference that never changes, for the memo reason above.
    * The price is the same as for the names of who voted: a room renamed or hidden
@@ -1147,12 +1303,36 @@ function TimelineInteira({
   )
   const alargarRef = useRef(alargar)
   alargarRef.current = alargar
+  /*
+    Older lines arrived above ("load older", 17/11/2026) while the reader sits at
+    the top: the window kept its first line, the scroller did not move, and no
+    scroll event comes to draw what came in. Grow it now, as a scroll would.
+  */
+  const primeiraChave = messages[0] ? chaveDe(messages[0]) : null
+  const primeiraAnterior = useRef({ conversa: conversaActual, chave: primeiraChave })
+  useLayoutEffect(() => {
+    const anterior = primeiraAnterior.current
+    primeiraAnterior.current = { conversa: conversaActual, chave: primeiraChave }
+    // Only lines that came in ABOVE the old first one, in the same conversation: a room switch is not a prepend.
+    if (anterior.conversa !== conversaActual || anterior.chave === null || anterior.chave === primeiraChave) return
+    if (!messages.slice(1).some((message) => chaveDe(message) === anterior.chave)) return
+    const el = container.current
+    if (el && inicioRef.current > 0 && el.scrollTop < el.clientHeight) alargarRef.current()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `messages` is read when the first line changes
+  }, [primeiraChave, conversaActual])
   useLayoutEffect(() => {
     const el = container.current
     if (!el || compensar.current === null) return
     el.scrollTop = el.scrollHeight - compensar.current
     ultimoTopo.current = el.scrollTop
     compensar.current = null
+    /*
+      Still at the top after growing (17/11/2026): the lines drawn did not fill a
+      screen above the reader, and at `scrollTop` 0 a wheel or a finger upward
+      sends no scroll event, so nothing would draw the rest. Grow once more, on
+      the next frame, as the scroll would have.
+    */
+    if (inicioRef.current > 0 && el.scrollTop < el.clientHeight) requestAnimationFrame(() => alargarRef.current())
   }, [inicio])
 
   const itemCount = messages.length + pending.length
@@ -1278,11 +1458,30 @@ function TimelineInteira({
     window never grew. Grow it until the drawn lines are two scroller heights
     tall, or until it reaches the first line. Each step re-renders and runs
     this again, so it stops on its own.
+
+    Only a screen the lines do not yet FILL grows before the frame (1.3.20).
+    A filled one grows after it is painted: what it adds sits above the view,
+    and `compensar` keeps the reader on the same line, so the screen is the
+    same; but the flat skin's lines are short, 30 of them fill 1440x900 and
+    not two heights, and growing before the frame drew 70 lines on every
+    switch and every return from Settings, inside the click.
   */
   useLayoutEffect(() => {
     const el = container.current
     if (!el || inicio === 0 || el.clientHeight === 0) return
-    if (el.scrollHeight < 2 * el.clientHeight) alargar()
+    if (el.scrollHeight >= 2 * el.clientHeight) return
+    if (el.scrollHeight <= el.clientHeight) {
+      alargar()
+      return
+    }
+    let tarefa: ReturnType<typeof setTimeout> | undefined
+    const quadro = requestAnimationFrame(() => {
+      tarefa = setTimeout(() => alargarRef.current(), 0)
+    })
+    return () => {
+      cancelAnimationFrame(quadro)
+      clearTimeout(tarefa)
+    }
   }, [inicio, itemCount, conversaActual, alargar])
 
   /**
@@ -1453,6 +1652,11 @@ function TimelineInteira({
           {strings.chat.loadOlder}
         </button>
       )}
+      {!semNada && inicio === 0 && !canLoadOlder && inicioDoAparelho && (
+        <p className="timeline-inicio-do-aparelho field-note" role="note">
+          {strings.chat.inicioDoAparelho}
+        </p>
+      )}
 
       {/* The line that said "older messages are not stored on this device" was
           removed: it explained the model, and at this
@@ -1566,6 +1770,7 @@ function TimelineInteira({
             {...(onPedirReaccao && message.payload.id !== undefined && message.payload.moderada !== true
               ? { onPedirReaccao: pedirReaccao }
               : {})}
+            {...(onVerReaccoes ? { onVerReaccoes: verReaccoes } : {})}
             nameFor={nomear}
             /* No identifier means no pin is possible: a friend request is not something said. The `?? ""` would fall into the empty set anyway, but saying it here saves the caller the question. */
             fixada={message.payload.id !== undefined && (fixadas?.has(message.payload.id) ?? false)}

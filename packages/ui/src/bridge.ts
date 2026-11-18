@@ -25,6 +25,9 @@ import type {
 import type { AvisoDeSuspensao, CorpoDoBug, FriendTie, InviteTie, PinnedMessage, Power } from "@enclave/protocol"
 import type { MessageExtras } from "./types.js"
 
+/** How this device takes a new version (Windows): ask first, or by itself. */
+export type ModoDeActualizacao = "perguntar" | "automaticamente"
+
 export type {
   DesfechoDoAnexo,
   DesfechoDoTrazer,
@@ -325,6 +328,14 @@ export interface AvisoDeActualizacao {
    * the manifest does not carry a file for this system.
    */
   soma?: string
+  /**
+   * The Windows app is waiting before it installs this version by itself
+   * (1.3.20: public on GitHub, seen by this device for 72 hours). The moment
+   * it may install, in ms. The notice then says "in verification" and does
+   * NOT send anyone to download it from the site: that download would skip
+   * every check.
+   */
+  emVerificacaoAte?: number
 }
 
 /**
@@ -1222,6 +1233,18 @@ export interface EnclaveBridge {
      */
     history: (channel: string) => Promise<StoredChatMessage[]>
     /**
+     * The conversation older than the vault, kept on this device (17/11/2026):
+     * one page per call, newest first; `seguinte` is the cursor for the next, `null`
+     * at the end. Absent on an older host: there is nothing past the vault there.
+     */
+    /** `falhou`: that page did not open (Erro 523); `seguinte` still goes past it. */
+    conversaArquivada?: (
+      channel: string,
+      cursor?: number | null,
+    ) => Promise<{ entradas: StoredChatMessage[]; seguinte: number | null; falhou?: true }>
+    /** Is there conversation older than the vault on this device? Absent on an older host: no. */
+    temConversaArquivada?: (channel: string) => Promise<boolean>
+    /**
      * Stop tracking a channel on this device: group secrets, history and
      * catch-up anchor are erased locally. The other members keep seeing this
      * account in the member list until somebody removes it — that is an MLS
@@ -1514,6 +1537,14 @@ export interface EnclaveBridge {
    */
   votacoes?: {
     votar: (channel: string, target: string, opcao: number, retirar?: boolean) => Promise<{ ok: boolean }>
+    /**
+     * The attested age of an account (17/11/2026): only accounts created 5 days
+     * ago or more vote. `regra: false` when the server does not sign ages, and
+     * then every vote counts, as before. `criadaEm: null` is an age that cannot be
+     * known, and that account's votes do not count. Optional: a host without it
+     * counts every vote.
+     */
+    idadeDaConta?: (address: string) => Promise<{ regra: boolean; criadaEm: number | null }>
   }
   profile: {
     get: () => Promise<Profile>
@@ -1688,6 +1719,15 @@ export interface EnclaveBridge {
      * `apps/client/src/main/actualizacao-windows.ts`.
      */
     diagnostico?: () => Promise<{ quando: number; codigo: string; versao?: string } | null>
+    /**
+     * "Install updates": ask first (the default) or automatically, for this
+     * device. `disponivel` is false wherever the app does not update itself
+     * (anything but the packaged Windows app), and then Settings shows
+     * nothing. Optional: a `preload` before 1.3.20 does not have it. See
+     * `apps/client/src/main/actualizacao-windows.ts`.
+     */
+    modo?: () => Promise<{ disponivel: boolean; modo: ModoDeActualizacao }>
+    definirModo?: (modo: ModoDeActualizacao) => Promise<{ ok: boolean }>
   }
   /**
    * Global keyboard shortcuts for the desktop app: mute the mic and toggle audio

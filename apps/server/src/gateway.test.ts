@@ -1,4 +1,5 @@
 import {
+  criadaEmAtestada,
   fromBase64,
   generateIdentity,
   identityFromPrivateKey,
@@ -2840,5 +2841,74 @@ describe("batimento do websocket", () => {
       Gateway.BATIMENTO_MS = anterior
       socket.close()
     }
+  })
+})
+
+/**
+ * The attested age of an account (17/11/2026): only accounts created 5 days ago
+ * or more vote, and each client checks the age the homeserver signed.
+ */
+describe("gateway: a idade atestada da conta", () => {
+  it("uma conta deste servidor recebe a data do primeiro registo, assinada pela chave do servidor", async () => {
+    const ana = await TestClient.connect(gatewayUrl)
+    const identity = generateIdentity(HOME)
+    const antes = Date.now() - 60_000
+    expect((await login(ana, identity)).t).toBe("auth.ok")
+    ana.send({ t: "account.age.get", address: identity.address })
+    const resposta = (await ana.nextOf("account.age.result")) as {
+      atestacao: { criadaEm: number; keyId: string } | null
+      chave: { keyId: string; key: string } | null
+    }
+    expect(resposta.atestacao).not.toBeNull()
+    expect(resposta.chave?.keyId).toBe(resposta.atestacao?.keyId)
+    const criada = criadaEmAtestada(resposta.atestacao, identity.address, {
+      [resposta.chave!.keyId]: fromBase64(resposta.chave!.key),
+    })
+    expect(criada).not.toBeNull()
+    // To the day (M4): the next UTC midnight after the first registration.
+    expect(criada! % Gateway.DIA_MS).toBe(0)
+    expect(criada!).toBeGreaterThanOrEqual(antes)
+    expect(criada!).toBeLessThanOrEqual(Date.now() + Gateway.DIA_MS)
+    ana.close()
+  })
+
+  it("só responde sobre quem partilha um canal com quem pergunta (M4): sem canal em comum, não há atestação", async () => {
+    const ana = await TestClient.connect(gatewayUrl)
+    const bruno = await TestClient.connect(gatewayUrl)
+    const anaId = generateIdentity(HOME)
+    const brunoId = generateIdentity(HOME)
+    expect((await login(ana, anaId)).t).toBe("auth.ok")
+    expect((await login(bruno, brunoId)).t).toBe("auth.ok")
+    ana.send({ t: "account.age.get", address: brunoId.address })
+    expect(await ana.nextOf("account.age.result")).toMatchObject({ atestacao: null, chave: null })
+
+    const canal = `!idades-${Date.now()}:${HOME}`
+    enclave.store.subscribe(canal, anaId.address)
+    enclave.store.subscribe(canal, brunoId.address)
+    ana.send({ t: "account.age.get", address: brunoId.address })
+    const resposta = (await ana.nextOf("account.age.result")) as { atestacao: unknown }
+    expect(resposta.atestacao).not.toBeNull()
+    ana.close()
+    bruno.close()
+  })
+
+  it("uma conta de outro servidor, ou que este nunca viu, não tem atestação", async () => {
+    const ana = await TestClient.connect(gatewayUrl)
+    expect((await login(ana, generateIdentity(HOME))).t).toBe("auth.ok")
+    ana.send({ t: "account.age.get", address: "@outra-conta-de-gente:outro.example" })
+    expect(await ana.nextOf("account.age.result")).toMatchObject({ atestacao: null, chave: null })
+    ana.send({ t: "account.age.get", address: generateIdentity(HOME).address })
+    expect(await ana.nextOf("account.age.result")).toMatchObject({ atestacao: null, chave: null })
+    ana.close()
+  })
+
+  it("abrir uma votação com 100 votantes pede 100 idades num minuto, e todas têm resposta", async () => {
+    // Before, the requests shared the manifests' 60 a minute: the other 40 were dropped in silence.
+    const ana = await TestClient.connect(gatewayUrl)
+    const identity = generateIdentity(HOME)
+    expect((await login(ana, identity)).t).toBe("auth.ok")
+    for (let i = 0; i < 100; i++) ana.send({ t: "account.age.get", address: identity.address })
+    for (let i = 0; i < 100; i++) expect(await ana.nextOf("account.age.result")).toMatchObject({ address: identity.address })
+    ana.close()
   })
 })

@@ -37,10 +37,14 @@ describe("RichText: cargos e salas", () => {
     expect(onSala).toHaveBeenLastCalledWith("")
   })
 
-  it("uma sala que não vejo diz sala privada, sem o nome nem o id", () => {
+  it("uma sala que não vejo, apagada ou inexistente lê-se #sala-sem-acesso, sem o nome nem o id", () => {
     const { container } = render(<RichText etiquetas={etiquetas({ onSala: vi.fn() })}>{"<#forum-secreta-sala>"}</RichText>)
-    expect(container.textContent).toBe(`#${strings.etiquetas.salaPrivada}`)
+    expect(strings.etiquetas.semAcesso).toBe("sala-sem-acesso")
+    expect(container.textContent).toBe("#sala-sem-acesso")
+    expect(container.innerHTML).not.toContain("secreta")
+    // Not a button: the link opens nothing and says nothing about the room.
     expect(container.querySelector("button")).toBeNull()
+    expect(container.querySelector("[aria-label],[title]")).toBeNull()
   })
 
   it("sem etiquetas (um sítio sem contexto), o token fica como texto", () => {

@@ -56,6 +56,8 @@ function foraDoProduto(caminho: string): boolean {
  * No line number on purpose: the file changes, the reason does not.
  */
 const TOLERADAS: Readonly<Record<string, string>> = {
+  // The Aurora sheets read back for the tests (`styles/aurora.folhas.ts`): only the tests call it.
+  "packages/ui/src/styles/aurora.folhas.ts::aurora.gen.css não tem a folha pedida": "ajuda dos testes, nunca chega ao ecrã",
   // Vault file in one buffer (1.3.13): internal checks of the write. They never fire on a sound build; if one did, the write fails and `Session.#falhaAoGravar` sends it to the log.
   "packages/client-core/src/seloDoCofre.ts::base64 in place: the writer would pass the reader": "invariante interna da gravação, vai ao log",
   "packages/client-core/src/seloDoCofre.ts::vault envelope without one empty ciphertext": "invariante interna da gravação, vai ao log",
@@ -78,6 +80,8 @@ const TOLERADAS: Readonly<Record<string, string>> = {
   "packages/client-core/src/audio/processador-de-voz.ts::noise-suppressor-assert": "apanhado na cadeia, vira diagnóstico",
   "packages/client-core/src/audio/processador-de-voz.ts::noise-suppressor-exports-changed": "apanhado na cadeia, vira diagnóstico",
   "packages/client-core/src/audio/processador-de-voz.ts::noise-suppressor-delay-mismatch": "apanhado na cadeia, vira diagnóstico",
+  // Account age (review of 1.3.18, C1): `useIdadesDosVotantes` takes the rejection and asks again online or 5 s later; it never shows.
+  "packages/client-core/src/session.ts::Session.IDADE_SEM_RESPOSTA": "ainda sem resposta: a interface volta a pedir, nunca o mostra",
   // Núcleo.
   "packages/client-core/src/armazem/contentor.ts::a media sha must be 32 bytes":
     "guarda do contrato: `exportarComImagens` só passa shas que `shaEmBruto` aceitou",

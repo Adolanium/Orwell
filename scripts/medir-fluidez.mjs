@@ -459,13 +459,101 @@ async function medir() {
 
     // ---- B. channel switch: pointerdown to the frame where the timeline changed
     const trocas = []
-    // `--rastreio`: a devtools timeline trace of the switches, summed by event (style, layout, paint, script).
-    const rastreio = tem("--rastreio") ? [] : null
-    if (rastreio) {
-      cdp.on("Tracing.dataCollected", ({ value }) => rastreio.push(...value))
-      await cdp.send("Tracing.start", { transferMode: "ReportEvents", traceConfig: { includedCategories: ["devtools.timeline", "disabled-by-default-devtools.timeline", "blink"] } })
+    // `--rastreio`: a devtools timeline trace of the switches, the scroll and the menus,
+    // summed by event (style, layout, paint, script), one summary per phase.
+    const RASTREAR = tem("--rastreio")
+    const eventosDoRastreio = []
+    if (RASTREAR) cdp.on("Tracing.dataCollected", ({ value }) => eventosDoRastreio.push(...value))
+    resultado.rastreio = {}
+    // `--seletores` (with `--rastreio`): Blink's selector stats, the style-recalc time per selector.
+    const SELETORES = tem("--seletores")
+    // `--invalidacoes` (with `--rastreio`): who invalidates layout and style, by reason and node.
+    const INVALIDACOES = tem("--invalidacoes")
+    // `--mutacoes` (with `--rastreio`): the DOM mutations of each traced phase,
+    // counted by target and attribute: who changes the page while it scrolls.
+    const MUTACOES = tem("--mutacoes")
+    async function comRastreio(nome, fn) {
+      if (!RASTREAR) return fn()
+      if (MUTACOES) {
+        await page.evaluate(() => {
+          const contas = new Map()
+          const alvo = (n) => {
+            const el = n.nodeType === 1 ? n : n.parentElement
+            if (!el) return "?"
+            const c = [...el.classList].slice(0, 2).join(".")
+            return `${el.tagName.toLowerCase()}${c ? "." + c : ""}`
+          }
+          globalThis.__mutacoes = contas
+          globalThis.__obsMutacoes?.disconnect()
+          globalThis.__obsMutacoes = new MutationObserver((lista) => {
+            for (const m of lista) {
+              const k = `${m.type}${m.attributeName ? "[" + m.attributeName + "]" : ""} ${alvo(m.target)}`
+              contas.set(k, (contas.get(k) ?? 0) + 1)
+            }
+          })
+          globalThis.__obsMutacoes.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true })
+        })
+      }
+      eventosDoRastreio.length = 0
+      await cdp.send("Tracing.start", { transferMode: "ReportEvents", traceConfig: { includedCategories: ["devtools.timeline", "disabled-by-default-devtools.timeline", "blink", ...(SELETORES ? ["disabled-by-default-blink.debug"] : []), ...(INVALIDACOES ? ["disabled-by-default-devtools.timeline.invalidationTracking", "disabled-by-default-devtools.timeline.stack"] : [])] } })
+      const r = await fn()
+      const fim = new Promise((res) => cdp.once("Tracing.tracingComplete", res))
+      await cdp.send("Tracing.end")
+      await fim
+      const porNome = new Map()
+      const grandes = []
+      for (const e of eventosDoRastreio) {
+        if (e.ph !== "X" || !e.dur) continue
+        porNome.set(e.name, (porNome.get(e.name) ?? 0) + e.dur / 1000)
+        if (e.name === "Layout" && e.dur > 5000) grandes.push({ ms: Math.round(e.dur / 1000), nos: e.args?.beginData?.dirtyObjects, total: e.args?.beginData?.totalObjects, raiz: e.args?.endData?.layoutRoots?.length })
+        if (e.name === "UpdateLayoutTree" && e.dur > 5000) grandes.push({ estilo: Math.round(e.dur / 1000), elementos: e.args?.elementCount })
+      }
+      // Style recalcs and layouts: how many, how many elements, how long.
+      const contas = { recalcs: 0, elementos: 0, recalcMs: 0, layouts: 0, layoutMs: 0, pinturaMs: 0 }
+      for (const e of eventosDoRastreio) {
+        if (e.ph !== "X" || !e.dur) continue
+        if (e.name === "UpdateLayoutTree") { contas.recalcs++; contas.elementos += e.args?.elementCount ?? 0; contas.recalcMs += e.dur / 1000 }
+        else if (e.name === "Layout") { contas.layouts++; contas.layoutMs += e.dur / 1000 }
+        else if (e.name === "Paint" || e.name === "PrePaint") contas.pinturaMs += e.dur / 1000
+      }
+      for (const k of ["recalcMs", "layoutMs", "pinturaMs"]) contas[k] = Math.round(contas[k])
+      const porInvalidacao = new Map()
+      if (INVALIDACOES) for (const e of eventosDoRastreio) {
+        if (!/Invalidat|ScheduleStyleRecalc|LayoutInvalidationTracking|StyleRecalcInvalidationTracking/.test(e.name)) continue
+        const d = e.args?.data ?? {}
+        const pilha = (d.stackTrace ?? []).slice(0, 3).map((f) => `${f.functionName || "?"}@${String(f.url ?? "").split("/").pop()}:${f.lineNumber}:${f.columnNumber}`).join(" < ")
+        const k = `${e.name} ${d.reason ?? ""} ${d.nodeName ?? ""} ${d.changedClass ?? d.changedAttribute ?? d.changedPseudo ?? ""} ${pilha}`.replace(/\s+/g, " ").trim()
+        porInvalidacao.set(k, (porInvalidacao.get(k) ?? 0) + 1)
+      }
+      const porSeletor = new Map()
+      for (const e of eventosDoRastreio) {
+        for (const t of e.args?.selector_stats?.selector_timings ?? []) {
+          const v = porSeletor.get(t.selector) ?? { us: 0, tentativas: 0, casou: 0, rejeitadoCedo: 0, folha: t.style_sheet_id }
+          v.us += t["elapsed (us)"] ?? 0
+          v.tentativas += t.match_attempts ?? 0
+          v.casou += t.match_count ?? 0
+          v.rejeitadoCedo += t.fast_reject_count ?? 0
+          porSeletor.set(t.selector, v)
+        }
+      }
+      const mutacoes = MUTACOES
+        ? await page.evaluate(() => { globalThis.__obsMutacoes?.disconnect(); return [...globalThis.__mutacoes].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([k, v]) => `${v} ${k}`) })
+        : undefined
+      resultado.rastreio[nome] = {
+        ...contas,
+        ...(mutacoes ? { mutacoes } : {}),
+        ...(INVALIDACOES ? { invalidacoes: [...porInvalidacao].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k, v]) => `${v} ${k}`) } : {}),
+        porEvento: [...porNome].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([k, v]) => `${Math.round(v)} ms ${k}`),
+        grandes: grandes.sort((a, b) => (b.ms ?? b.estilo) - (a.ms ?? a.estilo)).slice(0, 20),
+        ...(SELETORES ? {
+          seletoresUs: Math.round([...porSeletor.values()].reduce((t, v) => t + v.us, 0)),
+          seletores: [...porSeletor].sort((a, b) => b[1].us - a[1].us).slice(0, 150).map(([k, v]) => ({ seletor: k, ...v, us: Math.round(v.us) })),
+        } : {}),
+      }
+      console.log(`== rastreio ${nome}`, JSON.stringify(resultado.rastreio[nome]))
+      return r
     }
-    await comPerfil("canais", async () => {
+    await comRastreio("canais", () => comPerfil("canais", async () => {
       const ordem = [...Array(Math.min(nCanais, 8)).keys()].concat([0, 1, 0])
       for (const i of ordem) {
         const t0 = await agora()
@@ -478,7 +566,12 @@ async function medir() {
             const obs = new MutationObserver(() => {
               obs.disconnect()
               clearTimeout(limite)
-              requestAnimationFrame(() => r(performance.now()))
+              requestAnimationFrame(() => {
+                // What the first frame shows: lines drawn and the distance of the view to the bottom.
+                const t = document.querySelector(".timeline")
+                globalThis.__quadro1 = t ? { linhas: t.querySelectorAll(".message").length, aoFundo: Math.round(t.scrollHeight - t.scrollTop - t.clientHeight) } : null
+                r(performance.now())
+              })
             })
             obs.observe(tl, { childList: true, subtree: true })
           })
@@ -488,27 +581,14 @@ async function medir() {
         const toque = await page.evaluate(() => globalThis.__f.ultimoToque)
         await wait(1_200)
         const f = await sonda()
-        trocas.push({ canal: nomes[i]?.slice(0, 30), ms: fimTroca < 0 ? null : Math.round(fimTroca - toque), ...janela(f, t0, await agora()) })
+        // And 1.2 s later: a window that grew after the frame must leave the view where it was.
+        const ecra = await page.evaluate(() => {
+          const t = document.querySelector(".timeline")
+          return { primeiro: globalThis.__quadro1 ?? null, depois: t ? { linhas: t.querySelectorAll(".message").length, aoFundo: Math.round(t.scrollHeight - t.scrollTop - t.clientHeight) } : null }
+        })
+        trocas.push({ canal: nomes[i]?.slice(0, 30), ms: fimTroca < 0 ? null : Math.round(fimTroca - toque), ecra, ...janela(f, t0, await agora()) })
       }
-    })
-    if (rastreio) {
-      const fim = new Promise((r) => cdp.once("Tracing.tracingComplete", r))
-      await cdp.send("Tracing.end")
-      await fim
-      const porNome = new Map()
-      const layouts = []
-      for (const e of rastreio) {
-        if (e.ph !== "X" || !e.dur) continue
-        porNome.set(e.name, (porNome.get(e.name) ?? 0) + e.dur / 1000)
-        if (e.name === "Layout" && e.dur > 5000) layouts.push({ ms: Math.round(e.dur / 1000), nos: e.args?.beginData?.dirtyObjects, total: e.args?.beginData?.totalObjects, raiz: e.args?.endData?.layoutRoots?.length })
-        if (e.name === "UpdateLayoutTree" && e.dur > 5000) layouts.push({ estilo: Math.round(e.dur / 1000), elementos: e.args?.elementCount })
-      }
-      resultado.rastreioDasTrocas = {
-        porEvento: [...porNome].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([k, v]) => `${Math.round(v)} ms ${k}`),
-        grandes: layouts.slice(0, 20),
-      }
-      console.log("== rastreio", JSON.stringify(resultado.rastreioDasTrocas))
-    }
+    }))
     const ms = trocas.map((t) => t.ms).filter((x) => x != null)
     fase("canais", { trocas, trocaP50Ms: p(ms, 0.5), trocaMaxMs: Math.max(0, ...ms), longaMaxMs: Math.max(0, ...trocas.map((t) => t.longaMaxMs)), inpMs: Math.max(0, ...trocas.map((t) => t.inpMs)) })
 
@@ -530,7 +610,7 @@ async function medir() {
     })
 
     // ---- D. scrolling the common room
-    await comPerfil("scroll", async () => {
+    await comRastreio("scroll", () => comPerfil("scroll", async () => {
       const t0 = await agora()
       const tl = page.locator(".timeline").first()
       const caixa = await tl.boundingBox()
@@ -539,26 +619,34 @@ async function medir() {
       for (let k = 0; k < 30; k++) { await page.mouse.wheel(0, 500); await wait(80) }
       await wait(500)
       fase("scroll", janela(await sonda(), t0, await agora()))
-    })
+    }))
 
     // ---- E. menus: settings, the members panel, a channel's context menu
-    await comPerfil("menus", async () => {
+    await comRastreio("menus", () => comPerfil("menus", async () => {
       const t0 = await agora()
+      // Each action's own window too: which of them is slow (the INP is the worst one).
+      const marcas = []
+      const accao = async (nome, fn, ms) => { const a = await agora(); await fn(); await wait(ms); marcas.push({ nome, a, b: await agora() }) }
       for (let k = 0; k < 3; k++) {
         // Settings is a screen, not a sheet: open it, and back to the communities by the rail.
-        await page.locator('button[aria-label="Configurações"], button[title="Configurações"]').first().click().catch(() => {})
-        await wait(600)
-        await page.getByRole("button", { name: "Comunidades", exact: true }).first().click().catch(() => {})
-        await wait(600)
-        await canais.nth(0).click({ button: "right" }).catch(() => {})
-        await wait(500)
-        await page.keyboard.press("Escape")
-        await wait(500)
+        await accao("definicoes", () => page.locator('button[aria-label="Configurações"], button[title="Configurações"]').first().click().catch(() => {}), 600)
+        await accao("comunidades", () => page.getByRole("button", { name: "Comunidades", exact: true }).first().click().catch(() => {}), 600)
+        await accao("menu-do-canal", () => canais.nth(0).click({ button: "right" }).catch(() => {}), 500)
+        await accao("escape", () => page.keyboard.press("Escape"), 500)
         const membros = page.getByRole("button", { name: /membros/i }).first()
-        if (await membros.count()) { await membros.click().catch(() => {}); await wait(600); await membros.click().catch(() => {}); await wait(600) }
+        if (await membros.count()) {
+          await accao("membros-abrir", () => membros.click().catch(() => {}), 600)
+          await accao("membros-fechar", () => membros.click().catch(() => {}), 600)
+        }
       }
-      fase("menus", janela(await sonda(), t0, await agora()))
-    })
+      const f = await sonda()
+      const porAccao = {}
+      for (const m of marcas) {
+        const j = janela(f, m.a, m.b)
+        porAccao[m.nome] = (porAccao[m.nome] ?? []).concat(j.inpMs)
+      }
+      fase("menus", { ...janela(f, t0, await agora()), porAccao })
+    }))
     await page.getByRole("button", { name: "Comunidades", exact: true }).first().click().catch(() => {})
     await wait(800)
     await canais.nth(Math.max(0, iSala)).click().catch(() => {})

@@ -12,8 +12,9 @@
  *  1. Ana reacts to Bruno's message with the hover button and the picker; the
  *     chip reaches Bruno and Ana's phone, marked as mine on the phone.
  *  2. Bruno taps the chip: two. The names show on hover.
- *  3. On the phone, a long press opens the menu, "Reagir", a tap on an emoji.
- *  4. Ana takes hers back on the computer: it leaves Bruno and the phone.
+ *  3. On the phone, a long press opens the menu, "Reagir", a tap on an emoji:
+ *     one reaction per person, so it replaces Ana's first one everywhere.
+ *  4. Ana takes it back on the computer: it leaves Bruno and the phone.
  *  5. A reload keeps the chips (vault), on Bruno and on the phone.
  *  6. In a direct conversation too.
  *  7. # in the box lists the rooms; the sent chip opens the room on Bruno.
@@ -209,15 +210,19 @@ try {
   console.log("   emoji escolhido no telemóvel:", E2)
   check("a reacção do telemóvel chega ao Bruno", (await ate(async () => (await fichaDe(bruno.page, PERGUNTA, E2))?.n === 1, 60_000)) >= 0)
   check("e ao computador da Ana, como minha", (await ate(async () => (await fichaDe(ana.page, PERGUNTA, E2))?.minha === true, 60_000)) >= 0)
+  check(
+    "uma reacção por pessoa: a do telemóvel troca a primeira da Ana",
+    (await ate(async () => (await fichaDe(bruno.page, PERGUNTA, E1))?.n === 1 && (await fichaDe(ana.page, PERGUNTA, E1))?.minha === false, 60_000)) >= 0,
+  )
   await tel.page.screenshot({ path: join(CAPTURAS, "3-telemovel-fichas-390.png") })
   const rola = await tel.page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
   check("a 390 px, as fichas não trazem rolagem horizontal", !rola)
 
-  // 4. Ana takes back the first on the computer: it leaves everywhere.
-  await linha(ana.page, PERGUNTA).locator(".reaccao:not(.reaccao-mais)").first().click()
+  // 4. Ana takes hers (now the phone's) back on the computer: it leaves everywhere.
+  await linha(ana.page, PERGUNTA).locator(".reaccao", { hasText: E2 }).first().click()
   check(
     "retirar no computador propaga ao Bruno e ao telemóvel",
-    (await ate(async () => (await fichaDe(bruno.page, PERGUNTA, E1))?.n === 1 && (await fichaDe(tel.page, PERGUNTA, E1))?.minha === false, 60_000)) >= 0,
+    (await ate(async () => !(await fichaDe(bruno.page, PERGUNTA, E2)) && !(await fichaDe(tel.page, PERGUNTA, E2)) && (await fichaDe(tel.page, PERGUNTA, E1))?.minha === false, 60_000)) >= 0,
   )
 
   // 5. Reload: the vault keeps the chips.
@@ -235,7 +240,7 @@ try {
     await abrirCanal(p.page, CANAL)
     const depois = await ate(async () => {
       const f = await fichas(p.page, PERGUNTA)
-      return f.length === 2 && f.find((x) => x.emoji === E1)?.n === 1 && f.find((x) => x.emoji === E2)?.n === 1
+      return f.length === 1 && f.find((x) => x.emoji === E1)?.n === 1
     }, 60_000)
     check(`depois de recarregar, ${p.nome} vê as mesmas fichas`, depois >= 0, JSON.stringify(await fichas(p.page, PERGUNTA)))
   }

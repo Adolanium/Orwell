@@ -810,14 +810,29 @@ export class MotorDeMedia {
     dono: string,
     entrada: EntradaPendente,
   ): Promise<{ rtpCapabilities: types.RtpCapabilities; produtores: ProdutorNoAmbito[] }> {
-    const ambito = await this.#ambitoVivo(chave)
+    let ambito: Ambito
+    for (let volta = 0; ; volta++) {
+      ambito = await this.#ambitoVivo(chave)
 
-    // The owner left while the scope was being made. Becoming a member now
-    // would leave a member that no exit will ever remove, and a router that
-    // `#talvezFecharAmbito` never closes: a leak in the worker until restart.
-    if (entrada.cancelada) {
-      await this.#talvezFecharAmbito(ambito)
-      throw new RecusaDeMedia("saiu-a-meio", "esta ligação saiu da chamada antes de acabar de entrar")
+      // The owner left while the scope was being made. Becoming a member now
+      // would leave a member that no exit will ever remove, and a router that
+      // `#talvezFecharAmbito` never closes: a leak in the worker until restart.
+      if (entrada.cancelada) {
+        await this.#talvezFecharAmbito(ambito)
+        throw new RecusaDeMedia("saiu-a-meio", "esta ligação saiu da chamada antes de acabar de entrar")
+      }
+
+      // Another entry on the same new scope, cancelled, ran first and closed it
+      // between `#ambitoVivo` and here: two joins at once, and the first socket
+      // dropped. The closed scope is already out of the maps, so the next turn
+      // builds a live one; three turns, as in `#ambitoVivo`.
+      if (!ambito.fechado) break
+      if (volta >= 2) {
+        throw new RecusaDeMedia(
+          "ambito-instavel",
+          "esta chamada está a ser fechada e reaberta ao mesmo tempo: tenta outra vez",
+        )
+      }
     }
 
     if (!ambito.membros.has(dono) && ambito.membros.size >= PARTICIPANTES_POR_AMBITO) {

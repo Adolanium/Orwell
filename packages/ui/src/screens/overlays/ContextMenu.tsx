@@ -253,10 +253,17 @@ export function ContextMenu({
   at,
   items,
   onClose,
+  topo,
 }: {
   at: { x: number; y: number }
   items: MenuItem[]
   onClose: () => void
+  /**
+   * A row drawn above the entries: the quick reactions of a message, like
+   * Discord. Its buttons carry `role="menuitem"`, so the arrows reach them; each
+   * one closes the menu itself.
+   */
+  topo?: React.ReactNode
 }): React.JSX.Element {
   const menu = useRef<HTMLDivElement>(null)
   const escada = useRef<HTMLDivElement>(null)
@@ -402,6 +409,7 @@ export function ContextMenu({
             }
           }}
         >
+          {topo}
           <Entradas
             items={items}
             onClose={onClose}
