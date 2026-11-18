@@ -106,3 +106,67 @@ export function listarVotacoes(ctx: {
   }
   return lista.sort((a, b) => (b.message.payload.sentAt ?? 0) - (a.message.payload.sentAt ?? 0))
 }
+
+/** What a polls room shows in place of a poll that is not a poll any more (diag-votacao, 18/11/2026). */
+export type TipoDeRasto = "autor" | "moderacao" | "semPoder"
+
+export interface RastoDeVotacao {
+  id: string
+  tipo: TipoDeRasto
+  /** The poll message as it came (for "autor" and "moderacao"), or the message as it reads now ("semPoder"). */
+  message: ChatMessage
+  /** When the poll closes by its deadline, or `null`: it decides the tab, like a poll's `fechoEm`. */
+  fechoEm: number | null
+}
+
+/**
+ * The traces a polls room keeps of what it does not list as a poll (diag-votacao, 18/11/2026).
+ *
+ * - **"autor"**: the poll was deleted by its author. The conversation drops the line;
+ *   a polls room has no conversation, so without this it showed nothing at all.
+ * - **"moderacao"**: deleted by someone who may moderate. The conversation keeps the
+ *   line ("Message deleted by moderation"); this is the same line for the polls room.
+ * - **"semPoder"**: a poll from someone without `votacoes` (1.3.21), read without its
+ *   poll (`votacaoSemPoder`). Its text shows, with a note, and no voting.
+ *
+ * Same rules as `listarVotacoes`: the same fold (`comEmendas` with `modera`) decides
+ * what was deleted and by whom, and the same room tag rule decides the room. A poll
+ * that only an altered client deleted (a tombstone from someone who may not) is no
+ * trace: it is still listed as a poll.
+ */
+export function rastosDeVotacoes(ctx: {
+  messages: ChatMessage[]
+  channel: string
+  existentes: ReadonlySet<string>
+  salas: readonly SalaDaPagina[]
+  modera: (quem: string) => boolean
+}): RastoDeVotacao[] {
+  const doCanal = ctx.messages.filter((message) => message.channel === ctx.channel)
+  const salas = new Set(ctx.salas.map((sala) => sala.room))
+  const vivas = new Map<string, ChatMessage>()
+  for (const message of comEmendas(
+    doCanal.filter((message) => ["message", "edit", "redact"].includes(message.payload.t)),
+    { modera: ctx.modera },
+  )) {
+    if (message.payload.id) vivas.set(message.payload.id, message)
+  }
+  const vistos = new Set<string>()
+  const rastos: RastoDeVotacao[] = []
+  for (const message of doCanal) {
+    const id = message.payload.id
+    if (message.payload.t !== "message" || !id || vistos.has(id)) continue
+    const votacao = votacaoDe(message.payload)
+    const semPoder = message.payload.votacaoSemPoder === true
+    if (!votacao && !semPoder) continue
+    const etiqueta = (message.payload as { room?: string }).room ?? ""
+    const room = etiqueta !== "" && ctx.existentes.has(etiqueta) ? etiqueta : ""
+    if (!salas.has(room)) continue
+    vistos.add(id)
+    const viva = vivas.get(id)
+    const fechoEm = votacao?.closesAt ?? null
+    if (!viva) rastos.push({ id, tipo: "autor", message, fechoEm })
+    else if (viva.payload.moderada === true) rastos.push({ id, tipo: "moderacao", message, fechoEm })
+    else if (semPoder) rastos.push({ id, tipo: "semPoder", message: viva, fechoEm })
+  }
+  return rastos.sort((a, b) => (b.message.payload.sentAt ?? 0) - (a.message.payload.sentAt ?? 0))
+}

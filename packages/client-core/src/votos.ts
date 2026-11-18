@@ -185,7 +185,80 @@ export function semPoll<P extends object>(payload: P): P {
   return copia
 }
 
-/** An entry's payload as the screen and the vote folds read it: without the poll when `semVotacao`. */
+/**
+ * A poll its author could not create, as the screen reads it: without the poll,
+ * and marked `votacaoSemPoder`, so the polls room shows it as a message with a note
+ * instead of showing nothing (diag-votacao, 18/11/2026). The marker is for the
+ * screen only: nothing sends it.
+ */
+export function semPollNoEcra<P extends object>(payload: P): P {
+  const sem = semPoll(payload)
+  return sem === payload ? payload : ({ ...sem, votacaoSemPoder: true } as P)
+}
+
+/**
+ * The payload without a `votacaoSemPoder` that came on the wire (I3 of the review of
+ * diag-votacao). Only this device writes the marker, from its own verdict; an altered app
+ * that sends it would put its text in the polls room with the note. Returns the SAME
+ * object when there is no marker.
+ */
+export function semMarcaDoFio<P extends object>(payload: P): P {
+  if (!Object.hasOwn(payload, "votacaoSemPoder")) return payload
+  const copia = { ...payload } as P & { votacaoSemPoder?: unknown }
+  delete copia.votacaoSemPoder
+  return copia
+}
+
+/**
+ * An entry's payload as the screen and the vote folds read it: without the poll, and
+ * marked, when `semVotacao`; never with a marker that came on the wire.
+ */
 export function comoNoEcra<P extends object>(entrada: { payload: P; semVotacao?: true | undefined }): P {
-  return entrada.semVotacao ? semPoll(entrada.payload) : entrada.payload
+  const limpo = semMarcaDoFio(entrada.payload)
+  return entrada.semVotacao ? semPollNoEcra(limpo) : limpo
+}
+
+/**
+ * How many open polls a channel holds on to, the newest (diag-votacao, 18/11/2026).
+ * A bound, so a hostile member creating polls cannot grow memory or the vault without end.
+ */
+export const VOTACOES_ABERTAS_PRESAS_MAX = 50
+
+/**
+ * The open polls that stay put, like a pinned message (diag-votacao, 18/11/2026): the
+ * memory caps of the interface (200 at start, 400 live) do not take them, the vault cap
+ * does not move them to the archive, and the vault's vote bucket does not drop their
+ * counted votes for age.
+ *
+ * Open: no deadline, or a deadline after `agora`; no `closePoll` edit; no tombstone. Only
+ * the author's edits and tombstones are read here, because the vault does not see roles: a
+ * poll a moderator closed or deleted stays held until its deadline or until fifty newer
+ * open polls push it out. That costs room, never a wrong count: the folds still decide what
+ * shows. At most `VOTACOES_ABERTAS_PRESAS_MAX`, the newest in `itens` order (server order).
+ * Once closed or deleted, a poll follows the normal rules again.
+ */
+export function votacoesAbertasPresas<T>(
+  itens: readonly T[],
+  ler: (item: T) => EventoDeVoto,
+  agora: number = Date.now(),
+): Set<string> {
+  const autores = new Map<string, string>()
+  const ordem: string[] = []
+  for (const item of itens) {
+    const { payload, sender } = ler(item)
+    const votacao = votacaoGuardada(payload)
+    if (!votacao || autores.has(votacao.id)) continue
+    if (votacao.closesAt !== undefined && votacao.closesAt <= agora) continue
+    autores.set(votacao.id, sender)
+    ordem.push(votacao.id)
+  }
+  if (ordem.length === 0) return new Set()
+  const fora = new Set<string>()
+  for (const item of itens) {
+    const { payload, sender } = ler(item)
+    const alvo = payload["target"]
+    if (typeof alvo !== "string" || autores.get(alvo) !== sender) continue
+    if (payload["t"] === "redact" || (payload["t"] === "edit" && payload["closePoll"] === true)) fora.add(alvo)
+  }
+  return new Set(ordem.filter((id) => !fora.has(id)).slice(-VOTACOES_ABERTAS_PRESAS_MAX))
 }

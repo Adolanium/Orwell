@@ -3,11 +3,16 @@ import { Votacao } from "../../components/Votacao.js"
 import { Button } from "../../components/Button.js"
 import { formatarDataEHora } from "../../lib/format.js"
 import { useAgora } from "../../hooks/useAgora.js"
-import type { VotacaoListada } from "../../lib/listarVotacoes.js"
+import type { RastoDeVotacao, VotacaoListada } from "../../lib/listarVotacoes.js"
 import type { ChatMessage } from "../../types.js"
 import { strings } from "../../strings.js"
 
 type Separador = "abertas" | "fechadas"
+
+/** One row of the list: a poll, or the trace of one. Exactly one of the two. */
+type Item = { votacao: VotacaoListada; rasto?: undefined } | { rasto: RastoDeVotacao; votacao?: undefined }
+
+const quando = (item: Item): number => (item.votacao ?? item.rasto).message.payload.sentAt ?? 0
 
 /**
  * The screen of a polls room: polls as cards, and no conversation.
@@ -23,10 +28,16 @@ type Separador = "abertas" | "fechadas"
  * Who may create one is decided by the caller (`onNova` absent means this account cannot
  * write in the room, read-only rooms and roles included): without it the button does not
  * appear, the house rule, and a sentence says why.
+ *
+ * **What is no longer a poll leaves a trace** (`rastos`, diag-votacao): a deleted poll says
+ * who deleted it (its author, or moderation), and a poll from someone without the power to
+ * create polls shows its text with a note. Before, both left the room empty. A trace sits in
+ * the tab the poll would be in, by its deadline, among the polls by date.
  */
 export function SalaDeVotacoes({
   nome,
   votacoes,
+  rastos = [],
   nameFor,
   onVotar,
   podeFechar,
@@ -37,6 +48,8 @@ export function SalaDeVotacoes({
 }: {
   nome: string
   votacoes: VotacaoListada[]
+  /** Deleted polls and polls without the power, as traces (see `rastosDeVotacoes`). */
+  rastos?: RastoDeVotacao[]
   nameFor: (address: string) => string
   onVotar?: ((message: ChatMessage, opcao: number) => void) | undefined
   /** Can this account close this poll? Its author, or whoever moderates. */
@@ -51,10 +64,15 @@ export function SalaDeVotacoes({
   const [separador, setSeparador] = useState<Separador>("abertas")
   const id = useId()
   // Wakes the screen when the next deadline passes, so a poll moves tab by itself.
-  const agora = useAgora(votacoes.map((votacao) => votacao.fechoEm))
-  const estaFechada = (votacao: VotacaoListada): boolean => votacao.fechoEm !== null && votacao.fechoEm <= agora
-  const abertas = votacoes.filter((votacao) => !estaFechada(votacao))
-  const fechadas = votacoes.filter(estaFechada)
+  const agora = useAgora([...votacoes, ...rastos].map((item) => item.fechoEm))
+  const estaFechada = (item: { fechoEm: number | null }): boolean => item.fechoEm !== null && item.fechoEm <= agora
+  // Polls and traces together, newest first, as the polls already were.
+  const itens: Item[] = [
+    ...votacoes.map((votacao): Item => ({ votacao })),
+    ...rastos.map((rasto): Item => ({ rasto })),
+  ].sort((a, b) => quando(b) - quando(a))
+  const abertas = itens.filter((item) => !estaFechada(item.votacao ?? item.rasto))
+  const fechadas = itens.filter((item) => estaFechada(item.votacao ?? item.rasto))
   const mostradas = separador === "abertas" ? abertas : fechadas
 
   return (
@@ -101,7 +119,25 @@ export function SalaDeVotacoes({
           </p>
         ) : (
           <ul>
-            {mostradas.map((votacao) => (
+            {mostradas.map(({ votacao, rasto }) =>
+              rasto ? (
+                <li key={rasto.id} className="votacoes-pagina-cartao votacoes-pagina-rasto">
+                  {rasto.tipo === "semPoder" && rasto.message.payload.body && (
+                    <p className="votacoes-pagina-texto">{rasto.message.payload.body}</p>
+                  )}
+                  <p className="hint">
+                    {rasto.tipo === "autor"
+                      ? strings.salaDeVotacoes.eliminadaPeloAutor
+                      : rasto.tipo === "moderacao"
+                        ? strings.salaDeVotacoes.eliminadaPorModeracao
+                        : strings.salaDeVotacoes.semPoder}
+                  </p>
+                  <p className="votacoes-pagina-meta">
+                    {strings.salaDeVotacoes.deQuem(nameFor(rasto.message.sender), formatarDataEHora(rasto.message.payload.sentAt))}
+                  </p>
+                </li>
+              ) : (
+                votacao && (
               <li key={votacao.id} className="votacoes-pagina-cartao">
                 <Votacao
                   votacao={votacao.votacao}
@@ -130,7 +166,9 @@ export function SalaDeVotacoes({
                   </div>
                 )}
               </li>
-            ))}
+                )
+              ),
+            )}
           </ul>
         )}
       </div>

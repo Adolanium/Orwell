@@ -51,10 +51,11 @@ describe("os votos das votações e os tectos do cofre", () => {
     expect(votos?.has(BRUNO)).toBe(false)
   })
 
-  it("controlo: com 400 mensagens depois, a própria votação sai da conversa", () => {
+  it("controlo: com 400 mensagens depois, a própria votação (fechada) sai da conversa", () => {
+    // Closed by its deadline: an open poll stays in the vault (diag-votacao, `votacoesAbertasPresas`).
     const c = newVaultContents()
     let seq = 1
-    appendHistory(c, SALA, entrada(seq++, BRUNO, { t: "message", id: "v1", body: "?", sentAt: 1, poll: { question: "?", options: ["a", "b"] } }))
+    appendHistory(c, SALA, entrada(seq++, BRUNO, { t: "message", id: "v1", body: "?", sentAt: 1, poll: { question: "?", options: ["a", "b"], closesAt: 5 } }))
     appendHistory(c, SALA, entrada(seq++, ANA, { t: "post.reaction", id: "a1", target: "v1", emoji: "", at: 10, remove: false, vote: 0 }))
     for (let i = 0; i < HISTORY_MAX_PER_CHANNEL; i++) appendHistory(c, SALA, entrada(seq++, ANA, { t: "message", id: `m${i}`, body: "x", sentAt: seq }))
     expect(c.history[SALA]?.some((e) => e.payload["id"] === "v1")).toBe(false)

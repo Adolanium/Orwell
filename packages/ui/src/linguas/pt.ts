@@ -3988,6 +3988,9 @@ export const pt = {
     semSalas: "Ainda não há votações neste canal.",
     semSalasLead: "Quem organiza o canal pode criar uma sala de votações.",
     voltar: "Voltar à conversa",
+    eliminadaPeloAutor: "Votação eliminada pelo autor.",
+    eliminadaPorModeracao: "Votação eliminada por moderação.",
+    semPoder: "Votação sem permissão para criar votações.",
   },
 
   /*

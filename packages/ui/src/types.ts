@@ -104,6 +104,12 @@ export interface ChatMessage {
      * the text was.
      */
     moderada?: boolean
+    /**
+     * In a "message": a poll its author could not create (`votacoes`, 1.3.21), read
+     * without its poll. Never travels: the core writes it for the screen
+     * (`semPollNoEcra`), so the polls room shows the text with a note.
+     */
+    votacaoSemPoder?: boolean
     /** For "friend.request": an optional note from the sender. */
     note?: string
     acceptedAt?: number

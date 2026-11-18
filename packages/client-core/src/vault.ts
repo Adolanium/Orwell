@@ -3,7 +3,7 @@ import { xchacha20poly1305 } from "@noble/ciphers/chacha.js"
 import { argon2id } from "@noble/hashes/argon2.js"
 import { fromBase64, toBase64, type CorpoDaDenuncia, type Motivo } from "@enclave/protocol"
 import { chavesDeOrdem, chaveDoEvento, venceCarimbo } from "./dobras.js"
-import { comoNoEcra, votosAGuardar } from "./votos.js"
+import { comoNoEcra, lerVoto, votacaoGuardada, votacoesAbertasPresas, votosAGuardar } from "./votos.js"
 import { carriesBytes, entryMediaBytes, LINK_KEY, MEDIA_KEYS, thumbnailBytes } from "./medidaDeMedia.js"
 import { comCabecalho, semCabecalho, versaoDoFicheiro, type VersaoDoFicheiroDoCofre } from "./cabecalhoDoCofre.js"
 import { registarFicha, type FichaDoCanal, type FichaQueChega } from "./tipoDoCanal.js"
@@ -1375,16 +1375,25 @@ function porOrdem(list: readonly StoredChatMessage[]): StoredChatMessage[] {
  * In a version 2 vault the list holds only chat. A state entry still there
  * (written by hand in a test, or by an old path) does not count and does not
  * evict: its place is the state book, and the migration takes it.
+ *
+ * An open poll stays (`presas`, diag-votacao): the cap takes the next oldest instead, so
+ * the poll is not archived while people can still vote. Asked only when something leaves.
  */
-function apararConversa(list: StoredChatMessage[]): StoredChatMessage[] {
+function apararConversa(list: StoredChatMessage[], presas: () => ReadonlySet<string> = () => new Set()): StoredChatMessage[] {
   let comuns = 0
   for (const entry of list) if (tipoDoEstado(entry) === null) comuns += 1
   let tirar = Math.max(0, comuns - HISTORY_MAX_PER_CHANNEL)
   if (tirar === 0) return []
+  const abertas = presas()
+  const presa = (entry: StoredChatMessage): boolean => {
+    if (abertas.size === 0) return false
+    const id = entry.payload["id"]
+    return typeof id === "string" && abertas.has(id) && votacaoGuardada(comoNoEcra(entry)) !== null
+  }
   const tiradas: StoredChatMessage[] = []
   let escrita = 0
   for (const entry of list) {
-    if (tirar > 0 && tipoDoEstado(entry) === null) {
+    if (tirar > 0 && tipoDoEstado(entry) === null && !presa(entry)) {
       tirar -= 1
       tiradas.push(entry)
       continue
@@ -1569,10 +1578,14 @@ function apararEstado(contents: VaultContents, channel: string): void {
     const votacoes = [...(contents.history[channel] ?? []), ...ordenadas]
     // A poll its author could not create is no poll: its votes are orphans (`semVotacao`).
     const { guardar, orfaos } = votosAGuardar(votacoes, (entry) => ({ sender: entry.sender, payload: comoNoEcra(entry) }))
+    // The counted votes of an open poll do not leave for age (`votacoesAbertasPresas`, diag-votacao):
+    // the votes of every other poll leave first. The bucket never passes its cap: past it, the
+    // "rest" pass below takes the oldest, open polls included (measured with 12 000 voters).
+    const abertas = votacoesAbertasPresas(votacoes, (entry) => ({ sender: entry.sender, payload: comoNoEcra(entry) }))
     const fases: ((entry: StoredChatMessage) => boolean)[] = [
       (entry) => !guardar.has(entry) && !orfaos.has(entry),
       (entry) => orfaos.has(entry),
-      () => true,
+      (entry) => !abertas.has(lerVoto(entry)?.alvo ?? ""),
     ]
     for (const fase of fases) {
       for (const entry of ordenadas) {
@@ -1620,7 +1633,17 @@ function enforceHistoryLimits(contents: VaultContents, channel: string): void {
   if (conversa) {
     // Out of the vault, not out of the device (17/11/2026): what the cap takes waits for
     // an archive page in the media store. See `armazem/conversaArquivada.ts`.
-    const tiradas = apararConversa(conversa).filter((entrada) => !entrada.herdado)
+    const ler = (entrada: StoredChatMessage): { sender: string; payload: StoredChatMessage["payload"] } => ({
+      sender: entrada.sender,
+      payload: comoNoEcra(entrada),
+    })
+    // Hot: a busy channel at the cap trims on every message. The polls live in the conversation
+    // (about 400 entries); the state book (thousands) is read only when one of them is open.
+    const presas = (): ReadonlySet<string> =>
+      votacoesAbertasPresas(conversa, ler).size === 0
+        ? new Set()
+        : votacoesAbertasPresas([...conversa, ...(contents.estadoDoCanal?.[channel] ?? [])], ler)
+    const tiradas = apararConversa(conversa, presas).filter((entrada) => !entrada.herdado)
     if (tiradas.length > 0) {
       contents.porArquivar ??= {}
       ;(contents.porArquivar[channel] ??= []).push(...tiradas)

@@ -2149,6 +2149,9 @@ export const en: Traducao = {
     semSalas: "There are no polls in this channel yet.",
     semSalasLead: "People who organize the channel can create a polls room.",
     voltar: "Back to the conversation",
+    eliminadaPeloAutor: "Poll deleted by its author.",
+    eliminadaPorModeracao: "Poll deleted by moderation.",
+    semPoder: "Poll by someone without permission to create polls.",
   },
 
   /*

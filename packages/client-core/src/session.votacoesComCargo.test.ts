@@ -319,9 +319,12 @@ describe("criar votações pede um cargo", () => {
       const linha = noEcra(quem, "forjada-0002")
       expect(linha?.payload["body"]).toBe("Pizza ou sushi?\n1. Pizza\n2. Sushi")
       expect(linha?.payload["poll"]).toBeUndefined()
+      // Marked for the screen, so the polls room shows its text with a note and not nothing (diag-votacao).
+      expect(linha?.payload["votacaoSemPoder"]).toBe(true)
     }
     expect(recebidas).toHaveLength(1)
     expect((recebidas[0] as { poll?: unknown }).poll).toBeUndefined()
+    expect((recebidas[0] as { votacaoSemPoder?: unknown }).votacaoSemPoder).toBe(true)
     // A vote for it is a vote for no poll: the vault's cap takes it first (`votosAGuardar`).
     await ana.session.voteOnPoll(CANAL, "forjada-0002", 0)
     await settle(80)
@@ -406,6 +409,21 @@ describe("criar votações pede um cargo", () => {
     await expect(ana.session.republishAuthority(CANAL)).resolves.toBeUndefined()
   })
 
+  it("a marca votacaoSemPoder não se aceita do fio (I3 da revisão do diag-votacao)", async () => {
+    const { ana, bento } = await canal()
+    const recebidas: unknown[] = []
+    ana.session.on("message", (evento) => {
+      if ((evento.payload as { id?: unknown }).id === "marca-0001") recebidas.push(evento.payload)
+    })
+    const forjada = mensagemAEnviar("texto de outra pessoa", undefined, { votacaoSemPoder: true } as never, { id: "marca-0001", sentAt: Date.now() })
+    await bento.session.send(CANAL, forjada)
+    await settle(120)
+    expect(noEcra(ana, "marca-0001")?.payload["body"]).toBe("texto de outra pessoa")
+    expect(noEcra(ana, "marca-0001")?.payload["votacaoSemPoder"]).toBeUndefined()
+    expect(recebidas).toHaveLength(1)
+    expect((recebidas[0] as { votacaoSemPoder?: unknown }).votacaoSemPoder).toBeUndefined()
+  })
+
   it("uma votação que o servidor recebeu antes do corte não é julgada: vale como em 1.3.20", async () => {
     const { ana, bento } = await canal()
     minutoDoRele = PODER_DAS_VOTACOES_DESDE_MINUTO - 1
@@ -414,6 +432,7 @@ describe("criar votações pede um cargo", () => {
     await settle(120)
     expect(noEcra(ana, "antiga-0001")?.payload["poll"]).toBeDefined()
     expect(entradaDe(ana, "antiga-0001")?.semVotacao).toBeUndefined()
+    expect(noEcra(ana, "antiga-0001")?.payload["votacaoSemPoder"]).toBeUndefined()
   })
 })
 

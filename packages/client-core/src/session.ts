@@ -225,7 +225,7 @@ import {
 import { APELIDO_MAX, apelidoDaMensagem, apelidosDoCanal, esquecerApelidos, registarApelido, type RegistoDeApelido } from "./apelidos.js"
 import { contarGrafemas, NOME_MAX } from "./nomeDeApresentacao.js"
 import { chaveDoEvento, dobrarReaccoes, porOrdemDoServidor, venceCarimbo } from "./dobras.js"
-import { comoNoEcra, lerVoto, semPoll, votacaoGuardada } from "./votos.js"
+import { comoNoEcra, lerVoto, semMarcaDoFio, semPollNoEcra, votacaoGuardada } from "./votos.js"
 import {
   anexosParaFixar,
   apagadasDe,
@@ -15187,7 +15187,7 @@ What was left behind:
       channel: canal,
       seq,
       sender: autor as UserAddress,
-      payload: this.#comMencoesConferidas(canal, autor, semVotacao ? semPoll(payload) : payload),
+      payload: this.#comMencoesConferidas(canal, autor, semVotacao ? semPollNoEcra(semMarcaDoFio(payload)) : semMarcaDoFio(payload)),
     })
   }
 
@@ -21503,7 +21503,7 @@ None of this touches the deafness counter: whoever reads it is the next
         channel,
         seq,
         sender: result.sender,
-        payload: this.#comMencoesConferidas(channel, result.sender, semVotacao ? semPoll(result.payload) : result.payload),
+        payload: this.#comMencoesConferidas(channel, result.sender, semVotacao ? semPollNoEcra(semMarcaDoFio(result.payload)) : semMarcaDoFio(result.payload)),
         ...(aoVivo ? { aoVivo: true as const } : {}),
         ...(cargosNovos.length > 0 ? { cargosNovos } : {}),
       })

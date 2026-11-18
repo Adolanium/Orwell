@@ -12768,6 +12768,18 @@ button.message-citacao:focus-visible {
   width: 100%;
 }
 
+/* The trace of a poll that is no poll any more (deleted, or without the power): quieter than a poll. */
+.votacoes-pagina-rasto {
+  border-style: dashed;
+  background: transparent;
+}
+
+.votacoes-pagina-texto {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .votacoes-pagina-meta,
 .votacoes-pagina-prazo {
   max-width: 100%;

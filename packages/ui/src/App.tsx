@@ -75,7 +75,7 @@ import { useIdadesDosVotantes } from "./hooks/useIdadesDosVotantes.js"
 import { NovaVotacao } from "./screens/overlays/NovaVotacao.js"
 import { SalaDeVotacoes } from "./screens/chat/SalaDeVotacoes.js"
 import { EscolherSalaDeVotacoes } from "./screens/chat/EscolherSalaDeVotacoes.js"
-import { listarVotacoes, type VotacaoListada } from "./lib/listarVotacoes.js"
+import { listarVotacoes, rastosDeVotacoes, type VotacaoListada } from "./lib/listarVotacoes.js"
 import { useLigacaoDeMensagem } from "./hooks/useLigacaoDeMensagem.js"
 import {
   admiteAdministracao,
@@ -295,6 +295,51 @@ export function toChatMessage(channel: string, entry: StoredChatMessage): ChatMe
     ...(entry.seq < 0 && entry.apos !== undefined ? { apos: entry.apos } : {}),
     payload: entry.payload as ChatMessage["payload"],
   }
+}
+
+/**
+ * The polls of a channel's archived conversation, with their edits (diag-votacao, 18/11/2026).
+ *
+ * The whole archive, page by page, from the newest: the polls room must find a poll however
+ * old. Only polls, polls read without their poll (`votacaoSemPoder`) and edits of those stay,
+ * so memory holds a few entries and not the archive. A page that does not open is skipped,
+ * as "load older" skips it. A poll deleted after it was archived is not here at all: the
+ * archive drops it (`apagadoNoArquivo`).
+ */
+export async function votacoesDoArquivo(
+  channel: string,
+  ler: EnclaveBridge["channels"]["conversaArquivada"],
+): Promise<ChatMessage[]> {
+  if (!ler) return []
+  const todas: ChatMessage[] = []
+  let cursor: number | null | undefined = undefined
+  // `seguinte` only goes down, to `null`; the bound is a guard against a host that loops.
+  for (let voltas = 0; voltas < 100_000; voltas++) {
+    const { entradas, seguinte }: { entradas: StoredChatMessage[]; seguinte: number | null } = await ler(channel, cursor)
+    for (const entry of entradas) todas.push(toChatMessage(channel, entry))
+    if (seguinte === null) break
+    cursor = seguinte
+  }
+  return soDasVotacoes(todas)
+}
+
+/**
+ * Only what the polls room folds: the polls (and polls read without their poll), and the
+ * edits, tombstones and votes that point at them (diag-votacao). A vault read holds the whole
+ * state book, reactions and all, up to thousands of entries; the room folds a few.
+ */
+export function soDasVotacoes(todas: readonly ChatMessage[]): ChatMessage[] {
+  const votacoes = new Set<string>()
+  for (const message of todas) {
+    const { payload } = message
+    if (payload.t === "message" && payload.id && (votacaoDe(payload) !== null || payload.votacaoSemPoder === true)) votacoes.add(payload.id)
+  }
+  if (votacoes.size === 0) return []
+  return todas.filter(({ payload }) => {
+    if (payload.t === "message") return payload.id !== undefined && votacoes.has(payload.id)
+    if (payload.t !== "edit" && payload.t !== "redact" && payload.t !== "post.reaction") return false
+    return payload.target !== undefined && votacoes.has(payload.target)
+  })
 }
 
 /**
@@ -4227,12 +4272,64 @@ function Shell({
     setActiveRooms((actual) => ({ ...actual, [active]: unica.room }))
     setEscolhaDeVotacoes(null)
   }, [escolhaNoEcra, active, salasDeVotacoes])
+  /**
+   * The open polls room reads the vault and the archive, not only memory (diag-votacao, 18/11/2026).
+   *
+   * Memory holds the last `MEMORY_PER_CHANNEL` entries of the channel, every room and the
+   * votes, reactions and edits together. A poll with more than that after it left memory on
+   * the next start, and its polls room showed nothing: no card, no line, and no "load older".
+   *
+   * Read when the room opens and again every fifty server events (`lotesDoActivo`), never per
+   * render. The vault is one read (`history`). The archive is read once per channel in this
+   * session, page by page, and only its polls (and their edits) are kept. What arrives live is
+   * in memory, and the two are merged by `keyOf`.
+   */
+  const salaDeVotacoesAberta = active !== null && salaAberta?.layout === "polls"
+  const [votacoesGuardadas, setVotacoesGuardadas] = useState<{ channel: string; messages: ChatMessage[] } | null>(null)
+  // The promise, not the result (I1 of the review): one archive read per channel, even while
+  // the next batch of fifty events asks again.
+  const votacoesArquivadas = useRef(new Map<string, Promise<ChatMessage[]>>())
+  useEffect(() => {
+    if (!salaDeVotacoesAberta || active === null) return
+    const canal = active
+    let vivo = true
+    void (async () => {
+      let leitura = votacoesArquivadas.current.get(canal)
+      if (leitura === undefined) {
+        leitura = votacoesDoArquivo(canal, bridge.channels.conversaArquivada)
+        votacoesArquivadas.current.set(canal, leitura)
+        // A read that fails is asked again on the next batch.
+        leitura.catch(() => votacoesArquivadas.current.delete(canal))
+      }
+      const arquivadas = await leitura
+      const doCofre = soDasVotacoes((await bridge.channels.history(canal)).map((entry) => toChatMessage(canal, entry)))
+      if (vivo) setVotacoesGuardadas({ channel: canal, messages: [...arquivadas, ...doCofre] })
+    })().catch(() => {
+      // The vault read failed: the room shows what memory has, as before.
+    })
+    return () => {
+      vivo = false
+    }
+  }, [salaDeVotacoesAberta, active, lotesDoActivo, bridge])
+  /**
+   * Memory and the stored polls, once each: memory wins, it is the newest copy. The key has
+   * the type and the sender as well as the id, like the vault (`chaveDoEvento`): with `keyOf`
+   * alone, another member's event with the poll's id took the poll's place (B1 of the review).
+   */
+  const mensagensDasVotacoes = useMemo(() => {
+    if (!salaDeVotacoesAberta || !active || votacoesGuardadas?.channel !== active) return messages
+    const chave = (message: ChatMessage): string => `${keyOf(message)}|${message.payload.t}|${message.sender}`
+    const porChave = new Map<string, ChatMessage>()
+    for (const message of votacoesGuardadas.messages) porChave.set(chave(message), message)
+    for (const message of messages) if (message.channel === active) porChave.set(chave(message), message)
+    return [...porChave.values()]
+  }, [salaDeVotacoesAberta, active, votacoesGuardadas, messages])
   /** The polls of the open polls room, folded like the conversation (see `listarVotacoes`). */
   const votacoesDaSala = useMemo(
     () =>
       active && salaAberta?.layout === "polls"
         ? listarVotacoes({
-            messages: semVotacoesDeSalasApagadas(messages, salasApagadas),
+            messages: semVotacoesDeSalasApagadas(mensagensDasVotacoes, salasApagadas),
             channel: active,
             eu: address,
             existentes: salasExistentes,
@@ -4241,7 +4338,21 @@ function Shell({
             ...(podeContarVoto ? { podeContar: podeContarVoto } : {}),
           })
         : [],
-    [active, salaAberta, messages, salasApagadas, address, salasExistentes, activeRoom, bridge, podeContarVoto],
+    [active, salaAberta, mensagensDasVotacoes, salasApagadas, address, salasExistentes, activeRoom, bridge, podeContarVoto],
+  )
+  /** What the open polls room keeps of polls that are not polls any more (see `rastosDeVotacoes`). */
+  const rastosDaSala = useMemo(
+    () =>
+      active && salaAberta?.layout === "polls"
+        ? rastosDeVotacoes({
+            messages: semVotacoesDeSalasApagadas(mensagensDasVotacoes, salasApagadas),
+            channel: active,
+            existentes: salasExistentes,
+            salas: [{ room: activeRoom, name: salaAberta.name, fechada: false }],
+            modera: (quem) => bridge.channels.mayModerate?.(active, quem) ?? false,
+          })
+        : [],
+    [active, salaAberta, mensagensDasVotacoes, salasApagadas, salasExistentes, activeRoom, bridge],
   )
   /** Open the polls of a channel: from the always-visible row in the sidebar and from the channel menu. */
   const abrirVotacoes = (channel: string): void => {
@@ -7441,6 +7552,7 @@ function Shell({
       <SalaDeVotacoes
         nome={salaAberta.name}
         votacoes={votacoesDaSala}
+        rastos={rastosDaSala}
         nameFor={nameFor}
         {...(bridge.votacoes ? { onVotar: votarNaConversa } : {})}
         podeFechar={(votacao) =>
