@@ -598,6 +598,18 @@ interface VezDeEnvio {
 }
 
 /** The turn of someone not in slow mode: nothing to release. */
+/**
+ * A time before which nothing counts for a poll judged as text (`semVotacaoAte`),
+ * that its author cannot choose: just before the server minute that received it, or
+ * this device's clock when it came without one (a report, until the server event
+ * confirms it). A role signed up to here was held when the server got the poll.
+ * The minute is not split: a role given in the same minute, before or after the
+ * poll, does not count, so a backdated or forward-dated `sentAt` gains nothing.
+ */
+function limiteDaVotacao(minuto?: number): number {
+  return minuto !== undefined ? minuto * 60_000 - 1 : Date.now()
+}
+
 const VEZ_LIVRE: VezDeEnvio = { saiu: () => {}, largar: () => {} }
 
 /** Waiting for a send to be written to the batch. See `Session.#enviarEmLote`. */
@@ -6680,6 +6692,119 @@ What was left behind:
       channel,
     })
     return true
+  }
+
+  /**
+   * Per vault contents, per channel: the authors with a poll stored as text
+   * (`semVotacao`). Built from the vault the first time the roles of a channel
+   * move in this session, and kept up to date by `#recordPayload`. So a write
+   * that moves roles costs nothing in a channel where no poll waits to be
+   * judged again, however large it is.
+   */
+  #autoresSemVotacao = new WeakMap<VaultContents, Map<string, Set<string>>>()
+
+  /**
+   * A poll judged as text because this device did not yet know its author's roles
+   * is judged again when they arrive (polls-somem, 19/11/2026).
+   *
+   * The verdict at arrival (`#votacaoSemPoder`) is taken against what the device
+   * holds then. A newcomer before the admin's cascade (`#arrumarParaQuemEntrou`),
+   * a device that refused an assignment because it did not yet know the assigner,
+   * a recovery that brings messages before the roles: each turned a valid poll into
+   * text for good, and it left the polls page and, in 1.3.22, the polls room too.
+   *
+   * **Never forges.** Only text turns into a poll, never the other way (a role
+   * taken away later still leaves old polls alone). And it counts only what was
+   * signed as already true when the server received the poll (`semVotacaoAte`, a
+   * time the author cannot choose): the author's assignment, each role definition
+   * and `@todos`. Anything dated later
+   * counts as absent, which can only take powers away. Rooms and categories do not
+   * count: `votacoes` is not a power by room, so their overrides never change it.
+   */
+  #rejulgarVotacoes(contents: VaultContents, channel: string, autores: Set<string> | "todos"): void {
+    if (this.#eDirecta(channel) || this.#eMural(channel) || channel === this.canalDaConta) return
+    let doCofre = this.#autoresSemVotacao.get(contents)
+    if (!doCofre) this.#autoresSemVotacao.set(contents, (doCofre = new Map()))
+    let comTexto = doCofre.get(channel)
+    if (!comTexto) {
+      comTexto = new Set(entradasDoCanal(contents, channel).flatMap((entrada) => (entrada.semVotacao ? [entrada.sender] : [])))
+      doCofre.set(channel, comTexto)
+    }
+    const candidatos = autores === "todos" ? new Set(comTexto) : new Set([...autores].filter((autor) => comTexto.has(autor)))
+    if (candidatos.size === 0) return
+    const ficam = new Set<string>()
+    const mudadas: StoredChatMessage[] = []
+    // Once per call: the state is the same for every entry (`#tinhaOPoder`).
+    const estado = this.#estadoDePermissoes(channel)
+    for (const entrada of entradasDoCanal(contents, channel)) {
+      if (!entrada.semVotacao || !candidatos.has(entrada.sender)) continue
+      /*
+        An entry with no limit (judged by 1.3.21 to 1.3.23, or from an old sibling) is
+        limited at first sight (I2 of the review): a `sentAt` in the future becomes now,
+        and a role given after this moment no longer counts. An honest author loses
+        nothing: their `sentAt` is already in the past.
+      */
+      if (entrada.semVotacaoAte === undefined) {
+        entrada.semVotacaoAte = Math.min(entrada.at, Date.now())
+        this.#memoriaPorGravar = true
+      }
+      if (!this.#tinhaOPoder(contents, channel, entrada, estado)) {
+        ficam.add(entrada.sender)
+        continue
+      }
+      delete entrada.semVotacao
+      delete entrada.semVotacaoAte
+      mudadas.push(entrada)
+    }
+    for (const autor of candidatos) if (!ficam.has(autor)) comTexto.delete(autor)
+    if (mudadas.length === 0) return
+    this.#memoriaPorGravar = true
+    // After this write: the interface swaps the text line for the poll (`juntarCopiaAoVivo`).
+    queueMicrotask(() => {
+      for (const entrada of mudadas) {
+        this.emit("message", {
+          channel,
+          seq: entrada.seq,
+          sender: entrada.sender as UserAddress,
+          payload: this.#paraOEcra(this.#comMencoesConferidas(channel, entrada.sender, comoNoEcra(entrada))) as Payload,
+        })
+      }
+    })
+  }
+
+  /**
+   * The pass of `#rejulgarVotacoes` for a channel read before any write touched it
+   * in this session (I3 of the review). Without it, in a quiet channel the polls
+   * judged as text before their author's roles arrived waited for a message. One
+   * scan per channel per session; then nothing.
+   */
+  #rejulgarAoLer(channel: string): void {
+    const contents = this.vault.contents
+    if (this.#autoresSemVotacao.get(contents)?.has(channel)) return
+    const antes = this.#memoriaPorGravar
+    this.#rejulgarVotacoes(contents, channel, "todos")
+    if (this.#memoriaPorGravar && !antes) this.#agendarGravacao()
+  }
+
+  /** Whether the author of this poll held `votacoes` by what was signed up to `semVotacaoAte`. See `#rejulgarVotacoes`. */
+  #tinhaOPoder(
+    contents: VaultContents,
+    channel: string,
+    entrada: StoredChatMessage,
+    estado: EstadoDePermissoes = this.#estadoDePermissoes(channel),
+  ): boolean {
+    const ate = entrada.semVotacaoAte ?? entrada.at
+    if (!Number.isFinite(ate)) return false
+    const room = typeof entrada.payload["room"] === "string" ? entrada.payload["room"] : DEFAULT_ROOM.room
+    const definicoes = contents.channelRoles[channel] ?? {}
+    const carimbo = contents.channelMemberRolesAt?.[channel]?.[entrada.sender]
+    const naqueleTempo: EstadoDePermissoes = {
+      ...estado,
+      cargosDe: (quem) => (quem === entrada.sender && (carimbo === undefined || carimbo.at > ate) ? [] : estado.cargosDe(quem)),
+      cargo: (role) => ((definicoes[role]?.at ?? 0) > ate ? undefined : estado.cargo(role)),
+      todos: (definicoes[CARGO_TODOS]?.at ?? 0) > ate ? [...PODERES_DE_TODOS_POR_OMISSAO] : estado.todos,
+    }
+    return permissoesNoModelo(naqueleTempo, entrada.sender, { sala: room }).includes("votacoes")
   }
 
   /**
@@ -19580,7 +19705,15 @@ What was left behind:
    * Returns false when the payload is a repeat of channel state we already hold, and
    * nothing was queued (hotfix 1.3.12). The caller then does not tell the interface.
    */
-  #recordPayload(channel: string, seq: number, sender: string, payload: Payload, apos?: number, semVotacao = false): boolean {
+  #recordPayload(
+    channel: string,
+    seq: number,
+    sender: string,
+    payload: Payload,
+    apos?: number,
+    semVotacao = false,
+    minuto?: number,
+  ): boolean {
     // Anything that came out of the group at all proves this member's seat is
     // live — the profile they republish on every epoch counts exactly as much
     // as a post, and for a feed reader it is the only thing there is.
@@ -19597,7 +19730,8 @@ What was left behind:
     const marcaDeOrdem = seq < 0 && apos !== undefined && apos >= 0 ? { apos } : {}
     if (payload.t === "message") {
       // A poll its author may not create keeps the verdict on the entry. See `#votacaoSemPoder`.
-      const marcaDaVotacao = semVotacao ? { semVotacao: true as const } : {}
+      const marcaDaVotacao = semVotacao ? { semVotacao: true as const, semVotacaoAte: limiteDaVotacao(minuto) } : {}
+      if (semVotacao) this.#autoresSemVotacao.get(this.vault.contents)?.get(channel)?.add(sender)
       this.#pendingHistory.push({ channel, entry: { seq, sender, ...marcaDeOrdem, ...marcaDaVotacao, at: payload.sentAt, payload } })
       const apelido = this.#apelidoAceite(channel, sender, seq, payload)
       if (apelido) this.#pendingApelidos.push({ channel, ...apelido })
@@ -19933,6 +20067,7 @@ What was left behind:
       if (!apagadas) votacoesApagadas.set(channel, (apagadas = this.#votacoesApagadas(contents, channel)))
       return apagadas
     }
+    const canaisComEntradas = new Set(this.#pendingHistory.map(({ channel }) => channel))
     for (const { channel, entry } of this.#pendingHistory) {
       // A vote for a deleted poll counts for nothing, and is not stored. See `#largarVotosDaVotacao`.
       const voto = lerVoto(entry)
@@ -20101,6 +20236,24 @@ What was left behind:
       }
       contents.channelRoles[channel] = doCanal
     }
+    // Whose polls judged as text may be judged again in this write (`#rejulgarVotacoes`):
+    // a role definition or a founder record touches every author of the channel.
+    const cargosMexidos = new Map<string, Set<string> | "todos">()
+    for (const { channel } of this.#pendingRoleDefs) cargosMexidos.set(channel, "todos")
+    /*
+      And once per channel per session, at its first write: the polls stored as text
+      before the roles that now validate them arrived (or before this version, which
+      did not judge again). A role already held is not heard again (`#estadoRepetido`),
+      so without this they would wait for a role to change.
+    */
+    const indexados = this.#autoresSemVotacao.get(contents)
+    for (const channel of canaisComEntradas) if (!indexados?.has(channel)) cargosMexidos.set(channel, "todos")
+    for (const entrada of this.#pendingAuthority) {
+      const antes = cargosMexidos.get(entrada.channel)
+      if (antes === "todos") continue
+      if (entrada.kind === "founder") cargosMexidos.set(entrada.channel, "todos")
+      else cargosMexidos.set(entrada.channel, (antes ?? new Set<string>()).add(entrada.address))
+    }
     this.#pendingRoleDefs = []
     for (const entrada of this.#pendingAuthority) {
       const { channel, address } = entrada
@@ -20142,6 +20295,7 @@ What was left behind:
     }
     this.#pendingAuthority = []
     for (const channel of autoridadeMexida) this.#reverProvasDasFixadas(contents, channel)
+    for (const [channel, autores] of cargosMexidos) this.#rejulgarVotacoes(contents, channel, autores)
     for (const { channel, address } of this.#pendingTransmitters) noteTransmitter(contents, channel, address)
     this.#pendingTransmitters = []
     // And gaps go in the SAME write, for the usual reason: the vault is
@@ -20152,6 +20306,8 @@ What was left behind:
 
   /** Stored history for a channel, oldest first. A copy: the vault's is live. */
   history(channel: string, limit?: number): StoredChatMessage[] {
+    // A quiet channel gets its pass too, the first time it is read (I3 of the review). See `#rejulgarVotacoes`.
+    this.#rejulgarAoLer(channel)
     // Both lists (conversation and state log), in server order. Without the actions
     // inherited from pairing: this device never decrypted them, and the interface never had them (phase S2).
     const list = entradasDoCanal(this.vault.contents, channel).filter((entrada) => !entrada.herdado)
@@ -21465,7 +21621,7 @@ None of this touches the deafness counter: whoever reads it is the next
       // is about to do anyway. Ephemeral kinds (typing, signalling) never land
       // on disk, and voice.* already returned above.
       // A repeat of state we already hold stops here: no queue, no `message`, no render (hotfix 1.3.12).
-      if (!this.#recordPayload(channel, seq, result.sender, result.payload, undefined, semVotacao)) return
+      if (!this.#recordPayload(channel, seq, result.sender, result.payload, undefined, semVotacao, minuto)) return
       // A friendship that arrives live closes live. See `#onFriendPayload` for why
       // it is live only, and `syncFriendships` for what came before.
       if (aoVivo && seq >= 0 && result.sender !== this.identity.address && isFriendPayload(result.payload)) {

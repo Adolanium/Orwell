@@ -55,3 +55,30 @@ describe("a mesma mensagem duas vezes ao vivo: o relato e depois o servidor", ()
     expect(juntarCopiaAoVivo([semId], { ...semId, seq: 10 })).toBeNull()
   })
 })
+
+describe("uma votação lida como texto e julgada outra vez (polls-somem)", () => {
+  const sondagem = (semPoder: boolean): ChatMessage => ({
+    channel: CANAL,
+    seq: 70,
+    sender: BRUNO,
+    payload: {
+      t: "message",
+      id: "votacao-0001",
+      sentAt: 1,
+      body: "Pizza ou sushi?\n1. Pizza\n2. Sushi",
+      ...(semPoder ? { votacaoSemPoder: true } : { poll: { question: "Pizza ou sushi?", options: ["Pizza", "Sushi"] } }),
+    } as ChatMessage["payload"],
+  })
+
+  it("a cópia com a votação toma o lugar da linha de texto", () => {
+    const depois = juntarCopiaAoVivo([sondagem(true)], sondagem(false))
+    expect(depois).toHaveLength(1)
+    expect(depois![0]!.payload.poll).toBeDefined()
+    expect((depois![0]!.payload as { votacaoSemPoder?: unknown }).votacaoSemPoder).toBeUndefined()
+  })
+
+  it("nunca o contrário: uma cópia de texto não tira a votação", () => {
+    const antes = [sondagem(false)]
+    expect(juntarCopiaAoVivo(antes, sondagem(true))).toBe(antes)
+  })
+})

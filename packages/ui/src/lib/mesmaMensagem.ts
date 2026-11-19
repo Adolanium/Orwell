@@ -15,6 +15,11 @@ import type { ChatMessage } from "../types.js"
  * Becomes one line, at the spot of the first. Uses the payload with more media bytes;
  * in a tie, what was already there (and the list stays the same). Returns `null` if the
  * message is new: the caller adds it as usual.
+ *
+ * One exception: a poll the session read as text (`votacaoSemPoder`) and then judged
+ * again once its author's roles arrived (`#rejulgarVotacoes`, polls-somem). The poll
+ * copy takes the line, whatever its bytes. Never the other way: only the session
+ * writes that marker (a wire copy is stripped of it), and it never turns a poll into text.
  */
 export function juntarCopiaAoVivo(current: ChatMessage[], message: ChatMessage): ChatMessage[] | null {
   const id = message.payload.id
@@ -28,11 +33,16 @@ export function juntarCopiaAoVivo(current: ChatMessage[], message: ChatMessage):
   )
   if (indice < 0) return null
   const guardada = current[indice]!
+  const rejulgada = semPoder(guardada) && !semPoder(message)
   // Same list: React does not redraw anything.
-  if (bytesDeMedia(message) <= bytesDeMedia(guardada)) return current
+  if (!rejulgada && bytesDeMedia(message) <= bytesDeMedia(guardada)) return current
   const proxima = [...current]
   proxima[indice] = { ...guardada, seq: message.seq >= 0 ? message.seq : guardada.seq, payload: message.payload }
   return proxima
+}
+
+function semPoder(message: ChatMessage): boolean {
+  return (message.payload as { votacaoSemPoder?: unknown }).votacaoSemPoder === true
 }
 
 function bytesDeMedia(message: ChatMessage): number {

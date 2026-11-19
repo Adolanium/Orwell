@@ -110,6 +110,14 @@ export interface StoredChatMessage {
    * the poll (`comoNoEcra`). Travels with the entry to a sibling and to the archive.
    */
   semVotacao?: true
+  /**
+   * With `semVotacao`: a time (ms) by which the poll surely existed, that its author
+   * cannot choose: the end of the server minute that received it, or this device's
+   * clock when it came without one (a report). The verdict is judged again when the
+   * author's roles arrive, counting only roles and assignments dated up to here
+   * (`#rejulgarVotacoes` in the session). Absent in an entry judged by 1.3.23.
+   */
+  semVotacaoAte?: number
 }
 
 /** The freshest profile payload a peer published, kept so names survive reload. */
@@ -1817,6 +1825,8 @@ function confirmarRelato(guardada: StoredChatMessage, chega: StoredChatMessage, 
   // The poll verdict is the server event's (1.3.21): it was judged with the server minute, the report by this clock.
   if (chega.semVotacao) guardada.semVotacao = true
   else delete guardada.semVotacao
+  if (chega.semVotacaoAte !== undefined) guardada.semVotacaoAte = chega.semVotacaoAte
+  else delete guardada.semVotacaoAte
   if (entryMediaBytes(chega, peso.presente, peso.media) <= entryMediaBytes(guardada, peso.presente, peso.media)) return "confirmou"
   // A new copy and not the same one changed: whoever read the old payload may be holding it.
   guardada.payload = structuredClone(chega.payload)

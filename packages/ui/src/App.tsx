@@ -4289,20 +4289,37 @@ function Shell({
   // The promise, not the result (I1 of the review): one archive read per channel, even while
   // the next batch of fifty events asks again.
   const votacoesArquivadas = useRef(new Map<string, Promise<ChatMessage[]>>())
+  /** The polls the last vault read of each channel held, by author and id. See below. */
+  const votacoesNoCofre = useRef(new Map<string, Set<string>>())
   useEffect(() => {
     if (!salaDeVotacoesAberta || active === null) return
     const canal = active
     let vivo = true
+    const chaveDaVotacao = (message: ChatMessage): string | null =>
+      message.payload.t === "message" && message.payload.id ? `${message.sender}|${message.payload.id}` : null
+    const lerArquivo = (): Promise<ChatMessage[]> => {
+      const leitura = votacoesDoArquivo(canal, bridge.channels.conversaArquivada)
+      votacoesArquivadas.current.set(canal, leitura)
+      // A read that fails is asked again on the next batch.
+      leitura.catch(() => votacoesArquivadas.current.delete(canal))
+      return leitura
+    }
     void (async () => {
-      let leitura = votacoesArquivadas.current.get(canal)
-      if (leitura === undefined) {
-        leitura = votacoesDoArquivo(canal, bridge.channels.conversaArquivada)
-        votacoesArquivadas.current.set(canal, leitura)
-        // A read that fails is asked again on the next batch.
-        leitura.catch(() => votacoesArquivadas.current.delete(canal))
-      }
-      const arquivadas = await leitura
+      let arquivadas = await (votacoesArquivadas.current.get(canal) ?? lerArquivo())
       const doCofre = soDasVotacoes((await bridge.channels.history(canal)).map((entry) => toChatMessage(canal, entry)))
+      /*
+        A poll that left the vault since the last read went to the archive (I2 of the
+        diag-votacao review): a poll that closes is no longer held in the vault, and
+        the next trim archives it. The archive was read once per session, so it was in
+        neither read and left "Closed" until reload. Only then is the archive read again.
+      */
+      const agora = new Set(doCofre.flatMap((message) => chaveDaVotacao(message) ?? []))
+      const antes = votacoesNoCofre.current.get(canal)
+      votacoesNoCofre.current.set(canal, agora)
+      if (antes && [...antes].some((chave) => !agora.has(chave))) {
+        const noArquivo = new Set(arquivadas.flatMap((message) => chaveDaVotacao(message) ?? []))
+        if ([...antes].some((chave) => !agora.has(chave) && !noArquivo.has(chave))) arquivadas = await lerArquivo()
+      }
       if (vivo) setVotacoesGuardadas({ channel: canal, messages: [...arquivadas, ...doCofre] })
     })().catch(() => {
       // The vault read failed: the room shows what memory has, as before.
