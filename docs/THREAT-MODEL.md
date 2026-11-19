@@ -598,8 +598,10 @@ If you run your own server (`infra/.env.example`, `infra/docker-compose.yml`,
 - **Logging.** `ENCLAVE_LOG=debug` logs requests; do not leave it on. Your proxy
   and host keep their own logs with IPs and times.
 - **Calls.** Without an SFU port, calls use a mesh, which shows participants'
-  IPs to each other. Without your own TURN (`ENCLAVE_TURN_URLS`), clients use a
-  public STUN server, which sees the time and IP of every call.
+  IPs to each other. Without your own STUN and TURN (`ENCLAVE_TURN_URLS`),
+  clients use no ICE servers at all: since 1.3.15 no third party learns of a
+  call. A mesh call then reaches only the same network, and the app says so.
+  orwell.pt runs its own SFU and TURN.
 - **Abuse reports** are plaintext files in `<data>/denuncias/`. Decide on purpose
   whether backups include them and who can read them.
 - **Pre-1.0 databases** hold a readable social graph. Protect or destroy them.
