@@ -1,0 +1,7 @@
+# Security contact for orwell.pt (RFC 9116).
+# Please report vulnerabilities by email, not in a public issue.
+Contact: mailto:orwell.eu@proton.me
+Expires: 2027-11-19T23:59:59Z
+Preferred-Languages: en, pt
+Policy: https://github.com/magnuslab-sudo/Orwell/blob/main/SECURITY.md
+Canonical: https://orwell.pt/.well-known/security.txt

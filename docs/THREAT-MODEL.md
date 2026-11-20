@@ -78,6 +78,7 @@ adds a line here.
 | Web Push subscriptions, per device that turned on "Notifications when the app is closed" (`push_subscriptions`): the push service endpoint (so which service), the two encryption keys, the device language, the whole channels that device muted, the end of its pause or Busy, expiry, last renewal, and the last push with the count for the day | To wake a closed app the server must know where to knock, and must not knock for a muted channel or a paused device | Opt-in per device, off by default, and off on the server unless `ENCLAVE_PUSH=on`. The push carries only the language, encrypted for that device (RFC 8291) and padded to one size. Rows go on revocation, on a 404 or 410 from the push service, at expiry, and after 90 days without renewal. See "Web Push" |
 | IP addresses and connection times; in calls, who is with whom and who speaks | It is a server; the SFU forwards packets | Not logged by default. See "Calls" |
 | **A diagnostic log, when the person sends one** ("Send log" in Help and diagnostics; `POST /_enclave/relato`, `apps/server/src/relato.ts`): the app's event log for that session, the account address, the app version and the second it arrived, in `<data>/relatos/<day>-<address>.txt`, outside `enclave.sqlite` | The operator reads it when the person describes a problem; it saves pasting the log by hand | Sent only on a click, never on its own. The log holds events, not messages and not text the person wrote, and is capped at 64 kB, 10 per hour per address and 30 per hour per IP. **From the 1.3.15 server on, the request is signed** by a device of the account (the signed request below, the same as the report routes), the account must have logged in here, and a revoked device is refused: the address on the file is proven, not claimed. Before that the route was open and the address was what the caller declared. The IP is counted in memory for the cap and never written. Each file is **deleted after 30 days** (`RELATO_DIAS`), by a sweep every six hours |
+| **A bug report, when the person sends one** ("Report a bug"; `POST /_enclave/bug`, `apps/server/src/bugs.ts`): the description, the technical details the form shows (app version, platform, system and browser names, language, up to 20 error codes, connection and sync state) and the time it arrived, in `<data>/bugs/<number>.json`, outside `enclave.sqlite`. The account address only when the person ticks "Let us contact you" | The operator reads it to fix the bug, and writes back only when asked to | Sent only on a click. The schema is strict (`packages/protocol/src/bugs.ts`): short capped fields and no free list, so message content, channel names, other addresses and keys have nowhere to ride. A signed request, like the diagnostic log; without "Let us contact you" the address is used to count and then forgotten. Caps: 16 kB per report, 5 per day per account, 20 per day per IP (counted in memory, never written), 2 000 files in the folder. Each report is **deleted after 90 days** (`BUGS_DIAS`) |
 
 **It never has:** message text, the author of a stored message, display names,
 avatars, topics, reactions, mentions, read receipts, typing, attachment names or
@@ -162,9 +163,10 @@ secret and exchange keys encrypted under a key derived from it.
   (`emparelhar.ts`); phones paired earlier get it over the account channel
   (`chaveDaConta.ts`). Every device of the account is equal: each can certify a
   device and sign a manifest.
-- **A removed phone stays out.** For an account with a manifest, only a device
-  in it, and not revoked, logs in (`Gateway.#finishAuth`); a login with the
-  account key alone is refused. The one exception is pairing: a device outside
+- **A removed phone stays out (N-01).** For an account with a manifest, only a
+  device in it, and not revoked, logs in (`Gateway.#finishAuth`); a login with
+  the account key alone is refused. The tests are
+  `apps/server/src/n01-*.test.ts`. The one exception is pairing: a device outside
   the manifest gets two minutes, only while an active device of the account has
   a pairing box open, and only once per device key. In that window it has no
   seat, no Welcome and cannot publish a manifest.
@@ -529,10 +531,13 @@ see, which the vault of 1.3.14 kept inside its seal:
 |---|---|---|
 | **The name of each blob is the SHA-256 of its plaintext** (base64url) | The store is content addressed: the same image is stored once, and the address is checked on arrival | **Confirmation of a known file.** Whoever has a file can hash it and look for that name: they learn whether that exact file is on this device. They learn nothing about files they do not already have |
 | **The index**: each blob's size, class (original or thumbnail) and last use; the ceiling | The ceiling and the least-recently-used eviction run before the vault is open | How many media items there are, how big, which are thumbnails, and when each was last shown |
+| **Pages of the archived conversation (from 1.3.20)**: what the vault's per-channel cap pushes out is kept as encrypted pages of 100 messages (`conversaArquivada.ts`), stored as blobs of the thumbnail class, which the store never evicts for room | The vault is one file written whole on every change; the older conversation has to live outside it | The number and size of those blobs, so roughly how much older conversation the device keeps. Which channel each page belongs to, and what it says, stay inside the vault |
 
-Planned for 1.3.16 (a store format change): the name on disk becomes an HMAC of
+Today the name on disk is the plain SHA-256 (`enderecoDe` in
+`packages/client-core/src/armazem/referencias.ts`). Naming blobs by an HMAC of
 the `sha` under a secret kept in the vault, so a known file can no longer be
-confirmed; inside the vault the blobs stay addressed by `sha`.
+confirmed, is a store format change and is still planned; inside the vault the
+blobs would stay addressed by `sha`.
 
 ## The attested age of an account, for votes (from 1.3.20)
 
@@ -554,6 +559,20 @@ an age the homeserver signs.
   is signed, but no client can catch it. Accounts on another server have an
   unknown age in this version. Older clients count every vote, so two versions
   can show two totals for the same poll.
+
+## Who may create a poll (from 1.3.21)
+
+Creating a poll needs the "create polls" power (`votacoes`), given by a role.
+The founder and `admin` always have it; no other role has it by default.
+
+- **Enforced by the clients.** A poll is an encrypted message, so the server
+  cannot judge it. Each receiving client checks the author's roles when the
+  poll arrives, in server order (`Session.#votacaoSemPoder`), and stores the
+  verdict. A poll from an author without the power reads as a plain message,
+  with its text intact.
+- **What it cannot stop.** An altered client can still send the poll; it just
+  never shows as a poll on other members' devices. Polls the server received
+  before the rule went live keep their card.
 
 ## Other known limits
 
@@ -596,7 +615,9 @@ If you run your own server (`infra/.env.example`, `infra/docker-compose.yml`,
 - **Community mode is off by default.** `ENCLAVE_COMMUNITY_MODE=true` lets every
   account see which accounts exist. Only where everyone already knows each other.
 - **Logging.** `ENCLAVE_LOG=debug` logs requests; do not leave it on. Your proxy
-  and host keep their own logs with IPs and times.
+  and host keep their own logs with IPs and times unless you change them. On
+  orwell.pt the front nginx logs requests without IP addresses and keeps no
+  error log (`infra/nginx-enclave.conf`, since 19 November 2026).
 - **Calls.** Without an SFU port, calls use a mesh, which shows participants'
   IPs to each other. Without your own STUN and TURN (`ENCLAVE_TURN_URLS`),
   clients use no ICE servers at all: since 1.3.15 no third party learns of a

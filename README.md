@@ -6,8 +6,10 @@ Orwell is a place for communities to talk: text rooms, voice and video calls,
 direct messages and a wall for each account. Everything is end-to-end
 encrypted, so the server that carries your messages cannot read them. It runs
 at [orwell.pt](https://orwell.pt), in the browser and as a desktop app for
-Windows and macOS, with a Linux version on the way. The current version is 1.3.16 "Carmelo". I build it on my
-own, and I have put hundreds of hours into it so far.
+Windows and macOS, with a Linux version on the way. The current version is
+1.3.24 "Carmelo" on the web, with the desktop installers at 1.3.22 and the
+homeserver at 1.3.21. I build it on my own, and I have put hundreds of hours
+into it so far.
 
 <p align="center">
   <a href="https://ko-fi.com/orwell_eu"><img src="https://img.shields.io/badge/Ko--fi-Support%20Orwell-FF5E5B?logo=ko-fi&logoColor=white" alt="Support Orwell on Ko-fi"></a>
@@ -60,9 +62,17 @@ I run on coffee.
 - **Several devices on one account.** You pair a new device with a code, and
   both screens show the same six words.
 - **No email and no phone number.** Your account is a key pair.
+- **Reactions, mentions and read-only rooms.**
+- **Polls.** Creating one needs a role with "create polls", and only accounts
+  that are at least 5 days old vote.
+- **Themes:** Dark (the default), Light, System and Aurora.
 - **Reports.** A member can report a message or a person. A person, not a
   script, decides on suspensions.
-- **In Portuguese**, in the app and on the site.
+- **"Report a bug"** inside the app, with the technical details shown word for
+  word before anything is sent.
+- **In English and Portuguese**, in the app and on the site. English by
+  default, Portuguese when your system asks for it, and you can switch in
+  Settings.
 - **Your own server.** The homeserver is in this repository.
 
 <p align="center">
@@ -131,8 +141,9 @@ password only unlocks your account on your own device.
 **The server does see:**
 
 - The IP address of whoever connects. The Orwell server itself keeps no
-  access log by default. On orwell.pt, the web server in front of it keeps a
-  short log for 14 days, with the end of each IP address removed.
+  access log by default. On orwell.pt, the web server in front of it keeps an
+  access log without IP addresses (time, request, response and size) for 15
+  days at most, and no error log.
 - When you are connected, and which channels you are in. Channel addresses are
   opaque, so the database does not say who talks to whom. But someone watching
   the running server can see which account writes in which channel, and when.
@@ -146,6 +157,11 @@ password only unlocks your account on your own device.
   request is signed by your device, so the address is proven, not claimed.
   The server keeps it 30 days, then deletes it. It counts the sender's IP in
   memory for the rate limit and does not write it down.
+- A bug report, only when you send one with "Report a bug": your description
+  and the technical details the form shows (app version, platform, system and
+  browser names, language, error codes, connection and sync state). The server
+  keeps it 90 days. It stores your address only if you tick "Let us contact
+  you", and counts the IP in memory for the daily cap.
 
 **One exception.** When someone reports a message, their device decrypts it and
 gives it to the server. That is the only way the server ever reads a message:
@@ -188,7 +204,8 @@ not work for you, there is a commercial licence. If you would rather not run a
 server at all, I can host one for you. Both are in
 [`COMMERCIAL.md`](COMMERCIAL.md).
 
-You need Node.js 22 or later.
+You need Node.js 24, the version the CI and the Docker image use (the server
+needs `node:sqlite`).
 
 ```bash
 npm install
@@ -253,7 +270,7 @@ The packages are named after the protocol, so you will see `@enclave/*` and
 `ENCLAVE_*` throughout the code.
 
 Code comments and the documentation are in English. Many identifiers are still
-in Portuguese. The app and the site are in Portuguese.
+in Portuguese. The app and the site are in English and Portuguese.
 
 ## Security
 
@@ -296,7 +313,8 @@ ask every contributor to agree to the [CLA](CLA.md), once.
 
 Orwell is licensed under the
 [GNU Affero General Public License, version 3 only](LICENSE)
-(AGPL-3.0-only). Copyright © 2026 Duarte Bivar.
+(AGPL-3.0-only). Copyright © 2026 Duarte Bivar and
+[contributors](CONTRIBUTORS.md).
 
 A commercial licence is available for anyone who cannot follow the AGPL, for
 example to run a modified server without publishing the changes. See
@@ -307,6 +325,8 @@ Third-party components keep their own licences, listed in
 
 ## Thanks
 
+- [edtimer](https://github.com/edtimer), for the flat redesign and the light
+  theme ([#2](https://github.com/magnuslab-sudo/Orwell/pull/2)).
 - [David Rodrigues](https://github.com/davidrodrigues98), for reviewing the
   code.
 - [Blotterrot](https://github.com/Blotterrot), for a security audit that helped me fix

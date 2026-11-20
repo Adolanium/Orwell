@@ -48,7 +48,7 @@
     <!-- Translation of `pt/privacidade.html`, which is the authoritative version. -->
     <main class="legal">
       <h1>Privacy</h1>
-      <p class="legal-data">In force since 18 November 2026.</p>
+      <p class="legal-data">In force since 20 November 2026.</p>
       <p class="legal-lingua">
         This is a translation. <a href="/pt/privacidade.html" hreflang="pt">The Portuguese version</a> is the legally
         binding one.
@@ -93,18 +93,15 @@
       <ul>
         <li>
           <strong>Access log.</strong> For each request to <span class="mono">orwell.pt</span>, the web server logs
-          the day and time, the request, the response and the size. Of the IP address, it keeps only the network: the
-          first three numbers (IPv4) or the first three blocks (IPv6). It does not keep the browser.
+          the day and time, the request, the response and the size. It does not keep the IP address or the browser.
         </li>
-        <li>
-          <strong>Error log.</strong> When a request fails, the web server logs the error with the full IP address.
-        </li>
+        <li><strong>Error log.</strong> The web server keeps no error log.</li>
         <li>
           <strong>Old addresses.</strong> A request to <span class="mono">http://orwell.pt</span> or to
           <span class="mono">www.orwell.pt</span> is redirected to <span class="mono">https://orwell.pt</span>. That
-          request goes into the same access log: only the network of the IP address, and not the browser.
+          request goes into the same access log, also without the IP address and without the browser.
         </li>
-        <li>The web server deletes each log after 15 days at most.</li>
+        <li>The web server deletes the access log after 15 days at most.</li>
       </ul>
 
       <h2>When you send a log or report a bug</h2>
@@ -182,6 +179,19 @@
         We keep each report for 90 days after we close it, or while a suspension or a review is open. After that, the
         server deletes it.
       </p>
+
+      <h2>Who processes data on our behalf</h2>
+      <ul>
+        <li>
+          <strong>Hosting.</strong> The <span class="mono">orwell.pt</span> server is in a data centre in the European
+          Union. The hosting company stores the server's data on our behalf and does not use it for anything else.
+        </li>
+        <li>
+          <strong>Email.</strong> When you write to us, the email goes through an email provider in Switzerland. The
+          European Commission recognises that Switzerland gives personal data an adequate level of protection
+          (Decision 2000/518/EC).
+        </li>
+      </ul>
 
       <h2>Your rights</h2>
       <p>
