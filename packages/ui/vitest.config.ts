@@ -6,5 +6,7 @@ export default defineConfig({
   esbuild: { jsx: "automatic" },
   test: {
     environment: "jsdom",
+    // Portuguese for the assertions, asked for and not inherited: see inside.
+    setupFiles: ["./src/testes/lingua-de-teste.ts"],
   },
 })

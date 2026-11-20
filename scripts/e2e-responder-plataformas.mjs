@@ -79,7 +79,7 @@ function vigiar(page, nome) {
   })
 }
 
-const caixa = (page) => page.locator(".chat-composer .composer-line input:not([type])").first()
+const caixa = (page) => page.locator(".chat-composer .composer-line textarea").first()
 const linhaCom = (page, texto) => page.locator(".message").filter({ hasText: texto }).first()
 const barraDe = (page) => page.locator(".composer-resposta")
 const errosDe = (nome) => registo.filter((linha) => linha.startsWith(`${nome} PAGEERROR`))
@@ -301,6 +301,9 @@ try {
   await carla.page.screenshot({ path: join(CAPTURAS, "carla-toque-barra-390.png") })
   await caixa(carla.page).fill(DA_CARLA)
   await carla.page.keyboard.press("Enter")
+  // With a finger (a touch context), Enter starts a new line and the send
+  // button sends (1.3.25). The text is still in the box: send it.
+  if ((await caixa(carla.page).inputValue().catch(() => "")) !== "") await carla.page.locator("form.chat-composer .composer-enviar").first().click()
   for (const [quem, page] of [["WebKit (Bruno)", bruno.page], ["secretária (Ana)", anaSec.page]]) {
     const chegou = await chega(page, DA_CARLA)
     const citacao = chegou >= 0 ? await citacaoDe(page, DA_CARLA) : { dentroDela: "" }

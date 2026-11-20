@@ -168,13 +168,16 @@ async function abrirCanal(page, nome) {
   }
   await linha.click()
   if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click()
-  await page.locator('input[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
+  await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
 }
 async function dizer(page, frase) {
-  const caixa = page.locator('input[placeholder="Escreve uma mensagem"]')
+  const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]')
   await caixa.click()
   await caixa.fill(frase)
   await page.keyboard.press("Enter")
+  // With a finger (a touch context), Enter starts a new line and the send
+  // button sends (1.3.25). The text is still in the box: send it.
+  if ((await caixa.inputValue().catch(() => "")) !== "") await page.locator("form.chat-composer .composer-enviar").first().click()
 }
 const ouviu = (page, frase, timeout = 30_000) =>
   page.getByText(frase, { exact: false }).first().waitFor({ timeout }).then(() => true, () => false)

@@ -201,19 +201,6 @@
   flex: none;
 }
 
-/* The rail's "something is unread somewhere" dot. */
-.rail-dot {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent-deep);
-  border: 2px solid var(--bg-rail);
-  box-sizing: content-box;
-}
-
 .sealed {
   display: inline-flex;
   align-items: center;
@@ -1105,8 +1092,10 @@ select:focus {
 }
 
 .badge,
-.rail-dot,
 .rail-count,
+.rail-toque,
+.rail-chamada,
+.rail-offline,
 .filter-chip,
 .tag-preview .tag-pill {
   animation: pop-in var(--dur-fast) var(--ease);

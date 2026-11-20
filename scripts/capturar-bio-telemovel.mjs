@@ -32,10 +32,10 @@ const i = process.argv.indexOf("--rotulo")
 const ROTULO = i >= 0 ? process.argv[i + 1] : "agora"
 const FRASE = "frase-de-verificacao-2026"
 const BIOS = {
-  curta: "Fotografo o Alentejo.",
+  curta: "Fotografo a planície.",
   longa:
-    "Fotografo o Alentejo há vinte anos, sobretudo a planície e o montado ao fim da tarde, quando a luz baixa e as sombras dos sobreiros se alongam sobre a terra. Escrevo sobre o que vejo e guardo tudo em papel.",
-  quebras: "Fotografia.\nEscrita.\n\nPortalegre, Alentejo.\nResposta em dois dias.",
+    "Fotografo a planície há vinte anos, sobretudo os campos e o montado ao fim da tarde, quando a luz baixa e as sombras dos sobreiros se alongam sobre a terra. Escrevo sobre o que vejo e guardo tudo em papel.",
+  quebras: "Fotografia.\nEscrita.\n\nNo interior, junto ao rio.\nResposta em dois dias.",
   palavra: "https://exemplo.pt/um/caminho/muito/comprido/sem/espacos/nenhuns/que/nao/cabe/numa/linha/de/telemovel e Supercalifragilisticexpialidociousmentequenãocabe",
 }
 

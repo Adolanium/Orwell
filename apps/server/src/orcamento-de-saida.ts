@@ -6,7 +6,7 @@
  * the other calls, and all of them go through the SAME worker and the SAME network card.
  * Measured on 3 November 2026: a worker uses ~400 Mbit/s at 70 % of
  * one core, and the card gave 300 to 745 Mbit/s of egress, shared with
- * magnuslab.pt. When the sum exceeds that, ALL calls degrade, including voice.
+ * the other services on the host. When the sum exceeds that, ALL calls degrade, including voice.
  * This counter keeps the sum from getting there.
  *
  * **The count is per consumer, not per stream.** An SFU's egress is

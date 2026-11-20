@@ -281,7 +281,9 @@ describe("fixar uma mensagem, visto do ecrã", () => {
       ],
     })
 
-    await user.pointer({ keys: "[MouseRight]", target: screen.getByText("As inscrições fecham na sexta.") })
+    // In the conversation: the pinned bar at the top says the same text (fixadas-topo).
+    const conversa = document.querySelector(".timeline") as HTMLElement
+    await user.pointer({ keys: "[MouseRight]", target: within(conversa).getByText("As inscrições fecham na sexta.") })
 
     expect(await screen.findByText(strings.chat.messageUnpin)).toBeTruthy()
     expect(screen.queryByText(strings.chat.messagePin)).toBeNull()

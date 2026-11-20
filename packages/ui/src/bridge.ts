@@ -765,6 +765,18 @@ export interface EnclaveBridge {
      * does not appear.
      */
     escolherSalaComum?: (entrar: boolean) => Promise<{ ok: boolean }>
+    /**
+     * Who may create an account on a server (1.3.25), asked before the vault
+     * exists: `aberto`, `convite`, `fechado`, or `null` when the server could not
+     * be asked. See `Session.sondarRegisto`. Optional: an older host does not
+     * have it, and the gate goes on as before.
+     */
+    sondarRegisto?: (servidor: string) => Promise<"aberto" | "convite" | "fechado" | null>
+    /**
+     * The registration invite code that the new account sends at its first
+     * login (1.3.25). See `Session.definirConviteDeRegisto`. Optional, like the one above.
+     */
+    definirConviteDeRegisto?: (codigo: string | null) => Promise<{ ok: boolean }>
     /** Announce this connection to channel-mates, or not. Hides you from
      * people; the server still knows, because it must. */
     setVisible: (visible: boolean) => Promise<{ ok: boolean }>
@@ -1240,6 +1252,13 @@ export interface EnclaveBridge {
      */
     history: (channel: string) => Promise<StoredChatMessage[]>
     /**
+     * Every chat reaction the vault holds for the channel, in server order (B6, 1.3.25),
+     * so the chips are folded over the vault and not only over memory. Absent on an
+     * older host (the desktop bridge until it wires `session.reaccoesGuardadas`): the
+     * chips are folded over memory, as before.
+     */
+    reaccoesGuardadas?: (channel: string) => Promise<StoredChatMessage[]>
+    /**
      * The conversation older than the vault, kept on this device (17/11/2026):
      * one page per call, newest first; `seguinte` is the cursor for the next, `null`
      * at the end. Absent on an older host: there is nothing past the vault there.
@@ -1489,6 +1508,12 @@ export interface EnclaveBridge {
     /** Channels whose events keep arriving and never open: deafness, not
      * silence. The difference matters more than any other diagnostic. */
     deafChannels: () => Promise<string[]>
+    /**
+     * The rooms the room notice says are deaf now (1.3.25, P5), the same set as the
+     * last `on.surdez`. Read when the shell starts: a window that reloads in the
+     * middle of a session missed the event. Optional: an older host lacks it.
+     */
+    canaisSurdos?: () => Promise<string[]>
     /** Forget written-off invitations and ask the server for them again. */
     resyncWelcomes: (channel?: string) => Promise<{ ok: boolean }>
     /**
@@ -1585,6 +1610,17 @@ export interface EnclaveBridge {
      * them waits for it, and the box says so. Optional: an older host lacks it.
      */
     recuperacao?: (handler: (event: { canais: string[] }) => void) => () => void
+    /**
+     * The rooms this device cannot read for a minute or more (1.3.25, P5). The
+     * room says so (code 390), what is written there waits, and goes out when
+     * the room hears again. Optional: an older host lacks it.
+     */
+    surdez?: (handler: (event: { canais: string[] }) => void) => () => void
+    /**
+     * The echo of our message brought its server `seq` (ordem-resposta, 20/11/2026).
+     * The line takes it and moves to its server place. Optional: an older host lacks it.
+     */
+    eco?: (handler: (event: { channel: string; id: string; seq: number }) => void) => () => void
     /**
      * Somebody joined or left a call, in any channel we belong to.
      *

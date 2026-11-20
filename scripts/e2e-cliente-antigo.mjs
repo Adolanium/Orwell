@@ -519,17 +519,17 @@ async function ateVerNaVoz(page, quantos, timeout = 20_000) {
 
 async function abrirSalaComum(page) {
   await page.locator(".channel-name", { hasText: /orwell/i }).first().click()
-  await page.locator('input[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
+  await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
 }
 
 /** A channel by the sidebar, until the text input box appears. */
 async function abrirCanalAntigo(page, nome) {
   await page.locator(".channel-name", { hasText: nome }).first().click()
-  await page.locator('input[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
+  await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
 }
 
 async function dizer(page, frase) {
-  const caixa = page.locator('input[placeholder="Escreve uma mensagem"]')
+  const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]')
   await caixa.click()
   await caixa.fill(frase)
   await page.keyboard.press("Enter")

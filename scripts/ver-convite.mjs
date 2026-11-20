@@ -134,7 +134,7 @@ check("depois de aceitar, a sala aparece nos canais do Bruno", textoCanais.inclu
 
 // The final proof: Ana speaks in the room and Bruno reads.
 const DITO = `dito no lagar ${Date.now().toString().slice(-4)}`
-const caixa = a.page.locator(".composer-line input:not([type=file])").last()
+const caixa = a.page.locator(".composer-line textarea").last()
 await caixa.fill(DITO)
 await a.page.keyboard.press("Enter")
 await a.page.waitForTimeout(4000)

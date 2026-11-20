@@ -51,7 +51,13 @@ import type { ServerKeypair } from "./config.js"
 import { ed25519 } from "@noble/curves/ed25519.js"
 import type { Federation } from "./federation.js"
 import { fetchLinkPreview } from "./link-preview.js"
+import { ContadoresDosLugares } from "./lugares.js"
 import { RecusaDeMedia, type MotorDeMedia } from "./media.js"
+import {
+  CODIGO_CONVITE_DE_REGISTO_EM_FALTA,
+  CODIGO_CONVITE_DE_REGISTO_INVALIDO,
+  CODIGO_REGISTO_FECHADO,
+} from "@enclave/protocol"
 
 /**
  * The client gateway.
@@ -235,6 +241,12 @@ export class Gateway {
     private readonly store: Store,
     private readonly config: ServerConfig,
   ) {}
+
+  /**
+   * Seat repairs as numbers, for `GET /_interno/canais` (1.3.25, P8). In memory,
+   * with no address. See `lugares.ts`.
+   */
+  readonly lugares = new ContadoresDosLugares()
 
   /** Wired after construction because federation needs to call back into us. */
   attachFederation(federation: Federation): void {
@@ -423,15 +435,28 @@ export class Gateway {
    */
   static PINGS_SEM_PONG_SEM_MEDIA = 10
 
-  /** The message for the `error` `versao-antiga`, in STE100. */
-  static readonly FRASE_VERSAO_ANTIGA = "Há uma versão nova do Orwell. Recarrega a página, ou descarrega a versão nova."
+  /**
+   * The message for the `error` `versao-antiga`, in STE100. Only an old client
+   * shows it, and that client has no catalog for it: so it goes in both
+   * languages, English first (20/11/2026). The frame has one `message`.
+   */
+  static readonly FRASE_VERSAO_ANTIGA =
+    "There is a new version of Orwell. Reload the page, or download the new version. / Há uma versão nova do Orwell. Recarrega a página, ou descarrega a versão nova."
 
   /**
    * The message for the `error` `account-suspended` (reports, §8), for an app
    * that does not know the code. One that does shows "Erro 218" and the full
    * notice.
    */
-  static readonly FRASE_CONTA_SUSPENSA = "A tua conta está suspensa neste servidor. Abre a app para ler o motivo e pedir revisão."
+  static readonly FRASE_CONTA_SUSPENSA =
+    "Your account is suspended on this server. Open the app to read the reason and ask for a review. / A tua conta está suspensa neste servidor. Abre a app para ler o motivo e pedir revisão."
+
+  /** The messages for a refused new account (1.3.25), for an app that does not know the codes. See `#fecharRegistoRecusado`. */
+  static readonly FRASE_REGISTO_FECHADO = "Este servidor não aceita contas novas. This server does not accept new accounts."
+  static readonly FRASE_CONVITE_DE_REGISTO_EM_FALTA =
+    "Este servidor só aceita contas novas com um código de convite. This server only accepts new accounts with an invite code."
+  static readonly FRASE_CONVITE_DE_REGISTO_INVALIDO =
+    "Esse código de convite não é válido. That invite code is not valid."
 
   /**
    * How often `fecharSuspensas` runs (`app.ts`): a connection opened before
@@ -891,6 +916,8 @@ export class Gateway {
                 commonRoomGroupInfo: this.store.hasGroupInfo(this.config.commonRoom),
               }
             : {}),
+          // Who may create an account here (1.3.25). See `registo.ts` in the protocol.
+          registo: this.config.registo ?? "aberto",
         })
         return
 
@@ -916,7 +943,7 @@ export class Gateway {
       }
 
       case "auth.finish":
-        this.#finishAuth(connection, frame.signature, { posse: frame.posse ?? 0, marca: frame.assumirPosse })
+        this.#finishAuth(connection, frame.signature, { posse: frame.posse ?? 0, marca: frame.assumirPosse }, frame.conviteDeRegisto)
         return
 
       case "channel.subscribe": {
@@ -1541,15 +1568,22 @@ export class Gateway {
         // way back. Only this request: members check the tree (`#answerRejoin`),
         // and anyone not in it gets no seat.
         if (!this.#mayAsk(connection, frame.channel) && this.store.claimantOf(frame.channel) !== connection.address) return
+        // A ceiling, like every neighbour (1.3.25 review, finding 3). See `PEDIDOS_DE_LUGAR_POR_CANAL`.
+        if (!this.#dentroDoTecto("pedidos-de-lugar", connection.address as string, Gateway.PEDIDOS_DE_LUGAR_POR_MINUTO)) return
+        if (!this.#dentroDoTecto("pedidos-de-lugar", `${connection.address as string}|${frame.channel}`, Gateway.PEDIDOS_DE_LUGAR_POR_CANAL)) return
         {
           const ouviram = this.broadcast(frame.channel, {
             t: "channel.rejoin",
             channel: frame.channel,
             address: connection.address as string,
+            // Which device asks (1.3.25): its leaf is the only one to take out (C1). Never what
+            // the client says: the key this connection proved at login, and none without a chain.
+            ...(connection.deviceKey !== null ? { device: toBase64(connection.deviceKey) } : {}),
           })
           // Say how many it reached. Zero is a useful answer: it means nobody
           // online can admit, which is different from being ignored by those who are.
           this.#send(connection, { t: "channel.rejoin.sent", channel: frame.channel, ouviram })
+          this.lugares.pedido(frame.channel, connection.address as string, ouviram)
         }
         return
 
@@ -2210,7 +2244,7 @@ export class Gateway {
     const motor = this.#motor
 
     if (!motor || !motor.estaDePe()) {
-      this.#recusarSfu(connection, "sem-sfu", "este servidor não encaminha media por um SFU", ref)
+      this.#recusarSfu(connection, "sem-sfu", "this server does not relay media through an SFU", ref)
       return
     }
 
@@ -2226,7 +2260,7 @@ export class Gateway {
       // else is our own bug, and the client is not told what broke inside: we
       // say it failed, with a code that sets it apart from a legitimate rejection.
       if (erro instanceof RecusaDeMedia) this.#recusarSfu(connection, erro.codigo, erro.message, ref)
-      else this.#recusarSfu(connection, "interno", "o motor de media não conseguiu atender o pedido", ref)
+      else this.#recusarSfu(connection, "interno", "the media engine could not serve the request", ref)
     }
   }
 
@@ -2239,10 +2273,14 @@ export class Gateway {
         // ciphertext, decides whether there is a call. Nobody produces or consumes
         // in a scope it would not grant.
         if (!this.#mayReach(connection, frame.channel)) {
-          this.#recusarSfu(connection, "sem-lugar", "não tens lugar neste canal", ref)
+          this.#recusarSfu(connection, "sem-lugar", "you have no seat in this channel", ref)
           return
         }
         const chave = chaveDeAmbito(frame.channel, frame.scope)
+        if (this.#chamadaNoutroAparelho(connection, frame.tomar === true)) {
+          this.#recusarSfu(connection, "noutro-aparelho", "esta conta está numa chamada noutro aparelho", ref)
+          return
+        }
         const { rtpCapabilities, produtores } = await motor.entrar(chave, connection.id)
         // The socket may have closed during the `await`, and `#drop` already ran:
         // nobody else will take this member out (ORW-134-07).
@@ -2251,6 +2289,8 @@ export class Gateway {
           return
         }
         connection.sfu.set(chave, { channel: frame.channel, scope: frame.scope })
+        this.#largarMarca(connection)
+        await this.#umaChamadaPorConta(connection, chave, motor)
         this.#send(connection, {
           t: "sfu.scope.joined",
           channel: frame.channel,
@@ -2281,7 +2321,7 @@ export class Gateway {
 
       case "sfu.transport.create": {
         if (!this.#mayReach(connection, frame.channel)) {
-          this.#recusarSfu(connection, "sem-lugar", "não tens lugar neste canal", ref)
+          this.#recusarSfu(connection, "sem-lugar", "you have no seat in this channel", ref)
           return
         }
         const chave = chaveDeAmbito(frame.channel, frame.scope)
@@ -2450,6 +2490,112 @@ export class Gateway {
   }
 
   /**
+   * The devices whose call another device of the same account took over, by
+   * account. See `#umaChamadaPorConta`.
+   *
+   * By DEVICE, not by connection: a device that lost the call and reconnects
+   * comes back on a new socket, and its rebuild (`Call.ligacaoVoltou`) sends a
+   * plain `sfu.scope.join`. Marked by connection, that join would take the call
+   * back, and two devices would pass the call between them forever.
+   */
+  #chamadasTomadas = new Map<string, Set<string>>()
+
+  /** The device of a connection for `#chamadasTomadas`: its key, or the connection itself without a chain. */
+  #marcaDoAparelho(connection: Connection): string {
+    return connection.deviceKey ? toBase64(connection.deviceKey) : `ligacao:${connection.id}`
+  }
+
+  /** Two connections of the same device: the same device key. Without a chain nothing says so. */
+  #mesmoAparelho(uma: Connection, outra: Connection): boolean {
+    return uma.deviceKey !== null && outra.deviceKey !== null && bytesIguais(uma.deviceKey, outra.deviceKey)
+  }
+
+  /**
+   * Must this join be refused because the account is in a call on another
+   * device?
+   *
+   * Only for a device that LOST the call (`#chamadasTomadas`), and only while
+   * the other device is still in a call. The join that comes from a person's
+   * gesture carries `tomar` (1.3.25) and takes the call back. The joins without
+   * it are the automatic ones: a rebuild after the socket dropped, the
+   * resynchronisation that asks who is in the call. From a client before
+   * 1.3.25 every join comes without it, and refusing them is what stops that
+   * client from taking the call back by itself.
+   *
+   * Only reads: the mark goes in `#largarMarca`, after the join worked. Cleared
+   * here, a gesture whose join then failed in the engine left the device with
+   * no call and no mark, and its next rebuild took the call from the other device.
+   */
+  #chamadaNoutroAparelho(connection: Connection, tomar: boolean): boolean {
+    const address = connection.address as string
+    if (!this.#chamadasTomadas.get(address)?.has(this.#marcaDoAparelho(connection))) return false
+    const outroEmChamada = [...this.#connections].some(
+      (outra) => outra !== connection && outra.address === address && outra.sfu.size > 0 && !this.#mesmoAparelho(outra, connection),
+    )
+    return outroEmChamada && !tomar
+  }
+
+  /** This device is in a call again: it no longer lost one. See `#chamadaNoutroAparelho`. */
+  #largarMarca(connection: Connection): void {
+    const address = connection.address as string
+    const tomadas = this.#chamadasTomadas.get(address)
+    if (!tomadas) return
+    tomadas.delete(this.#marcaDoAparelho(connection))
+    if (tomadas.size === 0) this.#chamadasTomadas.delete(address)
+  }
+
+  /**
+   * One call per account, as in Discord (1.3.25).
+   *
+   * The account just joined `chave` through `connection`. Every other call of
+   * the same account ends here, on the server, so that a modified client cannot
+   * keep two:
+   *
+   * - **Another device of the account:** its scopes close, the others in those
+   *   calls hear `sfu.producer.closed`, and the device gets `sfu.scope.closed`
+   *   with `noutro-aparelho`. It is marked in `#chamadasTomadas`.
+   * - **The same device on an older socket:** the reconnection of the same
+   *   device (the new socket rebuilt the call before the server saw the old one
+   *   die). Its scopes close in silence: that socket is dead, and a notice
+   *   there would reach nobody, or reach the same app that just rebuilt.
+   * - **The same connection in another scope:** a move between rooms, where
+   *   the client already sends the `sfu.scope.leave` of the old room. Closing
+   *   it here is the same result, without waiting for a client that may not send it.
+   *
+   * The same connection in the same scope is the resynchronisation, and nothing closes.
+   */
+  async #umaChamadaPorConta(connection: Connection, chave: string, motor: MotorDeMedia): Promise<void> {
+    const address = connection.address as string
+    for (const outra of [...this.#connections]) {
+      if (outra.address !== address || outra.sfu.size === 0) continue
+      const ambitos = [...outra.sfu].filter(([chaveDaOutra]) => outra !== connection || chaveDaOutra !== chave)
+      if (ambitos.length === 0) continue
+      const avisar = outra !== connection && !this.#mesmoAparelho(outra, connection)
+      if (avisar) {
+        let tomadas = this.#chamadasTomadas.get(address)
+        if (!tomadas) this.#chamadasTomadas.set(address, (tomadas = new Set()))
+        tomadas.add(this.#marcaDoAparelho(outra))
+      }
+      for (const [chaveDaOutra, par] of ambitos) {
+        outra.sfu.delete(chaveDaOutra)
+        const mortos = await motor.sairDoAmbito(outra.id, chaveDaOutra)
+        for (const produtor of mortos) {
+          this.#anunciarNoAmbito(chaveDaOutra, { t: "sfu.producer.closed", channel: par.channel, scope: par.scope, producer: produtor }, outra)
+        }
+        if (avisar) {
+          this.#send(outra, {
+            t: "sfu.scope.closed",
+            channel: par.channel,
+            scope: par.scope,
+            reason: "noutro-aparelho",
+            mesmaChamada: chaveDaOutra === chave,
+          })
+        }
+      }
+    }
+  }
+
+  /**
    * Drop everything a connection has in the engine, and tell the others.
    *
    * Called from `#drop`, the normal way out of a call, used far more than
@@ -2462,6 +2608,9 @@ export class Gateway {
     if (!motor) return
     const ambitos = new Map(connection.sfu)
     connection.sfu.clear()
+    // The last connection of the account went away: no device of it is in a call to lose.
+    const address = connection.address
+    if (address && ![...this.#connections].some((outra) => outra.address === address)) this.#chamadasTomadas.delete(address)
     for (const { chave, produtores } of await motor.sair(connection.id)) {
       const par = ambitos.get(chave)
       if (!par) continue
@@ -2552,7 +2701,12 @@ export class Gateway {
     this.#send(connection, { t: "auth.challenge", nonce: toBase64(connection.challenge) })
   }
 
-  #finishAuth(connection: Connection, signature: string, posse: { posse: number; marca: string | undefined }): void {
+  #finishAuth(
+    connection: Connection,
+    signature: string,
+    posse: { posse: number; marca: string | undefined },
+    conviteDeRegisto?: string,
+  ): void {
     const pending = connection.pending
     const challenge = connection.challenge
 
@@ -2575,8 +2729,21 @@ export class Gateway {
     // Changing devices cannot change the account: if it did, the address would
     // stop being a hash of a key and become a name stored next to it, which is
     // exactly what this system does not have.
-    if (!this.store.registerOrVerifyAccount(pending.address, pending.accountKey)) {
+    //
+    // A NEW account also passes the server's registration rule here (1.3.25,
+    // `ENCLAVE_REGISTO`): after the signature, so nobody spends an invite with a
+    // key they do not hold, and before anything else is written. A refused one
+    // closes the connection, like a suspension: retrying gives the same answer.
+    const registo = this.store.entrarOuRegistar(pending.address, pending.accountKey, {
+      modo: this.config.registo ?? "aberto",
+      convite: conviteDeRegisto,
+    })
+    if (registo === "address-taken") {
       this.#send(connection, { t: "error", code: "address-taken", message: "address bound to another key", fatal: true })
+      return
+    }
+    if (registo !== "ok") {
+      this.#fecharRegistoRecusado(connection, registo)
       return
     }
     // Suspended (reports, §8): the signature is good, so we say why.
@@ -2656,7 +2823,10 @@ export class Gateway {
     // Per device: the pool that matters to this connection is its own. Counting
     // the whole account would tell a second device with zero that it has "twenty".
     const remaining = this.store.availableKeyPackages(pending.address, connection.deviceKey ?? undefined)
-    if (remaining < 10) this.#send(connection, { t: "keypackage.low", remaining })
+    if (remaining < 10) {
+      this.#send(connection, { t: "keypackage.low", remaining })
+      this.lugares.notar("avisosDeChaves")
+    }
 
     // Invitations that arrived while this account was offline are NOT pushed
     // here: at this instant the client has not yet restored its vault, so it
@@ -2823,6 +2993,21 @@ export class Gateway {
    * reachable by a user using the product.
    */
   static readonly RESYNCS_POR_MINUTO = 60
+  /**
+   * Seat requests (`channel.rejoin.request`), per account per minute, and per account
+   * and channel per minute (1.3.25 review, finding 3).
+   *
+   * Each request goes to every connection of the channel (hundreds in the common
+   * room), and each 1.3.25 client queues it. An honest client asks at most once a
+   * minute per channel for a missing seat (`#pedirLugar`), and its deafness requests
+   * share a bucket of 3 and one every 2 s (`REGRAS_DOS_PEDIDOS`, about 30 a minute
+   * across channels). But a new phone asks at once in every channel it has no group
+   * for, 57 in a real account: one ceiling of 30 per account would drop most of them.
+   * So 120 per account, and 6 per account and channel. Over the ceiling the request
+   * is dropped without a receipt, like the other buckets.
+   */
+  static readonly PEDIDOS_DE_LUGAR_POR_MINUTO = 120
+  static readonly PEDIDOS_DE_LUGAR_POR_CANAL = 6
   static readonly ICE_POR_MINUTO = 60
   static readonly DIRECTORIOS_POR_MINUTO = 60
   /**
@@ -3047,7 +3232,7 @@ export class Gateway {
     const recentes = (this.#previewHits.get(quem) ?? []).filter((carimbo) => agora - carimbo < 60_000)
     const emCurso = this.#previewInFlight.get(quem) ?? 0
     if (recentes.length >= Gateway.PREVIEWS_PER_MINUTE || emCurso >= Gateway.PREVIEWS_AT_ONCE) {
-      this.#send(connection, { t: "link.preview.result", url, ok: false, reason: "demasiados pedidos" })
+      this.#send(connection, { t: "link.preview.result", url, ok: false, reason: "too many requests" })
       return
     }
     recentes.push(agora)
@@ -3058,7 +3243,7 @@ export class Gateway {
       const preview = await fetchLinkPreview(url)
       this.#send(connection, { t: "link.preview.result", url, ok: true, ...preview })
     } catch {
-      this.#send(connection, { t: "link.preview.result", url, ok: false, reason: "não foi possível ler a página" })
+      this.#send(connection, { t: "link.preview.result", url, ok: false, reason: "could not read the page" })
     } finally {
       const restantes = (this.#previewInFlight.get(quem) ?? 1) - 1
       if (restantes <= 0) this.#previewInFlight.delete(quem)
@@ -3358,6 +3543,7 @@ export class Gateway {
       return
     }
     if (!guardado.ok) {
+      if (guardado.reason === "stale-epoch") this.lugares.notar("recusasPorEpoca")
       this.#send(connection, {
         t: "channel.rejected",
         channel: frame.channel,
@@ -3369,7 +3555,10 @@ export class Gateway {
     }
     const stored = guardado.event
     // The addressed Welcome is the admission: that account's pending request is done.
-    if (frame.kind === "welcome" && frame.recipient !== undefined) this.#pendentes.delete(chaveDoPendente(frame.channel, frame.recipient))
+    if (frame.kind === "welcome" && frame.recipient !== undefined) {
+      this.#pendentes.delete(chaveDoPendente(frame.channel, frame.recipient))
+      if (!guardado.repetido) this.lugares.welcome(frame.channel, frame.recipient)
+    }
     /*
       The external commit was accepted as THE commit of the epoch: it is the
       proof of entry to the common room, and only here does the temporary seat
@@ -3490,18 +3679,38 @@ export class Gateway {
       if (home === this.config.serverName) {
         // A suspended account cannot be invited (reports, §8): the reply is that
         // of an empty pool, and nothing is spent.
-        if (this.store.estaSuspensa(address)) {
+        const suspensa = this.store.estaSuspensa(address)
+        if (suspensa) {
           resposta = { t: "keypackage.claimed", address, keyPackage: null, ...(bundle ? { keyPackages: [], manifest: null } : {}) }
         } else if (bundle) {
           const { manifest, packages, fallback } = this.store.claimBundle(address, devices)
           const keyPackages = packages.map((p) => ({ deviceKey: p.deviceKey, keyPackage: toBase64(p.keyPackage) }))
           const singular = keyPackages[0]?.keyPackage ?? (fallback ? toBase64(fallback) : null)
           resposta = { t: "keypackage.claimed", address, keyPackage: singular, keyPackages, manifest }
+          // A seat repair names the asker's device (1.3.25, C1). The devices it named that the
+          // manifest lists and that got nothing: that seat fails with "no invite keys".
+          if (devices !== undefined && manifest !== null) {
+            const listados = new Set(manifest.devices.map((d) => d.deviceKey))
+            const pedidos = devices.filter((d) => listados.has(d)).length
+            if (packages.length < pedidos) this.lugares.semChave("reseat", pedidos, packages.length)
+          } else if (singular === null) {
+            this.lugares.semChave("convite", manifest?.devices.length ?? 0, 0)
+          }
         } else {
           const claimed = this.store.claimKeyPackage(address)
           resposta = { t: "keypackage.claimed", address, keyPackage: claimed ? toBase64(claimed) : null }
+          if (claimed === undefined) this.lugares.semChave("convite", 0, 0)
         }
-        if (resposta.keyPackage !== null) this.#avisarChavesBaixas(address)
+        /*
+          ALSO when the claim came back empty (20/11/2026, P4). The nudge used to go only
+          after a claim that SPENT a key package, so the claim that found the pool at
+          zero said nothing to anyone: a device at 0 that was connected, and asking for
+          a seat, never heard that its reseat failed for lack of its keys, and stayed
+          out of the channel until its next login (production: 0 free of 160 and of
+          322). The nudge has its own brake (`AVISO_DE_CHAVES_MS`, and the client's
+          hourly cap), so an empty pool claimed in a loop does not make a key factory.
+        */
+        if (!suspensa) this.#avisarChavesBaixas(address)
       } else if (this.#federation) {
         const remoto = await this.#federation.claimRemote(address, home, bundle ? { bundle, devices } : undefined)
         if (remoto) {
@@ -3544,6 +3753,7 @@ export class Gateway {
       if (remaining < Gateway.MINIMO_DE_CHAVES) {
         outra.chavesAvisadasEm = agora
         this.#send(outra, { t: "keypackage.low", remaining })
+        this.lugares.notar("avisosDeChaves")
       }
     }
   }
@@ -3578,6 +3788,23 @@ export class Gateway {
    * does not reconnect by itself, and reads the notice through the signed
    * request, which needs no session (`ROTAS_DA_DENUNCIA.suspensao`).
    */
+  /**
+   * A new account the registration rule refused (1.3.25). The `message` is for
+   * an app that does not know the code: before 1.3.25 it shows "Erro 212" with
+   * "Código do servidor: registration-closed" in the toast, and the gate says
+   * "Erro 203". One that knows the code shows its own sentence.
+   */
+  #fecharRegistoRecusado(connection: Connection, motivo: "registo-fechado" | "convite-em-falta" | "convite-invalido"): void {
+    const [code, message] =
+      motivo === "registo-fechado"
+        ? [CODIGO_REGISTO_FECHADO, Gateway.FRASE_REGISTO_FECHADO]
+        : motivo === "convite-em-falta"
+          ? [CODIGO_CONVITE_DE_REGISTO_EM_FALTA, Gateway.FRASE_CONVITE_DE_REGISTO_EM_FALTA]
+          : [CODIGO_CONVITE_DE_REGISTO_INVALIDO, Gateway.FRASE_CONVITE_DE_REGISTO_INVALIDO]
+    this.#send(connection, { t: "error", code, message, fatal: true })
+    connection.socket.close()
+  }
+
   #fecharSuspensa(connection: Connection): void {
     this.#send(connection, { t: "error", code: "account-suspended", message: Gateway.FRASE_CONTA_SUSPENSA, fatal: true })
     connection.socket.close()

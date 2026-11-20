@@ -10,12 +10,14 @@ import {
   toBase64,
   verifyDeviceManifest,
   type ManifestoRecusado,
+  type ModoDeRegisto,
   type ServerName,
 } from "@enclave/protocol"
 import { randomBytes } from "node:crypto"
 import type { DatabaseSync } from "node:sqlite"
 import { epochDeCartao, epochDeCommit } from "./cabecalho-mls.js"
 import { currentMinute, currentSecond, type StoredEvent } from "./db.js"
+import { gerarConviteDeRegisto, hashDoConviteDeRegisto } from "./registo.js"
 
 /** What happened to an event we tried to store. See `appendEvent`. */
 export type EventoGuardado =
@@ -241,6 +243,77 @@ export class Store {
     }
 
     return equalBytes(signingKey, existing.signing_key)
+  }
+
+  /**
+   * `registerOrVerifyAccount`, with the server's registration rule (1.3.25).
+   *
+   * An account that exists is verified, whatever the mode: the rule is about
+   * NEW accounts, and a new device of an existing account is an existing
+   * account. A new one gets in with `aberto`; with `convite` only if the code
+   * still has a use left and has not expired, and the use is spent in the same
+   * transaction as the insert, so two logins racing for the last use cannot both
+   * get it; with `fechado` never. A refused account writes nothing.
+   */
+  entrarOuRegistar(
+    address: string,
+    signingKey: Uint8Array,
+    regra: { modo: ModoDeRegisto; convite: string | undefined },
+  ): "ok" | "address-taken" | "registo-fechado" | "convite-em-falta" | "convite-invalido" {
+    return this.#transaction(() => {
+      const existing = this.#db.prepare("SELECT signing_key FROM accounts WHERE address = ?").get(address) as
+        | { signing_key: Uint8Array }
+        | undefined
+      if (existing) return equalBytes(signingKey, existing.signing_key) ? "ok" : "address-taken"
+      if (regra.modo === "fechado") return "registo-fechado"
+      if (regra.modo === "convite") {
+        if (regra.convite === undefined || regra.convite.trim() === "") return "convite-em-falta"
+        const gasto = this.#db
+          .prepare(
+            "UPDATE registration_invites SET uses = uses + 1 WHERE code_hash = ? AND uses < max_uses AND expires_second > ?",
+          )
+          .run(hashDoConviteDeRegisto(regra.convite), currentSecond())
+        if (Number(gasto.changes) !== 1) return "convite-invalido"
+      }
+      this.#db
+        .prepare("INSERT INTO accounts (address, signing_key, created_minute) VALUES (?, ?, ?)")
+        .run(address, signingKey, currentMinute())
+      return "ok"
+    })
+  }
+
+  /**
+   * A new registration invite, for tests and for anyone with the store in hand.
+   * Returns the code in clear, the only time it exists outside the person's
+   * hands. In production the operator uses `scripts/convites-de-registo.mjs`,
+   * which writes the same row.
+   */
+  criarConviteDeRegisto({ usos, dias, agoraSegundo = currentSecond() }: { usos: number; dias: number; agoraSegundo?: number }): string {
+    const codigo = gerarConviteDeRegisto()
+    this.#db
+      .prepare("INSERT INTO registration_invites (code_hash, max_uses, uses, expires_second, created_second) VALUES (?, ?, 0, ?, ?)")
+      .run(hashDoConviteDeRegisto(codigo), usos, agoraSegundo + dias * 86_400, agoraSegundo)
+    return codigo
+  }
+
+  /** The registration invites as stored: hashes and counts, never a code. */
+  convitesDeRegisto(): { hash: string; usos: number; maximo: number; expiraSegundo: number }[] {
+    return (
+      this.#db
+        .prepare("SELECT code_hash, uses, max_uses, expires_second FROM registration_invites ORDER BY created_second")
+        .all() as { code_hash: string; uses: number; max_uses: number; expires_second: number }[]
+    ).map((linha) => ({ hash: linha.code_hash, usos: linha.uses, maximo: linha.max_uses, expiraSegundo: linha.expires_second }))
+  }
+
+  /** How many accounts were created at or after this minute. Only a number: see `registo.ts` (C1). */
+  contasCriadasDesde(minuto: number): number {
+    const linha = this.#db.prepare("SELECT COUNT(*) AS n FROM accounts WHERE created_minute >= ?").get(minuto) as { n: number }
+    return Number(linha.n)
+  }
+
+  /** An account created at a given minute. Only tests use it, to count across an hour without waiting for one. */
+  registarContaNoMinuto(address: string, signingKey: Uint8Array, minuto: number): void {
+    this.#db.prepare("INSERT INTO accounts (address, signing_key, created_minute) VALUES (?, ?, ?)").run(address, signingKey, minuto)
   }
 
   /**
@@ -1960,8 +2033,8 @@ export class Store {
   /**
    * Sweep of vaults for channels with no subscribers (decision D7).
    *
-   * Off by default: only runs if the operator sets `ENCLAVE_COFRE_GC_DIAS`
-   * (see `app.ts`). Each pass looks at every `canal:` scope: with someone
+   * 90 days by default since 1.3.25; `ENCLAVE_COFRE_GC_DIAS=0` turns it off
+   * (see `config.ts`, `app.ts`). Each pass looks at every `canal:` scope: with someone
    * subscribed, clear the mark; with no one and no mark, mark the minute; with
    * no one and the mark older than `dias`, delete the channel vault. `conta:`
    * scopes are not swept: an account does not cease to exist on this server,

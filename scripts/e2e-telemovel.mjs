@@ -382,7 +382,7 @@ try {
   check("tocar numa sala fecha a gaveta: é o fim do percurso", (await gavetaAberta(page)) === false)
   // The conversation is in front and it is THIS room: the input box in view, no
   // panel on top, and the room highlighted in the drawer when you open it again.
-  check("e a conversa está à frente, com a caixa de escrita à vista", await page.locator('input[placeholder="Escreve uma mensagem"]').isVisible())
+  check("e a conversa está à frente, com a caixa de escrita à vista", await page.locator('textarea[placeholder="Escreve uma mensagem"]').isVisible())
   await retratar(page, "sala-aberta")
   await hamburguer.tap()
   await wait(400)
@@ -469,7 +469,7 @@ try {
   // ---------------------------------------------------------------------------
   // 6. The keyboard. Focus on the input bar does not send it off screen.
   // ---------------------------------------------------------------------------
-  const caixaDeEscrita = page.locator('input[placeholder="Escreve uma mensagem"]')
+  const caixaDeEscrita = page.locator('textarea[placeholder="Escreve uma mensagem"]')
   await caixaDeEscrita.tap()
   await wait(400)
   const posicao = await caixaDeEscrita.boundingBox()
@@ -519,8 +519,11 @@ try {
   // of the writer is their own: opening the "Me" destination. It goes back via the
   // sidebar, like it does in real life. (The page of ANOTHER person, over the
   // channel, is measured with two accounts in `scripts/sondar-salas-telemovel.mjs`.)
-  await page.locator('input[placeholder="Escreve uma mensagem"]').fill("a prensa já trabalha")
-  await page.locator('input[placeholder="Escreve uma mensagem"]').press("Enter")
+  await page.locator('textarea[placeholder="Escreve uma mensagem"]').fill("a prensa já trabalha")
+  await page.locator('textarea[placeholder="Escreve uma mensagem"]').press("Enter")
+  // With a finger (a touch context), Enter starts a new line and the send
+  // button sends (1.3.25). The text is still in the box: send it.
+  if ((await page.locator('textarea[placeholder="Escreve uma mensagem"]').inputValue().catch(() => "")) !== "") await page.locator("form.chat-composer .composer-enviar").first().click()
   const cara = page.locator(".message-avatar-botao").last()
   await cara.waitFor({ timeout: 30_000 })
   await cara.tap()
@@ -535,7 +538,7 @@ try {
   check("(salas) de volta às Comunidades, as salas da adega vêem-se na gaveta", salasCertas(comPagina), comPagina.map((s) => `${s.nome}${s.ok ? "" : "✗"}`).join(", "))
   await page.locator('.room-tree button.room', { hasText: "barricas" }).first().tap()
   await wait(800)
-  check("(salas) e tocar numa sala abre a conversa dela", await page.locator('input[placeholder="Escreve uma mensagem"]').isVisible())
+  check("(salas) e tocar numa sala abre a conversa dela", await page.locator('textarea[placeholder="Escreve uma mensagem"]').isVisible())
 
   // With a call: enter the voice room, and go back to a text room via the drawer.
   await hamburguer.tap()
@@ -551,7 +554,7 @@ try {
   await retratar(page, "salas-com-chamada")
   await page.locator('.room-tree button.room', { hasText: "prensa" }).first().tap()
   await wait(800)
-  check("(salas) e tocar numa sala de texto abre a conversa, com a chamada viva", await page.locator('input[placeholder="Escreve uma mensagem"]').isVisible())
+  check("(salas) e tocar numa sala de texto abre a conversa, com a chamada viva", await page.locator('textarea[placeholder="Escreve uma mensagem"]').isVisible())
   await hamburguer.tap()
   await wait(500)
   const depoisDaChamada = await salasAoDedo(page)

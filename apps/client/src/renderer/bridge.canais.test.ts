@@ -123,6 +123,22 @@ function anfitriao(): Record<string, never> & {
         ler("tickets", [channel, room], [{ id: "t1", subject: "a porta", state: "open" }]),
       mayDecideTicket: (channel: string, room: string, ticket: string) =>
         ler("mayDecideTicket", [channel, room, ticket], true),
+      mayMoveIn: (channel: string, de: string, para?: string) =>
+        ler("mayMoveIn", [channel, de, para ?? "<desligar>"], para !== "palco"),
+      // The 1.2 permission model (1.3.25), nested like the UI bridge.
+      permissoes: {
+        todos: (channel: string) => ler("permissoes.todos", [channel], { powers: ["escrever"], definido: true }),
+        em: (channel: string, address: string, lugar?: { sala?: string; categoria?: string }) =>
+          ler("permissoes.em", [channel, address, JSON.stringify(lugar ?? null)], lugar?.sala === "anuncios" ? [] : ["escrever"]),
+        mayManageRole: (channel: string, role: string) => ler("permissoes.mayManageRole", [channel, role], true),
+        delegacao: (channel: string) => ler("permissoes.delegacao", [channel], true),
+        sobreposicoes: (channel: string, lugar: unknown) =>
+          ler("permissoes.sobreposicoes", [channel, JSON.stringify(lugar)], [{ role: "@todos", allow: [], deny: ["escrever"] }]),
+        maySetSobreposicoes: (channel: string, lugar: unknown) =>
+          ler("permissoes.maySetSobreposicoes", [channel, JSON.stringify(lugar)], true),
+        setSobreposicoes: (channel: string, lugar: unknown, perms: unknown) =>
+          pedir("permissoes.setSobreposicoes", [channel, JSON.stringify(lugar), JSON.stringify(perms)]),
+      },
 
       // -------------------------------------------------------- the requests
       list: async () => ["!geral:servidor"],
@@ -150,7 +166,10 @@ function anfitriao(): Record<string, never> & {
       defineRole: (channel: string, next: { role: string }) => pedir("defineRole", [channel, next.role]),
       deleteRole: (channel: string, role: string) => pedir("deleteRole", [channel, role]),
       reorderRoles: (channel: string, ordem: string[]) => pedir("reorderRoles", [channel, ordem.join("+")]),
-      moveVoice: (channel: string, address: string, room: string) => pedir("moveVoice", [channel, address, room]),
+      moveVoice: (channel: string, address: string, room: string, de?: string) =>
+        pedir("moveVoice", [channel, address, room, ...(de === undefined ? [] : [`de=${de}`])]),
+      disconnectVoice: (channel: string, address: string, de?: string) =>
+        pedir("disconnectVoice", [channel, address, ...(de === undefined ? [] : [`de=${de}`])]),
       expel: (channel: string, address: string) => pedir("expel", [channel, address]),
       pin: (channel: string, room: string, message: { id: string; body: string }) =>
         pedir("pin", [channel, room, message.id, message.body]),
@@ -409,6 +428,139 @@ describe("a memória das leituras", () => {
     host.disparar("message", { channel: CANAL })
 
     expect(vistas).toEqual([[SALA, { ...SALA, room: "b", name: "Sala B" }]])
+  })
+})
+
+describe("o modelo de permissões de 1.2 chega à interface (1.3.25)", () => {
+  /*
+    Until 1.3.25 the desktop bridge had no `permissoes` at all. The UI reads
+    `bridge.channels.permissoes?.maySetSobreposicoes(...) ?? false`, so "Who
+    writes" (read-only rooms) never appeared in the room editor, the roles
+    and permissions editor never mounted, and a read-only room still showed
+    the message box. Nothing complained.
+  */
+  it("está lá inteiro, e as leituras devolvem valor", () => {
+    const p = createDesktopBridge().channels.permissoes
+
+    expect(p).toBeDefined()
+    expect(p!.maySetSobreposicoes(CANAL, { sala: "anuncios" })).toBe(true)
+    expect(p!.em(CANAL, "@eu:servidor", { sala: "anuncios" })).toEqual([])
+    expect(p!.em(CANAL, "@eu:servidor", { sala: "geral" })).toEqual(["escrever"])
+    expect(p!.em(CANAL, "@eu:servidor")).toEqual(["escrever"])
+    expect(p!.todos(CANAL)).toEqual({ powers: ["escrever"], definido: true })
+    expect(p!.mayManageRole(CANAL, "guarda")).toBe(true)
+    expect(p!.delegacao(CANAL)).toBe(true)
+    expect(p!.sobreposicoes(CANAL, { categoria: "Voz" })).toEqual([{ role: "@todos", allow: [], deny: ["escrever"] }])
+  })
+
+  it("o lugar vai ao anfitrião tal como veio, e sem lugar não vai nenhum", () => {
+    const p = createDesktopBridge().channels.permissoes!
+
+    p.em(CANAL, "@eu:servidor")
+    p.em(CANAL, "@eu:servidor", { sala: "x" })
+    p.sobreposicoes(CANAL, { categoria: "x" })
+
+    expect(feito).toEqual([
+      `permissoes.em:${CANAL}:@eu:servidor:null`,
+      `permissoes.em:${CANAL}:@eu:servidor:{"sala":"x"}`,
+      `permissoes.sobreposicoes:${CANAL}:{"categoria":"x"}`,
+    ])
+  })
+
+  it("a memória separa sala de categoria, e o canal inteiro da sala de omissão", () => {
+    const p = createDesktopBridge().channels.permissoes!
+
+    // A room "x" and a category "x" are two places; the channel (no place) and
+    // the default room (`""`) are two more. One cache key for any pair would
+    // answer one with the other's rules.
+    p.sobreposicoes(CANAL, { sala: "x" })
+    p.sobreposicoes(CANAL, { categoria: "x" })
+    p.sobreposicoes(CANAL, { sala: "x" })
+    p.em(CANAL, "@eu:servidor")
+    p.em(CANAL, "@eu:servidor", { sala: "" })
+    p.em(CANAL, "@eu:servidor")
+
+    expect(feito).toEqual([
+      `permissoes.sobreposicoes:${CANAL}:{"sala":"x"}`,
+      `permissoes.sobreposicoes:${CANAL}:{"categoria":"x"}`,
+      `permissoes.em:${CANAL}:@eu:servidor:null`,
+      `permissoes.em:${CANAL}:@eu:servidor:{"sala":""}`,
+    ])
+  })
+
+  it("mudar as sobreposições esquece o que estava guardado", async () => {
+    const p = createDesktopBridge().channels.permissoes!
+
+    p.maySetSobreposicoes(CANAL, { sala: "anuncios" })
+    await p.setSobreposicoes(CANAL, { sala: "anuncios" }, [{ role: "@todos", allow: [], deny: ["escrever"] }])
+    p.maySetSobreposicoes(CANAL, { sala: "anuncios" })
+
+    expect(feito).toEqual([
+      `permissoes.maySetSobreposicoes:${CANAL}:{"sala":"anuncios"}`,
+      `permissoes.setSobreposicoes:${CANAL}:{"sala":"anuncios"}:[{"role":"@todos","allow":[],"deny":["escrever"]}]`,
+      `permissoes.maySetSobreposicoes:${CANAL}:{"sala":"anuncios"}`,
+    ])
+  })
+
+  it("um anfitrião com metade do modelo conta como um anfitrião sem ele, e queixa-se", () => {
+    const queixas: string[] = []
+    const original = console.error
+    console.error = (...argumentos: unknown[]): void => {
+      queixas.push(argumentos.join(" "))
+    }
+    try {
+      const velho = host as unknown as { channels: { permissoes: Record<string, unknown> } }
+      delete velho.channels.permissoes.setSobreposicoes
+
+      // The editor that mounts on `permissoes` calls every function in it: half would break it.
+      expect(createDesktopBridge().channels.permissoes).toBeUndefined()
+      expect(queixas.some((cada) => cada.includes("channels.permissoes"))).toBe(true)
+    } finally {
+      console.error = original
+    }
+  })
+
+  it("quando a leitura falha, ninguém pode mudar nada", () => {
+    const original = console.error
+    console.error = (): void => {}
+    try {
+      leituraFalha = "o cofre está trancado"
+      const p = createDesktopBridge().channels.permissoes!
+
+      expect(p.maySetSobreposicoes(CANAL, { sala: "a" })).toBe(false)
+      expect(p.mayManageRole(CANAL, "guarda")).toBe(false)
+      expect(p.sobreposicoes(CANAL, { sala: "a" })).toEqual([])
+      expect(p.todos(CANAL)).toEqual({ powers: [], definido: false })
+    } finally {
+      console.error = original
+    }
+  })
+
+  it("`mayMoveIn` distingue desligar de mover para a sala de omissão", () => {
+    const canais = createDesktopBridge().channels
+
+    expect(canais.mayMoveIn?.(CANAL, "geral", "palco")).toBe(false)
+    expect(canais.mayMoveIn?.(CANAL, "geral", "")).toBe(true)
+    expect(canais.mayMoveIn?.(CANAL, "geral")).toBe(true)
+
+    // Three questions, three crossings: `""` (the default room) is not "disconnect".
+    expect(feito).toEqual([
+      `mayMoveIn:${CANAL}:geral:palco`,
+      `mayMoveIn:${CANAL}:geral:`,
+      `mayMoveIn:${CANAL}:geral:<desligar>`,
+    ])
+  })
+
+  it("mover e desligar levam a sala de onde a pessoa sai", async () => {
+    const canais = createDesktopBridge().channels
+
+    await canais.moveVoice?.(CANAL, "@alguem:servidor", "palco", "geral")
+    await canais.disconnectVoice?.(CANAL, "@alguem:servidor", "palco")
+
+    expect(feito).toEqual([
+      `moveVoice:${CANAL}:@alguem:servidor:palco:de=geral`,
+      `disconnectVoice:${CANAL}:@alguem:servidor:de=palco`,
+    ])
   })
 })
 

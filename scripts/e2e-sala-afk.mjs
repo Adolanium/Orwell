@@ -184,7 +184,7 @@ try {
     const movido = await page.getByText(MOVIDO).waitFor({ timeout: 20_000 }).then(() => true, () => false)
     check(`${nome}: ao fim de 15 minutos silenciado, passa para a sala AFK com o aviso`, movido)
     check(`${nome}: a sala AFK diz que não há voz nem texto`, (await page.getByText(SEM_VOZ).count()) > 0)
-    check(`${nome}: a sala AFK não tem caixa de escrita`, (await page.locator('input[placeholder="Escreve uma mensagem"]').count()) === 0)
+    check(`${nome}: a sala AFK não tem caixa de escrita`, (await page.locator('textarea[placeholder="Escreve uma mensagem"]').count()) === 0)
     check(`${nome}: o painel não tem o botão do microfone`, (await page.locator(".call-barra").getByRole("button", { name: /microfone/i }).count()) === 0)
     await capturar(page, `${nome}-na-sala-afk`)
     const naAfk = await ate(async () => (await bruno.locator("li").filter({ has: linhaDa(bruno, AFK) }).first().innerText()).includes("Ana") || (await linhaDa(bruno, AFK).locator(".vozes, [class*=voz]").count()) > 0, 60_000)

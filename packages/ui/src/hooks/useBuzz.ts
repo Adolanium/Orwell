@@ -3,7 +3,6 @@ import { BUZZ_MAX_AGE_MS } from "@enclave/protocol"
 import type { EnclaveBridge } from "../bridge.js"
 import { isDirect } from "../lib/format.js"
 import { COTOVELADA_INTERVALO_MS, segundosQueFaltam } from "../lib/limiteDaCotovelada.js"
-import { playSound } from "../lib/sounds.js"
 
 /**
  * The nudge, the MSN Messenger nudge.
@@ -103,8 +102,8 @@ export function useBuzz(bridge: EnclaveBridge, channel: string | null): Buzz {
       // session cut, cheap, and the cost of not having it was the screen shaking
       // by itself when opening the app.
       if (Math.abs(Date.now() - event.at) > BUZZ_MAX_AGE_MS) return
-      // The engine decides whether to play it: respects the mute button, the volume, and "Busy".
-      playSound("buzz")
+      // No sound here since 20/11/2026: `useCotoveladaPorVer` plays it for the whole
+      // app, once, wherever the person is. This hook only shakes.
       setShaking(true)
     })
     // Subscribed once, like all the app's other subscriptions.

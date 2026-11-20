@@ -6,6 +6,7 @@ import { CodigoCurto } from "./ligacao-curta.js"
 import { AtestacaoDeIdade } from "./idade-da-conta.js"
 import { DeviceManifestWire, RevogadosNoManifesto } from "./manifest.js"
 import { PAIR_ID_PATTERN, PAIR_PAYLOAD_MAX_CHARS } from "./pair.js"
+import { ConviteDeRegisto, ModoDeRegisto } from "./registo.js"
 import { SELO_DO_CONVITE_MAX_CARACTERES } from "./selo-do-convite.js"
 
 /**
@@ -334,9 +335,9 @@ export type FonteDeMedia = z.infer<typeof FonteDeMedia>
  *                                                         ---------
  *                     measured on the wire, with headers:       209 Mbit/s
  *
- * against a measured output of 300 to 745 Mbit/s (VPS bandwidth), shared with magnuslab.pt. At 25 the same call measures 265
+ * against a measured output of 300 to 745 Mbit/s (VPS bandwidth), shared with the other services on the host. At 25 the same call measures 265
  * Mbit/s, and at 30 it measures 323: above the lowest measured output. Twenty leaves
- * headroom for the website and for broadcasts. The CPU copes: ~61 % of
+ * headroom for the other services and for broadcasts. The CPU copes: ~61 % of
  * one VPS core, estimated.
  *
  * The cap is checked when the screen starts, not when someone joins later. A call
@@ -621,6 +622,12 @@ const TramasDoClienteSemCofre = z.discriminatedUnion("t", [
     signature: Base64,
     posse: z.number().int().min(0).max(2_147_483_647).optional(),
     assumirPosse: z.string().min(16).max(64).optional(),
+    /**
+     * The registration invite code, for a NEW account on a server in `convite`
+     * mode (see `registo.ts`). Ignored for an account that already exists, and by
+     * a server before 1.3.25 (an unknown field is dropped).
+     */
+    conviteDeRegisto: ConviteDeRegisto.optional(),
   }),
 
   z.object({ t: z.literal("channel.subscribe"), channels: z.array(z.string()).max(512) }),
@@ -904,6 +911,17 @@ const TramasDoClienteSemCofre = z.discriminatedUnion("t", [
      * server would end up with the name stored in a map and no one would notice.
      */
     scope: z.string().regex(/^[A-Za-z0-9_-]{43}$/, "expected a base64url SHA-256 digest"),
+    /**
+     * "The person asked for this call here": take it from another device of the
+     * account (1.3.25). See `sfu.scope.closed`.
+     *
+     * Sent on the join that comes from a gesture, never on the automatic ones
+     * (a rebuild, a resynchronisation). A device whose call another device took
+     * gets `noutro-aparelho` on a join without it while the other device is
+     * still in a call: that is what stops it from taking the call back by itself.
+     * An older server strips the field and lets the join through, as before.
+     */
+    tomar: z.boolean().optional(),
     /** See `ref` in `sfu.transport.create`. */
     ref: z.string().max(64).optional(),
   }),
@@ -1263,6 +1281,11 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
      * the group keys. Whoever creates it is whoever arrives first, arbitrated by `channel.claim`.
      */
     commonRoom: z.string().optional(),
+    /**
+     * Who may create an account here (1.3.25): `aberto`, `convite` or `fechado`.
+     * See `registo.ts`. Absent on older servers, which are `aberto`.
+     */
+    registo: ModoDeRegisto.optional(),
   }),
 
   z.object({ t: z.literal("auth.challenge"), nonce: Base64 }),
@@ -1334,6 +1357,29 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
     keyPackages: z.array(z.object({ deviceKey: Base64, keyPackage: Base64 })).max(APARELHOS_POR_CONTA).optional(),
     manifest: DeviceManifestWire.nullable().optional(),
   }),
+  /**
+   * "This device has few key packages left on the server: publish more."
+   *
+   * Per DEVICE: sent to one connection, and `remaining` counts that device's pool
+   * (with the account's packages that have no device). When it goes out:
+   *  - at login, when the pool is under 10;
+   *  - after any local `keypackage.claim` for the account that leaves a connected
+   *    device under `Gateway.MINIMO_DE_CHAVES` (20). Since 1.3.25 (P4) ALSO when the
+   *    claim came back EMPTY: that is the claim of a seat repair (`channel.rejoin`
+   *    answered with `devices` naming the asker) that fails with "no invite keys",
+   *    so the device that asked hears it while still connected. `remaining: 0` then
+   *    means "a claim just failed for lack of your keys".
+   * Braked per connection: at most one per `Gateway.AVISO_DE_CHAVES_MS` (5 s), reset
+   * when the device publishes. A device that is offline hears nothing now and gets
+   * the login nudge on its next connection.
+   *
+   * The client answers with a top-up of 20 (`keypackage.publish`), or a ring reset
+   * when its ring is full and `remaining` is 0, up to `Session.CHAVES_POR_HORA_POR_AVISO`
+   * keys minted an hour for this frame (the login top-up is not capped). A client that
+   * asked for a seat can take `remaining: 0` as the sign that its request failed and
+   * ask again once its top-up is out. Unchanged shape since 0.2: older clients top up
+   * the same way.
+   */
   z.object({ t: z.literal("keypackage.low"), remaining: z.number().int().nonnegative() }),
 
   z.object({
@@ -1425,8 +1471,17 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
    */
   z.object({ t: z.literal("presence"), address: Address, online: z.boolean() }),
 
-  /** Somebody in this channel lost their seat and is asking for a new one. */
-  z.object({ t: z.literal("channel.rejoin"), channel: z.string(), address: Address }),
+  /**
+   * Somebody in this channel lost their seat and is asking for a new one.
+   *
+   * `device` (1.3.25): the device key of the connection that asked, as the server
+   * authenticated it at login (`auth.finish` with the device chain). Absent when the
+   * asker logged in without the chain, and from an older server. With it, the members
+   * take out only that device's leaf, never a sibling that is merely offline (C1 of
+   * the 1.3.20 review). The members still check it against the tree and the proof of
+   * life, so a wrong value can only narrow a repair. An older client ignores it.
+   */
+  z.object({ t: z.literal("channel.rejoin"), channel: z.string(), address: Address, device: Base64.optional() }),
 
   /** Local accounts, in community mode. Empty when the mode is off. */
   z.object({ t: z.literal("directory.list.result"), addresses: z.array(Address) }),
@@ -1649,6 +1704,29 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
     channel: z.string(),
     scope: z.string(),
     producer: z.string(),
+  }),
+
+  /**
+   * Your call here ended: the account joined a call on another device (1.3.25).
+   *
+   * One call per account, as in Discord. The server already closed this
+   * connection's scope (transports, producers, consumers) and told the others
+   * in it. The client leaves the call and says why, and does not rebuild it.
+   *
+   * `mesmaChamada` is whether the other device joined THIS same call. Then the
+   * account is still in it, and the client leaves without `voice.leave`: the
+   * roster is by address, and that goodbye would erase the other device from
+   * everyone's screen.
+   *
+   * A client before 1.3.25 drops this frame (unknown `t`). See the 1.3.25
+   * report for what it does then.
+   */
+  z.object({
+    t: z.literal("sfu.scope.closed"),
+    channel: z.string(),
+    scope: z.string(),
+    reason: z.literal("noutro-aparelho"),
+    mesmaChamada: z.boolean(),
   }),
 
   /**

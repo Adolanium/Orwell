@@ -231,7 +231,7 @@ async function abrirCanal(page, nome) {
   }
   await linha.click()
   if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click()
-  await page.locator('input[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
+  await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
 }
 
 /** The channel is in the list, visible or not (the drawer may be closed): by the row `title`. */
@@ -240,10 +240,13 @@ async function temCanal(page, nome, timeout = 90_000) {
 }
 
 async function dizer(page, frase) {
-  const caixa = page.locator('input[placeholder="Escreve uma mensagem"]')
+  const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]')
   await caixa.click()
   await caixa.fill(frase)
   await page.keyboard.press("Enter")
+  // With a finger (the phone's touch context), Enter starts a new line and the
+  // send button sends (1.3.25). The text is still in the box: send it.
+  if ((await caixa.inputValue().catch(() => "")) !== "") await page.locator("form.chat-composer .composer-enviar").first().click()
 }
 
 async function ouviu(page, frase, timeout = 30_000) {
@@ -338,7 +341,8 @@ try {
   await pc.getByRole("button", { name: "Criar canal" }).first().click()
   await pc.locator("form.prompt input").first().fill("adega")
   await pc.locator("form.prompt button.primary").first().click()
-  await pc.getByRole("heading", { name: "adega" }).waitFor({ timeout: 30_000 })
+  // Since 1.3.20 the bar titles the room and names the community beside it (`.topbar-comunidade`).
+  await pc.locator(".topbar-comunidade", { hasText: "adega" }).waitFor({ timeout: 30_000 })
   check("a Ana cria o canal adega", true)
 
   // ---------------------------------------------------------------------------
@@ -657,7 +661,8 @@ try {
   await c.getByRole("button", { name: "Criar canal" }).first().click()
   await c.locator("form.prompt input").first().fill("lagar")
   await c.locator("form.prompt button.primary").first().click()
-  await c.getByRole("heading", { name: "lagar" }).waitFor({ timeout: 30_000 })
+  // Since 1.3.20 the bar titles the room and names the community beside it (`.topbar-comunidade`).
+  await c.locator(".topbar-comunidade", { hasText: "lagar" }).waitFor({ timeout: 30_000 })
   await c.getByRole("button", { name: "Amigos" }).click()
   await c.locator(".people-destination").waitFor({ timeout: 15_000 })
   await c.getByRole("button", { name: "Encontrar", exact: true }).click()
@@ -705,7 +710,7 @@ try {
       await page.getByRole("button", { name: "Abrir o painel lateral" }).click().catch(() => {})
     }
     await botao.click()
-    await page.locator('input[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 60_000 })
+    await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 60_000 })
   }
   // The conversation starts as a friend REQUEST: Ana must accept. Accept on the
   // PHONE on purpose: a commit made by the paired device on a channel where the

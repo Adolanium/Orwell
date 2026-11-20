@@ -1,5 +1,112 @@
 [
   {
+    "versao": "1.3.25",
+    "nome": "Carmelo",
+    "data": "2026-11-20",
+    "itens": [
+      {
+        "tipo": "nova",
+        "texto": "One call per account: joining a call on another device takes the call there, and the first device leaves it with a notice instead of reconnecting."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Server admins choose who may create an account: open, invite only or closed (ENCLAVE_REGISTO). Existing accounts and their new devices always get in."
+      },
+      {
+        "tipo": "nova",
+        "texto": "English is the default language. The app opens in Portuguese when the system's first language is Portuguese, and your own choice always wins."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Animated GIFs: up to 2 MiB in messages and 1 MiB in posts, sent intact and still moving. The desktop app makes their thumbnails too."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Shift+Enter starts a new line, and the message box grows up to half the conversation. On a phone, Enter starts a new line and the button sends."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Pinned messages: the newest pin shows on a bar at the top of the room, and a pinned message stays in the vault however old it gets."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Formatting from the message box: Cmd/Ctrl+E for code, Cmd/Ctrl+Shift+H for hidden text (it was Shift+E, the screen share key), undo works after a formatting key, and a bar over selected text."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Blocking reaches shared rooms: a blocked person's messages fold into one line with Show, ring nothing, count nowhere, and their reactions leave the counts."
+      },
+      {
+        "tipo": "nova",
+        "texto": "A nudge is heard anywhere in the app and shows on the Friends button until you open Friends or the conversation."
+      },
+      {
+        "tipo": "nova",
+        "texto": "Privacy Policy and Terms links when you create an account on orwell.pt, and in Settings › Help."
+      },
+      {
+        "tipo": "nova",
+        "texto": "A + next to a category's name creates a room in it."
+      },
+      {
+        "tipo": "nova",
+        "texto": "A device that falls behind in a room now tells you, holds your messages until it catches up, and asks for its place again."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Rail badges have a shape each: a pill for unread, a number for what waits for you, a glyph for a nudge, a green seal for a call, an amber seal when the connection drops. The Communities number counts mentions only."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Self-hosting: stored ciphertext for offline members is swept after 90 days by default (ENCLAVE_COFRE_GC_DIAS, 0 turns it off), and the compose file bounds container logs."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Load older loads whole lines of the conversation, keeps what it loaded and leaves you on the line you were reading."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Invite and friend links open inside the app instead of the browser."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Desktop app: room permissions work, so \"Who can write\", roles and read-only rooms behave as on the web."
+      },
+      {
+        "tipo": "fix",
+        "texto": "A device asking for its place in a room no longer pushes your other devices out, even when they are offline."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Keys refill when they run out, so a seat that failed for lack of keys can be given again."
+      },
+      {
+        "tipo": "fix",
+        "texto": "The \"Receiving the channel\" bar no longer sticks."
+      },
+      {
+        "tipo": "fix",
+        "texto": "A quick reply no longer shows above the message it answers."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Reaction counts on older messages include every reaction this device has stored, not only the ones in memory."
+      },
+      {
+        "tipo": "fix",
+        "texto": "The conversation stays at the bottom when the reply bar or a taller message box opens under it."
+      },
+      {
+        "tipo": "fix",
+        "texto": "The \"You joined here\" marker no longer lands below the messages you sent right after joining."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Pinned images get their thumbnail again, and an image left without one asks again on the next opening."
+      }
+    ]
+  },
+  {
     "versao": "1.3.24",
     "nome": "Carmelo",
     "data": "2026-11-19",

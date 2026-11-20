@@ -146,7 +146,7 @@ function Lateral() {
   return (
     <div style={{ display: "flex", gap: 24, padding: 24, alignItems: "flex-start" }}>
       <div className="sidebar" style={{ width: 244, position: "relative", display: "flex", flexDirection: "column" }}>
-        <CallDock variante="lateral" comAudio={false} channel="!nexo:s" channelLabel="MagnusLab" roomLabel="Sala das reuniões de sexta"
+        <CallDock variante="lateral" comAudio={false} channel="!nexo:s" channelLabel="Atelier 9" roomLabel="Sala das reuniões de sexta"
           latencia={{ ms: 42, ate: "servidor" }} participants={[{ address: "@ana:s", connected: true, stream: null }]}
           localStream={null} nameFor={(x) => x} onBack={noop} onLeave={noop} micMuted onToggleMic={noop} />
       </div>

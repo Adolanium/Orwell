@@ -28,7 +28,14 @@ import { CropIcon, ImageIcon, LinkIcon, LockIcon, PaperclipIcon } from "../../ic
 import { colarImagens } from "../../lib/colar.js"
 import { extensaoDe, formatarBytes, lerComoDataUrl, nomeSeguro } from "../../lib/ficheiros.js"
 import { dataUrlParaBlob, podeEnquadrar } from "../../lib/enquadrar.js"
-import { compressImage, IMAGE_BUDGETS, resumoDaReducao, type CompressedImage } from "../../lib/images.js"
+import {
+  avisoDeAnimacaoPerdida,
+  compressImage,
+  IMAGE_BUDGETS,
+  orcamentoDaImagem,
+  resumoDaReducao,
+  type CompressedImage,
+} from "../../lib/images.js"
 import { ACEITA_VIDEO, formatarDuracao, lerVideo, validarAntesDeLer } from "../../lib/videos.js"
 import { VideoIcon } from "../../components/VideoDaPublicacao.js"
 import {
@@ -184,6 +191,8 @@ export function Social({
    * ignore both.
    */
   const [reducao, setReducao] = useState<string | null>(null)
+  /** A GIF that went still: not an error, like `reducao`. */
+  const [avisoDoGif, setAvisoDoGif] = useState<string | null>(null)
   /**
    * The cover (the first image in the draft) framed at 16:10, matching the
    * frame of the feed and the profile thumbnails. Only the first one, because
@@ -365,14 +374,18 @@ export function Social({
     }
     setNote(null)
     setReducao(null)
+    setAvisoDoGif(null)
     setBusy(true)
     try {
       let gasto = ocupadoNaPublicacao
       const novas: string[] = []
       const originais: File[] = []
       const finais: { bytes: number }[] = []
+      let gifParado: string | null = null
       for (const file of escolhidas.slice(0, espaço)) {
-        const imagem = await compressImage(file, IMAGE_BUDGETS.post)
+        // A GIF keeps its animated cap only while it still fits in the post.
+        const orcamento = orcamentoDaImagem(file, gasto, IMAGE_BUDGETS.post)
+        const imagem = await compressImage(file, orcamento)
         // The type comes from the data URL the compressor returned, not from the file:
         // an image recoded to WebP is no longer the PNG that came in.
         const mediaType = imagem.dataUrl.slice(5, imagem.dataUrl.indexOf(";")) || "image/*"
@@ -384,10 +397,12 @@ export function Social({
         novas.push(imagem.dataUrl)
         originais.push(file)
         finais.push(imagem)
+        gifParado ??= avisoDeAnimacaoPerdida(file, imagem, orcamento, "mensagem")
       }
       if (novas.length > 0) {
         onDraft({ images: [...images, ...novas].slice(0, IMAGENS_MAX_POST) })
         setReducao(resumoDaReducao(originais, finais))
+        setAvisoDoGif(gifParado)
       }
     } catch (erro) {
       // The phrase comes from the compressor as a stable key ("this device cannot
@@ -584,6 +599,7 @@ export function Social({
         onDraft(limparPublicado(publicado, rascunhoAgora.current))
         // The compression note goes with the images it talked about.
         setReducao(null)
+        setAvisoDoGif(null)
       })
       .catch((error: Error) => setNote(traduzirErro(error)))
       .finally(() => {
@@ -677,7 +693,10 @@ export function Social({
                 <div key={index} className="draft-image">
                   <img src={src} alt="" />
                   <button
-                    onClick={() => onDraft({ images: images.filter((_, i) => i !== index) })}
+                    onClick={() => {
+                      onDraft({ images: images.filter((_, i) => i !== index) })
+                      setAvisoDoGif(null)
+                    }}
                     title={strings.common.remove}
                     aria-label={strings.common.remove}
                   >
@@ -785,6 +804,11 @@ export function Social({
 
           {/* No `warn`: shrinking a photo is not a problem. */}
           {reducao && <p className="field-note">{reducao}</p>}
+          {avisoDoGif && (
+            <p className="field-note" role="status">
+              {avisoDoGif}
+            </p>
+          )}
           {note && (
             <p className="field-note warn">
               <TextoDeErro texto={note} />
@@ -811,7 +835,7 @@ export function Social({
                     size decides. The label states the limit before any choice. */}
                 <label
                   className="ghost file icon-only"
-                  data-tip={`${strings.social.fileAdd} (máx. ${formatarBytes(FICHEIRO_MAX_BYTES)})`}
+                  data-tip={`${strings.social.fileAdd} ${strings.common.maximo(formatarBytes(FICHEIRO_MAX_BYTES))}`}
                   aria-label={strings.social.fileAdd}
                 >
                   <PaperclipIcon size={17} />

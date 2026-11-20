@@ -126,6 +126,29 @@ describe("os atalhos de voz, configuráveis", () => {
     expect(alternarSom).toHaveBeenCalledTimes(1)
   })
 
+  it("na caixa de escrita, a formatação vence: uma tecla que a formatação já tratou não liga o atalho de voz", () => {
+    /*
+      Someone who moves the microphone to Mod+B has the same key for bold. In the
+      text box the formatting hook handles it first and calls preventDefault; the
+      voice shortcut then stays out. Outside a text box, and in a box where nothing
+      handled the key, the shortcut works as before.
+    */
+    const alternarMicrofone = vi.fn()
+    renderHook(() => useAtalhos({ alternarMicrofone }, () => ({ ...ATALHOS_POR_OMISSAO, microfone: "Mod+B" })))
+    const caixa = document.createElement("textarea")
+    document.body.appendChild(caixa)
+    caixa.addEventListener("keydown", (event) => {
+      if (event.key === "b") event.preventDefault()
+    })
+
+    caixa.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true, cancelable: true }))
+    expect(alternarMicrofone).not.toHaveBeenCalled()
+    caixa.remove()
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true, cancelable: true }))
+    expect(alternarMicrofone).toHaveBeenCalledTimes(1)
+  })
+
   it("uma letra sozinha serve de atalho fora das caixas de texto", () => {
     const alternarMicrofone = vi.fn()
     renderHook(() => useAtalhos({ alternarMicrofone }, () => ({ ...ATALHOS_POR_OMISSAO, microfone: "M" })))

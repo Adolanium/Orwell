@@ -634,8 +634,8 @@ export class MotorDeMedia {
    *
    * **ONE worker, not one per core.** Everyone's recipe is
    * `numWorkers = os.cpus().length` and it's wrong on this machine: the VPS has two
-   * cores and eight GB, shared with nginx, Postgres, bots and
-   * magnuslab.pt. One worker leaves an entire core for them. The
+   * cores and eight GB, shared with nginx, Postgres and the other
+   * services on the host. One worker leaves an entire core for them. The
    * dominant cost of an SFU is network, not CPU (one worker handles hundreds of voice
    * flows), and the wrong scaling only shows up on a bad day. This is written here because
    * this is where someone would change it without thinking.
@@ -1160,8 +1160,8 @@ export class MotorDeMedia {
    *
    * The other caps in `produzir` are per connection: how many streams a person
    * sends. These are per scope, and it is in them that the SFU physics lives: the output is
-   * `bitrate × espectadores`, and it is what saturates the interface that serves
-   * magnuslab.pt. See the math in `CAMARAS_POR_AMBITO` and in
+   * `bitrate × espectadores`, and it is what saturates the host's network
+   * interface. See the math in `CAMARAS_POR_AMBITO` and in
    * `PESSOAS_COM_ECRA`.
    *
    * The microphone has no cap here on purpose: what limits it is

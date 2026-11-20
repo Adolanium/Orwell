@@ -18,6 +18,7 @@ import { PassoDoFicheiroDaConta } from "../../components/FicheiroDaConta.js"
 import { FolhaComoFunciona } from "../settings/ComoFunciona.js"
 import { FraseDoMomento } from "../../components/FraseDoMomento.js"
 import { Enquadrar } from "../../components/Enquadrar.js"
+import { LigacoesLegais } from "../../components/LigacoesLegais.js"
 import { podeEnquadrar } from "../../lib/enquadrar.js"
 import { avisoDeAnimacaoPerdida, compressImage, IMAGE_BUDGETS, type CompressedImage } from "../../lib/images.js"
 import { EMPTY_SETUP_PROGRESS, ecraInicial, firstIncomplete, markDone, SETUP_STEPS, type SetupStep } from "./setupSteps.js"
@@ -37,7 +38,7 @@ const VAULT_EXISTS = "__vault_exists__"
  * `confirm` drops when the vault is protected by the system, there's no password
  * to confirm. That's why the list is calculated, not written.
  */
-type Passo = "nome" | "fotografia" | "chave" | "confirmar"
+type Passo = "nome" | "convite" | "fotografia" | "chave" | "confirmar"
 
 /*
   No color question. It was here between the name and password, and it was
@@ -56,6 +57,17 @@ type Passo = "nome" | "fotografia" | "chave" | "confirmar"
 */
 const PASSOS_COM_FRASE: readonly Passo[] = ["nome", "fotografia", "chave", "confirmar"]
 const PASSOS_COM_SISTEMA: readonly Passo[] = ["nome", "fotografia", "chave"]
+
+/**
+ * The pages, with the invite code page right after the name on a server that
+ * takes new accounts only with an invite (1.3.25, `ENCLAVE_REGISTO=convite`).
+ */
+export function passosDoSetup(base: readonly Passo[], registo: "aberto" | "convite" | "fechado" | null): readonly Passo[] {
+  return registo === "convite" ? [base[0]!, "convite", ...base.slice(1)] : base
+}
+
+/** The errors of a refused new account that a code can fix: the gate then shows the code field. See `Session.connect`. */
+const ERROS_QUE_PEDEM_CONVITE = new Set(["this server needs a registration invite", "the registration invite is not valid"])
 
 /**
  * Account creation, as an atomic-feeling sequence of five steps.
@@ -101,6 +113,17 @@ export function defaultServer(
 }
 
 /**
+ * The Privacy and Terms links and the age sentence of the gate are orwell.pt's:
+ * they show only while the account is being made on orwell.pt (1.3.25). Another server, chosen in the advanced options or by `?servidor=`,
+ * has its own rules, and the gate does not hand them orwell.pt's. The port 443
+ * and the case are the same server.
+ */
+export function eOServidorDeOmissao(servidor: string): boolean {
+  const nome = servidor.trim().toLowerCase().replace(/:443$/, "")
+  return nome === SERVIDOR_DA_APP_DE_SECRETARIA
+}
+
+/**
  * The "Join the official Orwell channel" checkbox on the last step comes unchecked.
  *
  * Since 12 November 2026, joining is opt-in. Whoever does nothing
@@ -123,6 +146,7 @@ export function Setup({
   const toast = useToast()
 
   const [server, setServer] = useState(() => defaultServer())
+  const termosDoOrwell = eOServidorDeOmissao(server)
   const [name, setName] = useState("")
   /** The initial profile photo, already compressed. `null` = no photo: stays initial. */
   const [avatar, setAvatar] = useState<string | null>(null)
@@ -153,6 +177,17 @@ export function Setup({
   const [busyStep, setBusyStep] = useState<SetupStep | null>(null)
   const [indice, setIndice] = useState(0)
   const [avancadas, setAvancadas] = useState(false)
+  /**
+   * Who may create an account on the chosen server (1.3.25), asked at the name
+   * page, before the vault. `null`: not asked yet, or the server could not be asked.
+   */
+  const [registo, setRegisto] = useState<"aberto" | "convite" | "fechado" | null>(null)
+  /** Asking the server, between the name page and the next one. */
+  const [aSondar, setASondar] = useState(false)
+  /** The registration invite code, as typed. Sent at the first connection only. */
+  const [convite, setConvite] = useState("")
+  /** The first connection was refused for want of a valid code: the field shows on the creation screen. */
+  const [conviteRecusado, setConviteRecusado] = useState(false)
   /** From here on the answers are set and the screen shows creation. */
   const [aCriar, setACriar] = useState(false)
   /**
@@ -208,7 +243,7 @@ export function Setup({
       })
   }, [])
 
-  const passos = useOs ? PASSOS_COM_SISTEMA : PASSOS_COM_FRASE
+  const passos = passosDoSetup(useOs ? PASSOS_COM_SISTEMA : PASSOS_COM_FRASE, registo)
   const posicao = Math.min(indice, passos.length - 1)
   const passo = passos[posicao] as Passo
   const ultimo = posicao === passos.length - 1
@@ -258,6 +293,8 @@ export function Setup({
           its other devices. Retrying doesn't change anything.
         */
         await bridge.session.escolherSalaComum?.(entrarNoCanalOficial)
+        // The invite code, when there is one: the server reads it only for a new account. See `Session.definirConviteDeRegisto`.
+        if (convite.trim() !== "") await bridge.session.definirConviteDeRegisto?.(convite)
         await bridge.session.connect()
         return
       case "perfil":
@@ -284,6 +321,10 @@ export function Setup({
         if ((caught as Error).message === VAULT_EXISTS) {
           setVaultExists(true)
           return
+        }
+        // A server that wants a code (or a better one): show the field, and retry resumes at the connection.
+        if (ERROS_QUE_PEDEM_CONVITE.has((caught as Error).message) && bridge.session.definirConviteDeRegisto) {
+          setConviteRecusado(true)
         }
         const detail = traduzirErro(caught)
         setError(detail)
@@ -332,7 +373,9 @@ export function Setup({
    * knows about the field in front of the person.
    */
   const pronto =
-    passo === "nome"
+    passo === "convite"
+      ? convite.trim() !== ""
+      : passo === "nome"
       ? /* The display-name rule (12 graphemes, `nomeValido`): the field cuts
            what is typed, but not while a keyboard composes, and Android's
            composes every word. */
@@ -373,6 +416,26 @@ export function Setup({
       } catch {
         setServerError(strings.gate.serverInvalid)
         setAvancadas(true)
+        return
+      }
+      /*
+        Who may create an account there (1.3.25), before anything is written.
+        `fechado` stops here, on the name page, with the vault still unmade; the
+        person can pick another server below, or go back and pair. `convite` adds
+        the code page next. Not asked (an older host, a server that did not answer):
+        the gate goes on as before, and the first connection says the same.
+      */
+      const sondar = bridge.session.sondarRegisto
+      if (sondar) {
+        setASondar(true)
+        void sondar(serverRef.current)
+          .catch(() => null)
+          .then((modo) => {
+            setASondar(false)
+            setRegisto(modo)
+            if (modo === "fechado") return
+            setIndice(1)
+          })
         return
       }
     }
@@ -469,6 +532,11 @@ export function Setup({
                 {strings.comoFunciona.link}
               </button>
             </p>
+            {termosDoOrwell && (
+              <p>
+                <LigacoesLegais className="gate-link" />
+              </p>
+            )}
             {/* An account added, still empty: go back to the existing ones. */}
             <LigacaoMudarDeConta rotulo={strings.contas.voltar} podeAcrescentar={false} />
           </div>
@@ -482,7 +550,9 @@ export function Setup({
     ? strings.gate.creatingTitle
     : passo === "nome"
       ? strings.gate.askName
-      : passo === "fotografia"
+      : passo === "convite"
+        ? strings.gate.askInvite
+        : passo === "fotografia"
         ? strings.gate.askPhoto
         : passo === "chave"
         ? useOs
@@ -494,7 +564,9 @@ export function Setup({
     ? strings.gate.creatingLead
     : passo === "nome"
       ? strings.gate.askNameLead
-      : passo === "fotografia"
+      : passo === "convite"
+        ? strings.gate.askInviteLead
+        : passo === "fotografia"
         ? strings.gate.askPhotoLead
         : passo === "chave"
         ? useOs
@@ -557,6 +629,28 @@ export function Setup({
                 />
                 <p className="gate-lead setup-promise">{strings.gate.setupLead}</p>
               </>
+            )}
+
+            {((!aCriar && passo === "convite") || (aCriar && conviteRecusado)) && (
+              <Field label={aCriar ? strings.gate.inviteCode : <span className="sr-only">{strings.gate.inviteCode}</span>}>
+                <input
+                  ref={aCriar ? undefined : campo}
+                  name="convite-de-registo"
+                  value={convite}
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  maxLength={64}
+                  placeholder={strings.gate.invitePlaceholder}
+                  onChange={(event) => setConvite(event.target.value)}
+                />
+              </Field>
+            )}
+
+            {!aCriar && passo === "nome" && registo === "fechado" && (
+              <p className="error" role="alert">
+                {strings.gate.registoFechado}
+              </p>
             )}
 
             {!aCriar && passo === "fotografia" && (
@@ -736,6 +830,11 @@ export function Setup({
           )}
           </div>
 
+          {/* Before "Create": the age the Terms ask for, and that creating the
+              account accepts them. No checkbox: the Terms say that using the
+              service is the acceptance. orwell.pt's Terms, so only on orwell.pt. */}
+          {!aCriar && ultimo && termosDoOrwell && <p className="field-note setup-termos">{strings.legal.idadeEAceitacao}</p>}
+
           <div className="setup-actions">
             {/* On the first screen, "Back" goes to the other device question:
                 that is how you reach pairing after saying "No". */}
@@ -752,7 +851,7 @@ export function Setup({
               variant="primary"
               type="submit"
               className="setup-go"
-              disabled={busyStep !== null || (!aCriar && !pronto)}
+              disabled={busyStep !== null || aSondar || (!aCriar && !pronto) || (aCriar && conviteRecusado && convite.trim() === "")}
             >
               {busyStep
                 ? strings.gate.stepLabels[busyStep]
@@ -788,6 +887,8 @@ export function Setup({
                       onChange={(event) => {
                         setServer(event.target.value)
                         setServerError(null)
+                        // Another server: what the last one said about new accounts no longer holds.
+                        setRegisto(null)
                       }}
                     />
                   </Field>
@@ -818,6 +919,13 @@ export function Setup({
               {strings.comoFunciona.link}
             </button>
           </p>
+          {/* GDPR art. 13: the policy is at hand on every screen that asks for data.
+              orwell.pt's policy, so only for an account on orwell.pt. */}
+          {termosDoOrwell && (
+            <p>
+              <LigacoesLegais className="gate-link" />
+            </p>
+          )}
           {!aCriar && <LigacaoMudarDeConta rotulo={strings.contas.voltar} podeAcrescentar={false} />}
         </div>
       </div>

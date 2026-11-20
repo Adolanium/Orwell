@@ -64,7 +64,7 @@ function vigiar(page, nome) {
 }
 
 const linhaDa = (page, nome) => page.locator(".room-row").filter({ has: page.locator(".room-name", { hasText: new RegExp(`^${nome}$`) }) }).first()
-const caixa = (page) => page.locator('input[placeholder="Escreve uma mensagem"]').first()
+const caixa = (page) => page.locator('textarea[placeholder="Escreve uma mensagem"]').first()
 const frase = (page) => page.locator(".chat-escrita-trancada").filter({ hasText: SEM_ESCRITA }).first()
 const viu = (page, texto) => page.locator(".message").filter({ hasText: texto }).first().isVisible().catch(() => false)
 const temFrase = (page) => frase(page).isVisible().catch(() => false)

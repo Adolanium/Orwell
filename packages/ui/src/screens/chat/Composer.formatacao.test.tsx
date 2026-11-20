@@ -48,12 +48,13 @@ describe("Composer — a formatação escreve-se com o teclado", () => {
     expect(campo.value).toBe("isto é **urgente**")
   })
 
-  it("os quatro atalhos chegam todos à barra de escrita", () => {
+  it("os cinco atalhos chegam todos à barra de escrita", () => {
     const casos: [Record<string, unknown>, string][] = [
       [{ key: "b", ctrlKey: true }, "**urgente**"],
       [{ key: "i", ctrlKey: true }, "*urgente*"],
       [{ key: "X", ctrlKey: true, shiftKey: true }, "~~urgente~~"],
-      [{ key: "E", ctrlKey: true, shiftKey: true }, "||urgente||"],
+      [{ key: "e", ctrlKey: true }, "`urgente`"],
+      [{ key: "H", ctrlKey: true, shiftKey: true }, "||urgente||"],
     ]
     for (const [tecla, esperado] of casos) {
       cleanup()

@@ -38,3 +38,5 @@ scripts/movel-wkwebview/smoke
 
 .DS_Store
 *.log
+# Screenshots of the light theme and Aurora (scripts/retratar-*-tema*.mjs): kept outside the repository, too heavy for it
+capturas/tema-claro/

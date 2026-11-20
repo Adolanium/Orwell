@@ -714,6 +714,12 @@ export class AntiEntropia {
   readonly #instantaneoDe = new Map<string, string>()
   /** Channels whose last request got no response (the "no response" state). */
   readonly #semResposta = new Set<string>()
+  /**
+   * The last progress of each channel's snapshot, on the wall clock, and the timer that
+   * re-reads the bar when the ceiling passes (P6). See `TECTOS_DA_SINCRONIA.semProgressoMs`.
+   */
+  readonly #progressoEm = new Map<string, number>()
+  readonly #tectosDaBarra = new Map<string, ReturnType<typeof setTimeout>>()
   /** The time of the last comparison per channel: a summary sent or heard. */
   readonly #comparadoEm = new Map<string, number>()
   /** The attachment request in progress, and the queue of others (one at a time, §4.4). */
@@ -789,15 +795,41 @@ export class AntiEntropia {
       cofre.migrado = true
       this.#porta.marcarParaGravar()
     }
-    // Requests from the previous connection died with it.
-    for (const descida of this.#descidas.values()) this.#parar(descida)
+    /*
+      Requests from the previous connection died with it. And the interface is told
+      (20/11/2026, P6): the connection can come back without passing through
+      `aoDesligar` (a phone back from the background), and the bar stayed on
+      "Receiving the channel…" with nothing behind it until some other change. A
+      snapshot cut off here goes back to pending, as in `aoDesligar`.
+    */
+    const tocados = new Set<string>()
+    for (const descida of this.#descidas.values()) {
+      this.#parar(descida)
+      tocados.add(descida.canal)
+      if (descida.doInstantaneo) this.#instantaneos.add(descida.canal)
+    }
     this.#descidas.clear()
+    for (const canal of this.#progressoEm.keys()) tocados.add(canal)
+    for (const canal of tocados) this.#mudou(canal)
+  }
+
+  /**
+   * The page came back to the foreground: read the bar again on the wall clock (P6).
+   *
+   * The ceiling timer may not have run (a phone stops `setTimeout` in the background);
+   * `estadoDoCanal` measures the time itself, so one emission per channel with a bar
+   * is enough to put the screen right.
+   */
+  revistar(): void {
+    for (const canal of [...this.#progressoEm.keys()]) this.#mudou(canal)
   }
 
   aoDesligar(): void {
     for (const temporizador of this.#temporizadores) clearTimeout(temporizador)
     this.#temporizadores.clear()
     this.#esperasDoInstantaneo.clear()
+    this.#tectosDaBarra.clear()
+    this.#progressoEm.clear()
     if (this.#anexoEmCurso) this.#fecharAnexo(this.#anexoEmCurso, { ok: false, motivo: "sem-ligacao" })
     this.#respostasAgendadas.clear()
     // Profile requests too: the next connection has different people listening.
@@ -1030,6 +1062,9 @@ export class AntiEntropia {
         }
       }),
     )
+    // A new seat: the bar's clock starts now (P6).
+    this.#progressoEm.delete(canal)
+    this.#notarProgresso(canal)
     this.#mudou(canal)
     await this.enviarResumo(canal).catch(() => false)
   }
@@ -1041,12 +1076,61 @@ export class AntiEntropia {
     this.#mudou(canal)
   }
 
+  /**
+   * Tell the interface of a change in the channel's sync.
+   *
+   * Not progress by itself (P6): a summary heard, or a new descent towards a leaf
+   * that stays silent, changes the state without bringing anything, and counting it
+   * kept the bar up for as long as someone kept sending summaries. Progress is only
+   * what `#notarProgresso` is called for.
+   */
   #mudou(canal: string): void {
+    if (this.#progressoEm.has(canal) && !this.#aReceberAgora(canal)) {
+      // Nothing left to receive: stop watching. Past the ceiling the entry stays, so the
+      // bar stays down until real progress, which brings it back.
+      this.#progressoEm.delete(canal)
+      this.#cancelar(this.#tectosDaBarra.get(canal))
+      this.#tectosDaBarra.delete(canal)
+    }
     try {
       this.#porta.aoMudar?.(canal)
     } catch {
       // Listeners cannot break sync.
     }
+  }
+
+  /**
+   * The snapshot moved (a Welcome, a response, items applied): the ceiling starts again.
+   * `soSeNovo`: only start the clock if it is not running (a descent that begins).
+   * `ate` is a later instant when the next step is known to wait (a cap that lifts).
+   */
+  #notarProgresso(canal: string, ate = this.#porta.agora(), soSeNovo = false): void {
+    if (!this.#aReceberAgora(canal)) return
+    if (soSeNovo && this.#progressoEm.has(canal)) return
+    this.#progressoEm.set(canal, Math.max(ate, this.#progressoEm.get(canal) ?? 0))
+    this.#cancelar(this.#tectosDaBarra.get(canal))
+    const falta = (this.#progressoEm.get(canal) as number) + TECTOS_DA_SINCRONIA.semProgressoMs - this.#porta.agora()
+    this.#tectosDaBarra.set(
+      canal,
+      this.#mais(Math.max(0, falta) + 10, () => {
+        this.#tectosDaBarra.delete(canal)
+        this.#mudou(canal)
+      }),
+    )
+  }
+
+  /** The bar's condition, before the ceiling. */
+  #aReceberAgora(canal: string): boolean {
+    const descida = this.#descidas.get(canal)
+    const esperaInstantaneo = this.#instantaneos.has(canal) && this.#esperasDoInstantaneo.has(canal)
+    const continua = this.#continuacoes.has(canal)
+    return descida?.doInstantaneo === true || continua || (esperaInstantaneo && !this.#semResposta.has(canal))
+  }
+
+  /** No progress for `semProgressoMs` on the wall clock: the bar gives up (P6). */
+  #semProgresso(canal: string): boolean {
+    const em = this.#progressoEm.get(canal)
+    return em !== undefined && this.#porta.agora() - em >= TECTOS_DA_SINCRONIA.semProgressoMs
   }
 
   /**
@@ -1056,9 +1140,10 @@ export class AntiEntropia {
    */
   estadoDoCanal(canal: string): SincroniaDoCanal {
     const descida = this.#descidas.get(canal)
-    const esperaInstantaneo = this.#instantaneos.has(canal) && this.#esperasDoInstantaneo.has(canal)
     const continua = this.#continuacoes.has(canal)
-    const aReceber = descida?.doInstantaneo === true || continua || (esperaInstantaneo && !this.#semResposta.has(canal))
+    // Past the ceiling with no progress, the bar goes and the state is the real one: no response.
+    const parado = this.#semProgresso(canal)
+    const aReceber = !parado && this.#aReceberAgora(canal)
     let progresso: SincroniaDoCanal["progresso"] = []
     const deQuem = descida?.responde.aparelho ?? this.#instantaneoDe.get(canal)
     if (aReceber && deQuem) {
@@ -1066,7 +1151,9 @@ export class AntiEntropia {
       if (visto) progresso = progressoDoInstantaneo(resumoNivel0(this.#itens(canal, visto.d)), visto.r, TIPOS_DO_RESUMO)
     }
     const estado: SincroniaDoCanal["estado"] =
-      descida || aReceber || continua
+      parado
+        ? "sem-resposta"
+        : descida || aReceber || continua
         ? "a-reparar"
         : this.#semResposta.has(canal)
           ? "sem-resposta"
@@ -1505,6 +1592,7 @@ export class AntiEntropia {
       riVisto: false,
     }
     this.#descidas.set(canal, descida)
+    this.#notarProgresso(canal, this.#porta.agora(), true)
     this.#mudou(canal)
     void this.#pedirPrimeiro(descida)
   }
@@ -1624,6 +1712,8 @@ export class AntiEntropia {
       const canal = descida.canal
       if (descida.doInstantaneo) this.#continuacoes.add(canal)
       const espera = Math.round(descida.voltarEm * (1 + Math.random() * ACASO_DA_VOLTA))
+      // Waiting for the responder's cap to lift is not a stall: the ceiling counts from the end of the wait.
+      this.#notarProgresso(canal, this.#porta.agora() + espera)
       this.#mais(espera, () => {
         this.#continuacoes.delete(canal)
         this.#continuar(descida, descida.seguidas, descida.voltas + 1)
@@ -3013,7 +3103,10 @@ export class AntiEntropia {
     }
     this.estatisticas.relatosAplicados += aplicados
     if (respondeANos) emCurso.aplicados += aplicados
-    if (aplicados > 0 && this.#descidas.get(canal)?.inteiro) this.#mudou(canal)
+    if (aplicados > 0 && this.#descidas.get(canal)?.inteiro) {
+      this.#notarProgresso(canal)
+      this.#mudou(canal)
+    }
 
     const descida = this.#descidas.get(canal)
     if (
@@ -3025,6 +3118,7 @@ export class AntiEntropia {
     ) {
       descida.relatosRecebidos.add(lido.parte)
       descida.relatosEsperados ??= lido.de
+      this.#notarProgresso(canal)
       this.#armarEspera(descida)
       this.#talvezAcabarItens(descida)
     }

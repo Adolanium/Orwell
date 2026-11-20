@@ -55,7 +55,7 @@ async function abrir(motor, nome) {
 
 const linha = (page, texto) => page.locator(".message").filter({ hasText: texto }).first()
 const viu = (page, texto) => linha(page, texto).isVisible().catch(() => false)
-const caixa = (page) => page.locator('input[placeholder="Escreve uma mensagem"]').first()
+const caixa = (page) => page.locator('textarea[placeholder="Escreve uma mensagem"]').first()
 const botaoFixadas = (page) => page.getByRole("button", { name: "Ver o que está fixado nesta sala" })
 const temFixada = (page) => ate(async () => (await botaoFixadas(page).count()) > 0, 60_000, 400).then((t) => t >= 0)
 

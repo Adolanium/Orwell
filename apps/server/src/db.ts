@@ -446,6 +446,21 @@ export function openDatabase(path: string): DatabaseSync {
 
     CREATE INDEX IF NOT EXISTS push_by_address ON push_subscriptions (address);
 
+    -- Registration invites (1.3.25, ENCLAVE_REGISTO=convite): a code the
+    -- operator made with scripts/convites-de-registo.mjs and gave to a person,
+    -- so that a NEW account gets in. Only the SHA-256 of the code (in its
+    -- canonical form, see normalizarConviteDeRegisto) is here: a copy of this
+    -- table opens nothing. No column says which account used which code: the
+    -- count of uses is all the server keeps.
+    CREATE TABLE IF NOT EXISTS registration_invites (
+      code_hash      TEXT PRIMARY KEY,
+      max_uses       INTEGER NOT NULL,
+      uses           INTEGER NOT NULL DEFAULT 0,
+      -- Unix seconds. A code always expires.
+      expires_second INTEGER NOT NULL,
+      created_second INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS suspensoes (
       address    TEXT PRIMARY KEY,
       activa     INTEGER NOT NULL,

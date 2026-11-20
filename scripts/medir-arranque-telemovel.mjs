@@ -157,7 +157,7 @@ const SONDA = () => {
     if (d.querySelector('button[aria-label="Configurações"]') || [...d.querySelectorAll("button")].some((b) => b.textContent === "Configurações" || b.getAttribute("aria-label") === "Configurações")) marcar(notas.ecra, "app")
     if (d.querySelector(".channel-name")) marcar(notas.ecra, "canais")
     if (d.querySelector(".message, .msg, [data-message-id]")) marcar(notas.ecra, "mensagem")
-    if (d.querySelector('input[placeholder="Escreve uma mensagem"]')) marcar(notas.ecra, "caixa")
+    if (d.querySelector('textarea[placeholder="Escreve uma mensagem"]')) marcar(notas.ecra, "caixa")
     // Usable: the app is there, and the opening (and its fading copy) no longer covers it.
     const html = d.documentElement
     if (notas.ecra.app !== undefined && !d.querySelector(".abertura") && !html.classList.contains("abertura-a-segurar") && !html.classList.contains("abertura-a-sair")) marcar(notas.ecra, "utilizavel")

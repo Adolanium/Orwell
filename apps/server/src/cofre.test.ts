@@ -661,7 +661,7 @@ describe("o Store do cofre", () => {
 describe("TECTOS_DO_COFRE e ENCLAVE_COFRE_* no arranque", () => {
   const com = (env: Record<string, string>) => loadConfig(env as NodeJS.ProcessEnv)
 
-  it("os por omissão são os do plano, e o varrimento vem desligado", () => {
+  it("os por omissão são os do plano, e o varrimento vem ligado a 90 dias (1.3.25)", () => {
     expect(TECTOS_DO_COFRE).toEqual({
       entradaMaxBytes: 65536,
       entradasPorEscopo: 4096,
@@ -673,8 +673,11 @@ describe("TECTOS_DO_COFRE e ENCLAVE_COFRE_* no arranque", () => {
     })
     const config = com({})
     expect(config.cofre).toEqual(TECTOS_DO_COFRE)
-    expect(config.cofreGcDias).toBe(0)
-    expect(com({ ENCLAVE_COFRE_GC_DIAS: " 90 " }).cofreGcDias).toBe(90)
+    expect(config.cofreGcDias).toBe(90)
+    expect(com({ ENCLAVE_COFRE_GC_DIAS: "" }).cofreGcDias).toBe(90)
+    expect(com({ ENCLAVE_COFRE_GC_DIAS: " 30 " }).cofreGcDias).toBe(30)
+    // Zero, said by the operator, still turns the sweep off.
+    expect(com({ ENCLAVE_COFRE_GC_DIAS: "0" }).cofreGcDias).toBe(0)
     expect(com({ ENCLAVE_COFRE_ESCRITAS_POR_MINUTO: "30" }).cofre?.escritasPorMinuto).toBe(30)
   })
 

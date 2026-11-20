@@ -42,7 +42,7 @@ describe("a cor com que as janelas abrem segue o tema escolhido", () => {
     expect(index).not.toMatch(/backgroundColor:\s*"#/)
     expect(index).toMatch(/backgroundColor:\s*FUNDO_DA_JANELA\[temaNoEcra\(\)\]/)
     expect(index).toMatch(/backgroundColor:\s*CORES_DO_ARRANQUE\[temaNoEcra\(\)\]\.fundo/)
-    expect(index).toMatch(/htmlDoArranque\(temaNoEcra\(\)\)/)
+    expect(index).toMatch(/htmlDoArranque\(temaNoEcra\(\), linguaAgora\(\)\)/)
   })
 })
 

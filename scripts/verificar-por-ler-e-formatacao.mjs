@@ -34,7 +34,7 @@ const alice = await conta("Alice Marca", "frase-de-teste-alice-2")
 const bob = await conta("Bob Marca", "frase-de-teste-bob-2")
 for (const quem of [alice, bob]) await quem.page.locator(".chat-composer").waitFor({ timeout: 90_000 })
 
-const escrita = (page) => page.locator(".chat-composer input:not([type=file])").first()
+const escrita = (page) => page.locator(".chat-composer textarea").first()
 const enviar = async (page, texto) => {
   await escrita(page).fill(texto)
   await page.getByRole("button", { name: "Enviar" }).click()

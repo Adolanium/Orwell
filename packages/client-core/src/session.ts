@@ -1,5 +1,7 @@
+import { corpoDaRespostaAoConvite, corpoDoActoDoTicket } from "./actosEmTexto.js"
 import { marcarArranque, medirRecuperacao } from "./marcasDeArranque.js"
 import { lugaresDoHistorico, proximoPedidoDeLugar } from "./lugaresDoAparelhoNovo.js"
+import { PedidosDeLugar, REGRAS_DOS_PEDIDOS, SURDEZ_AVISADA_MS, surdezAvisada, type RegrasDosPedidos } from "./surdez.js"
 import { confirmarPagina, lerPagina, selarPaginas, type PaginaEmCurso } from "./armazem/conversaArquivada.js"
 import {
   addMembers,
@@ -214,6 +216,11 @@ import {
   type EstadoDeConta,
   type CopiaSelada,
   type AvisoDeSuspensao,
+  CODIGO_CONVITE_DE_REGISTO_EM_FALTA,
+  CODIGO_CONVITE_DE_REGISTO_INVALIDO,
+  CODIGO_REGISTO_FECHADO,
+  CODIGOS_DE_RECUSA_DO_REGISTO,
+  type ModoDeRegisto,
 } from "@enclave/protocol"
 import { ticketsOf, type Ticket } from "./tickets.js"
 import {
@@ -275,6 +282,8 @@ import {
   perfisParaOsIrmaos,
   adoptarPerfil,
   aplicarAtribuicao,
+  empateDepoisDe,
+  seqDoEmpate,
   chaveConfirmada,
   appendHistory,
   canaisComEntradas,
@@ -766,6 +775,13 @@ export const CAPACIDADE_PERMISSOES = "permissoes-v1"
 const SEM_ADMINISTRACAO_EM_CONVERSA = "a direct conversation has no administration"
 
 /**
+ * The send to a deaf channel, held (1.3.25, P2). A key, like the one above: the
+ * interface gives it code 390, and the outbox keeps the message waiting for the
+ * channel instead of marking it failed. See `#surdoParaEnviar`.
+ */
+export const CANAL_SURDO = "this device is not receiving this channel"
+
+/**
  * How many failures in a row, and for how long, before declaring deafness.
  *
  * Both conditions together, and the second is what matters. A dead place always
@@ -942,6 +958,14 @@ export interface MembrosVistos {
  * ts-mls marks it in `groupActiveState` when it processes a commit that removes
  * the leaf of whoever is processing it (`selfRemoved`). See `#fomosRemovidos`.
  */
+/** What a seat request found when it arrived. See `Session.#answerRejoin`. */
+interface ChegadaDoPedido {
+  em: number
+  epoca: bigint | undefined
+  /** The asker's leaf (`#folhaDoAparelho`), when the server named the device. */
+  folha: string | undefined
+}
+
 /** A slot to request, with request spacing. See `lugaresPorPedir` in the vault. */
 export type LugarPorPedir = { desde: number; tentativas: number; proxima: number }
 
@@ -965,6 +989,18 @@ function soltar<T>(relogio: T): T {
 
 function comSeq(seq: number): { seq?: number } {
   return seq >= 0 ? { seq } : {}
+}
+
+/** Whether two `role.define` payloads give the same powers (and the same `removed`). See `seqDoEmpate`. */
+function mesmosPoderes(antes: unknown, depois: unknown): boolean {
+  if (antes === undefined) return false
+  const a = antes as { powers?: unknown; removed?: unknown }
+  const b = depois as { powers?: unknown; removed?: unknown }
+  if (Boolean(a.removed) !== Boolean(b.removed)) return false
+  const lista = (valor: unknown): Set<unknown> => new Set(Array.isArray(valor) ? valor : [])
+  const pa = lista(a.powers)
+  const pb = lista(b.powers)
+  return pa.size === pb.size && [...pb].every((poder) => pa.has(poder))
 }
 
 export function resumoDoLivro(bytes: Uint8Array): string {
@@ -1512,6 +1548,10 @@ export type StatusCode =
   | "handshake-failed"
   | "channels-unreadable"
   | "channel-forked"
+  /** The rooms and feeds started again (20/11/2026): the interface says it by this code. */
+  | "channels-reset"
+  /** The server restarted and the old rooms are gone (20/11/2026): the interface says it by this code. */
+  | "server-restarted"
   /** Phase 1g: someone who missed the live stream premiere did not receive the Welcome in time and created the group. */
   | "directa-sem-estreia"
   | "catchup-failed"
@@ -1566,6 +1606,8 @@ export type StatusCode =
   | "rejoin-resync"
   /** Adding or removing someone's place failed, on a path with no one waiting. */
   | "reseat-failed"
+  /** A `keypackage.low` ignored: nudges already made this device mint `CHAVES_POR_HORA_POR_AVISO` keys in the last hour. */
+  | "keypackage-cap"
   /** The server requires a guarantee that this connection did not advertise. Never on an up-to-date client. */
   | "update-required"
   /** The server served a device manifest that does not close. See `deviceManifestOf`. */
@@ -1666,6 +1708,18 @@ export type SessionEvents = {
   presence: { address: UserAddress; online: boolean }
   /** The channels catching up now (12/11/2026). The box says so. See `Session.aRecuperar`. */
   recuperacao: { canais: string[] }
+  /**
+   * The channels this device cannot read for a minute or more (1.3.25, P5).
+   * The room says so, and what is written there waits. See `surdezAvisada`.
+   */
+  surdez: { canais: string[] }
+  /**
+   * The echo of our conversation message came back with the server `seq`
+   * (ordem-resposta, 20/11/2026). Our send enters the screen with `seq` -1; this
+   * gives that line its `seq`, so the screen orders it the way the vault does.
+   * Only for `t: "message"` entries with an `id`.
+   */
+  eco: { channel: string; id: string; seq: number }
   /**
    * The pairing of a device, step by step. See `emparelhar.ts`.
    *
@@ -1804,6 +1858,12 @@ export type SfuAviso =
       fonte?: FonteDeMedia
     }
   | { t: "producer.closed"; channel: string; scope: string; producer: string }
+  /**
+   * The server closed our call here: the account joined a call on another
+   * device (1.3.25). `mesmaChamada` when it joined this same call. See
+   * `sfu.scope.closed` in the protocol.
+   */
+  | { t: "scope.closed"; channel: string; scope: string; mesmaChamada: boolean }
 
 /**
  * A channel as `roomsOf` returns it.
@@ -1860,6 +1920,12 @@ export class Session extends Emitter<SessionEvents> {
   #identity: Identity | null = null
   #socket: WebSocket | null = null
   #serverCapabilities: string[] = []
+  /** Who may create an account on the server, from `hello.ok` (1.3.25); `undefined` before a connection, or on an older server. */
+  #registoDoServidor: ModoDeRegisto | undefined
+  /** The registration invite code for a new account, sent in `auth.finish`. See `definirConviteDeRegisto`. */
+  #conviteDeRegisto: string | null = null
+  /** The `code` of the registration refusal this connection got, read when `auth.ok` does not come. */
+  #recusaDoRegisto: string | null = null
   /** How many days the server keeps events, stated in `hello.ok`; `undefined` on a server before this. */
   #serverRetentionDays: number | undefined
   /** Announce this connection to channel-mates? Set before connecting, so an
@@ -2281,6 +2347,8 @@ export class Session extends Emitter<SessionEvents> {
    */
   retomar(opcoes: { escondidaMs?: number; suspende?: boolean } = {}): "ligar" | "religar" | "verificar" | "nada" {
     if (this.#deliberateClose) return "nada"
+    // The sync bar is re-read on the wall clock: its ceiling timer may not have run in the background (P6).
+    this.#antiEntropia?.revistar()
     const escondidaMs = opcoes.escondidaMs ?? 0
     const socket = this.#socket
     if (this.#connection !== "online" || !socket || socket.readyState !== 1) {
@@ -2724,7 +2792,7 @@ export class Session extends Emitter<SessionEvents> {
       // stage failed, so "nothing works" becomes something diagnosable.
       this.emit("status", {
         detail: detail === "the server did not answer in time"
-          ? "O servidor aceitou a ligação mas não completou a autenticação. A tentar de novo…"
+          ? "The server accepted the connection but did not finish the authentication. Trying again…"
           : detail,
         level: "error",
         code: "handshake-failed",
@@ -2753,8 +2821,10 @@ export class Session extends Emitter<SessionEvents> {
       no longer this one.
     */
     if (hello.t === "error") throw new Error(hello.message)
+    this.#recusaDoRegisto = null
     if (hello.t === "hello.ok") {
       this.#serverCapabilities = hello.capabilities
+      this.#registoDoServidor = hello.registo ?? "aberto"
       // Ages and the pinned key are per connection: a server that rotated its key,
       // or answered nothing on the last one, is asked again.
       this.#idades.clear()
@@ -2801,9 +2871,10 @@ export class Session extends Emitter<SessionEvents> {
       signature: toBase64(signWithDevice(identity, fromBase64(challenge.nonce))),
       ...(posseDoAparelho !== undefined ? { posse: posseDoAparelho } : {}),
       ...(assumirPosse ? { assumirPosse } : {}),
+      ...(this.#conviteDeRegisto !== null ? { conviteDeRegisto: this.#conviteDeRegisto } : {}),
     })
     const ok = await this.#await("auth.ok")
-    if (ok.t !== "auth.ok") throw new Error("the server refused the login")
+    if (ok.t !== "auth.ok") throw new Error(fraseDaRecusaDoRegisto(this.#recusaDoRegisto) ?? "the server refused the login")
     this.#autenticado = true
     // A server that doesn't know the possession doesn't answer `possession`: the
     // request stays pending for a server that does know it.
@@ -2822,6 +2893,8 @@ export class Session extends Emitter<SessionEvents> {
     // presence announcement — so invisibility never flickers on reconnect.
     if (!this.#visible) this.#send({ t: "presence.set", visible: false })
     this.#setConnection("online", identity.address)
+    // The seat requests that could not leave while offline (P3). See `adiantar`.
+    this.#pedidosDeLugar.adiantar()
     marcarArranque("auth-ok")
     this.#renovarPush()
 
@@ -2945,7 +3018,7 @@ export class Session extends Emitter<SessionEvents> {
       } catch (error) {
         const message = (error as Error).message
       this.emit("status", {
-        detail: message.includes("storage is full") ? message : `recuperação de mensagens interrompida: ${message}`,
+        detail: message.includes("storage is full") ? message : `message recovery stopped: ${message}`,
         level: "error",
         code: "catchup-failed",
         // A full local store is the one catch-up failure a person can act on,
@@ -3029,7 +3102,7 @@ export class Session extends Emitter<SessionEvents> {
     }
     if (failed.length > 0) {
       this.emit("status", {
-        detail: `${failed.length} canal(is) com estado ilegível, ignorado(s)`,
+        detail: `${failed.length} channel(s) with unreadable state, skipped`,
         level: "error",
         code: "channels-unreadable",
         // Rare, real, and not something the log should swallow: part of this
@@ -3068,7 +3141,7 @@ export class Session extends Emitter<SessionEvents> {
       this.emit("status", {
         detail: message.includes("storage is full")
           ? message
-          : `não foi possível repor as chaves de convite: ${message}`,
+          : `could not restore the invitation keys: ${message}`,
         level: "error",
         code: "keypackages-failed",
         route: message.includes("storage is full") ? "toast" : "log",
@@ -3437,7 +3510,7 @@ export class Session extends Emitter<SessionEvents> {
     this.#vivoNaEpoca.clear()
     this.#lugaresPedidosPorMim.clear()
     this.#convitesAoCanalDaConta.clear()
-    this.#reparacaoDoCanalDaConta = 0
+    this.#reparacaoDoCanalDaConta.clear()
     this.#pararDeInsistir()
     this.#identity = null
     this.#groups.clear()
@@ -3490,8 +3563,9 @@ export class Session extends Emitter<SessionEvents> {
         vanishes by persistent secrecy. It is the silent break that
         `session.surdez.test.ts` exists to measure, triggered by an account that
         was never sick.
-      - `#rejoinAsked` is the gate on "once per channel per session": inherited,
-        it silences the repair of the new account in that channel forever.
+      - `#pedidosDeLugar` holds the seat requests of each deaf channel (it was
+        `#rejoinAsked`, "once per channel per session"): inherited, it asks for
+        a seat for the new account, or silences its repair.
       - `#buracos` describes the event where reading stopped, by sequence number
         of ANOTHER account.
       - `#entradaExternaPorConfirmar` is the observation opened by an invite card
@@ -3499,7 +3573,8 @@ export class Session extends Emitter<SessionEvents> {
         contradiction that is not hers.
     */
     this.#undecryptable.clear()
-    this.#rejoinAsked.clear()
+    this.#pedidosDeLugar.limpar()
+    this.#limparAvisosDeSurdez()
     this.#buracos.clear()
     this.#buracoAnunciado.clear()
     this.#consumidasAoVivo.clear()
@@ -3562,6 +3637,22 @@ export class Session extends Emitter<SessionEvents> {
   #reposicaoDeChaves: Promise<void> | null = null
 
   /**
+   * Key packages that `keypackage.low` may make this device mint in an hour. See `#reporChaves`.
+   * Twelve top-ups of 20: a new device seated in a hundred channels needs five. Static for tests.
+   *
+   * It counts keys MINTED, not nudges (review of the 1.3.25 merge). The first version
+   * counted nudges, and a full ring answers every nudge above 0 with nothing: a burst
+   * of claims spent the hour on no-ops, and the nudge at 0 that resets the ring was
+   * the one ignored. The pool then stayed empty with the device connected
+   * (`session.anel-welcome-em-transito.rede`, "fora do login").
+   */
+  static CHAVES_POR_HORA_POR_AVISO = 240
+  /** What nudge-driven top-ups minted in the last hour: when, and how many. Oldest first. */
+  readonly #cunhadasPorAviso: { em: number; n: number }[] = []
+  /** Key packages this session ever minted. Read before and after a nudge's top-up. */
+  #cunhadasAoTodo = 0
+
+  /**
    * Answer the server's `keypackage.low`, once at a time (17/11/2026).
    *
    * The server used to say it only at login. Since then it also says it when a
@@ -3578,9 +3669,35 @@ export class Session extends Emitter<SessionEvents> {
       this.#anelPresoNoLogin = true
       return Promise.resolve()
     }
-    this.#reposicaoDeChaves ??= (this.#anelPreso(remaining) ? this.#reiniciarAnelDepoisDosWelcomes() : this.topUpKeyPackages(20))
+    if (this.#reposicaoDeChaves) return this.#reposicaoDeChaves
+    /*
+      The hourly cap (20/11/2026, P4). Since 1.3.25 the server also nudges after a
+      claim that found the pool EMPTY, so a seat repair that failed for lack of this
+      device's keys makes it publish at once. That opens a door: someone claiming
+      this account in a loop gets one nudge per 5 s, and each nudge made this device
+      mint 20 (or reset the ring at 0). Past `CHAVES_POR_HORA_POR_AVISO` keys minted
+      for nudges in the last hour, a nudge is ignored and logged. A nudge that mints
+      nothing (a full ring above 0) costs nothing. The top-up at login (`#handshake`)
+      does not count and is never capped: a reconnect always refills.
+    */
+    const agora = Date.now()
+    while (this.#cunhadasPorAviso.length > 0 && agora - (this.#cunhadasPorAviso[0] as { em: number }).em >= 3_600_000) this.#cunhadasPorAviso.shift()
+    const naHora = this.#cunhadasPorAviso.reduce((soma, c) => soma + c.n, 0)
+    if (naHora >= Session.CHAVES_POR_HORA_POR_AVISO) {
+      this.emit("status", {
+        detail: `keypackage.low ignorado: ${naHora} chaves geradas por avisos na última hora (reserva ${remaining})`,
+        level: "info",
+        code: "keypackage-cap",
+        route: "log",
+      })
+      return Promise.resolve()
+    }
+    const antes = this.#cunhadasAoTodo
+    this.#reposicaoDeChaves = (this.#anelPreso(remaining) ? this.#reiniciarAnelDepoisDosWelcomes() : this.topUpKeyPackages(20))
       .catch(() => {})
       .finally(() => {
+        const n = this.#cunhadasAoTodo - antes
+        if (n > 0) this.#cunhadasPorAviso.push({ em: Date.now(), n })
         this.#reposicaoDeChaves = null
       })
     return this.#reposicaoDeChaves
@@ -3701,6 +3818,7 @@ export class Session extends Emitter<SessionEvents> {
     const espaco = replaceServerCopy ? count : Math.min(count, Session.KEY_PACKAGES_LOCAIS_MAX - this.#keyPackages.size)
     if (espaco <= 0) return
     const generated = await generateKeyPackages(this.identity, espaco)
+    this.#cunhadasAoTodo += generated.length
     for (const item of generated) this.#keyPackages.set(toBase64(item.wire), exportKeyPackage(item))
     this.#keyPackagesDirty = true
     this.#reservaNoServidor = replaceServerCopy ? generated.length : (this.#reservaNoServidor ?? 0) + generated.length
@@ -3754,6 +3872,24 @@ export class Session extends Emitter<SessionEvents> {
   ]
 
   /**
+   * The same three rooms, named in the language of whoever creates the channel
+   * (20/11/2026). The core has no language; the host says it (`channels.create`
+   * in both bridges). English is the default. The interface shows these origin
+   * names in the language of who reads (`nomesDeOrigem.ts` in the UI), so a
+   * German reader of a channel born in Portuguese reads "announcements".
+   */
+  static readonly SALAS_INICIAIS_EN: readonly { kind: "text" | "voice"; name: string }[] = [
+    { kind: "text", name: "announcements" },
+    { kind: "text", name: "chat" },
+    { kind: "voice", name: "voice" },
+  ]
+
+  /** The rooms a new channel is born with, in the creator's language. Anything but "pt" is English. */
+  static salasIniciais(lingua: string | null | undefined): readonly { kind: "text" | "voice"; name: string }[] {
+    return lingua === "pt" ? Session.SALAS_INICIAIS : Session.SALAS_INICIAIS_EN
+  }
+
+  /**
    * The rooms the server's COMMON channel is born with, others, and for reasons.
    *
    * "Announcements" is what stays out, and it is the choice that matters. In a
@@ -3768,6 +3904,11 @@ export class Session extends Emitter<SessionEvents> {
    * already is: a place to say who you are, a place to say what broke, and voice.
    * General talk already exists without creating anything, it is the default
    * room, with empty identifier, and where the person lands.
+   *
+   * These names stay in Portuguese whoever founds the channel (20/11/2026): the
+   * common channel is shared by every account of the server, and versions look
+   * for "avarias" and "anúncios" by name (`lib/oficial.ts` in the UI). The
+   * interface shows them in the language of who reads.
    */
   static readonly SALAS_DO_CANAL_COMUM: readonly { kind: "text" | "voice"; name: string }[] = [
     { kind: "text", name: "apresentações" },
@@ -3843,7 +3984,7 @@ export class Session extends Emitter<SessionEvents> {
     const knownBefore = this.#cofreConheceOCanal(channel)
     if (knownBefore) {
       this.emit("status", {
-        detail: `${channel}: o estado deste canal perdeu-se e foi recriado. Quem lá estava precisa de ser convidado outra vez.`,
+        detail: `${channel}: the state of this channel was lost and the channel was recreated. Its members must be invited again.`,
         level: "error",
         code: "channel-forked",
         // Rare, consequential, and it asks something of the person: the other
@@ -3958,8 +4099,8 @@ What was left behind:
         entered. Behind deafness comes `repairChannel`, the request to re-enter
         and the reseat of who answers, which is a remove followed by an add: the
         history just received disappeared by persistent silence.
-      - `#rejoinAsked` is the brake on "once per channel per session", and on the
-        flip side of the same coin: inherited, it silences real repairs forever.
+      - `#pedidosDeLugar` (was `#rejoinAsked`) holds the seat requests of a deaf
+        channel: inherited, it asks for a seat in a channel we just entered.
       - `deafChannels()` reads `#undecryptable`, so a channel you left kept
         showing as broken.
       - `#buracos` describes the event where reading stopped, by sequence number
@@ -3972,7 +4113,8 @@ What was left behind:
         it speaks of is no longer this one.
     */
     this.#undecryptable.delete(channel)
-    this.#rejoinAsked.delete(channel)
+    this.#pedidosDeLugar.parar(channel)
+    this.#avisarSurdez()
     this.#buracos.delete(channel)
     this.#buracoAnunciado.delete(channel)
     this.#consumidasAoVivo.delete(channel)
@@ -4301,8 +4443,10 @@ What was left behind:
     this.#memberCounts.clear()
     this.emit("channels", { channels: this.channels })
     this.emit("status", {
-      detail: "Salas e feeds recomeçados. A tua conta e o teu perfil mantêm-se; pede para te convidarem de novo.",
+      // The interface says it in the reader's language, by the code (`fraseDoStatus`).
+      detail: "rooms and feeds started again; the account and the profile stay",
       level: "info",
+      code: "channels-reset",
       route: "toast",
     })
   }
@@ -4347,7 +4491,7 @@ What was left behind:
 
     this.emit("status", {
       detail:
-        "As contas anteriores deixaram de ser válidas neste servidor. Esta foi apagada deste dispositivo — cria uma conta nova e pede para te convidarem.",
+        "the earlier accounts are not valid on this server; this one was deleted from this device",
       level: "error",
       code: "identity-obsolete",
       route: "toast",
@@ -4379,8 +4523,10 @@ What was left behind:
     await this.forgetAllChannels()
     this.emit("status", {
       detail:
-        "O servidor foi reiniciado e as salas e feeds antigos deixaram de existir. A tua conta e o teu perfil mantêm-se — pede para te convidarem de novo.",
+        "the server was restarted and the old rooms and feeds do not exist now; the account and the profile stay",
       level: "info",
+      // The interface says it in the reader's language, by the code (`fraseDoStatus`).
+      code: "server-restarted",
       route: "toast",
     })
   }
@@ -5293,7 +5439,29 @@ What was left behind:
     if (payload.t === "message" && payload.poll !== undefined && !this.mayCreatePoll(channel)) {
       throw new Error("you may not create polls in this channel", { cause: { channel } })
     }
+    if (this.#reterNoSurdo(channel, payload)) return
     await this.#sendPayload(channel, this.#comMencoesConferidas(channel, this.identity.address, payload), opcoes.daPessoa === true)
+  }
+
+  /**
+   * The guard of a send to a deaf channel (1.3.25, P2). See `#surdoParaEnviar`.
+   *
+   * Before, a deaf device kept encrypting in its old epoch for days. The server
+   * took every frame, and nobody read one: the people who are up to date throw
+   * them away (`epoca-saltada`). Now nothing leaves:
+   *  - what is said (a message, an edit, a reaction, the state the cascade
+   *    publishes) throws `CANAL_SURDO`. The outbox keeps a message as waiting
+   *    and sends it when the room hears again; the cascade's `.catch` drops the
+   *    rest, and the new seat republishes it anyway (`#acceptWelcome`);
+   *  - what is ephemeral (typing, buzz) is dropped without a word: `true`.
+   * And the seat request starts, if it was not running. A send never brings a
+   * request forward: a person who writes ten times does not ask ten times.
+   */
+  #reterNoSurdo(channel: string, payload: Payload): boolean {
+    if (!this.#surdoParaEnviar(channel)) return false
+    this.#pedidosDeLugar.comecar(channel)
+    if (payload.t === "typing" || payload.t === "buzz") return true
+    throw new Error(CANAL_SURDO, { cause: { channel } })
   }
 
   /** This channel is catching up (to recover, or recovering) on this connection. */
@@ -5335,6 +5503,7 @@ What was left behind:
    */
   async #enviarEmLote(channel: string, guardados: readonly Payload[]): Promise<void> {
     if (!this.#groups.has(channel)) throw new Error("not a member of this channel", { cause: { channel } })
+    if (guardados[0] !== undefined && this.#reterNoSurdo(channel, guardados[0])) return
     await this.#esperarPelaAutenticacao()
     // The store's bytes first: the authorship signs the `inline` (design §5).
     const payloads = await Promise.all(guardados.map((payload) => this.#paraOFio(payload)))
@@ -6216,7 +6385,13 @@ What was left behind:
     if (!this.vault.unlocked) return
     this.#largarEnvioPorConfirmar(marca)
     // Our friend send that gains a `seq` can move place in the fold.
-    if (confirmarSeq(this.vault.contents, channel, chave, seq) && chave.startsWith("friend.")) this.#avisarAmizades()
+    const confirmou = confirmarSeq(this.vault.contents, channel, chave, seq)
+    if (confirmou && chave.startsWith("friend.")) this.#avisarAmizades()
+    if (confirmou) {
+      const nossa = (this.vault.contents.history[channel] ?? []).find((entrada) => entrada.seq === seq)
+      const id = nossa?.payload["id"]
+      if (nossa?.payload.t === "message" && typeof id === "string") this.emit("eco", { channel, id, seq })
+    }
     this.#memoriaPorGravar = true
     this.#gravarJa()
   }
@@ -6798,11 +6973,18 @@ What was left behind:
     const room = typeof entrada.payload["room"] === "string" ? entrada.payload["room"] : DEFAULT_ROOM.room
     const definicoes = contents.channelRoles[channel] ?? {}
     const carimbo = contents.channelMemberRolesAt?.[channel]?.[entrada.sender]
+    /*
+      Dated after the limit, or changed by a tie of timestamps after the poll in
+      server order (I1 of the polls-somem review, `seqDoEmpate`): absent. Both can
+      only take a power away.
+    */
+    const depois = (registo: { at: number; empateSeq?: number } | undefined): boolean =>
+      (registo?.at ?? 0) > ate || empateDepoisDe(registo, entrada.seq)
     const naqueleTempo: EstadoDePermissoes = {
       ...estado,
-      cargosDe: (quem) => (quem === entrada.sender && (carimbo === undefined || carimbo.at > ate) ? [] : estado.cargosDe(quem)),
-      cargo: (role) => ((definicoes[role]?.at ?? 0) > ate ? undefined : estado.cargo(role)),
-      todos: (definicoes[CARGO_TODOS]?.at ?? 0) > ate ? [...PODERES_DE_TODOS_POR_OMISSAO] : estado.todos,
+      cargosDe: (quem) => (quem === entrada.sender && (carimbo === undefined || depois(carimbo)) ? [] : estado.cargosDe(quem)),
+      cargo: (role) => (depois(definicoes[role]) ? undefined : estado.cargo(role)),
+      todos: depois(definicoes[CARGO_TODOS]) ? [...PODERES_DE_TODOS_POR_OMISSAO] : estado.todos,
     }
     return permissoesNoModelo(naqueleTempo, entrada.sender, { sala: room }).includes("votacoes")
   }
@@ -8496,9 +8678,8 @@ What was left behind:
       throw new Error("only an attendant or the author may change the ticket", { cause: { channel } })
     }
     const assunto = this.ticketsOf(channel, room).find((entrada) => entrada.id === ticket)?.subject ?? ""
-    const onde = assunto ? `"${assunto}"` : "este ticket"
-    const corpo =
-      state === "closed" ? `Fechou o ticket ${onde}.` : state === "working" ? `Pôs o ticket ${onde} em curso.` : `Reabriu o ticket ${onde}.`
+    // English, and the interface says it in the language of who reads (`actosEmTexto.ts`).
+    const corpo = corpoDoActoDoTicket(state, assunto)
     const at = Date.now()
     await this.send(channel, {
       t: "message",
@@ -10310,11 +10491,16 @@ What was left behind:
   async sfuEntrarNoAmbito(
     channel: string,
     scope: string,
+    opcoes: { tomar?: boolean } = {},
   ): Promise<{
     rtpCapabilities: unknown
     producers: { id: string; kind: "audio" | "video"; address: UserAddress; fonte?: FonteDeMedia | undefined }[]
   }> {
-    const frame = await this.#pedirSfu({ t: "sfu.scope.join", channel, scope }, "sfu.scope.joined")
+    // `tomar` only on the join a person asked for: see `tomar` in `sfu.scope.join`.
+    const frame = await this.#pedirSfu(
+      { t: "sfu.scope.join", channel, scope, ...(opcoes.tomar === true ? { tomar: true } : {}) },
+      "sfu.scope.joined",
+    )
     if (frame.t !== "sfu.scope.joined") throw new Error("unexpected answer from the server", { cause: { kind: frame.t } })
     // There is a call on this connection: the return to the foreground does not cut it. See `retomar`.
     this.#ambitosSfu.add(`${channel}|${scope}`)
@@ -10493,6 +10679,14 @@ What was left behind:
       return true
     }
 
+    // One call per account (1.3.25): the server already closed this scope, so
+    // there is no call on this connection to keep the socket awake for.
+    if (frame.t === "sfu.scope.closed") {
+      this.#ambitosSfu.delete(`${frame.channel}|${frame.scope}`)
+      this.emit("sfu", { t: "scope.closed", channel: frame.channel, scope: frame.scope, mesmaChamada: frame.mesmaChamada === true })
+      return true
+    }
+
     const ref = "ref" in frame ? frame.ref : undefined
     const pedido = ref === undefined ? undefined : this.#sfuPendentes.get(ref)
 
@@ -10606,7 +10800,7 @@ What was left behind:
     })
 
     this.emit("status", {
-      detail: "Pedido enviado. Falta alguém do canal estar online para te deixar entrar.",
+      detail: "Request sent. Someone from the channel must be online to let you in.",
       level: "info",
       code: "invite-sent",
       // The prompt already said this the instant the link was submitted; a
@@ -10775,6 +10969,81 @@ What was left behind:
   /** What the connected server said it can do, verbatim from hello.ok. */
   get serverCapabilities(): string[] {
     return [...this.#serverCapabilities]
+  }
+
+  /**
+   * Who may create an account on the server (1.3.25), as its last `hello.ok`
+   * said: `aberto`, `convite` or `fechado`. `undefined` before any connection;
+   * an older server, which says nothing, is `aberto`.
+   */
+  get registoDoServidor(): ModoDeRegisto | undefined {
+    return this.#registoDoServidor
+  }
+
+  /**
+   * The registration invite code that a NEW account presents at its first
+   * login, on a server in `convite` mode. The gate sets it before `connect()`;
+   * `null` takes it away. A server sends it to no one and keeps only its hash; an
+   * account that already exists ignores it. Kept in memory, never in the vault:
+   * it is spent at the first login, and a second device of the account never needs it.
+   */
+  definirConviteDeRegisto(codigo: string | null): void {
+    const limpo = codigo?.trim() ?? ""
+    this.#conviteDeRegisto = limpo === "" ? null : limpo.slice(0, 64)
+  }
+
+  /**
+   * Ask a server who may create an account there, before there is an account
+   * (1.3.25). The gate asks it before it makes the vault, so a `fechado` server
+   * is said in words before anything is written, and a `convite` one gets its
+   * code asked for. A `hello` and nothing else, on its own socket, closed at
+   * once: no identity goes out. `null` when the server could not be asked (down,
+   * refused the version, no answer in `prazoMs`): the gate then goes on as before,
+   * and the refusal at the first login says the same thing.
+   */
+  sondarRegisto(servidor: string, prazoMs = 5000): Promise<ModoDeRegisto | null> {
+    return new Promise((resolve) => {
+      let socket: WebSocket
+      try {
+        socket = new WebSocket(gatewayUrlDe(servidor))
+      } catch {
+        resolve(null)
+        return
+      }
+      let acabou = false
+      const acabar = (modo: ModoDeRegisto | null): void => {
+        if (acabou) return
+        acabou = true
+        clearTimeout(prazo)
+        try {
+          socket.close()
+        } catch {
+          // Already closed.
+        }
+        resolve(modo)
+      }
+      const prazo = setTimeout(() => acabar(null), prazoMs)
+      socket.addEventListener("open", () => {
+        socket.send(
+          JSON.stringify({
+            t: "hello",
+            version: PROTOCOL_VERSION,
+            capabilities: GARANTIAS_DO_CLIENTE,
+            ...(this.#versaoDaApp ? { versao: this.#versaoDaApp } : {}),
+          }),
+        )
+      })
+      socket.addEventListener("message", (event) => {
+        try {
+          const frame = JSON.parse(String(event.data)) as ServerFrame
+          acabar(frame.t === "hello.ok" ? (frame.registo ?? "aberto") : null)
+        } catch {
+          acabar(null)
+        }
+      })
+      socket.addEventListener("error", () => acabar(null))
+      socket.addEventListener("close", () => acabar(null))
+    })
   }
 
   /**
@@ -12945,26 +13214,37 @@ What was left behind:
   }
 
   /** The last time the account channel was repaired at a sibling's request. Memory only. */
-  #reparacaoDoCanalDaConta = 0
+  #reparacaoDoCanalDaConta = new Map<string, number>()
 
   /**
    * A device from this account requested a seat in the account channel (F16 in the account channel).
    *
    * ANY leaf from the account that is there answers, not just the one on the device with the key (I5 of slot 1 revision): the deaf device might be precisely the one with the key, and it would never get repaired. Restoring a seat does not need the account key: the claim asks only for missing devices, and `#pacotesAdmissiveis` accepts only those in the manifest. Inviting those who announced themselves and are missing remains with whoever has the key (`#cuidarDoCanalDaConta`).
    *
-   * Waits for proof of life from siblings (`PROVA_DE_VIDA_MS`), removes only leaves that did not signal in the current epoch and invites them again. Once a minute: a 0.5.7 leaf with dead Welcome requests a seat now and then, and it cannot cost a repair every time.
+   * Waits for proof of life from siblings (`PROVA_DE_VIDA_MS`). With a device of the manifest missing, it only seats it. Otherwise it removes only leaves that did not signal in the current epoch and invites them again. Once a minute: a leaf with a dead Welcome requests a seat now and then, and it cannot cost a repair every time.
    */
-  async #repararCanalDaConta(): Promise<void> {
+  async #repararCanalDaConta(device?: string): Promise<void> {
     const agora = Date.now()
-    if (agora - this.#reparacaoDoCanalDaConta < REJOIN_TURN_MS * 20) return
-    this.#reparacaoDoCanalDaConta = agora
+    // Once a minute per device that asks, when the server names it (1.3.25); for the whole account channel without the name.
+    const travao = device ?? ""
+    if (agora - (this.#reparacaoDoCanalDaConta.get(travao) ?? 0) < REJOIN_TURN_MS * 20) return
+    this.#reparacaoDoCanalDaConta.set(travao, agora)
     await new Promise((resolve) => setTimeout(resolve, Session.PROVA_DE_VIDA_MS))
     const canal = this.canalDaConta
     // Only in a group that really is the account channel (B1).
     const grupo = await this.#canalDaContaConfiavel()
-    if (!grupo) return
+    if (!grupo || this.#naoPossoResponder(canal, grupo)) return
     const eu = this.identity.address
-    const mortas = this.#folhasMortas(canal, grupo, eu)
+    /*
+      A device of the manifest has no leaf here: it is the one asking, as in
+      `#repararAparelhosDaConta` (C1 of the 1.3.20 review). Nobody leaves, and
+      `#cuidarDoCanalDaConta` below seats it. The other order took out the leaf of a
+      sibling that was merely offline (no proof of life) each time a new phone asked
+      for its seat here, and spent one of its key packages. With nobody missing the
+      rule stays: the deaf leaf may be the device with the account key, of any age (I5).
+    */
+    // And only the leaf of the device that asked, when the server names it (1.3.25, `#soQuemPediu`).
+    const mortas = (await this.#haLugarPorDar(grupo, eu)) ? [] : this.#soQuemPediu(this.#folhasMortas(canal, grupo, eu), device, grupo, eu)
     if (mortas !== null && mortas.length > 0) {
       const manifesto = await this.#manifestoPara(eu)
       if (manifesto !== null) {
@@ -13005,18 +13285,21 @@ What was left behind:
    * a minute per channel. Tests: `session.welcome-morto-volta-a-sentar.rede`,
    * `session.irmao-desligado-fica.rede`.
    */
-  async #repararAparelhosDaConta(channel: string): Promise<void> {
+  async #repararAparelhosDaConta(channel: string, device?: string): Promise<void> {
     // The common room has its own way in (the card, `#entrarComCartao`, and admission).
     if (channel === this.#commonRoom) return
     const agora = Date.now()
-    const ultima = this.#reparacoesDosIrmaos.get(channel)
+    // Per device that asks, when the server names it (1.3.25): a sibling's seat does not close the door to the next one.
+    const travao = device === undefined ? channel : `${channel}|${device}`
+    const ultima = this.#reparacoesDosIrmaos.get(travao)
     if (ultima !== undefined && agora - ultima < REJOIN_TURN_MS * 20) return
-    // The echo of a request this device made itself: nothing to repair here.
+    // The echo of a request this device made itself: nothing to repair here. Told by
+    // time only when the server did not name the device (`#answerRejoinAgora`).
     const pedido = this.#lugaresPedidosPorMim.get(channel)
-    if (pedido !== undefined && agora - pedido < REJOIN_TURN_MS * 20) return
+    if (device === undefined && pedido !== undefined && agora - pedido < REJOIN_TURN_MS * 20) return
     const grupo = this.#groups.get(channel)
     if (!grupo || estaRemovido(grupo)) return
-    this.#reparacoesDosIrmaos.set(channel, agora)
+    this.#reparacoesDosIrmaos.set(travao, agora)
     const epocaAntes = epochOf(grupo)
     /*
       Siblings take turns by device key, like `#assentarAparelhosEmFalta` (I3 of the
@@ -13034,6 +13317,8 @@ What was left behind:
     await new Promise((resolve) => setTimeout(resolve, Session.PROVA_DE_VIDA_MS + (1 + vez) * REJOIN_TURN_MS))
     const atual = this.#groups.get(channel)
     if (!atual || estaRemovido(atual) || epochOf(atual) !== epocaAntes) return
+    // Behind or deaf here: our commit would be refused, after spending a key package (1.3.25 review, finding 2).
+    if (this.#naoPossoResponder(channel, atual)) return
     try {
       /*
         A device of the manifest has no leaf here: it is the one asking (C1 of the
@@ -13061,7 +13346,8 @@ What was left behind:
           .map((aparelho) => toBase64(aparelho.deviceKey)),
       )
       const vistos = this.vault.contents.aparelhoVistoNoCanal?.[channel] ?? {}
-      const mortas = (this.#folhasMortas(channel, atual, eu) ?? []).filter(
+      // And only the device that asked, when the server names it (1.3.25, `#soQuemPediu`).
+      const mortas = (this.#soQuemPediu(this.#folhasMortas(channel, atual, eu), device, atual, eu) ?? []).filter(
         (aparelho) => vistos[aparelho] === undefined && novos.has(aparelho),
       )
       if (mortas.length === 0) return
@@ -13215,9 +13501,44 @@ What was left behind:
    *
    * **And it is claim, not admit.** Admitting before removing was what is refused in `PersonProfile`, admission refuses those already in the tree, so it forced two leaves for the same person, and half the messages encrypted to a seat they cannot open. Claiming does not touch the tree: it spends a package on the server, and that is the only cost if removal fails next.
    */
-  async #reseat(channel: string, address: string): Promise<void> {
+  async #reseat(channel: string, address: string, device?: string): Promise<void> {
     const grupo = this.#groups.get(channel)
     if (!grupo) throw new Error("not a member of this channel", { cause: { channel } })
+    /*
+      **Only the leaf of the device that asked, when the server names it (1.3.25).**
+      The rule below takes every leaf with no proof of life, and a sibling that is
+      merely offline has none: a new phone asking for its seat took out the tablet
+      too (C1 of the 1.3.20 review, the path of the other accounts). With the name,
+      only that leaf leaves, also when it is the account's only one, and also when it
+      looks alive here: the device itself says its seat stopped working, and before,
+      with every leaf alive, ALL of them left (the path below).
+
+      A named device with no leaf here, of an account that has leaves, is only seated,
+      and nobody leaves: in the common room `#haLugarPorDar` is skipped, and a new phone
+      asking there took out the offline tablet by the rule below (the 1.3.25 `.rede`).
+      A device the manifest does not list gets no package, and nothing happens. An
+      account with no leaf at all (a newcomer to the common room) takes the path
+      below, as before.
+    */
+    const pediu = this.#soQuemPediu(this.#folhasMortas(channel, grupo, address), device, grupo, address)
+    const temFolhas = leavesOf(grupo.state.ratchetTree, address as UserAddress).length > 0
+    if (device !== undefined && pediu !== null && (pediu.length > 0 || temFolhas)) {
+      const manifesto = await this.#manifestoPara(address)
+      if (manifesto !== null) {
+        if (pediu.length === 0) {
+          await this.#seatInvite(channel, address, await this.#reclamarPacotes(address, [device], manifesto))
+          return
+        }
+        const reclamados = await this.#reclamarPacotes(address, pediu, manifesto)
+        await this.#unseat(
+          channel,
+          address,
+          reclamados.pacotes.map((p) => p.deviceKey),
+        )
+        await this.#seatInvite(channel, address, reclamados)
+        return
+      }
+    }
     /*
       **Only the dead leaf, when we know which one it is (F16, phase 5).** An account with two devices where one went deaf lost BOTH leaves on each seat request: the healthy device was out until it opened the new Welcome, and everything said in the meantime was unreadable to it forever. Now, when some of the account's leaves signaled in the current epoch (`#folhasMortas`), we remove only the rest and re-seat only that rest, by claim with `devices`. When we cannot tell (leaf without device key, account without manifest, no leaf with signal, or all with signal), we do what we always did: all of them.
       */
@@ -13370,26 +13691,140 @@ What was left behind:
    * turn comes round — whether the epoch has already moved. If it has, someone
    * ahead in the queue has already seated them and there is nothing left to do.
    */
-  async #answerRejoin(channel: string, address: string): Promise<void> {
+  async #answerRejoin(channel: string, address: string, device?: string): Promise<void> {
     // One admission at a time PER CHANNEL. `#umaDeCadaVez` already serialized, but per person: two nearly simultaneous requests both entered here, read the same tree, and both committed over the same epoch. MLS accepts one; the other Welcome describes a group no one else has, and the person who gets it is alone in a room with the right name. Measured symptom: two requests, one usable invite.
-    return this.#umaDeCadaVez(`rejoin|${channel}`, () => this.#answerRejoinAgora(channel, address))
+    //
+    // Queued per channel, never merged (1.3.25). Merged, a request that came while an
+    // earlier one waited its turn was dropped: the tablet's ate the phone's, and a
+    // phone's second request went with its first when the first gave up because the
+    // epoch moved. Each one in the queue reads the tree after the commit before it,
+    // and the brake (`#rejoinAnswered`, per device) stops a second seat for the same
+    // device.
+    //
+    // What the request found on arrival goes with it (1.3.25 review, finding 1): the
+    // epoch, the asker's leaf, and the time. The turn's wait counts from arrival, and a
+    // repair made while it waited is seen. Only the most recent request of the same
+    // asker stays in the queue, and one older than the brake (a minute) is dropped:
+    // in the common room a member far down the order waits minutes per request.
+    const grupo = this.#groups.get(channel)
+    const chegada: ChegadaDoPedido = {
+      em: Date.now(),
+      epoca: grupo ? epochOf(grupo) : undefined,
+      folha: grupo && device !== undefined ? this.#folhaDoAparelho(grupo, address, device) : undefined,
+    }
+    const quem = `${channel}|${address}|${device ?? ""}`
+    const ficha = (this.#pedidoMaisRecente.get(quem) ?? 0) + 1
+    this.#pedidoMaisRecente.set(quem, ficha)
+    const anterior = this.#filaDosPedidosDeLugar.get(channel) ?? Promise.resolve()
+    const vez = anterior.then(async () => {
+      if (this.#pedidoMaisRecente.get(quem) !== ficha) return
+      this.#pedidoMaisRecente.delete(quem)
+      if (Date.now() - chegada.em > REJOIN_TURN_MS * 20) return
+      await this.#answerRejoinAgora(channel, address, device, chegada)
+    })
+    const fim = vez.catch(() => {})
+    this.#filaDosPedidosDeLugar.set(channel, fim)
+    void fim.then(() => {
+      if (this.#filaDosPedidosDeLugar.get(channel) === fim) this.#filaDosPedidosDeLugar.delete(channel)
+    })
+    return vez
   }
 
-  async #answerRejoinAgora(channel: string, address: string): Promise<void> {
+  /** The seat requests being answered, one after the other, per channel. See `#answerRejoin`. */
+  #filaDosPedidosDeLugar = new Map<string, Promise<void>>()
+  /** The most recent request in the queue per "channel|address|device". See `#answerRejoin`. */
+  #pedidoMaisRecente = new Map<string, number>()
+
+  /** The index and HPKE key of `device`'s leaf of `address`, or "" without one. What tells a repair made. */
+  #folhaDoAparelho(grupo: GroupSession, address: string, device: string): string {
+    const arvore = grupo.state.ratchetTree
+    for (const folha of leavesOf(arvore, address as UserAddress)) {
+      const chave = deviceKeyAtLeaf(arvore, folha)
+      if (chave === undefined || toBase64(chave) !== device) continue
+      const no = arvore[folha * 2]
+      return `${folha}:${no?.nodeType === "leaf" ? toBase64(no.leaf.hpkePublicKey) : "?"}`
+    }
+    return ""
+  }
+
+  /**
+   * This device is behind in the channel or deaf there (1.3.25 review, finding 2).
+   *
+   * Its epoch never moves, so the turn's check never stopped it; `#reseat` claimed a
+   * key package of the asker BEFORE a commit the server refuses (`stale-epoch`), and
+   * the brake is written only after a seat, so it did it again on every request. A
+   * stuck device spent one package of the asker per request; with dozens stuck, the
+   * healthy member that came next found the reserve empty. Deaf is the confirmed
+   * deafness (`surdezConfirmada`), not one frame that did not open: a member could
+   * send one on purpose and stop everybody answering.
+   */
+  #naoPossoResponder(channel: string, grupo: GroupSession): boolean {
+    if (this.#atrasadoEm(channel, grupo)) return true
+    const falhas = this.#undecryptable.get(channel)
+    return falhas !== undefined && surdezConfirmada(falhas, Date.now())
+  }
+
+  /**
+   * Whether the device the server named in a `channel.rejoin` is this one (1.3.25).
+   * `undefined` when the server did not name one (older server, or a login without
+   * the device chain): then the echo is told by time, as before.
+   */
+  #eOMeuAparelho(device: string | undefined): boolean | undefined {
+    if (device === undefined) return undefined
+    return device === toBase64(this.identity.deviceSigningPublicKey)
+  }
+
+  /**
+   * The leaves a repair may take out, when the server named the device that asked
+   * (1.3.25): only that device's, if it has a leaf here. A sibling that is merely
+   * offline never leaves for another device's request (C1 of the 1.3.20 review).
+   *
+   * Also when the leaf looks alive here: the device itself says its seat stopped
+   * working. A healthy phone asking for its seat in the account channel answers the
+   * PC's state deltas, and with the rule "only without proof of life" it was never
+   * repaired (the `.rede` of 1.3.25). Without the name, or with a leaf without a
+   * device key, `mortas` as it is: the old rule.
+   */
+  #soQuemPediu(mortas: string[] | null, device: string | undefined, grupo: GroupSession, address: string): string[] | null {
+    if (device === undefined || mortas === null) return mortas
+    return this.#temFolha(grupo, address, device) ? [device] : []
+  }
+
+  /** Whether `device` has a leaf of `address` in this group. */
+  #temFolha(grupo: GroupSession, address: string, device: string): boolean {
+    const arvore = grupo.state.ratchetTree
+    return leavesOf(arvore, address as UserAddress).some((folha) => {
+      const chave = deviceKeyAtLeaf(arvore, folha)
+      return chave !== undefined && toBase64(chave) === device
+    })
+  }
+
+  async #answerRejoinAgora(channel: string, address: string, device?: string, chegada?: ChegadaDoPedido): Promise<void> {
     const group = this.#groups.get(channel)
     if (!group) return
+    // Behind or deaf here: no answer (1.3.25 review, finding 2).
+    if (this.#naoPossoResponder(channel, group)) return
+    const desde: ChegadaDoPedido = chegada ?? {
+      em: Date.now(),
+      epoca: epochOf(group),
+      folha: device !== undefined ? this.#folhaDoAparelho(group, address, device) : undefined,
+    }
     if (address === this.identity.address) {
+      // The echo of our own request, named by the server (1.3.25): nothing to repair.
+      const meu = this.#eOMeuAparelho(device)
+      if (meu === true) return
       // A sibling of ours. In channels with other people, those people re-seat him (and this leaf already gave proof of life, in `#onFrame`). In the account channel there is no one else: any leaf from the account that is there repairs it (I5). Except the echo of the request itself, which also reaches whoever asked: a deaf seat repairs nothing, and only wasted the brake of a repair for real (one from a sibling asking next). The echo is spent here, once.
       if (channel === this.canalDaConta) {
+        // Without the device's name, the echo is told by time (before 1.3.25).
         const pedido = this.#lugaresPedidosPorMim.get(channel)
-        if (pedido !== undefined && Date.now() - pedido < REJOIN_TURN_MS * 20) {
+        if (meu === undefined && pedido !== undefined && Date.now() - pedido < REJOIN_TURN_MS * 20) {
           this.#lugaresPedidosPorMim.delete(channel)
           return
         }
-        await this.#repararCanalDaConta()
+        await this.#repararCanalDaConta(device)
         return
       }
-      await this.#repararAparelhosDaConta(channel)
+      await this.#repararAparelhosDaConta(channel, device)
       return
     }
     // A new seat in a personal channel to someone who blocked is a seat given. See `block`.
@@ -13397,7 +13832,8 @@ What was left behind:
 
     // A reconnecting device asks once per session; several sessions in a row
     // must not each cost the channel a rekey.
-    const key = `${channel}|${address}`
+    // Per device when the server names it (1.3.25): a sibling's seat does not close the door to the next one.
+    const key = device === undefined ? `${channel}|${address}` : `${channel}|${address}|${device}`
     const answered = this.#rejoinAnswered.get(key)
     if (answered !== undefined && Date.now() - answered < REJOIN_TURN_MS * 20) return
 
@@ -13422,21 +13858,28 @@ What was left behind:
     // and computed from the tree both sides already agree on, so no two
     // members claim the same turn.
     const turn = members.filter((member) => member !== address && member < this.identity.address).length
-    const epochBefore = epochOf(group)
     /*
       With several leaves on the account, we expect at least a proof of life
       from the healthy devices on it (F16): this is what lets `#reseat` remove
       only the deaf leaf. With a single leaf, the wait is the usual one.
     */
     const folhasDaConta = leavesOf(group.state.ratchetTree, address as UserAddress).length
-    const espera = Math.max(turn * REJOIN_TURN_MS, folhasDaConta > 1 ? Session.PROVA_DE_VIDA_MS : 0)
+    // From the request's arrival, not from when it left the queue (1.3.25 review, finding 1).
+    const espera = desde.em + Math.max(turn * REJOIN_TURN_MS, folhasDaConta > 1 ? Session.PROVA_DE_VIDA_MS : 0) - Date.now()
     if (espera > 0) await new Promise((resolve) => setTimeout(resolve, espera))
 
     const current = this.#groups.get(channel)
-    if (!current) return
-    // Somebody ahead of us committed while we waited. Their commit is the
-    // repair; a second one on top of it would be the fork.
-    if (epochOf(current) !== epochBefore) return
+    if (!current || this.#naoPossoResponder(channel, current)) return
+    /*
+      Somebody ahead of us repaired it while the request waited. With the device
+      named, the repair is that device's leaf having changed since the request
+      arrived: another commit in the channel (another device's seat) is not it, and
+      the request is still served. Without the name, the old rule, from arrival: the
+      epoch moved. Their commit is the repair; a second one on top would be the fork.
+    */
+    if (device !== undefined) {
+      if (this.#folhaDoAparelho(current, address, device) !== desde.folha) return
+    } else if (epochOf(current) !== desde.epoca) return
 
     /*
       A device of that account is missing here, and the account's signed
@@ -13460,7 +13903,7 @@ What was left behind:
      * and forty-five: both within the window, both discarded silently. The
      * first one that could be served was more than ninety seconds later.
      */
-    await this.#reseat(channel, address)
+    await this.#reseat(channel, address, device)
     this.#rejoinAnswered.set(key, Date.now())
     /*
       The caller lost what was said to the dead leaf, and a reseat does not
@@ -17812,7 +18255,8 @@ What was left behind:
       t: "message",
       id: crypto.randomUUID(),
       sentAt: Date.now(),
-      body: accepted ? `Aceitei o convite para ${onde}.` : `Por agora não vou entrar em ${onde}.`,
+      // English, and the interface says it in the language of who reads (`actosEmTexto.ts`).
+      body: corpoDaRespostaAoConvite(onde, accepted),
       attachments: [],
       links: [],
       mentions: [],
@@ -19626,8 +20070,39 @@ What was left behind:
    * and offered a repair.
    */
   #undecryptable = new Map<string, FalhasSeguidas>()
-  /** Channels we already asked to re-enter this session. */
-  #rejoinAsked = new Set<string>()
+  /**
+   * The seat requests of each deaf channel (1.3.25, P3). It was `#rejoinAsked`:
+   * one request per channel per session, and after a `reseat-failed` none
+   * again until the app restarted. See `surdez.ts`.
+   */
+  #pedidosDeLugarCriados: PedidosDeLugar | null = null
+  get #pedidosDeLugar(): PedidosDeLugar {
+    this.#pedidosDeLugarCriados ??= new PedidosDeLugar(
+      {
+        estado: (canal) => {
+          if (!this.#groups.has(canal) || !this.#undecryptable.has(canal)) return "ouve"
+          // Catching up can fix it without anybody: a seat request now could
+          // cost a reseat (and the history) for nothing.
+          return this.aRecuperar(canal) ? "adiar" : "surdo"
+        },
+        pedir: (canal) => {
+          if (this.#connection !== "online") return false
+          void this.repairChannel(canal).catch(() => {})
+          return true
+        },
+        agora: () => performance.now(),
+        aleatorio: () => Math.random(),
+        programar: (fn, ms) => {
+          const relogio = soltar(setTimeout(fn, ms))
+          return () => clearTimeout(relogio)
+        },
+      },
+      Session.REGRAS_DOS_PEDIDOS,
+    )
+    return this.#pedidosDeLugarCriados
+  }
+  /** The waits and the bucket of the seat requests. Static for tests. See `surdez.ts`. */
+  static REGRAS_DOS_PEDIDOS: RegrasDosPedidos = REGRAS_DOS_PEDIDOS
   #pendingDirectory: { address: string; at: number; payload: StoredChatMessage["payload"] }[] = []
   /**
    * Who founded each channel, and who they named.
@@ -20232,7 +20707,15 @@ What was left behind:
         typeof fundido["rank"] === "number" &&
         typeof (actual.payload as { rank?: unknown }).rank !== "number"
       if (venceCarimbo(actual, { at, seq }) || maisCompleto) {
-        doCanal[role] = { at, payload: structuredClone(fundido) as StoredChatMessage["payload"], ...comSeq(seq), por }
+        // A tie that changes the powers is marked (I1 of the polls-somem review). See `seqDoEmpate`.
+        const empateSeq = seqDoEmpate(actual, { at, seq }, !mesmosPoderes(actual?.payload, fundido))
+        doCanal[role] = {
+          at,
+          payload: structuredClone(fundido) as StoredChatMessage["payload"],
+          ...comSeq(seq),
+          por,
+          ...(empateSeq !== undefined ? { empateSeq } : {}),
+        }
       }
       contents.channelRoles[channel] = doCanal
     }
@@ -20317,6 +20800,21 @@ What was left behind:
     // And a poll its author could not create, as a plain message (`semVotacao`).
     for (const entrada of copia) entrada.payload = this.#paraOEcra(this.#comMencoesConferidas(channel, entrada.sender, comoNoEcra(entrada)))
     return copia
+  }
+
+  /**
+   * Every chat reaction this vault holds for a channel, in server order (B6, 1.3.25).
+   *
+   * The interface folds reaction chips with `dobrarReaccoes`, the fold this session
+   * uses for a switch (`reactToMessage`). Over memory alone it only saw the newest
+   * 200 entries of the channel, and a line drawn with older reactions came with fewer
+   * chips than it has. Reactions are few and small (no media, no text): the whole
+   * set is read, not a page. Without the entries inherited from pairing, like `history`.
+   */
+  reaccoesGuardadas(channel: string): StoredChatMessage[] {
+    return structuredClone(
+      entradasDoCanal(this.vault.contents, channel).filter((entrada) => entrada.payload.t === "reaction" && !entrada.herdado),
+    )
   }
 
   /**
@@ -20812,8 +21310,8 @@ What was left behind:
     this.emit("status", {
       detail:
         ouviram === 0
-          ? "Pedido de entrada na sala comum enviado, mas não está ninguém online para o aceitar. Fica a tentar sozinho."
-          : "Pedido de entrada na sala comum enviado. Falta alguém que já lá esteja aceitar.",
+          ? "Request to join the common room sent, but nobody is online to accept it. It keeps trying."
+          : "Request to join the common room sent. Someone who is already there must accept it.",
       level: "info",
       code: "channel-joined",
       route: "log",
@@ -21295,18 +21793,19 @@ None of this touches the deafness counter: whoever reads it is the next
       const estado = this.#undecryptable.get(channel) ?? { falhas: 0, desde: Date.now() }
       estado.falhas += 1
       this.#undecryptable.set(channel, estado)
-      // Past the threshold, ask for a new seat, once per channel per session,
-      // because the answer arrives as a welcome, not as a reply. See DEAF_FAILURES:
-      // counting is not enough, it has to hurt for a while.
+      // Past the threshold, ask for a new seat, and again with backoff while the
+      // channel stays deaf, because the answer arrives as a welcome, not as a
+      // reply. See DEAF_FAILURES: counting is not enough, it has to hurt for a while.
       const surdo = surdezConfirmada(estado, Date.now())
-      if (surdo && !this.#rejoinAsked.has(channel)) {
-        this.#rejoinAsked.add(channel)
+      if (surdo && !this.#pedidosDeLugar.ativo(channel)) {
         // Everything this side can do about it, at once — and without asking
         // anybody. Asking only the members was half a remedy: the invitation
         // this device had already written off stayed written off, so a welcome
         // the server was still holding could never be tried again, and the two
-        // sides waited for each other for ever.
-        void this.repairChannel(channel).catch(() => {})
+        // sides waited for each other for ever. `repairChannel` is what each
+        // request runs, and since 1.3.25 it repeats while the channel stays
+        // deaf (P3), also after a `reseat-failed` on the other side.
+        this.#pedidosDeLugar.comecar(channel)
         this.emit("status", {
           detail: `${channel}: este dispositivo perdeu o acesso. Pedido de reentrada enviado aos membros.`,
           level: "info",
@@ -21317,6 +21816,7 @@ None of this touches the deafness counter: whoever reads it is the next
           channel,
         })
       }
+      this.#vigiarSurdez(channel, estado)
       /*
         Counted as deafness AND reported as a gap, in that order.
 
@@ -21331,8 +21831,7 @@ None of this touches the deafness counter: whoever reads it is the next
         throw new BuracoDeEpoca(result.epochDoFrame, epochOf(result.session))
       }
     } else if (!geracaoGasta) {
-      this.#undecryptable.delete(channel)
-      this.#rejoinAsked.delete(channel)
+      this.#ouveDeNovo(channel)
       // A frame that decrypts is proof our place is the same as everyone else's. It
       // closes the observation opened by a card join.
       this.#entradaExternaPorConfirmar.delete(channel)
@@ -21601,7 +22100,7 @@ None of this touches the deafness counter: whoever reads it is the next
           this.#manifestosRecentes.delete(result.sender)
           if (result.sender === this.identity.address && lida.aparelho === toBase64(this.identity.deviceSigningPublicKey)) {
             this.emit("status", {
-              detail: "este aparelho foi tirado da conta noutro aparelho",
+              detail: "this device was removed from the account on another device",
               level: "error",
               code: "device-revoked",
               route: "toast",
@@ -22033,6 +22532,20 @@ None of this touches the deafness counter: whoever reads it is the next
       return
     }
 
+    if (frame.t === "error" && CODIGOS_DE_RECUSA_DO_REGISTO.includes(frame.code)) {
+      /*
+        The server takes no new accounts, or only with an invite (1.3.25). This
+        account is new there and was refused: reconnecting gives the same answer,
+        so disconnect for real, as a revocation does. The handshake reads the code
+        and throws the sentence (`fraseDaRecusaDoRegisto`), which is what the gate
+        shows; the status goes to the log only, so the person does not get it twice.
+      */
+      this.#recusaDoRegisto = frame.code
+      this.emit("status", { detail: `${frame.code}: ${frame.message}`, level: "error", code: "server-error", route: "log" })
+      this.disconnect()
+      return
+    }
+
     if (frame.t === "error" && frame.code === "device-revoked") {
       /*
         The server refused this device: the account removed it from the manifest on another device. It is not a network failure, and reconnecting gives the same refusal: disconnect for real, and the UI says why.
@@ -22056,7 +22569,7 @@ None of this touches the deafness counter: whoever reads it is the next
         )
       const porAcabar = !removido && frame.pairingUnfinished === true
       this.emit("status", {
-        detail: porAcabar ? "o emparelhamento deste aparelho não terminou" : "este aparelho foi tirado da conta noutro aparelho",
+        detail: porAcabar ? "the pairing of this device did not finish" : "this device was removed from the account on another device",
         level: "error",
         code: "device-revoked",
         route: "toast",
@@ -22086,6 +22599,15 @@ None of this touches the deafness counter: whoever reads it is the next
 
     if (frame.t === "keypackage.low") {
       await this.#reporChaves(frame.remaining)
+      /*
+        The top-up is done (or capped): a seat request that failed for "no invite
+        keys" on the other side can work now (1.3.25, P3). Since 1.3.25 the server
+        sends this after every claim that leaves the account below 20, and with
+        `remaining: 0` when a claim found the pool empty, which is what the
+        answerer of our request saw. The deaf channels ask soon, never sooner than
+        the first wait after their last request. See `PedidosDeLugar.adiantar`.
+      */
+      this.#pedidosDeLugar.adiantar()
       return
     }
 
@@ -22152,7 +22674,7 @@ None of this touches the deafness counter: whoever reads it is the next
         this.#orfaos.add(frame.channel)
         this.emit("status", {
           detail:
-            "Esta sala já não existe no servidor, ou este dispositivo perdeu o lugar nela. O que escreveres aqui não chega a ninguém — sai da sala e pede para te convidarem outra vez.",
+            "this room does not exist on the server now, or this device lost its seat in it",
           level: "error",
           code: "channel-orphaned",
           route: "toast",
@@ -22164,12 +22686,13 @@ None of this touches the deafness counter: whoever reads it is the next
 
     if (frame.t === "channel.rejoin") {
       // A peer requesting a seat: this sheet says it is alive, so the responder
-      // will not be hit with theirs (F16).
-      if (frame.address === this.#identity?.address) this.#provarVida(frame.channel)
+      // will not be hit with theirs (F16). Not on the echo of our own request,
+      // which the server now names by our device key (1.3.25).
+      if (frame.address === this.#identity?.address && !this.#eOMeuAparelho(frame.device)) this.#provarVida(frame.channel)
       // Somebody in a channel we hold says their seat stopped working. Give
       // them a new one — but only if nobody closer to the front of the queue
       // does it first. See `#answerRejoin`.
-      void this.#answerRejoin(frame.channel, frame.address).catch((erro: unknown) => {
+      void this.#answerRejoin(frame.channel, frame.address, frame.device).catch((erro: unknown) => {
         // Silently swallowed until 12/9/2026, and the shared room repair was failing
         // with no one knowing why: a `removeMembers` throwing due to a missing patch
         // on the server. No one expects this, so the place to report it is diagnostics
@@ -22620,6 +23143,10 @@ None of this touches the deafness counter: whoever reads it is the next
         // And the seat epoch, which is the question of who decides what counts as loss:
         // nothing below this was from this device. See `#epocaAoLigar`.
         this.#epocaAoLigar.set(channel, epochOf(session))
+        // A new seat is a seat that hears (1.3.25, P3): the old series of failures
+        // was about the group just replaced. Before the profile and the cascade
+        // below, which the send guard would hold otherwise.
+        this.#ouveDeNovo(channel)
         await this.flush()
         /*
           The channel snapshot from the Welcome (phase 1 of 1.1), BEFORE the
@@ -22823,6 +23350,85 @@ None of this touches the deafness counter: whoever reads it is the next
       .map(([channel]) => channel)
   }
 
+  /**
+   * A frame opened, or a new seat arrived: this device hears the channel again.
+   * The series of failures ends, the seat requests stop, and the room stops
+   * saying it is deaf (and what waited there goes out, from the interface).
+   */
+  #ouveDeNovo(channel: string): void {
+    this.#undecryptable.delete(channel)
+    this.#pedidosDeLugar.parar(channel)
+    this.#avisarSurdez()
+  }
+
+  /**
+   * Whether a send to this channel would go to nobody (1.3.25, P2).
+   *
+   * The rule is `surdezAvisada`: five frames in a row that do not open, over a
+   * full minute, and NOT ONE that opens in between. Frames from before our
+   * epoch never count (`anteriorAoNossoLugar`), so the old-epoch sends of a
+   * stuck device never make a healthy one deaf. A slow network or a long
+   * catch-up open frames all the time, and every one that opens ends the series.
+   *
+   * What is NOT in the rule, and why:
+   *  - the server refusing our sends (`channel-orphaned`): it already refuses
+   *    them, and a seat request does not fix a seat the server does not know;
+   *  - a group without our leaf: that is removal (`#fomosRemovidos`);
+   *  - the account channel: it carries state between our own devices and has
+   *    its own repair, and holding there would hold the repair's own state.
+   */
+  #surdoParaEnviar(channel: string): boolean {
+    if (channel === this.canalDaConta || !this.#groups.has(channel)) return false
+    return surdezAvisada(this.#undecryptable.get(channel), Date.now(), DEAF_FAILURES)
+  }
+
+  /**
+   * The minute of `surdezAvisada` passes by the clock, not by a frame: a deaf
+   * room that goes quiet after the fifth failure would never say so. A timer
+   * per channel, at the moment the series reaches the minute.
+   */
+  #vigiarSurdez(channel: string, estado: FalhasSeguidas): void {
+    this.#avisarSurdez()
+    if (estado.falhas < DEAF_FAILURES || this.#relogiosDaSurdez.has(channel)) return
+    const falta = estado.desde + SURDEZ_AVISADA_MS - Date.now()
+    if (falta <= 0) return
+    this.#relogiosDaSurdez.set(
+      channel,
+      soltar(
+        setTimeout(() => {
+          this.#relogiosDaSurdez.delete(channel)
+          this.#avisarSurdez()
+        }, falta + 50),
+      ),
+    )
+  }
+  #relogiosDaSurdez = new Map<string, ReturnType<typeof setTimeout>>()
+
+  /** The deaf channels, said to the interface when the set changes. See `surdez` in the events. */
+  #avisarSurdez(): void {
+    if (this.#identity === null) return
+    const canais = [...this.#undecryptable.keys()].filter((canal) => this.#surdoParaEnviar(canal)).sort()
+    const chave = canais.join("\u0000")
+    if (chave === this.#surdezAvisada) return
+    this.#surdezAvisada = chave
+    this.emit("surdez", { canais })
+  }
+  #surdezAvisada = ""
+
+  #limparAvisosDeSurdez(): void {
+    for (const relogio of this.#relogiosDaSurdez.values()) clearTimeout(relogio)
+    this.#relogiosDaSurdez.clear()
+    if (this.#surdezAvisada !== "") {
+      this.#surdezAvisada = ""
+      this.emit("surdez", { canais: [] })
+    }
+  }
+
+  /** The channels the room says are deaf now. See `surdez` in the events. */
+  canaisSurdos(): string[] {
+    return this.#surdezAvisada === "" ? [] : this.#surdezAvisada.split("\u0000")
+  }
+
   /** Channels whose invitation could not be opened, for the UI's diagnostics. */
   deadWelcomeChannels(): string[] {
     const proprio = this.#identity !== null ? this.canalDaConta : null
@@ -22963,7 +23569,7 @@ None of this touches the deafness counter: whoever reads it is the next
     const mensagem = erro instanceof Error ? erro.message : String(erro)
     const cheio = mensagem.includes("storage is full")
     this.emit("status", {
-      detail: cheio ? mensagem : `não foi possível guardar no cofre: ${mensagem}`,
+      detail: cheio ? mensagem : `could not save to the vault: ${mensagem}`,
       level: "error",
       code: "persist-failed",
       route: cheio ? "toast" : "log",
@@ -23332,6 +23938,23 @@ function homeserverOf(identity: Identity): string {
 
 function gatewayUrl(identity: Identity): string {
   return gatewayUrlDe(homeserverOf(identity))
+}
+
+/**
+ * The error a refused new account throws from `connect()` (1.3.25), by the
+ * server's code. `null` for any other code, or none.
+ */
+function fraseDaRecusaDoRegisto(codigo: string | null): string | null {
+  switch (codigo) {
+    case CODIGO_REGISTO_FECHADO:
+      return "this server does not accept new accounts"
+    case CODIGO_CONVITE_DE_REGISTO_EM_FALTA:
+      return "this server needs a registration invite"
+    case CODIGO_CONVITE_DE_REGISTO_INVALIDO:
+      return "the registration invite is not valid"
+    default:
+      return null
+  }
 }
 
 /** The gateway of a server by name. Plain ws only for loopback development; everything else must be TLS. */

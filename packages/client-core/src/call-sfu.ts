@@ -43,9 +43,15 @@ import { VigiaDoFotogramaChave, type AmostraDoReceptor, type MotivoDoPedido } fr
 
 /** What this engine needs from the gateway. The session implements it. */
 export interface SinalizacaoSfu {
+  /**
+   * `tomar` on the join a person asked for (1.3.25): it takes the call from
+   * another device of the account. Never on the automatic joins. See `tomar`
+   * in `sfu.scope.join`.
+   */
   sfuEntrarNoAmbito(
     channel: string,
     scope: string,
+    opcoes?: { tomar?: boolean },
   ): Promise<{
     rtpCapabilities: unknown
     producers: { id: string; kind: "audio" | "video"; address: UserAddress; fonte?: FonteDoFluxo | undefined }[]
@@ -152,6 +158,13 @@ export function ehCifraDoEmissorEmFalta(erro: unknown): erro is Error {
 }
 
 /**
+ * The catalog key for a call that ended because the account joined one on
+ * another device (1.3.25). The same for the server notice (`sfu.scope.closed`)
+ * and for its refusal (`noutro-aparelho`): to the person it is one event.
+ */
+export const CHAMADA_NOUTRO_APARELHO = "you joined the call on another device"
+
+/**
  * The code of each SFU refusal that tells the person who tried something, and the
  * error catalog key.
  *
@@ -171,6 +184,8 @@ export const CHAVES_DAS_RECUSAS_DO_SFU: Readonly<Record<string, string>> = {
   "sem-sfu": "this server does not relay call media",
   "fora-da-chamada": "join the call first",
   "sem-lugar": "this device has no seat in this channel",
+  // One call per account (1.3.25): see `sfu.scope.closed` in the protocol.
+  "noutro-aparelho": CHAMADA_NOUTRO_APARELHO,
 }
 
 /** The generic key for an SFU refusal not in the table. */
@@ -206,6 +221,7 @@ export const RECUSAS_FINAIS_DO_CONSUMO: ReadonlySet<string> = new Set([
   "sem-sfu",
   "demasiados-ambitos",
   "chamada-cheia",
+  "noutro-aparelho",
 ])
 
 /** The code of an SFU refusal, also after IPC (goes in `cause`). `null` if not a refusal. */
@@ -659,6 +675,13 @@ export interface DependenciasDoMotorSfu {
    * no longer the server's. The caller remakes the media, as in `aoEnvioParado`.
    */
   aoRecepcaoPerdida?: () => void
+  /**
+   * The server refused to let us back in: the account is in a call on another
+   * device (`noutro-aparelho`, 1.3.25). Seen here when the resynchronisation
+   * asks again, after a `sfu.scope.closed` that never arrived. The caller
+   * leaves the call, and does not rebuild it.
+   */
+  aoChamadaNoutroAparelho?: () => void
 }
 
 /** The server's outgoing budget refusal? By the code in `cause`, which crosses the IPC. */
@@ -853,6 +876,7 @@ export class MotorSfu {
     ambito: string,
     faixa: MediaStreamTrack | null,
     camara: MediaStreamTrack | null = null,
+    opcoes: { tomar?: boolean } = {},
   ): Promise<void> {
     this.#canal = canal
     this.#ambito = ambito
@@ -862,7 +886,9 @@ export class MotorSfu {
     // The cipher derives from this call's channel, and the caller tells it where we are. Without this line there is no key and everything mounts the same way, transports standing, streams arriving, nothing decrypted: a silent call with all lights green.
     this.deps.cifra.canal = canal
 
-    const { rtpCapabilities, producers } = await this.deps.sinalizacao.sfuEntrarNoAmbito(canal, ambito)
+    const { rtpCapabilities, producers } = await (opcoes.tomar === true
+      ? this.deps.sinalizacao.sfuEntrarNoAmbito(canal, ambito, { tomar: true })
+      : this.deps.sinalizacao.sfuEntrarNoAmbito(canal, ambito))
     // Nothing built yet: leaving here just drops the request and nothing else.
     if (!aindaNesta()) return
 
@@ -2142,6 +2168,7 @@ export class MotorSfu {
       ;({ producers } = await this.deps.sinalizacao.sfuEntrarNoAmbito(canal, ambito))
     } catch (erro) {
       this.deps.aoDiagnosticar("sfu-ressincronizar-falhou", `${motivo} · ${descreverFalhaDoSfu(erro)}`)
+      if (codigoDaRecusaDoSfu(erro) === "noutro-aparelho" && geracao === this.#geracao) this.deps.aoChamadaNoutroAparelho?.()
       return
     }
     if (geracao !== this.#geracao) return

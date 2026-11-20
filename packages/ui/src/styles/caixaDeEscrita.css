@@ -1,0 +1,31 @@
+/*
+  The text box is a text area since 20/11/2026: Shift+Enter starts a new line.
+
+  The rules written for the old `<input>` name both in `screens.css` and
+  `pele.css` (the font comes from `base.css`). What only a text area needs
+  lives here:
+  - no resize handle;
+  - one line at rest (`rows="1"`); the height past that is set by
+    `Composer` from the text, up to half of the conversation area, and then
+    the box scrolls inside (`lib/alturaDaCaixa.ts`);
+  - with more than one line the buttons sit at the bottom, next to the last
+    line, where the cursor usually is.
+*/
+.chat-composer .composer-line > textarea {
+  display: block;
+  resize: none;
+  overflow-y: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* The placeholder stays on one line and cuts, as it did in the `<input>`: a
+   wrapped placeholder would make the empty box two lines tall at 390 px. */
+.chat-composer .composer-line > textarea::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-composer .composer-line.varias-linhas {
+  align-items: flex-end;
+}

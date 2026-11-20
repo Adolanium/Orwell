@@ -1,3 +1,4 @@
+import { nomeDaSalaNoEcra } from "../../lib/nomesDeOrigem.js"
 import { nomeVisivel } from "@enclave/client-core"
 import { LinhaDoEstado } from "../../components/LinhaDoEstado.js"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -14,7 +15,7 @@ import type { MentionCandidate } from "../../lib/mentions.js"
 import { useBridge } from "../../App.js"
 import type { ConnectionState, PinnedMessage, Profile } from "../../bridge.js"
 import type { ChatMessage, MessageExtras } from "../../types.js"
-import type { OutboxEntry } from "../../hooks/useOutbox.js"
+import { SALA_SURDA, type OutboxEntry } from "../../hooks/useOutbox.js"
 import { useApresentacao } from "../../hooks/usePrefs.js"
 import { useBuzz } from "../../hooks/useBuzz.js"
 import { useConfirmar } from "../../hooks/useConfirmar.js"
@@ -25,7 +26,7 @@ import { useToast } from "../../components/Toast.js"
 import { CameraIcon, MicIcon, PeopleIcon, PinIcon, SearchIcon, SmileyIcon } from "../../icons.js"
 import type { CargoDoMembro } from "../../lib/agruparMembros.js"
 import { isDirect, serverOf } from "../../lib/format.js"
-import { strings, traduzirErro } from "../../strings.js"
+import { strings, translateError, traduzirErro } from "../../strings.js"
 import { RoomIcon } from "../../components/RoomIcon.js"
 import { RoomGlyph } from "../../components/SidebarIcons.js"
 import { SeloOficial } from "../../components/SeloOficial.js"
@@ -41,6 +42,8 @@ import { CaixaComQuemEscreve } from "./QuemEscreve.js"
 import { EditarMensagem } from "./EditarMensagem.js"
 import { MemberPanel } from "./MemberPanel.js"
 import { PinnedPanel } from "./PinnedPanel.js"
+import { BarraDasFixadas } from "./BarraDasFixadas.js"
+import { barraEscondida, chaveDaSala, gravarEscondida, lerEscondidas } from "../../lib/barraDasFixadas.js"
 import { ProcuraPanel } from "./ProcuraPanel.js"
 import { Timeline } from "./Timeline.js"
 import { itensDeMedia, temMedia } from "./menuDeMedia.js"
@@ -106,6 +109,7 @@ export function ChatScreen({
   cameraOff,
   onToggleCamera,
   outbox,
+  surda = false,
   onSend,
   onRetryEntry,
   onDiscardEntry,
@@ -145,6 +149,7 @@ export function ChatScreen({
   apuramentos,
   onVotar,
   reaccoes,
+  ocultar,
   onReagir,
   etiquetas,
   onVotacao,
@@ -160,6 +165,7 @@ export function ChatScreen({
   procuraAberta = false,
   onProcuraAberta,
   onSaltarPara,
+  onAbrirFixada,
   nomeDaSala,
   destacada = null,
   caminhoDeMedia = null,
@@ -270,6 +276,8 @@ export function ChatScreen({
   onToggleCamera?: (() => void) | undefined
   /** Unconfirmed sends for the active channel. */
   outbox: OutboxEntry[]
+  /** This device cannot read the active room (1.3.25, P5). See `bridge.on.surdez`. */
+  surda?: boolean
   onSend: (channel: string, body: string, extras?: MessageExtras) => void
   onRetryEntry: (id: string) => void
   onDiscardEntry: (id: string) => void
@@ -384,6 +392,8 @@ export function ChatScreen({
   onVotar?: ((message: ChatMessage, opcao: number) => void) | undefined
   /** The reaction chips of this channel, by message id. From the shell, like `apuramentos`. */
   reaccoes?: ReadonlyMap<string, readonly FichaDeReaccao[]> | undefined
+  /** A message from someone this device blocked, folded in the timeline. See `Timeline`. */
+  ocultar?: ((message: ChatMessage) => boolean) | undefined
   /** Press or release an emoji on a message. Absent (old host): no React button. */
   onReagir?: ((message: ChatMessage, emoji: string) => void) | undefined
   /**
@@ -476,6 +486,12 @@ export function ChatScreen({
   procuraAberta?: boolean | undefined
   onProcuraAberta?: ((aberta: boolean) => void) | undefined
   onSaltarPara?: ((achado: Achado) => void) | undefined
+  /**
+   * Go to a pinned message of the open room (fixadas-topo). Resolves `false` when
+   * this device does not have the message, even after reading the vault: the sheet
+   * then opens on its copy. Absent, a pin opens the sheet.
+   */
+  onAbrirFixada?: ((id: string) => Promise<boolean>) | undefined
   /** The readable name of a room in this channel. The identifier is not shown. */
   nomeDaSala?: ((room: string) => string) | undefined
   /** The message we just jumped to, so the conversation can highlight it. */
@@ -521,6 +537,10 @@ export function ChatScreen({
   const [fixadasAbertas, setFixadasAbertas] = useState(false)
   /** The wrapper for the button and the sheet. See `ancora`, in `PinnedPanel`. */
   const ancoraDasFixadas = useRef<HTMLDivElement>(null)
+  /** The pin the sheet opened on, because the device does not have its message. */
+  const [fixadaRealcada, setFixadaRealcada] = useState<string | null>(null)
+  /** The rooms that hide the pinned bar on this device. See `lib/barraDasFixadas.ts`. */
+  const [fixadasEscondidas, setFixadasEscondidas] = useState(lerEscondidas)
   /** The same, for search. See `ancora`, in `ProcuraPanel`. */
   const ancoraDaProcura = useRef<HTMLDivElement>(null)
 
@@ -575,6 +595,47 @@ export function ChatScreen({
     return (id: string): string | undefined => porId.get(id)
   }, [messages, active])
 
+  /**
+   * The pinned bar of this room (fixadas-topo): hidden by the person on this
+   * device until a newer pin arrives. See `lib/barraDasFixadas.ts`.
+   */
+  const salaDaBarra = active !== null ? chaveDaSala(active, activeRoom) : null
+  const fixadaMaisRecente = pins.reduce<number | undefined>((maior, fixada) => (maior === undefined || fixada.pinnedAt > maior ? fixada.pinnedAt : maior), undefined)
+  const barraDasFixadasEscondida = salaDaBarra !== null && barraEscondida(fixadasEscondidas, salaDaBarra, fixadaMaisRecente)
+  const esconderBarraDasFixadas = (): void => {
+    if (salaDaBarra === null || fixadaMaisRecente === undefined) return
+    setFixadasEscondidas((actuais) => gravarEscondida(actuais, salaDaBarra, fixadaMaisRecente))
+  }
+  const mostrarBarraDasFixadas = (): void => {
+    if (salaDaBarra === null) return
+    setFixadasEscondidas((actuais) => gravarEscondida(actuais, salaDaBarra, null))
+    // The bar is now what shows the pins: the sheet over the conversation closes.
+    setFixadasAbertas(false)
+  }
+  /**
+   * Go to a pinned message, from the bar or the sheet. The sheet closes first: it
+   * sits over the conversation. Without the message on this device, the sheet
+   * opens again on the pin, with its copy, and the toast says why.
+   */
+  const abrirFixada = (id: string): void => {
+    setFixadasAbertas(false)
+    setFixadaRealcada(null)
+    const naoEsta = (): void => {
+      setFixadaRealcada(id)
+      setFixadasAbertas(true)
+      toast(strings.chat.pinnedBarNotHere, "info")
+    }
+    if (!onAbrirFixada) {
+      naoEsta()
+      return
+    }
+    void onAbrirFixada(id)
+      .then((esta) => {
+        if (!esta) naoEsta()
+      })
+      .catch((error: Error) => toast(traduzirErro(error), "error"))
+  }
+
   // The presentation of the shared channel. `oficial` is what makes it eligible;
   // the rest is this device's memory of who has already read it.
   const apresentacao = useApresentacao(active, oficial)
@@ -586,6 +647,12 @@ export function ChatScreen({
   const [aRecuperarCanais, setARecuperarCanais] = useState<ReadonlySet<string>>(() => new Set())
   useEffect(() => bridge.on.recuperacao?.((evento) => setARecuperarCanais(new Set(evento.canais))), [bridge])
   const aRecuperar = active !== null && aRecuperarCanais.has(active)
+  /**
+   * The lines of the deaf-room notice: "Error 390", then the sentence. Once per
+   * appearance and not per render: `translateError` also records the code shown,
+   * for "Report a bug".
+   */
+  const avisoDeSurdez = useMemo(() => (surda ? translateError(SALA_SURDA).split("\n") : null), [surda])
 
 
   /*
@@ -670,7 +737,7 @@ export function ChatScreen({
   const salaNoTopo: { nome: string; kind: "text" | "voice"; layout?: string | undefined } | null = (() => {
     if (active === null || ehDirecta || !nomeDaSala) return null
     const sala = bridge.channels.rooms?.(active)?.find((candidata) => candidata.room === activeRoom)
-    return { nome: sala?.name ?? nomeDaSala(activeRoom), kind: sala?.kind ?? "text", layout: sala?.layout }
+    return { nome: sala ? nomeDaSalaNoEcra(sala.room, sala.name) : nomeDaSala(activeRoom), kind: sala?.kind ?? "text", layout: sala?.layout }
   })()
   const topicoNoTopo = salaNoTopo && active !== null ? bridge.channels.meta?.(active)?.topic?.trim() || null : null
 
@@ -898,13 +965,19 @@ export function ChatScreen({
                     nameFor={nameFor}
                     podeDesafixar={podeFixar}
                     corpoDe={corpoFixado}
+                    onAbrir={abrirFixada}
+                    realcada={fixadaRealcada}
+                    {...(barraDasFixadasEscondida ? { onMostrarBarra: mostrarBarraDasFixadas } : {})}
                     onDesafixar={(id) => {
                       void bridge.channels
                         .unpin?.(active, activeRoom, id)
                         .then(() => toast(strings.chat.pinnedUndone, "info"))
                         .catch((error: Error) => toast(traduzirErro(error), "error"))
                     }}
-                    onClose={() => setFixadasAbertas(false)}
+                    onClose={() => {
+                      setFixadasAbertas(false)
+                      setFixadaRealcada(null)
+                    }}
                   />
                 )}
               </div>
@@ -1092,6 +1165,20 @@ export function ChatScreen({
           {notasDeVersao ? (
             <NotasDeVersao />
           ) : (
+          /* The conversation and the pinned bar share the `timeline` area: the bar
+             is a line in the flow, above the scroller, never over the text. The
+             wrapper is always there, so the scroller is not mounted again when
+             the bar comes or goes (it would lose the scroll position). */
+          <div className="conversa">
+          {pins.length > 0 && !barraDasFixadasEscondida && (
+            <BarraDasFixadas
+              pins={pins}
+              nameFor={nameFor}
+              corpoDe={corpoFixado}
+              onAbrir={abrirFixada}
+              onEsconder={esconderBarraDasFixadas}
+            />
+          )}
           <Timeline
             channel={active}
             conversa={chaveDaConversa(active, activeRoom)}
@@ -1121,6 +1208,7 @@ export function ChatScreen({
             apuramentos={apuramentos}
             {...(onVotar ? { onVotar } : {})}
             reaccoes={reaccoes}
+            ocultar={ocultar}
             etiquetas={etiquetas}
             {...(onReagir ? { onReagir } : {})}
             {...(onReagir && responderAqui ? { onPedirReaccao: setAReagir } : {})}
@@ -1142,6 +1230,22 @@ export function ChatScreen({
             citacaoDe={citacaoDe}
             onIrParaOriginal={onIrParaOriginal}
           />
+          </div>
+          )}
+          {/*
+            The deaf room, said in the room (1.3.25, P5): a line in the flow, between
+            the conversation and the box, never over the conversation. It goes away
+            when the room is received again. The error code first, as every error.
+          */}
+          {avisoDeSurdez && (
+            <p className="field-note chat-surda" role="status">
+              {avisoDeSurdez.map((linha, indice) => (
+                <span key={indice}>
+                  {indice > 0 && <br />}
+                  {linha}
+                </span>
+              ))}
+            </p>
           )}
           <MemberPanel
             channel={active}
@@ -1374,7 +1478,12 @@ export function ChatScreen({
                       // image of the first picture: whoever joins later sees what was shown.
                       const feito = fixada
                         ? bridge.channels.unpin?.(active, activeRoom, alvo)
-                        : miniaturaParaFixar(mensagem.payload.attachments).then((thumbnail) =>
+                        : miniaturaParaFixar(
+                            mensagem.payload.attachments,
+                            {},
+                            // An image the vault holds comes as `{ ref }`: its bytes are in the store.
+                            bridge.media ? (sha) => bridge.media!.bytes(sha) : undefined,
+                          ).then((thumbnail) =>
                             bridge.channels.pin?.(active, activeRoom, {
                               id: alvo,
                               sender: mensagem.sender,

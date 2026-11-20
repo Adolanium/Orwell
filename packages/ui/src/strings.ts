@@ -14,6 +14,7 @@ import {
   detectarLingua,
   LINGUA_BASE,
   type Lingua,
+  linguasDoNavegador,
 } from "./escolha-da-lingua.js"
 
 /**
@@ -21,11 +22,11 @@ import {
  *
  * ## The design, in three lines
  *
- * Portuguese is the BASE language and the only complete catalog
- * (`linguas/pt.ts`). The others are partial OVERLAYS (`linguas/en.ts`). When
- * switching language, one merges with the other, sheet by sheet, and what the
- * overlay does not say stays in Portuguese. A raw key never reaches the screen,
- * because no sheet exists without Portuguese underneath.
+ * English is the default language (20/11/2026): what the module shows before
+ * the host starts the language, and what everyone sees whose system is not in
+ * Portuguese. Portuguese (`linguas/pt.ts`) is the MOULD of the catalog: its
+ * shape is the type, and `linguas/en.ts` lays over it leaf by leaf. Both are
+ * complete (`linguas/catalogo.test.ts`), so no sheet falls back half-way.
  *
  * ## Why `strings` is `let`
  *
@@ -50,16 +51,13 @@ import {
  * which only sets the `<html lang>` for the splash in `index.html`. See
  * `escolha-da-lingua.ts`.)
  *
- * The reason is measurable: without it, detection would also run inside the
- * jsdom test environment, where `navigator.language` is "en-US". Twenty-seven
- * hundred assertions written against Portuguese text would run against English,
- * and the whole suite would go red because of a product decision. Without the
- * call, the language is Portuguese, and that is how tests find it: by default,
- * not by luck.
+ * Tests are the reason. Twenty-seven hundred assertions are written against
+ * Portuguese text, and they get it from a setup file that asks for it
+ * (`src/testes/lingua-de-teste.ts`), not from the system of the machine that runs
+ * them.
  *
- * Playwright scripts are the other side of that coin. They run the app for real,
- * where detection RUNS, and search for literal Portuguese text, a browser in
- * English breaks them all at once. So they ask for the language in the address
+ * Playwright scripts run the app for real, where detection RUNS, and search for
+ * literal Portuguese text. So they ask for the language in the address
  * (`?lingua=pt`), from `scripts/ambiente.mjs`, and there is a test that fails
  * if a script opens the app without that request. See `guioes.lingua.test.ts`.
  */
@@ -77,7 +75,9 @@ export {
   LINGUA_BASE,
   LINGUAS,
   type Lingua,
+  linguaDoSistema,
   linguaNoEndereco,
+  linguasDoNavegador,
   lerPreferencia,
   PARAMETRO_DA_LINGUA,
   type PreferenciaDeLingua,
@@ -169,7 +169,7 @@ let actual: Lingua = LINGUA_BASE
  * `let` and not `const`: see the note at the top. The caller always reads what
  * is now, never what was when the module loaded.
  */
-export let strings: Catalogo = pt as Catalogo
+export let strings: Catalogo = catalogo(LINGUA_BASE)
 
 /** The language being shown right now. */
 export function linguaActual(): Lingua {
@@ -206,6 +206,17 @@ export function definirLingua(lingua: Lingua): boolean {
   return true
 }
 
+/** The system languages the host gave at startup, if it gave any (Electron). */
+let sistemaDoAnfitriao: readonly string[] | undefined
+
+/**
+ * The system languages, most preferred first: what the host said at startup,
+ * or the browser's list. "auto" in settings goes back to this.
+ */
+export function linguasDoSistema(): readonly string[] {
+  return sistemaDoAnfitriao ?? linguasDoNavegador()
+}
+
 /**
  * Detect and apply the language. Called ONCE, by the host, on startup.
  *
@@ -213,6 +224,7 @@ export function definirLingua(lingua: Lingua): boolean {
  * and should.
  */
 export function arrancarLingua(opcoes: ArranqueDaLingua = {}): Lingua {
+  if (opcoes.sistema && opcoes.sistema.length > 0) sistemaDoAnfitriao = opcoes.sistema
   const escolhida = detectarLingua(opcoes)
   definirLingua(escolhida)
   return escolhida

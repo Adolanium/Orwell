@@ -12,6 +12,7 @@ import {
   type UserAddress,
 } from "@enclave/protocol"
 import {
+  codigoDaRecusaDoSfu,
   ehCifraDoEmissorEmFalta,
   limiteDoRelatorio,
   MotorSfu,
@@ -2093,7 +2094,8 @@ export class Call extends Emitter<CallEvents> {
     this.#comecarVarrimento(channel)
 
     if (servidorEncaminha && !semCifra) {
-      await this.#entrarPorSfu(channel)
+      // The person asked for this call: it takes the call from another device of the account.
+      await this.#entrarPorSfu(channel, { tomar: true })
       await this.#anunciar(channel)
       return
     }
@@ -2714,6 +2716,37 @@ export class Call extends Emitter<CallEvents> {
     return run
   }
 
+  /**
+   * The account joined a call on another device: this call ends here, and is
+   * not rebuilt (1.3.25). One call per account, as in Discord.
+   *
+   * Through the queue, like `leave`. A rebuild in progress stops: its next
+   * join would be refused anyway (`noutro-aparelho`).
+   *
+   * @param despedir send `voice.leave`. Not when the other device joined this
+   * same call: see `semDespedida` in `#leave`.
+   */
+  async #chamadaNoutroAparelho(despedir: boolean): Promise<void> {
+    if (this.#aRefazer) {
+      this.#desistirDeRefazer = true
+      this.#acordarORefazer?.()
+    }
+    const run = this.#queue.catch(() => {}).then(() => this.#terminarNoutroAparelho(despedir))
+    this.#queue = run.catch(() => {})
+    return run
+  }
+
+  /** The end itself, already inside the queue. See `#chamadaNoutroAparelho`. */
+  async #terminarNoutroAparelho(despedir: boolean): Promise<void> {
+    if (!this.#channel) return
+    this.emit("diagnostic", { code: "call-noutro-aparelho", detail: despedir ? "outra chamada" : "mesma chamada" })
+    await this.#leave(false, false, !despedir).catch(() => {})
+    // A notice, through the error table like the other notices of the core: the
+    // panel closes with `ended`, and this says why. Written out, not the constant
+    // (`CHAMADA_NOUTRO_APARELHO`): the error-code coverage reads the literal.
+    this.emit("error", { detail: "you joined the call on another device" })
+  }
+
   /** How many SFU joins a rebuild attempts before saying the call dropped (403). */
   static TENTATIVAS_DE_REFAZER = 3
   /** The total time a rebuild has for those attempts. */
@@ -2855,6 +2888,14 @@ export class Call extends Emitter<CallEvents> {
     }
     if (this.#channel !== channel) return
 
+    // The server did not let us back in because the account is in a call on
+    // another device (1.3.25): that is an end, not a drop, and it is not retried.
+    // Without the goodbye: we do not know if that device is in this same call.
+    if (erro !== null && codigoDaRecusaDoSfu(erro) === "noutro-aparelho") {
+      await this.#terminarNoutroAparelho(false)
+      return
+    }
+
     if (erro !== null) {
       /*
        * It was not rebuilt, not even on the third try. The rest of the call is
@@ -2966,7 +3007,12 @@ export class Call extends Emitter<CallEvents> {
    * @param manterCaptura (only with `aTransitar`) the microphone stays open for
    * the entry that follows: it is the move. See `#capturaGuardada`.
    */
-  async #leave(aTransitar = false, manterCaptura = false): Promise<void> {
+  /**
+   * @param semDespedida no `voice.leave`: the account is still in this same
+   * call through another device (1.3.25). The roster is by address, and the
+   * goodbye would erase that device from everyone's screen.
+   */
+  async #leave(aTransitar = false, manterCaptura = false, semDespedida = false): Promise<void> {
     const channel = this.#channel
     // Captured before being cleaned: the exit has to go to the room being left,
     // and cleanup happens below.
@@ -3073,14 +3119,16 @@ export class Call extends Emitter<CallEvents> {
     // for the new room, and the entry opens the gate again right after.
     if (!guardar) await this.bridge.setMediaActive?.(false)
 
-    try {
-      await this.bridge.sendSignal(channel, {
-        t: "voice.leave",
-        at: Date.now(),
-        ...(sala ? { room: sala } : {}),
-      })
-    } catch {
-      // Offline. Peers will time out their connections.
+    if (!semDespedida) {
+      try {
+        await this.bridge.sendSignal(channel, {
+          t: "voice.leave",
+          at: Date.now(),
+          ...(sala ? { room: sala } : {}),
+        })
+      } catch {
+        // Offline. Peers will time out their connections.
+      }
     }
     if (!aTransitar) this.emit("ended", { channel })
   }
@@ -5718,7 +5766,12 @@ once, and it left.
    * `largarAoFalhar: false` is the rebuild: on a failure only the engine is
    * dropped, and the capture, the channel and the roster stay for the next attempt.
    */
-  async #entrarPorSfu(channel: string, opcoes: { largarAoFalhar?: boolean } = {}): Promise<void> {
+  /**
+   * `tomar` is the join a person asked for (1.3.25): it takes the call from
+   * another device of the account. The rebuild never sends it. See `tomar` in
+   * `sfu.scope.join`.
+   */
+  async #entrarPorSfu(channel: string, opcoes: { largarAoFalhar?: boolean; tomar?: boolean } = {}): Promise<void> {
     const sfu = this.bridge.sfu
     if (!sfu) return
 
@@ -5763,6 +5816,11 @@ once, and it left.
         remakes through the same path and with the same cap.
       */
       aoRecepcaoPerdida: () => refazer("call-sfu-recepcao-parada"),
+      // The resynchronisation was refused: the account is in a call on another device.
+      aoChamadaNoutroAparelho: () => {
+        if (motor !== this.#motor) return
+        void this.#chamadaNoutroAparelho(false)
+      },
       aoPerderAVoz: (erro) => {
         if (motor !== this.#motor) return
         this.emit("diagnostic", { code: "call-sfu-voz-sem-cifra" })
@@ -5781,6 +5839,7 @@ once, and it left.
         // the voice, it is the `getUserMedia` of always, and the engine only sends
         // it on the air if the router takes it.
         this.#local?.getVideoTracks()[0] ?? null,
+        { tomar: opcoes.tomar === true },
       )
       this.emit("diagnostic", { code: "call-sfu-ligado", detail: motor.ambito ?? "" })
     } catch (erro) {
@@ -5855,15 +5914,31 @@ once, and it left.
    * leave, the socket is faster than the exit, and handling it would resurrect
    * half a call.
    */
-  async handleSfuAviso(aviso: {
-    t: "producer.new" | "producer.closed"
-    channel: string
-    scope: string
-    producer: string
-    address?: UserAddress
-    /** With music: see `FONTE_DA_MUSICA` in the protocol. */
-    fonte?: FonteDoFluxo
-  }): Promise<void> {
+  async handleSfuAviso(
+    aviso:
+      | {
+          t: "producer.new" | "producer.closed"
+          channel: string
+          scope: string
+          producer: string
+          address?: UserAddress
+          /** With music: see `FONTE_DA_MUSICA` in the protocol. */
+          fonte?: FonteDoFluxo
+        }
+      | { t: "scope.closed"; channel: string; scope: string; mesmaChamada?: boolean },
+  ): Promise<void> {
+    /*
+      One call per account (1.3.25): the server closed THIS call because the
+      account joined one on another device. Checked against the call we are in
+      (channel and room), not against the engine: in the middle of a rebuild
+      there is no engine, and the notice still ends the call.
+    */
+    if (aviso.t === "scope.closed") {
+      const canal = this.#channel
+      if (!canal || aviso.channel !== canal || aviso.scope !== ambitoDaChamada(canal, this.#room)) return
+      await this.#chamadaNoutroAparelho(aviso.mesmaChamada !== true)
+      return
+    }
     const motor = this.#motor
     if (!motor) return
     if (aviso.t === "producer.closed") {

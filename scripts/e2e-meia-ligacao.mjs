@@ -166,6 +166,9 @@ try {
     const caixa = page.getByPlaceholder("Escreve uma mensagem")
     await caixa.fill(texto)
     await caixa.press("Enter")
+    // With a finger (a touch context), Enter starts a new line and the send
+    // button sends (1.3.25). The text is still in the box: send it.
+    if ((await caixa.inputValue().catch(() => "")) !== "") await page.locator("form.chat-composer .composer-enviar").first().click()
   }
   // In the conversation, not just anywhere: the conversations drawer (hidden on the
   // phone) also shows the last message, and `first()` would catch that one.

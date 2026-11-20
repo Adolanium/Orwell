@@ -600,7 +600,7 @@ async function medir() {
     // ---- C. typing
     await comPerfil("escrever", async () => {
       const t0 = await agora()
-      const caixa = page.locator(".composer-line input:not([type=file])").first()
+      const caixa = page.locator(".composer-line textarea").first()
       await caixa.click()
       await page.keyboard.type("Uma frase escrita devagar para medir a caixa de escrita.", { delay: 70 })
       await page.keyboard.press("ControlOrMeta+a")

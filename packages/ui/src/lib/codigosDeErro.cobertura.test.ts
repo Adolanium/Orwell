@@ -57,7 +57,7 @@ function foraDoProduto(caminho: string): boolean {
  */
 const TOLERADAS: Readonly<Record<string, string>> = {
   // The Aurora sheets read back for the tests (`styles/aurora.folhas.ts`): only the tests call it.
-  "packages/ui/src/styles/aurora.folhas.ts::aurora.gen.css não tem a folha pedida": "ajuda dos testes, nunca chega ao ecrã",
+  "packages/ui/src/styles/aurora.folhas.ts::aurora.gen.css does not have the sheet asked for": "ajuda dos testes, nunca chega ao ecrã",
   // Vault file in one buffer (1.3.13): internal checks of the write. They never fire on a sound build; if one did, the write fails and `Session.#falhaAoGravar` sends it to the log.
   "packages/client-core/src/seloDoCofre.ts::base64 in place: the writer would pass the reader": "invariante interna da gravação, vai ao log",
   "packages/client-core/src/seloDoCofre.ts::vault envelope without one empty ciphertext": "invariante interna da gravação, vai ao log",
@@ -127,7 +127,13 @@ const TOLERADAS: Readonly<Record<string, string>> = {
     "guarda do contrato: a interface só passa uma das opções de `TECTOS_DO_ARMAZEM`",
   "packages/client-core/src/session.ts::the profile picture is not on this device":
     "apanhado em `publishProfile` e no envio aos irmãos: o perfil fica por publicar e sai na vez seguinte",
-  "apps/web/src/miniaturista.ts::no 2d context": "apanhado em `fazerMiniatura`: a imagem fica sem miniatura",
+  "apps/web/src/miniatura.ts::no 2d context": "apanhado em `fazerMiniatura`: a imagem fica sem miniatura",
+  "apps/client/src/main/miniaturas-pela-janela.ts::thumbnail: the window did not answer":
+    "rejeição de uma miniatura pedida à janela: o armazém apanha-a em `pedirMiniatura`, e tenta outra vez na abertura seguinte; nunca chega ao ecrã",
+  "apps/client/src/main/miniaturas-pela-janela.ts::thumbnail: no window":
+    "o mesmo: sem janela, a miniatura fica para a abertura seguinte",
+  "apps/client/src/main/miniaturas-pela-janela.ts::thumbnail: the window closed":
+    "o mesmo: a janela caiu a meio, a miniatura fica para a abertura seguinte",
   "apps/web/src/armazem-backend.ts::RECUSA_DE_ESCRITA":
     "a recusa de escrita de um separador sem posse (R17): o armazém apanha-a, e o ecrã desse separador já diz que não guarda (117)",
   // Pontes.
@@ -138,28 +144,28 @@ const TOLERADAS: Readonly<Record<string, string>> = {
   "apps/client/src/renderer/main.tsx::missing #root": "erro de programação: o HTML traz sempre o #root",
   "apps/client/src/renderer/envelope.ts::resposta.chave":
     "refaz o erro do processo principal; a chave é a que lá foi atirada (ver `envelope.codigos.test.ts`)",
-  "apps/client/src/main/link-preview.ts::o oEmbed respondeu ${resposta.status}":
+  "apps/client/src/main/link-preview.ts::the oEmbed answered ${resposta.status}":
     "apanhado dentro de `link-preview.ts`; a interface mostra uma frase fixa",
-  "apps/client/src/main/link-preview.ts::a página respondeu ${resposta.status}":
+  "apps/client/src/main/link-preview.ts::the page answered ${resposta.status}":
     "apanhado dentro de `link-preview.ts`; a interface mostra uma frase fixa",
   // Interface.
   "packages/ui/src/App.tsx::App must be rendered inside a bridge provider": "erro de programação",
   "packages/ui/src/components/Toast.tsx::useToast must be used inside a ToastContext provider": "erro de programação",
   "packages/ui/src/hooks/useConfirmar.tsx::useConfirmar precisa de um ConfirmarProvider por cima": "erro de programação",
-  "packages/ui/src/lib/qr.ts::o QR só leva até ${QR_MAX_BYTES} bytes; este texto tem ${payload.length}":
+  "packages/ui/src/lib/qr.ts::a QR code holds up to ${QR_MAX_BYTES} bytes; this text has ${payload.length}":
     "erro de programação: quem chama mede o texto antes",
-  "packages/ui/src/lib/colar.ts::não foi possível ler o que foi colado": "apanhado em `colar.ts`; a imagem é recusada sem erro",
-  "packages/ui/src/lib/colar.ts::os bytes colados não vieram como bytes": "apanhado em `colar.ts`; a imagem é recusada sem erro",
-  "packages/ui/src/lib/ficheiros.ts::data URL sem corpo": "erro de programação: a data URL é feita aqui",
-  "packages/ui/src/lib/ficheiros.ts::não foi possível ler o ficheiro":
+  "packages/ui/src/lib/colar.ts::could not read what was pasted": "apanhado em `colar.ts`; a imagem é recusada sem erro",
+  "packages/ui/src/lib/colar.ts::the pasted bytes did not come as bytes": "apanhado em `colar.ts`; a imagem é recusada sem erro",
+  "packages/ui/src/lib/ficheiros.ts::data URL without a body": "erro de programação: a data URL é feita aqui",
+  "packages/ui/src/lib/ficheiros.ts::could not read the file":
     'apanhado em `Composer` e `Social`, que mostram "fileUnreadable"',
-  "packages/ui/src/lib/ficheiros.ts::o ficheiro não veio como data URL":
+  "packages/ui/src/lib/ficheiros.ts::the file did not come as a data URL":
     'apanhado em `Composer` e `Social`, que mostram "fileUnreadable"',
-  "packages/ui/src/screens/social/fetchPreview.ts::sem endereço":
+  "packages/ui/src/screens/social/fetchPreview.ts::no address":
     'apanhado em `LinkAttach` e `LinkDraft`, que mostram "fetchFailed"',
-  "packages/ui/src/screens/social/fetchPreview.ts::a página respondeu ${response.status}":
+  "packages/ui/src/screens/social/fetchPreview.ts::the page answered ${response.status}":
     'apanhado em `LinkAttach` e `LinkDraft`, que mostram "fetchFailed"',
-  "packages/ui/src/screens/social/fetchPreview.ts::não é uma data URL":
+  "packages/ui/src/screens/social/fetchPreview.ts::not a data URL":
     "apanhado em `fetchPreview.ts`; a miniatura fica de fora",
   "packages/ui/src/screens/gate/Setup.tsx::__vault_exists__": "sentinela interna, comparada no `catch` do próprio ecrã",
 }

@@ -1,3 +1,4 @@
+import { corpoParaMostrar } from "./corpoParaMostrar.js"
 import type { ChatMessage } from "../types.js"
 import { dmPeerAddress, isDirect } from "./format.js"
 
@@ -139,7 +140,7 @@ export function listDirects(
       channel,
       peer: peerOf(channel, me),
       lastAt,
-      preview: (message?.payload.body ?? "").replace(/\s+/g, " ").trim(),
+      preview: (message ? corpoParaMostrar(message.payload) : "").replace(/\s+/g, " ").trim(),
       minha: message?.sender === me && me !== null,
       pedido: message?.payload.t === "friend.request",
     })

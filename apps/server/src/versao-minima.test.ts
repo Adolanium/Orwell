@@ -58,7 +58,10 @@ describe("com a mínima a 1.0.0", () => {
     if (resposta.t !== "error") return
     expect(resposta.code).toBe(CODIGO_VERSAO_ANTIGA)
     expect(resposta.code).toBe("versao-antiga")
-    expect(resposta.message).toBe("Há uma versão nova do Orwell. Recarrega a página, ou descarrega a versão nova.")
+    // Both languages, English first: only an old client reads it, and it has no catalog (20/11/2026).
+    expect(resposta.message).toBe(
+      "There is a new version of Orwell. Reload the page, or download the new version. / Há uma versão nova do Orwell. Recarrega a página, ou descarrega a versão nova.",
+    )
     expect(resposta.fatal).toBe(true)
     expect(fechou).toBe(true)
   })

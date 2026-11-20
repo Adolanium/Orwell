@@ -852,3 +852,80 @@ export function EtiquetaIcon(props: IconProps): React.JSX.Element {
     </Svg>
   )
 }
+
+/** A chevron that points up: the newer item in a short list (the pinned bar). */
+export function SetaCimaIcon(props: IconProps): React.JSX.Element {
+  return (
+    <Svg {...props}>
+      <path d="M6 15l6-6 6 6" />
+    </Svg>
+  )
+}
+
+/*
+  The five icons of the formatting bar (20/11/2026). Same grid of 24, the same
+  stroke and round ends as the rest of the family, drawn here: no third-party
+  icon set.
+*/
+
+/** Bold: a "B" drawn with two bowls. */
+export function NegritoIcon(props: IconProps): React.JSX.Element {
+  return (
+    <Svg {...props}>
+      <path d="M7.5 5h5.25a3.5 3.5 0 0 1 0 7H7.5z" strokeWidth={2.3} />
+      <path d="M7.5 12h6.25a3.5 3.5 0 0 1 0 7H7.5z" strokeWidth={2.3} />
+    </Svg>
+  )
+}
+
+/** A chevron that points down: the older item in a short list (the pinned bar). */
+export function SetaBaixoIcon(props: IconProps): React.JSX.Element {
+  return (
+    <Svg {...props}>
+      <path d="M6 9l6 6 6-6" />
+    </Svg>
+  )
+}
+
+/** Italic: a slanted stem with its two serifs. */
+export function ItalicoIcon(props: IconProps): React.JSX.Element {
+  return (
+    <Svg {...props}>
+      <path d="M10.5 5h7" />
+      <path d="M6.5 19h7" />
+      <path d="M14 5l-4 14" />
+    </Svg>
+  )
+}
+
+/** Strikethrough: an "S" with a line through the middle. */
+export function RasuradoIcon(props: IconProps): React.JSX.Element {
+  return (
+    <Svg {...props}>
+      <path d="M16.5 7.5C15.8 6 14.2 5 12 5 9.5 5 7.8 6.3 7.8 8.2c0 1.3.8 2.2 2.2 2.8" />
+      <path d="M8 16.5c.7 1.5 2.3 2.5 4.3 2.5 2.6 0 4.3-1.3 4.3-3.2 0-.7-.2-1.3-.7-1.8" />
+      <path d="M4.5 12h15" />
+    </Svg>
+  )
+}
+
+/** Code: the two angle brackets. */
+export function CodigoIcon(props: IconProps): React.JSX.Element {
+  return (
+    <Svg {...props}>
+      <path d="M9 7.5L4.5 12 9 16.5" />
+      <path d="M15 7.5l4.5 4.5-4.5 4.5" />
+    </Svg>
+  )
+}
+
+/** Hidden text: the eye of `OlhoIcon`, closed by a slash. */
+export function OlhoFechadoIcon(props: IconProps): React.JSX.Element {
+  return (
+    <Svg {...props}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M4 4l16 16" />
+    </Svg>
+  )
+}

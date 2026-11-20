@@ -25,6 +25,7 @@ export function NewRoom({
   onSubmit,
   onCancel,
   categorias = [],
+  categoria = "",
   minutosAfk,
   cargos,
 }: {
@@ -41,6 +42,8 @@ export function NewRoom({
   onCancel: () => void
   /** The categories that already exist, to pick instead of typing. */
   categorias?: string[]
+  /** The category the room starts in: the one whose `+` or menu opened this sheet (1.3.25). */
+  categoria?: string | undefined
   /**
    * The timeout for the AFK room, if the new room is one (2/11/2026). The one
    * the channel already has, or 15. Absent hides the option (nobody can mark
@@ -56,7 +59,7 @@ export function NewRoom({
 }): React.JSX.Element {
   const heading = useId()
   const [name, setName] = useState("")
-  const [category, setCategory] = useState("")
+  const [category, setCategory] = useState(categoria)
   /**
    * TYPE and LAYOUT are chosen in the same button, and they are not the same
    * thing.

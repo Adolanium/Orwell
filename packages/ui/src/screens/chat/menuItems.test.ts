@@ -613,6 +613,20 @@ describe("itensDaCategoria", () => {
     expect(itens.map((item) => item.label)).toEqual([strings.menu.renameCategory, strings.menu.deleteCategory])
   })
 
+  it('"Criar sala" vem primeiro e cria a sala nesta categoria (1.3.25)', () => {
+    let criada = 0
+    const itens = itensDaCategoria({ podeOrganizar: true, accoes: { ...accoes, criarSala: () => (criada += 1) } })
+    expect(itens.map((item) => item.label)).toEqual([strings.menu.criarSalaNaCategoria, strings.menu.renameCategory, strings.menu.deleteCategory])
+    itens[0]?.onSelect()
+    expect(criada).toBe(1)
+    // Separated from what changes the category itself.
+    expect(itens[1]?.separatorBefore).toBe(true)
+  })
+
+  it('sem quem organize, "Criar sala" também não aparece', () => {
+    expect(itensDaCategoria({ podeOrganizar: false, accoes: { ...accoes, criarSala: () => {} } })).toEqual([])
+  })
+
   it('sem onde a escolha ficar, "quem vê" não aparece', () => {
     // The entry depends on `setCategory` above: a host who cannot declare categories has nowhere to save the choice. House rule handles it by absence, not by graying out. An entry that opens a sheet that posts nothing is worse than no entry.
     const itens = itensDaCategoria({ podeOrganizar: true, accoes })

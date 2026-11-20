@@ -416,7 +416,7 @@ function penalizacao(m: Matriz): number {
 export function codificarQr(texto: string, mascaraForcada?: number): Qr {
   const payload = new TextEncoder().encode(texto)
   const versao = versaoPara(payload.length)
-  if (versao === null) throw new Error(`o QR só leva até ${QR_MAX_BYTES} bytes; este texto tem ${payload.length}`)
+  if (versao === null) throw new Error(`a QR code holds up to ${QR_MAX_BYTES} bytes; this text has ${payload.length}`)
   const dados = codewords(payload, versao)
   const size = 17 + 4 * versao
 

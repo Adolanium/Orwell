@@ -1,9 +1,9 @@
 {
   "name": "@enclave/client",
-  "version": "1.3.24",
+  "version": "1.3.25",
   "private": true,
   "description": "End-to-end encrypted group chat. The server reads nothing.",
-  "author": "MagnusLab",
+  "author": "Duarte Bivar",
   "homepage": "https://orwell.pt",
   "type": "module",
   "main": "./out/main/index.cjs",

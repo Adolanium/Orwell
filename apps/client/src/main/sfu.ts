@@ -70,6 +70,7 @@ export interface SessaoSfu {
   sfuEntrarNoAmbito(
     channel: string,
     scope: string,
+    opcoes?: { tomar?: boolean },
   ): Promise<{ rtpCapabilities: unknown; producers: { id: string; kind: "audio" | "video"; address: string }[] }>
   sfuSairDoAmbito(channel: string, scope: string): void
   sfuCriarTransporte(
@@ -138,7 +139,12 @@ export function ligarSfu({ registar, enviar, sessao }: PortasDoSfu): void {
     */
   registar(CANAIS_SFU.suporta, () => sessao.suportaSfu)
 
-  registar(CANAIS_SFU.entrar, (channel: string, scope: string) => sessao.sfuEntrarNoAmbito(channel, scope))
+  // `tomar` (1.3.25) only as a strict `true`: it comes from the other process.
+  registar(CANAIS_SFU.entrar, (channel: string, scope: string, opcoes?: unknown) =>
+    (opcoes as { tomar?: unknown } | undefined)?.tomar === true
+      ? sessao.sfuEntrarNoAmbito(channel, scope, { tomar: true })
+      : sessao.sfuEntrarNoAmbito(channel, scope),
+  )
 
   /*
     Leave returns nothing and expects nothing: the gateway doesn't respond to

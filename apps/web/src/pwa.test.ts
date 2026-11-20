@@ -43,6 +43,7 @@ const manifesto = JSON.parse(ler(`${PUBLICO}/manifest.webmanifest`)) as {
   name: string
   short_name: string
   lang: string
+  description: string
   id: string
   start_url: string
   scope: string
@@ -65,10 +66,11 @@ function impressao(caminho: string): string {
 }
 
 describe("o manifesto", () => {
-  it("chama-se Orwell, em português, e abre como aplicação", () => {
+  it("chama-se Orwell, em inglês (a língua por omissão), e abre como aplicação", () => {
     expect(manifesto.name).toBe("Orwell")
     expect(manifesto.short_name).toBe("Orwell")
-    expect(manifesto.lang).toBe("pt")
+    expect(manifesto.lang).toBe("en")
+    expect(manifesto.description).toBe("Community chat, end-to-end encrypted.")
     expect(manifesto.display).toBe("standalone")
   })
 

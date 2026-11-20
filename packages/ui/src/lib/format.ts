@@ -568,21 +568,16 @@ export function connectionLabel(state: ConnectionState): string {
 }
 
 /**
- * One formatter per shape, made on first use and kept.
+ * One formatter per shape, made on first use and kept, in the interface
+ * language (20/11/2026: it was fixed in "pt-PT").
  *
  * `toLocaleTimeString` with options builds a new `Intl.DateTimeFormat` on every
  * call: about 1 ms each on a slow laptop, and a channel switch draws the time
  * of every line (150 lines, 150 formatters, measured in `medir-fluidez.mjs`).
- * The output is the same: same locale, same options.
+ * `formatadorDaLingua` keeps one per locale and shape.
  */
-const formatadores = new Map<string, Intl.DateTimeFormat>()
 function formatador(chave: string, opcoes: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
-  let f = formatadores.get(chave)
-  if (!f) {
-    f = new Intl.DateTimeFormat("pt-PT", opcoes)
-    formatadores.set(chave, f)
-  }
-  return f
+  return formatadorDaLingua(chave, opcoes)
 }
 const HORA: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" }
 
@@ -592,8 +587,8 @@ export function formatTime(sentAt: number | undefined): string {
 }
 
 /**
- * How long ago, the way a person would say it: "agora mesmo", "há 5 min",
- * "há 2 h", "ontem", and past that, the absolute date, because "há 9 dias"
+ * How long ago, the way a person would say it ("just now", "5 min ago",
+ * "2 h ago", "yesterday", in the interface language), and past that, the absolute date, because "há 9 dias"
  * makes everybody do arithmetic. Pure on purpose: `now` is injectable so tests
  * pin the clock. The absolute stamp belongs in the element's `title`.
  */
@@ -601,15 +596,16 @@ export function formatRelative(at: number | undefined, now: number = Date.now())
   if (!at) return ""
   const diff = now - at
   // A post from "the future" is clock skew between devices, not time travel.
-  if (diff < 60_000) return "agora mesmo"
+  const tempo = strings.common.tempo
+  if (diff < 60_000) return tempo.agoraMesmo
   const minutes = Math.floor(diff / 60_000)
-  if (minutes < 60) return `há ${minutes} min`
+  if (minutes < 60) return tempo.haMinutos(minutes)
   const hours = Math.floor(diff / 3_600_000)
-  if (hours < 24) return `há ${hours} h`
+  if (hours < 24) return tempo.haHoras(hours)
   const date = new Date(at)
   const yesterday = new Date(now)
   yesterday.setDate(yesterday.getDate() - 1)
-  if (date.toDateString() === yesterday.toDateString()) return "ontem"
+  if (date.toDateString() === yesterday.toDateString()) return tempo.ontem
   const sameYear = date.getFullYear() === new Date(now).getFullYear()
   return sameYear
     ? formatador("dia-mes", { day: "2-digit", month: "short" }).format(date)
@@ -627,7 +623,7 @@ export function formatStamp(at: number | undefined): string {
   const date = new Date(at)
   const today = new Date().toDateString() === date.toDateString()
   return today
-    ? `hoje, ${formatador("hora", HORA).format(date)}`
+    ? strings.common.tempo.hojeAs(formatador("hora", HORA).format(date))
     : formatador("carimbo", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date)
 }
 

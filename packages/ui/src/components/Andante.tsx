@@ -4,7 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react"
  * A line that scrolls when it does not fit, like a news ticker.
  *
  * Made for the "Channel · Room" line on
- * the side card: the column is 244 px wide, and "MagnusLab · Friday meeting
+ * the side card: the column is 244 px wide, and "Design studio · Friday meeting
  * room" does not fit. Cutting with ellipsis hid the room, which is what
  * matters. Now the text slides left, continuously, with a second copy behind
  * so the wrap has no jump. Only what does not fit scrolls, and what fits stays

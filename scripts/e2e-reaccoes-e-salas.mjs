@@ -259,7 +259,7 @@ try {
   // 7. # in the box: the rooms, and the chip opens the room on Bruno.
   await abrirCanal(ana.page, CANAL)
   await abrirCanal(bruno.page, CANAL)
-  const caixa = ana.page.locator('input[placeholder="Escreve uma mensagem"]').first()
+  const caixa = ana.page.locator('textarea[placeholder="Escreve uma mensagem"]').first()
   await caixa.click()
   await caixa.pressSequentially("vejam #an", { delay: 50 })
   await ana.page.locator(".mention-picker").first().waitFor({ timeout: 10_000 })

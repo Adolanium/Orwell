@@ -7,8 +7,8 @@ import { describe, expect, it } from "vitest"
  * Where the nudge button shows (12/11/2026).
  *
  * In a direct, the line gets its own nudge button with its own icon. On a narrow
- * screen it hides and the "+" menu entry stays: at 390 px the line is the text box
- * and the two everyday buttons, by the choice of 12/08/2026. The reduced
+ * screen it hides: at 390 px the line is the text box and the two everyday
+ * buttons, by the choice of 12/08/2026. The "+" menu has no nudge (20/11/2026). The reduced
  * motion half of the nudge is in `movimentoReduzido.test.ts`.
  */
 // A path, not `new URL(...)`: under jsdom the global `URL` is not the one `fileURLToPath` expects.

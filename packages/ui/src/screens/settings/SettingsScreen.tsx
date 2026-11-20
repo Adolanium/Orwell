@@ -40,6 +40,7 @@ import { LINGUAS, strings, traduzirErro } from "../../strings.js"
 import { ConfiguracoesDeVoz } from "./ConfiguracoesDeVoz.js"
 import { SensibilidadeDoMicrofone } from "./SensibilidadeDoMicrofone.js"
 import { FolhaComoFunciona } from "./ComoFunciona.js"
+import { LigacoesLegais } from "../../components/LigacoesLegais.js"
 import { seccaoValida, seccoes, type Seccao } from "./seccoes.js"
 
 /** The public Orwell repository (AGPL-3.0, section 13). */
@@ -1035,6 +1036,9 @@ export function SettingsScreen({
                 <a className="linkified" href={CODIGO_FONTE} target="_blank" rel="noopener noreferrer">
                   {strings.settings.codigoFonte}
                 </a>
+              </p>
+              <p className="field-note">
+                <LigacoesLegais className="linkified" />
               </p>
             </section>
           </>

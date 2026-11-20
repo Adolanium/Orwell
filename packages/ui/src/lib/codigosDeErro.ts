@@ -126,6 +126,12 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "the device clock is off": 220,
   // The server's response to the `founder` and `caixa` routes could not be read.
   "could not read the report inbox": 221,
+  // 230-239: who may create an account on the server (1.3.25, `ENCLAVE_REGISTO`).
+  // From 230, so a 2xx code taken in another branch since 221 does not collide.
+  // `Session.connect` throws them when the server refuses a NEW account.
+  "this server does not accept new accounts": 230,
+  "this server needs a registration invite": 231,
+  "the registration invite is not valid": 232,
 
   "not a member of this channel": 301,
   "you may not invite in this channel": 302,
@@ -205,6 +211,13 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   // Reactions (12/11/2026): the core refuses an emoji the schema would refuse. 380, not 367,
   // so it does not collide with branches written at the same time.
   "the reaction emoji is not valid": 380,
+  // The desktop app's main process refuses an argument its renderer should never send
+  // (`apps/client/src/main/canais.ts`, 1.3.25). 385, not 381, so it does not collide
+  // with branches written at the same time. What was wrong goes in `cause`.
+  "the app sent a request this version does not read": 385,
+  // A deaf room (1.3.25, P2 and P5): the core holds what is said there, and the room
+  // says so. 390, not 367, so it does not collide with branches written at the same time.
+  "this device is not receiving this channel": 390,
 
   "the call could not be set up on this server": 401,
   "the call has no send path": 402,
@@ -293,6 +306,9 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "you may not write in this room": 454,
   // Screen sharing as a role power (12/11/2026). See `Call.startScreenShare`.
   "you may not share your screen in this room": 455,
+  // One call per account (1.3.25): the call here ended because the account
+  // joined one on another device. A notice, not a fault. See `CHAMADA_NOUTRO_APARELHO`.
+  "you joined the call on another device": 456,
   // Voice moderation (2/11/2026). Block 460-469.
   "to leave the call, leave it": 460,
   // The microphone sensitivity (2/11/2026). Block 490-499.
@@ -454,6 +470,9 @@ export const CHAVES_DO_SERVIDOR: Readonly<Record<string, string>> = {
   "account-suspended": "account-suspended",
   "frame-too-large": "the server refused a message that was too large",
   "rate-limited": "too many pairing attempts",
+  "registration-closed": "this server does not accept new accounts",
+  "registration-invite-required": "this server needs a registration invite",
+  "registration-invite-invalid": "the registration invite is not valid",
 }
 
 /** The key of a server error, by its code. */

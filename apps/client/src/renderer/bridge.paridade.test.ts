@@ -132,10 +132,13 @@ const { createDesktopBridge } = await import("./bridge.js")
 const { createBrowserBridge } = await import("../../../web/src/bridge.js")
 
 /**
- * Paths in an object, two levels deep.
+ * Paths in an object, three levels deep.
  *
- * Two and no more because that's where the bridge ends: `vault.export`,
- * `channels.pins`, `sfu.sfuProduzir`. Below that are arguments and return values,
+ * Three and no more because that's where the bridge ends: `vault.export`,
+ * `channels.pins`, `sfu.sfuProduzir`, and the one group nested inside a group,
+ * `channels.permissoes.em`. It was two until 1.3.25, and two could not see
+ * inside `channels.permissoes`: a host that brought the object with half its
+ * functions would have passed. Below that are arguments and return values,
  * which is what the compiler checks, both bridges implement the SAME interface,
  * and a swapped signature won't compile. What won't compile doesn't need testing;
  * what's completely missing is what passes.
@@ -147,7 +150,7 @@ function capacidades(objecto: unknown, prefixo = "", nivel = 0): string[] {
     const nome = prefixo ? `${prefixo}.${chave}` : chave
     saida.push(nome)
     const valor = (objecto as Record<string, unknown>)[chave]
-    if (nivel < 1 && valor !== null && typeof valor === "object") saida.push(...capacidades(valor, nome, nivel + 1))
+    if (nivel < 2 && valor !== null && typeof valor === "object") saida.push(...capacidades(valor, nome, nivel + 1))
   }
   return saida
 }
@@ -233,13 +236,6 @@ const SO_NA_SECRETARIA_NO_CALL: Record<string, string> = {
 
 /** What only the browser has, each entry with the reason in writing. */
 const SO_NO_BROWSER: Record<string, string> = {
-  /*
-    The permission model for 1.2. NOT a platform difference: IPC is
-    missing. The core, in the main process, refuses the same way; without this
-    the desktop app shows the usual role editor and reads `mayMove`.
-  */
-  "channels.mayMoveIn": "por fazer na secretária: falta o IPC (cargos-permissoes D-P3)",
-  "channels.permissoes": "idem",
   pararDeEscrever:
     "a posse entre separadores (`posse-do-separador.ts`): o browser tem vários separadores sobre o mesmo cofre e só um escreve; a aplicação instalada tem uma janela só e o cofre é dela",
   push: "avisos com a app fechada (Web Push): a aplicação instalada fecha a janela para a bandeja com o socket vivo, e os avisos saem do processo principal; não há serviço de push no Electron",
@@ -312,6 +308,28 @@ describe("as duas pontes oferecem o mesmo à interface", () => {
     expect(jaNaoDiverge, "já existe nas duas pontes: apagar de SO_NA_SECRETARIA").toEqual([])
     const inventadas = Object.keys(SO_NA_SECRETARIA).filter((nome) => !secretaria.has(nome))
     expect(inventadas, "não existe em ponte nenhuma: apagar de SO_NA_SECRETARIA").toEqual([])
+    // And the same for the browser side: `channels.permissoes` sat here as "missing on the desktop"
+    // with no assertion to say when it stopped being true (1.3.25).
+    const jaNaoFaltam = Object.keys(SO_NO_BROWSER).filter((nome) => secretaria.has(nome))
+    expect(jaNaoFaltam, "já existe nas duas pontes: apagar de SO_NO_BROWSER").toEqual([])
+    const inventadasNoBrowser = Object.keys(SO_NO_BROWSER).filter((nome) => !browser.has(nome))
+    expect(inventadasNoBrowser, "não existe em ponte nenhuma: apagar de SO_NO_BROWSER").toEqual([])
+  })
+})
+
+/*
+  Blocking (20/11/2026). The interface folds, silences and does not count a
+  blocked person from `social.blocked` and the `on.bloqueio` cue; without them
+  on one host, the screen reads "blocks nobody" and shows everything. Pinned by
+  name: the general count above would not say which one went missing.
+*/
+describe("o bloqueio chega à interface nas duas pontes", () => {
+  it("bloquear, desbloquear, a lista e o aviso de outro aparelho", () => {
+    const { browser, secretaria } = medir()
+    for (const nome of ["social.block", "social.unblock", "social.blocked", "on.bloqueio"]) {
+      expect(browser.has(nome), `${nome} no browser`).toBe(true)
+      expect(secretaria.has(nome), `${nome} na aplicação instalada`).toBe(true)
+    }
   })
 })
 

@@ -93,7 +93,7 @@ async function abrir(motor, nome, comControlo = false) {
   return aparelho
 }
 
-const caixa = (page) => page.locator(".chat-composer .composer-line input:not([type])").first()
+const caixa = (page) => page.locator(".chat-composer .composer-line textarea").first()
 const linha = (page, texto) => page.locator(".message").filter({ hasText: texto }).first()
 
 async function dizer(page, texto) {

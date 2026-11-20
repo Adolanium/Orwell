@@ -21,7 +21,7 @@ export function folhaDaAurora(nome: string): string {
   const gerado = readFileSync(join(AQUI, "aurora.gen.css"), "utf8")
   const partes = gerado.split(/^\/\* styles\/([A-Za-z]+\.css) \*\/$/m)
   const indice = partes.indexOf(nome)
-  if (indice < 0) throw new Error("aurora.gen.css não tem a folha pedida", { cause: nome })
+  if (indice < 0) throw new Error("aurora.gen.css does not have the sheet asked for", { cause: nome })
   const e = escapar(ESCOPO)
   return (
     (partes[indice + 1] ?? "")

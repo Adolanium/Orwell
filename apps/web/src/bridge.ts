@@ -366,7 +366,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
     sfu: {
       suportaSfu: () => session.suportaSfu,
       criarDispositivo: () => new Device(),
-      sfuEntrarNoAmbito: (channel, scope) => session.sfuEntrarNoAmbito(channel, scope),
+      sfuEntrarNoAmbito: (channel, scope, opcoes) => session.sfuEntrarNoAmbito(channel, scope, opcoes),
       sfuSairDoAmbito: (channel, scope) => session.sfuSairDoAmbito(channel, scope),
       sfuCriarTransporte: (channel, scope, direction) => session.sfuCriarTransporte(channel, scope, direction),
       sfuLigarTransporte: (transport, dtls) => session.sfuLigarTransporte(transport, dtls),
@@ -946,6 +946,11 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         await session.escolherSalaComum(entrar)
         return { ok: true }
       },
+      sondarRegisto: (servidor) => session.sondarRegisto(servidor),
+      definirConviteDeRegisto: async (codigo) => {
+        session.definirConviteDeRegisto(codigo)
+        return { ok: true }
+      },
       setVisible: async (visible) => {
         session.setVisible(visible)
         return { ok: true }
@@ -971,7 +976,8 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       create: async (channel, nome) => {
         // `createSpace`, not `createSpaceChannel`: a people channel is born with the rooms that define it.
         // See `SALAS_INICIAIS`.
-        await session.createSpace(channel, undefined, nome)
+        // The rooms are named in the language on screen (`<html lang>`), English by default.
+        await session.createSpace(channel, Session.salasIniciais(document.documentElement.lang), nome)
         return { ok: true }
       },
       meta: (channel) => session.spaceMeta(channel),
@@ -1150,6 +1156,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       },
       members: async (channel) => session.membersOf(channel),
       history: async (channel) => session.history(channel),
+      reaccoesGuardadas: async (channel) => session.reaccoesGuardadas(channel),
       conversaArquivada: async (channel, cursor) => session.conversaArquivada(channel, cursor),
       temConversaArquivada: async (channel) => session.temConversaArquivada(channel),
       forget: async (channel) => {
@@ -1297,6 +1304,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       },
       deadWelcomes: async () => session.deadWelcomeChannels(),
       deafChannels: async () => session.deafChannels(),
+      canaisSurdos: async () => session.canaisSurdos(),
       syncCommunity: () => session.syncCommunity(),
       resyncWelcomes: async (channel) => {
         await session.resyncWelcomes(channel)
@@ -1370,6 +1378,8 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       presence: (handler) => session.on("presence", handler),
       typing: (handler) => session.on("typing", handler),
       recuperacao: (handler) => session.on("recuperacao", handler),
+      surdez: (handler) => session.on("surdez", handler),
+      eco: (handler) => session.on("eco", handler),
       buzz: (handler) => session.on("buzz", handler),
       callActivity: (handler) => {
         activityHandlers.add(handler)

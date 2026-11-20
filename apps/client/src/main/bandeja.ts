@@ -1,6 +1,7 @@
 import { app, Menu, nativeImage, Notification, Tray, type BrowserWindow } from "electron"
 import { ICONE_CLARO_16, ICONE_CLARO_32, ICONE_ESCURO_16, ICONE_ESCURO_32 } from "./icone.js"
 import { entregaDoAviso, type Aviso, type Recusa } from "./aviso.js"
+import { type LinguaDoAnfitriao, textosDoAnfitriao } from "./lingua-do-anfitriao.js"
 
 export { sanearAviso, type Aviso, type Recusa } from "./aviso.js"
 
@@ -31,6 +32,8 @@ export interface Bandeja {
   revelar: () => void
   /** The vault closed: the count dies with it. */
   aoTrancar: () => void
+  /** The app's language changed: the menu and the tooltip follow it. */
+  redesenhar: () => void
   destruir: () => void
 }
 
@@ -77,9 +80,11 @@ export interface OpcoesDaBandeja {
   cofreAberto: () => boolean
   /** Quit for real. Closing the window is not this, see `index.ts`. */
   sair: () => void
+  /** The app's language, read at each draw: it can change while the app runs. */
+  lingua: () => LinguaDoAnfitriao
 }
 
-export function montarBandeja({ janela, cofreAberto, sair }: OpcoesDaBandeja): Bandeja {
+export function montarBandeja({ janela, cofreAberto, sair, lingua }: OpcoesDaBandeja): Bandeja {
   const tray = new Tray(imagemDoIcone())
   let porLer = 0
 
@@ -93,18 +98,19 @@ export function montarBandeja({ janela, cofreAberto, sair }: OpcoesDaBandeja): B
   }
 
   const desenhar = (): void => {
-    tray.setToolTip(porLer > 0 ? `Orwell — ${porLer} por ler` : "Orwell")
+    const texto = textosDoAnfitriao(lingua()).bandeja
+    tray.setToolTip(porLer > 0 ? texto.porLer(porLer) : "Orwell")
     // The dock badge follows the same count, and so the same silence: with
     // "Show content" off, `porLer` never goes up.
     app.setBadgeCount(porLer)
     tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: "Abrir o Orwell", click: revelar },
+        { label: texto.abrir, click: revelar },
         { type: "separator" },
         ...(ARRANQUE_GOVERNAVEL
           ? ([
               {
-                label: "Arrancar com o sistema",
+                label: texto.arrancarComOSistema,
                 type: "checkbox",
                 checked: arrancaComOSistema(),
                 click: (item) => {
@@ -119,7 +125,7 @@ export function montarBandeja({ janela, cofreAberto, sair }: OpcoesDaBandeja): B
               { type: "separator" },
             ] satisfies Electron.MenuItemConstructorOptions[])
           : []),
-        { label: "Sair", click: sair },
+        { label: texto.sair, click: sair },
       ]),
     )
   }
@@ -221,6 +227,7 @@ export function montarBandeja({ janela, cofreAberto, sair }: OpcoesDaBandeja): B
     },
     revelar,
     aoTrancar: limparContagem,
+    redesenhar: desenhar,
     destruir: () => {
       tray.destroy()
     },

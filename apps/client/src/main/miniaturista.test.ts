@@ -78,3 +78,43 @@ describe("miniaturistaDaSecretaria", () => {
     expect(await miniaturistaDaSecretaria(undefined).fazer(new Uint8Array([1]), "image/png")).toBeNull()
   })
 })
+
+/**
+ * What `nativeImage` does not decode (GIF and WebP, on every system: measured
+ * in Electron 43 on macOS), the window does. Before 1.3.25 such an image had
+ * no thumbnail on the desktop: a GIF, or a photo the composer had recoded to
+ * WebP, above 200 KB showed an empty box while its original loaded, and
+ * nothing at all once the store had pushed the original out.
+ */
+describe("miniaturistaDaSecretaria, com a janela para o que o nativeImage não descodifica", () => {
+  const DA_JANELA = { bytes: new Uint8Array([7]), tipo: "image/webp", w: 320, h: 200 }
+
+  it("um GIF que o nativeImage não lê vai à janela, e a miniatura é a dela", async () => {
+    const { porta } = nativeImageFalso(0, 0, true)
+    const naJanela = vi.fn(async () => DA_JANELA)
+    const mini = await miniaturistaDaSecretaria(porta, naJanela).fazer(new Uint8Array([1, 2]), "image/gif")
+    expect(mini).toEqual(DA_JANELA)
+    expect(naJanela).toHaveBeenCalledWith(new Uint8Array([1, 2]), "image/gif")
+  })
+
+  it("uma PNG que o nativeImage lê não vai à janela", async () => {
+    const { porta } = nativeImageFalso(1600, 1200)
+    const naJanela = vi.fn(async () => DA_JANELA)
+    const mini = await miniaturistaDaSecretaria(porta, naJanela).fazer(new Uint8Array([1]), "image/png")
+    expect(mini?.tipo).toBe("image/jpeg")
+    expect(naJanela).not.toHaveBeenCalled()
+  })
+
+  it("sem janela, rejeita, para o núcleo tentar outra vez (nulo seria «formato desconhecido» para sempre)", async () => {
+    const { porta } = nativeImageFalso(0, 0, true)
+    const naJanela = vi.fn(async () => {
+      throw new Error("sem janela")
+    })
+    await expect(miniaturistaDaSecretaria(porta, naJanela).fazer(new Uint8Array([1]), "image/webp")).rejects.toThrow()
+  })
+
+  it("a janela que também não descodifica dá nulo", async () => {
+    const { porta } = nativeImageFalso(0, 0, true)
+    expect(await miniaturistaDaSecretaria(porta, async () => null).fazer(new Uint8Array([1]), "image/avif")).toBeNull()
+  })
+})

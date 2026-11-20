@@ -75,6 +75,7 @@ import {
 } from "./actualizacao-windows.js"
 import { CHAVE_PUBLICA_DE_ACTUALIZACOES } from "./chave-de-actualizacoes.js"
 import { codigoDoEstado, CORES_DO_ARRANQUE, htmlDoArranque } from "./ecra-de-arranque.js"
+import { type LinguaDoAnfitriao, linguaDoAnfitriao, linguasDoSistemaElectron, textosDoAnfitriao } from "./lingua-do-anfitriao.js"
 import { escreverTema, FICHEIRO_DO_TEMA, FUNDO_DA_JANELA, lerTemaGuardado, temaValido, temaVisto, type TemaEscolhido } from "./tema-da-janela.js"
 import { CANAIS_DE_ATALHOS, DEFINICOES_DE_ACESSIBILIDADE, criarAtalhosGlobais } from "./atalhos.js"
 import { montarBandeja, sanearAviso, type Bandeja } from "./bandeja.js"
@@ -99,6 +100,7 @@ import { DesktopVaultBackend, escreverInteiro } from "./vault-backend.js"
 import { abrirFonteDoFicheiro, formaDoFicheiroNoDisco, gravarPorPartes } from "./ficheiro-de-conta.js"
 import { ArmazemDaContaActiva } from "./armazem-backend.js"
 import { miniaturistaDaSecretaria } from "./miniaturista.js"
+import { CANAIS_DA_MINIATURA, PedidosDeMiniatura } from "./miniaturas-pela-janela.js"
 import { permissaoConcedida } from "./permissoes.js"
 
 /**
@@ -258,9 +260,10 @@ let modoDeActualizacao: ModoDeActualizacao = (() => {
 const actualizaSozinha = (): boolean => app.isPackaged && process.platform === "win32"
 
 /*
-  The app's language, as the page last said it (`lingua:definir`), for the one
-  question asked before any window. Nothing stored is English, the app's rule
-  until the person chooses.
+  The app's language, as the page last said it (`lingua:definir`), for the
+  words this process shows itself (the splash, the tray, the quit question and
+  the update question). Nothing stored yet: the system decides, by the rule of
+  the interface (`lingua-do-anfitriao.ts`).
   */
 const CAMINHO_DA_LINGUA = join(app.getPath("userData"), "lingua.json")
 let linguaGuardada: string | null = (() => {
@@ -271,6 +274,8 @@ let linguaGuardada: string | null = (() => {
     return null
   }
 })()
+/** The language of this process now. `getPreferredSystemLanguages` needs no `ready`. */
+const linguaAgora = (): LinguaDoAnfitriao => linguaDoAnfitriao(linguaGuardada, linguasDoSistemaElectron(app))
 const contas: ContasDoAparelho = new ContasDoAparelho({
   lerLista: () => {
     try {
@@ -305,10 +310,27 @@ const vault = new Vault(
   vault's.
 */
 const armazemDeMedia = new ArmazemDaContaActiva(app.getPath("userData"), contas.activa)
+/**
+ * Thumbnails `nativeImage` cannot make (GIF, WebP), asked of the window. See
+ * `miniaturas-pela-janela.ts`. No window (closed, not yet open, destroyed):
+ * the request fails, and the core tries again on the next opening.
+ */
+const pedidosDeMiniatura = new PedidosDeMiniatura()
+const miniaturaNaJanela = (bytes: Uint8Array, tipo: string) =>
+  pedidosDeMiniatura.pedir(
+    (pedido) => {
+      const janela = janelaPrincipal
+      if (!janela || janela.isDestroyed() || janela.webContents.isDestroyed()) return false
+      janela.webContents.send(CANAIS_DA_MINIATURA.pedido, pedido)
+      return true
+    },
+    bytes,
+    tipo,
+  )
 const session = new Session(vault, {
   versaoDaApp: app.getVersion(),
   armazem: armazemDeMedia,
-  miniaturista: miniaturistaDaSecretaria(),
+  miniaturista: miniaturistaDaSecretaria(undefined, miniaturaNaJanela),
   // Media blobs open in a worker thread, like the vault seal: this process answers the window.
   decifradorDeMedia: decifradorNoWorker(() => trabalhadorDoSelo(join(__dirname, "selo.cjs"))),
 })
@@ -319,6 +341,20 @@ const session = new Session(vault, {
  * the disk, which may by then belong to another account. With a deadline, so a
  * stuck disk does not hold up the quit.
  */
+/**
+ * The account's homeserver, or `null` before an identity is loaded. For the
+ * link rule in `setWindowOpenHandler` (`links-externos.ts`): links to this app
+ * on this server stay in the window.
+ */
+function servidorDaConta(): string | null {
+  try {
+    const endereco = session.identity.address
+    return endereco.slice(endereco.indexOf(":") + 1) || null
+  } catch {
+    return null
+  }
+}
+
 function drenarArmazem(prazoMs = 2_000): Promise<void> {
   return Promise.race([session.drenarArmazem().catch(() => {}), new Promise<void>((resolve) => setTimeout(resolve, prazoMs).unref?.())])
 }
@@ -432,7 +468,7 @@ async function actualizarNoArranque(): Promise<{ sair: boolean; ecra: BrowserWin
         // "Ask first": a plain box over the startup screen, only after the
         // manifest, signature and version passed. Closing it is "Later".
         perguntar: async (versao) => {
-          const texto = textosDaPergunta(versao, linguaGuardada)
+          const texto = textosDaPergunta(versao, linguaAgora())
           const { response } = await dialog.showMessageBox(janela, {
             type: "question",
             title: texto.titulo,
@@ -495,7 +531,7 @@ function abrirEcraDeArranque(): { janela: BrowserWindow; mostrar: (estado: Estad
   ecra.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
   ecra.webContents.on("will-navigate", (event) => event.preventDefault())
   ecra.once("ready-to-show", () => ecra.show())
-  const carregado = ecra.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlDoArranque(temaNoEcra()))}`).catch(() => {})
+  const carregado = ecra.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlDoArranque(temaNoEcra(), linguaAgora()))}`).catch(() => {})
 
   // The bar updates at most ten times a second: a 100 MB download is thousands of chunks, and one `executeJavaScript` per chunk just burned CPU.
   let ultimaPintura = 0
@@ -504,7 +540,7 @@ function abrirEcraDeArranque(): { janela: BrowserWindow; mostrar: (estado: Estad
     if (estado.fase === "a-descarregar" && estado.recebidos < estado.total && agora - ultimaPintura < 100) return
     ultimaPintura = agora
     void carregado
-      .then(() => (ecra.isDestroyed() ? undefined : ecra.webContents.executeJavaScript(codigoDoEstado(estado))))
+      .then(() => (ecra.isDestroyed() ? undefined : ecra.webContents.executeJavaScript(codigoDoEstado(estado, linguaAgora()))))
       .catch(() => {})
   }
   return { janela: ecra, mostrar }
@@ -612,7 +648,7 @@ function createWindow(): BrowserWindow {
   // Only web links: see `links-externos.ts`. The YouTube thumbnail takes this
   // path since 2 November 2026; nothing opens inside the app.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const destino = enderecoParaAbrirFora(url)
+    const destino = enderecoParaAbrirFora(url, servidorDaConta())
     if (destino) void shell.openExternal(destino)
     return { action: "deny" }
   })
@@ -633,20 +669,22 @@ function createWindow(): BrowserWindow {
     Electron nobody asks, and `beforeunload` canceled Quit silently: the window
     stayed without saying why. We ask here.
 
-    Text is fixed in Portuguese: this process doesn't load the UI catalog.
+    The words come from `lingua-do-anfitriao.ts`, in the app's language: this
+    process does not load the UI catalog.
 
     `preventDefault` on this event means "ignore beforeunload and quit". Staying
     undoes `aSair`, so the next window close hides it again instead of closing
     mid-exit that never happened.
   */
   window.webContents.on("will-prevent-unload", (event) => {
+    const texto = textosDoAnfitriao(linguaAgora()).sairComPendentes
     const escolha = dialog.showMessageBoxSync(window, {
       type: "question",
-      buttons: ["Sair na mesma", "Ficar"],
+      buttons: [texto.sairNaMesma, texto.ficar],
       defaultId: 1,
       cancelId: 1,
-      message: "Há mensagens por enviar. Sair na mesma?",
-      detail: "As mensagens à espera de ligação perdem-se ao sair.",
+      message: texto.mensagem,
+      detail: texto.detalhe,
     })
     if (escolha === 0) event.preventDefault()
     else {
@@ -1062,6 +1100,8 @@ function registerIpc(window: BrowserWindow): void {
     stolen from other apps until the app closes.
   */
   window.webContents.on("render-process-gone", () => atalhos.libertar())
+  // Nor will it answer the thumbnails it was asked for: they fail now, not at the deadline.
+  window.webContents.on("render-process-gone", () => pedidosDeMiniatura.fecharTodos())
   window.webContents.on("did-start-navigation", (detalhes) => {
     if (detalhes.isMainFrame && !detalhes.isSameDocument) atalhos.libertar()
   })
@@ -1081,7 +1121,14 @@ function registerIpc(window: BrowserWindow): void {
     if (valor !== "pt" && valor !== "en") return
     if (valor === linguaGuardada) return
     linguaGuardada = valor
+    bandeja?.redesenhar()
     void writeFile(CAMINHO_DA_LINGUA, `${JSON.stringify({ lingua: valor })}\n`, "utf8").catch(() => {})
+  })
+
+  // The system languages, for the first frame of the renderer: the main
+  // process knows the OS list, the renderer only knows the Chromium locale.
+  ipcMain.on("lingua:sistema", (evento) => {
+    evento.returnValue = evento.sender === window.webContents ? linguasDoSistemaElectron(app) : []
   })
 
   // "System" follows the OS while the app is open too (review M7): the
@@ -1403,6 +1450,16 @@ function registerIpc(window: BrowserWindow): void {
     return { ok: true }
   })
 
+  // Who may create an account, and the invite code (1.3.25). See `Session.sondarRegisto`.
+  tratar("session:sondar-registo", (_event, servidor: unknown) =>
+    typeof servidor === "string" && servidor.length <= 253 ? session.sondarRegisto(servidor) : null,
+  )
+
+  tratar("session:convite-de-registo", (_event, codigo: unknown) => {
+    session.definirConviteDeRegisto(typeof codigo === "string" ? codigo : null)
+    return { ok: true }
+  })
+
   tratar("session:set-visible", (_event, visible: boolean) => {
     session.setVisible(visible)
     return { ok: true }
@@ -1446,7 +1503,8 @@ function registerIpc(window: BrowserWindow): void {
     // See `createSpace` in the core: a channel is born with three rooms alongside
     // the default channel, which stays first. The name comes from the UI, and
     // anything that isn't text doesn't get past here.
-    await session.createSpace(channel, undefined, typeof nome === "string" ? nome : undefined)
+    // The rooms are named in the app's language (`linguaAgora`), English by default.
+    await session.createSpace(channel, Session.salasIniciais(linguaAgora()), typeof nome === "string" ? nome : undefined)
     return { ok: true }
   })
 
@@ -1758,6 +1816,8 @@ function registerIpc(window: BrowserWindow): void {
 
   tratar("social:deaf-channels", () => session.deafChannels())
 
+  tratar("social:canais-surdos", () => session.canaisSurdos())
+
   tratar("social:sync-community", () => session.syncCommunity())
 
   tratar("social:resync-welcomes", async (_event, channel?: string) => {
@@ -1937,6 +1997,11 @@ function registerIpc(window: BrowserWindow): void {
     return reduzirFontes(cruas, semNome)
   })
 
+  /** `miniatura:responder`: the window's thumbnail, by `id`. Only from this window; the shape is checked in `lerMiniatura`. */
+  tratar(CANAIS_DA_MINIATURA.resposta, (evento, id: unknown, mini: unknown) => ({
+    ok: evento.sender === window.webContents && pedidosDeMiniatura.responder(id, mini),
+  }))
+
   /** `ecra:escolher`: the response to the pending request. `null` means give up. */
   tratar("ecra:escolher", (_event, id: string, fonte: EscolhaDeEcra | null) => {
     // Only the three fields, and sound only as `true` literal: what comes from the
@@ -2012,6 +2077,8 @@ function registerIpc(window: BrowserWindow): void {
   session.on("sincronia", (estado) => window.webContents.send("event:sincronia", { ...estado, progresso: estado.progresso.map((p) => ({ ...p })) }))
   session.on("typing", (event) => window.webContents.send("event:typing", event))
   session.on("recuperacao", (event) => window.webContents.send("event:recuperacao", event))
+  session.on("surdez", (event) => window.webContents.send("event:surdez", { canais: [...event.canais] }))
+  session.on("eco", (event) => window.webContents.send("event:eco", event))
   session.on("buzz", (event) => window.webContents.send("event:buzz", event))
   session.on("video", (event) => window.webContents.send("event:video", { ...event }))
   session.on("media", (event) => window.webContents.send("event:media", { ...event }))
@@ -2076,6 +2143,7 @@ async function start(): Promise<void> {
     // the vault may have been locked, and it's the state at that moment that
     // matters.
     cofreAberto: () => vault.unlocked,
+    lingua: linguaAgora,
     sair: () => {
       aSair = true
       app.quit()

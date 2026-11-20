@@ -77,6 +77,41 @@ describe("o marcador do lugar", () => {
     expect(depois).toContain("nova")
   })
 
+  /*
+    Whoever joined and wrote (diag-miniaturas, 20/11/2026). Our own send never
+    comes back with a `seq` on this device's screen (`seq` -1 until a reload),
+    and it was skipped like a report without one: with nothing else said after
+    the place, the marker fell to the end, below what we had just written.
+  */
+  const EU = "@eu:s"
+  function minha(body: string, apos?: number): ChatMessage {
+    return { channel: "!sala:s", seq: -1, sender: EU, ...(apos !== undefined ? { apos } : {}), payload: { t: "message", id: `id-${body}`, sentAt: 100, body } }
+  }
+
+  it("o que escrevemos depois de entrar fica depois do marcador, ao vivo", () => {
+    render(timeline({ me: EU, messages: [minha("m-pequena"), minha("m-gif")], lugar: { seq: 9, em: EM } }))
+    expect(vizinhos()).toEqual({ antes: null, depois: expect.stringContaining("m-pequena") })
+  })
+
+  it("e antes da resposta de outra pessoa que chegou depois, com `seq`", () => {
+    render(timeline({ me: EU, messages: [minha("a minha"), mensagem(12, "a resposta")], lugar: { seq: 9, em: EM } }))
+    expect(vizinhos()).toEqual({ antes: null, depois: expect.stringContaining("a minha") })
+  })
+
+  it("um envio nosso lido do cofre sem eco (com `apos`) também conta", () => {
+    render(timeline({ me: EU, messages: [mensagem(3, "velha"), minha("a minha", 9)], lugar: { seq: 6, em: EM } }))
+    const { antes, depois } = vizinhos()
+    expect(antes).toContain("velha")
+    expect(depois).toContain("a minha")
+  })
+
+  it("mas um envio nosso sem eco de antes do lugar (voltámos a entrar) fica acima dele", () => {
+    render(timeline({ me: EU, messages: [minha("de antes", 4), mensagem(8, "nova")], lugar: { seq: 6, em: EM } }))
+    const { antes, depois } = vizinhos()
+    expect(antes).toContain("de antes")
+    expect(depois).toContain("nova")
+  })
+
   it("com a conversa vazia, aparece na mesma", () => {
     render(timeline({ messages: [], lugar: { seq: 9, em: EM } }))
     expect(screen.getByRole("note").textContent).toContain(strings.sincronia.lugar)

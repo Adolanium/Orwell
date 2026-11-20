@@ -105,12 +105,15 @@ async function semear() {
   await ana.page.locator(".channel-name", { hasText: CANAL }).first().waitFor({ timeout: 30_000 })
   if (!(await convidar(ana.page, CANAL, bruno.addr)) || !(await aceitarConvite(bruno.page, CANAL))) throw new Error("Bruno did not join")
 
-  const caixa = (p) => p.locator('input[placeholder="Escreve uma mensagem"], textarea[placeholder="Escreve uma mensagem"]').first()
+  const caixa = (p) => p.locator('textarea[placeholder="Escreve uma mensagem"], textarea[placeholder="Escreve uma mensagem"]').first()
   await ana.page.locator(".room-tree .room-name").first().click()
   await caixa(ana.page).waitFor({ timeout: 30_000 })
   const dizer = async (p, texto) => {
     await caixa(p).fill(texto)
     await p.keyboard.press("Enter")
+    // With a finger (a touch context), Enter starts a new line and the send
+    // button sends (1.3.25). The text is still in the box: send it.
+    if ((await caixa(p).inputValue().catch(() => "")) !== "") await p.locator("form.chat-composer .composer-enviar").first().click()
     await wait(1500)
   }
   await dizer(ana.page, "Bom dia! Já viram o tema claro?")

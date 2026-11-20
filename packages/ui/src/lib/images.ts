@@ -19,12 +19,13 @@
  * transparency and gains artifacts, and an animated GIF that fits keeps animating,
  * which recoding would kill. Compress everything; don't damage what was already fine.
  *
- * Animated GIF has its own cap (`maxBytesAnimado`) in avatar and icon: passes intact
- * up to it, no matter the long side, because redrawing it smaller is recoding it, and
+ * Animated GIF has its own cap (`maxBytesAnimado`) in avatar, icon, message and post:
+ * passes intact up to it, no matter the long side, because redrawing it smaller is recoding it, and
  * recoding kills animation. Above the cap it recodes like any image, stops moving, and
  * whoever chose it is warned (`animacaoPerdida`, `avisoDeAnimacaoPerdida`).
  */
 
+import { bytesQueAindaCabem, caracteresDeDataUrl } from "@enclave/client-core"
 import { formatarBytes } from "./ficheiros.js"
 import { strings } from "../strings.js"
 
@@ -63,6 +64,35 @@ export interface ImageBudget {
  */
 const GIF_ANIMADO_MAX_BYTES = 160_000
 
+/**
+ * The cap for an animated GIF in a message: 2 MiB. A post has its own, lower
+ * (`GIF_ANIMADO_NO_POST_MAX_BYTES`).
+ *
+ * Here the bytes cost once, not per channel and per membership change. On the
+ * wire the image goes inline in the encrypted payload: 2 MiB is ~2.8 million
+ * data URL characters, under the 4 million of `Attachment.inline`, and ~3.7 MB
+ * sealed, under the 11 MiB of `MAX_SEALED_BYTES`. In the vault it is a
+ * reference: the bytes live in the media store, as an "original" that the store
+ * ceiling (500 MB by default) can push out, like any photo. A file attachment
+ * already goes up to ~3 MB on the same path.
+ *
+ * What does not fit is four of them: the frame holds ~8.6 million payload
+ * characters, which with four images is two GIFs of 2 MiB and two still ones.
+ * So the composer gives this cap only to a GIF that still fits in the message
+ * (`orcamentosDaMensagem`); the others go still, with the warning.
+ */
+const GIF_ANIMADO_NA_MENSAGEM_MAX_BYTES = 2 * 1024 * 1024
+
+/**
+ * The cap for an animated GIF in a post: 1 MiB, half the message one.
+ *
+ * A post is not sent once: each new follower gets the last 30 again
+ * (`POSTS_REPUBLICADOS`), and the server's monthly traffic quota is shared with
+ * other sites. Since 18/11/2026, at the worst (four 1 MiB GIFs in
+ * each of 30 posts), a new friendship costs ~126 MB instead of ~189 MB at 2 MiB.
+ */
+const GIF_ANIMADO_NO_POST_MAX_BYTES = 1024 * 1024
+
 export const IMAGE_BUDGETS = {
   /**
    * Avatar. Goes out once per channel the person belongs to, and again whenever
@@ -82,11 +112,15 @@ export const IMAGE_BUDGETS = {
   /**
    * Image in a conversation message. Lives in the channel history, which holds 400
    * items, and shares the same byte cap as everything else. 400 KB at 1600 px is a
-   * photo that looks good full-screen without being a camera file.
+   * photo that looks good full-screen without being a camera file. An animated
+   * GIF goes up to 2 MiB: see `GIF_ANIMADO_NA_MENSAGEM_MAX_BYTES`.
    */
-  chat: { maxSide: 1600, maxBytes: 400 * 1024 },
-  /** Post image. Like the message: they're the same on the wire. */
-  post: { maxSide: 1600, maxBytes: 400 * 1024 },
+  chat: { maxSide: 1600, maxBytes: 400 * 1024, maxBytesAnimado: GIF_ANIMADO_NA_MENSAGEM_MAX_BYTES },
+  /**
+   * Post image. Like the message: they're the same on the wire. The animated
+   * GIF cap is lower: see `GIF_ANIMADO_NO_POST_MAX_BYTES`.
+   */
+  post: { maxSide: 1600, maxBytes: 400 * 1024, maxBytesAnimado: GIF_ANIMADO_NO_POST_MAX_BYTES },
   /**
    * Thumbnail of a video: the frame at 1 s. Goes inside the `post` and stays in
    * the vault of whoever follows even after the video bytes leave, so it's small:
@@ -138,6 +172,16 @@ export function dataUrlBytes(dataUrl: string): number {
   const base64 = dataUrl.slice(virgula + 1)
   const enchimento = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0
   return Math.max(0, Math.floor((base64.length * 3) / 4) - enchimento)
+}
+
+/**
+ * The type of the bytes a data URL carries: `image/webp` for a GIF that was
+ * recoded, not the `image/gif` of the file that came in. Empty when there is none.
+ */
+export function tipoDoDataUrl(dataUrl: string): string {
+  if (!dataUrl.startsWith("data:")) return ""
+  const fim = dataUrl.search(/[;,]/)
+  return fim > 5 ? dataUrl.slice(5, fim) : ""
 }
 
 function blobParaDataUrl(blob: Blob): Promise<string> {
@@ -231,8 +275,7 @@ export async function compressImage(
       : undefined)
 
   /** A GIF that fits under the animated cap passes as is: see `maxBytesAnimado`. */
-  const gifQueAnima =
-    file.type === "image/gif" && budget.maxBytesAnimado !== undefined && file.size <= budget.maxBytesAnimado
+  const gifQueAnima = gifCandidato(file, budget)
   const gifQueParou = file.type === "image/gif" && budget.maxBytesAnimado !== undefined && !gifQueAnima
 
   // No decoder means there is nothing to do but let through what already fits.
@@ -351,9 +394,52 @@ export function avisoDeAnimacaoPerdida(
   original: { size: number },
   imagem: CompressedImage,
   budget: ImageBudget,
+  onde: "perfil" | "mensagem" = "perfil",
 ): string | null {
   if (!imagem.animacaoPerdida || budget.maxBytesAnimado === undefined) return null
+  // In a message the cap also depends on what else the message carries, so a
+  // number would lie: the sentence says only what happened.
+  if (onde === "mensagem") return strings.common.gifParadoNaMensagem
   return strings.common.gifParado(formatarBytes(original.size), formatarBytes(budget.maxBytesAnimado))
+}
+
+/** A GIF that the budget would let through animated, if the message has room. */
+function gifCandidato(ficheiro: Blob, budget: ImageBudget): boolean {
+  return ficheiro.type === "image/gif" && budget.maxBytesAnimado !== undefined && ficheiro.size <= budget.maxBytesAnimado
+}
+
+/** The same budget, with no animated cap left: the GIF goes still, and the warning says so. */
+const semAnimacao = (budget: ImageBudget): ImageBudget => ({ ...budget, maxBytesAnimado: 0 })
+
+/**
+ * The budget for ONE image added to a message that already carries `ocupado`
+ * payload characters. A GIF keeps its animated cap only if its bytes, intact,
+ * still fit in the frame (`bytesQueAindaCabem`); otherwise it goes still.
+ * Any other image comes out at most `maxBytes`, and the caller checks that.
+ */
+export function orcamentoDaImagem(ficheiro: Blob, ocupado: number, budget: ImageBudget): ImageBudget {
+  if (!gifCandidato(ficheiro, budget)) return budget
+  return ficheiro.size <= bytesQueAindaCabem(ocupado, ficheiro.type) ? budget : semAnimacao(budget)
+}
+
+/**
+ * The budgets for images chosen together, compressed in parallel.
+ *
+ * Every image is first counted as a still image at its worst (`maxBytes`),
+ * because that is the most any of them can come out as. Then each GIF, in
+ * order, trades its still place for its real size, if the message still has
+ * room for that. One that does not fit keeps its still place and goes still.
+ * So the message never grows past the frame, whatever the order.
+ */
+export function orcamentosDaMensagem(ficheiros: readonly Blob[], ocupado: number, budget: ImageBudget): ImageBudget[] {
+  const parada = (ficheiro: Blob): number => caracteresDeDataUrl(budget.maxBytes, ficheiro.type || "image/jpeg")
+  let gasto = ficheiros.reduce((total, ficheiro) => total + parada(ficheiro), ocupado)
+  return ficheiros.map((ficheiro) => {
+    if (!gifCandidato(ficheiro, budget)) return budget
+    if (ficheiro.size > bytesQueAindaCabem(gasto - parada(ficheiro), ficheiro.type)) return semAnimacao(budget)
+    gasto += caracteresDeDataUrl(ficheiro.size, ficheiro.type) - parada(ficheiro)
+    return budget
+  })
 }
 
 /**

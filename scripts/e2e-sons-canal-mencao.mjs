@@ -124,12 +124,12 @@ const contar = (page) => page.evaluate(() => window.__sons.length)
 async function abrirSala(page, nome) {
   const sala = page.locator(".room-row button.room").filter({ has: page.locator(".room-name", { hasText: nome }) }).first()
   await sala.click({ timeout: 30_000 })
-  await page.locator('input[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
+  await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
   await espera(600)
 }
 
 async function escrever(page, frase) {
-  const caixa = page.locator('input[placeholder="Escreve uma mensagem"]')
+  const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]')
   await caixa.click()
   await caixa.fill(frase)
   await page.keyboard.press("Enter")
@@ -137,7 +137,7 @@ async function escrever(page, frase) {
 
 /** Write with the chosen mention from the list, like a person. */
 async function mencionar(page, nome, resto) {
-  const caixa = page.locator('input[placeholder="Escreve uma mensagem"]')
+  const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]')
   await caixa.click()
   await caixa.fill("")
   await caixa.pressSequentially(`@${nome.slice(0, 3)}`, { delay: 60 })

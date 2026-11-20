@@ -6,6 +6,7 @@ import {
   CANAIS_DE_CANAL,
   LEITURAS_DE_CANAL,
   ligarCanais,
+  PEDIDO_MAL_FORMADO,
   type Resposta,
   type SalaDoNucleo,
   type SessaoDeCanais,
@@ -160,6 +161,34 @@ function sessaoFalsa(): SessaoDeCanais & { rebentar: boolean } {
       feito.push(`may:${channel}:${power}`)
       return true
     },
+    mayMoveIn(channel, de, para) {
+      feito.push(`mayMoveIn:${channel}:${de ?? "-"}:${para ?? "-"}`)
+      return para !== "palco"
+    },
+    todosOf(channel) {
+      feito.push(`todosOf:${channel}`)
+      return { powers: ["escrever"], definido: true }
+    },
+    permissoesEm(channel, address, lugar) {
+      feito.push(`permissoesEm:${channel}:${address}:${JSON.stringify(lugar ?? null)}`)
+      return lugar?.sala === "anuncios" ? [] : ["escrever"]
+    },
+    mayManageRole(channel, role) {
+      feito.push(`mayManageRole:${channel}:${role}`)
+      return role !== "fundador"
+    },
+    delegacaoDeCargos(channel) {
+      feito.push(`delegacaoDeCargos:${channel}`)
+      return true
+    },
+    sobreposicoesDe(channel, lugar) {
+      feito.push(`sobreposicoesDe:${channel}:${JSON.stringify(lugar)}`)
+      return [{ role: "@todos", allow: [], deny: ["escrever"] }]
+    },
+    maySetSobreposicoes(channel, lugar) {
+      feito.push(`maySetSobreposicoes:${channel}:${JSON.stringify(lugar)}`)
+      return true
+    },
 
     async upsertRoom(channel, next) {
       feito.push(`upsertRoom:${channel}:${next.room}:${next.name}:${next.closed ?? false}:${next.removed ?? false}`)
@@ -195,11 +224,11 @@ function sessaoFalsa(): SessaoDeCanais & { rebentar: boolean } {
     async setNickname(channel, subject, nick) {
       feito.push(`setNickname:${channel}:${subject}:${nick}`)
     },
-    async moveVoice(channel, subject, room) {
-      feito.push(`moveVoice:${channel}:${subject}:${room}`)
+    async moveVoice(channel, subject, room, de) {
+      feito.push(`moveVoice:${channel}:${subject}:${room}${de === undefined ? "" : `:de=${de}`}`)
     },
-    async disconnectVoice(channel, subject) {
-      feito.push(`disconnectVoice:${channel}:${subject}`)
+    async disconnectVoice(channel, subject, de) {
+      feito.push(`disconnectVoice:${channel}:${subject}${de === undefined ? "" : `:de=${de}`}`)
     },
     async assignRole(channel, subject, admin) {
       feito.push(`assignRole:${channel}:${subject}:${admin}`)
@@ -233,6 +262,13 @@ function sessaoFalsa(): SessaoDeCanais & { rebentar: boolean } {
     },
     async deleteChannel(channel) {
       feito.push(`deleteChannel:${channel}`)
+    },
+    async setSobreposicoes(channel, lugar, perms) {
+      feito.push(`setSobreposicoes:${channel}:${JSON.stringify(lugar)}:${JSON.stringify(perms)}`)
+    },
+    reaccoesGuardadas(channel) {
+      feito.push(`reaccoesGuardadas:${channel}`)
+      return [{ seq: 7, sender: "@quem:servidor", body: "", sentAt: 1, reaction: { target: "m1", emoji: "👍", remove: false } }] as never
     },
   }
 }
@@ -268,7 +304,7 @@ function montar(): {
 const CANAL = "!geral:servidor"
 
 describe("o processo principal expõe as operações de canal todas", () => {
-  it("regista os 50 nomes, e nenhum fica por registar", () => {
+  it("regista os 60 nomes, e nenhum fica por registar", () => {
     const { leituras, pedidos } = montar()
 
     for (const nome of Object.values(LEITURAS_DE_CANAL)) expect(leituras.has(nome)).toBe(true)
@@ -303,15 +339,27 @@ describe("o processo principal expõe as operações de canal todas", () => {
     // Plus `mayTransmit` (screen sharing as a role power, 12/11/2026), and
     // `removedRooms` (17/11/2026: the polls of a deleted room are deleted), and
     // `mayCreatePoll` (polls as a role power, 1.3.21).
-    expect(leituras.size).toBe(27)
-    expect(pedidos.size).toBe(24)
+    // The 1.2 permission model (1.3.25): `mayMoveIn` and the six reads of
+    // `permissoes`, and one request, `setSobreposicoes`. And the vault's reactions
+    // (`reaccoesGuardadas`, 1.3.25), a request.
+    expect(leituras.size).toBe(34)
+    expect(pedidos.size).toBe(26)
   })
 
   it("nenhuma leitura responde com uma promessa", () => {
     const { leituras } = montar()
 
+    /*
+      The permission reads check their arguments (a place is `{ sala }` or
+      `{ categoria }`), so they get theirs; the rest take any strings.
+    */
+    const argumentosDe: Record<string, unknown[]> = {
+      [LEITURAS_DE_CANAL.sobreposicoes]: [CANAL, { sala: "sala" }],
+      [LEITURAS_DE_CANAL.podeSobrepor]: [CANAL, { sala: "sala" }],
+      [LEITURAS_DE_CANAL.permissoesEm]: [CANAL, "@ana:servidor", { sala: "sala" }],
+    }
     for (const [nome, ler] of leituras) {
-      const resposta = ler(CANAL, "sala", "t1")
+      const resposta = ler(...(argumentosDe[nome] ?? [CANAL, "sala", "t1"]))
       // It is the lesson of `mayExpel` written as a test: the interface reads
       // `mayEdit?.(canal) ?? false` in the middle of a render, and a promise passes
       // that read as true. A read that returns a promise is not half a feature, it
@@ -358,6 +406,33 @@ describe("cada leitura chama o método certo, com os argumentos por ordem", () =
     [LEITURAS_DE_CANAL.podeTransmitir, [CANAL, "palco-fechado"], `mayTransmit:${CANAL}:palco-fechado`, false],
     [LEITURAS_DE_CANAL.podeCriarVotacoes, [CANAL], `mayCreatePoll:${CANAL}:`, true],
     [LEITURAS_DE_CANAL.podeCriarVotacoes, [CANAL, "@sem-cargo:servidor"], `mayCreatePoll:${CANAL}:@sem-cargo:servidor`, false],
+    // The 1.2 permission model (1.3.25). `""` is the default room, and must not read as "no room".
+    [LEITURAS_DE_CANAL.podeMoverEm, [CANAL, "geral", "palco"], `mayMoveIn:${CANAL}:geral:palco`, false],
+    [LEITURAS_DE_CANAL.podeMoverEm, [CANAL, "geral", ""], `mayMoveIn:${CANAL}:geral:`, true],
+    [LEITURAS_DE_CANAL.podeMoverEm, [CANAL, "geral"], `mayMoveIn:${CANAL}:geral:-`, true],
+    [LEITURAS_DE_CANAL.permissoesDeTodos, [CANAL], `todosOf:${CANAL}`, { powers: ["escrever"], definido: true }],
+    [LEITURAS_DE_CANAL.permissoesEm, [CANAL, "@ana:servidor"], `permissoesEm:${CANAL}:@ana:servidor:null`, ["escrever"]],
+    [
+      LEITURAS_DE_CANAL.permissoesEm,
+      [CANAL, "@ana:servidor", { sala: "anuncios" }],
+      `permissoesEm:${CANAL}:@ana:servidor:{"sala":"anuncios"}`,
+      [],
+    ],
+    [
+      LEITURAS_DE_CANAL.permissoesEm,
+      [CANAL, "@ana:servidor", { categoria: "Voz" }],
+      `permissoesEm:${CANAL}:@ana:servidor:{"categoria":"Voz"}`,
+      ["escrever"],
+    ],
+    [LEITURAS_DE_CANAL.podeGerirCargo, [CANAL, "fundador"], `mayManageRole:${CANAL}:fundador`, false],
+    [LEITURAS_DE_CANAL.delegacaoDeCargos, [CANAL], `delegacaoDeCargos:${CANAL}`, true],
+    [
+      LEITURAS_DE_CANAL.sobreposicoes,
+      [CANAL, { sala: "anuncios" }],
+      `sobreposicoesDe:${CANAL}:{"sala":"anuncios"}`,
+      [{ role: "@todos", allow: [], deny: ["escrever"] }],
+    ],
+    [LEITURAS_DE_CANAL.podeSobrepor, [CANAL, { categoria: "Voz" }], `maySetSobreposicoes:${CANAL}:{"categoria":"Voz"}`, true],
   ]
 
   for (const [canal, argumentos, esperado, valor] of casos) {
@@ -403,7 +478,7 @@ describe("cada leitura chama o método certo, com os argumentos por ordem", () =
 
     expect(resposta.ok).toBe(false)
     expect(resposta.ok === false && resposta.erro).toContain(LEITURAS_DE_CANAL.propriedades)
-    expect(resposta.ok === false && resposta.erro).toMatch(/não atravessa o IPC/)
+    expect(resposta.ok === false && resposta.erro).toMatch(/does not cross the IPC/)
   })
 
   it("o que atravessa é uma CÓPIA: mexer nela não mexe no cofre", () => {
@@ -458,6 +533,14 @@ describe("cada pedido chama o método certo, com os argumentos por ordem", () =>
     [CANAIS_DE_CANAL.mudarApelido, [CANAL, "@ana:servidor", "Aninhas"], `setNickname:${CANAL}:@ana:servidor:Aninhas`],
     [CANAIS_DE_CANAL.moverVoz, [CANAL, "@alguem:servidor", "sala"], `moveVoice:${CANAL}:@alguem:servidor:sala`],
     [CANAIS_DE_CANAL.desligarDaVoz, [CANAL, "@alguem:servidor"], `disconnectVoice:${CANAL}:@alguem:servidor`],
+    // `de` travels since 1.3.25: the per-room rule asks about the room the person leaves.
+    [CANAIS_DE_CANAL.moverVoz, [CANAL, "@alguem:servidor", "sala", "palco"], `moveVoice:${CANAL}:@alguem:servidor:sala:de=palco`],
+    [CANAIS_DE_CANAL.desligarDaVoz, [CANAL, "@alguem:servidor", ""], `disconnectVoice:${CANAL}:@alguem:servidor:de=`],
+    [
+      CANAIS_DE_CANAL.definirSobreposicoes,
+      [CANAL, { sala: "anuncios" }, [{ role: "@todos", allow: [], deny: ["escrever"], extra: "fora" }]],
+      `setSobreposicoes:${CANAL}:{"sala":"anuncios"}:[{"role":"@todos","allow":[],"deny":["escrever"]}]`,
+    ],
     [
       CANAIS_DE_CANAL.nomearAdministrador,
       [CANAL, "@alguem:servidor", true],
@@ -522,6 +605,86 @@ describe("cada pedido chama o método certo, com os argumentos por ordem", () =>
     await expect(
       pedidos.get(CANAIS_DE_CANAL.criarSala)!(CANAL, { room: "x", name: "X" }),
     ).rejects.toThrow(/administra/)
+  })
+})
+
+describe("o que o renderer manda para o modelo de permissões é verificado aqui", () => {
+  /*
+    The renderer is the less trusted side. A session method reads
+    `lugar.sala !== undefined` to choose a room over a category, so a shape
+    the UI bridge does not declare must fail here, loudly, and never reach it.
+  */
+  const lugaresMaus: unknown[] = [
+    null,
+    "anuncios",
+    ["anuncios"],
+    {},
+    { sala: 1 },
+    { sala: "a", categoria: "b" },
+    { categoria: "" },
+    { quarto: "a" },
+  ]
+
+  for (const lugar of lugaresMaus) {
+    it(`um lugar ${JSON.stringify(lugar)} é recusado no envelope, e a sessão não é chamada`, () => {
+      const { leituras } = montar()
+
+      for (const canal of [LEITURAS_DE_CANAL.sobreposicoes, LEITURAS_DE_CANAL.podeSobrepor]) {
+        const resposta = leituras.get(canal)!(CANAL, lugar)
+        expect(resposta.ok, canal).toBe(false)
+      }
+      expect(leituras.get(LEITURAS_DE_CANAL.permissoesEm)!(CANAL, "@ana:servidor", lugar).ok).toBe(false)
+      expect(feito).toEqual([])
+    })
+  }
+
+  it("um canal que não é texto é recusado", () => {
+    const { leituras } = montar()
+
+    expect(leituras.get(LEITURAS_DE_CANAL.permissoesDeTodos)!(42).ok).toBe(false)
+    expect(leituras.get(LEITURAS_DE_CANAL.podeMoverEm)!(CANAL, { sala: "x" }).ok).toBe(false)
+    expect(feito).toEqual([])
+  })
+
+  it("sobreposições com outra forma não chegam à sessão", async () => {
+    const { pedidos } = montar()
+    const definir = pedidos.get(CANAIS_DE_CANAL.definirSobreposicoes)!
+
+    // One coded message (385) for all of them; which argument, and why, goes in `cause`.
+    const recusa = async (promessa: unknown): Promise<unknown> => {
+      const erro = await (promessa as Promise<unknown>).then(
+        () => null,
+        (e: Error) => e,
+      )
+      expect((erro as Error | null)?.message).toBe(PEDIDO_MAL_FORMADO)
+      return (erro as Error).cause
+    }
+    expect(await recusa(definir(CANAL, { sala: "a" }, "tudo"))).toMatchObject({ argumento: "perms" })
+    expect(await recusa(definir(CANAL, { sala: "a" }, [{ role: "", allow: [], deny: [] }]))).toMatchObject({ argumento: "perms.role" })
+    expect(await recusa(definir(CANAL, { sala: "a" }, [{ role: "x", allow: [1], deny: [] }]))).toMatchObject({ argumento: "perms.allow" })
+    expect(await recusa(definir(CANAL, { sala: "a" }, Array.from({ length: 17 }, () => ({ role: "x" })))))
+      .toMatchObject({ esperado: "a list of at most 16 overrides" })
+    expect(await recusa(definir(CANAL, { sala: "a", categoria: "b" }, []))).toMatchObject({ argumento: "lugar" })
+    expect(feito).toEqual([])
+  })
+
+  it("as reacções guardadas pedem um canal em texto, e a recusa não chega à sessão", async () => {
+    const { pedidos } = montar()
+    const ler = pedidos.get(CANAIS_DE_CANAL.reaccoesGuardadas)!
+
+    await expect(ler(42)).rejects.toThrow(PEDIDO_MAL_FORMADO)
+    await expect(ler("")).rejects.toThrow(PEDIDO_MAL_FORMADO)
+    expect(feito).toEqual([])
+    expect(await ler(CANAL)).toHaveLength(1)
+    expect(feito).toEqual([`reaccoesGuardadas:${CANAL}`])
+  })
+
+  it("um `de` que não é texto não move ninguém", async () => {
+    const { pedidos } = montar()
+
+    await expect(pedidos.get(CANAIS_DE_CANAL.moverVoz)!(CANAL, "@alguem:servidor", "sala", 7)).rejects.toThrow(PEDIDO_MAL_FORMADO)
+    await expect(pedidos.get(CANAIS_DE_CANAL.desligarDaVoz)!(CANAL, "@alguem:servidor", null)).rejects.toThrow(PEDIDO_MAL_FORMADO)
+    expect(feito).toEqual([])
   })
 })
 

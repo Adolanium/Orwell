@@ -574,14 +574,23 @@ describe("as peças à volta", () => {
   })
 
   it("o ecrã de arranque diz o que está a acontecer, em frases curtas", () => {
-    expect(textoDoArranque({ fase: "a-procurar" }).titulo).toBe("A procurar actualizações")
+    // English by default (20/11/2026); Portuguese when the app is in Portuguese.
+    expect(textoDoArranque({ fase: "a-procurar" }).titulo).toBe("Looking for updates")
     const meio = textoDoArranque({ fase: "a-descarregar", versao: "1.0.7", recebidos: 50 * 1048576, total: 100 * 1048576 })
-    expect(meio).toEqual({ titulo: "A descarregar a versão 1.0.7", detalhe: "50 MB de 100 MB", progresso: 0.5 })
-    expect(textoDoArranque({ fase: "a-instalar", versao: "1.0.7" }).titulo).toBe("A instalar a versão 1.0.7")
+    expect(meio).toEqual({ titulo: "Downloading version 1.0.7", detalhe: "50 MB of 100 MB", progresso: 0.5 })
+    expect(textoDoArranque({ fase: "a-procurar" }, "pt").titulo).toBe("A procurar actualizações")
+    const meioPt = textoDoArranque({ fase: "a-descarregar", versao: "1.0.7", recebidos: 50 * 1048576, total: 100 * 1048576 }, "pt")
+    expect(meioPt).toEqual({ titulo: "A descarregar a versão 1.0.7", detalhe: "50 MB de 100 MB", progresso: 0.5 })
+    expect(textoDoArranque({ fase: "a-instalar", versao: "1.0.7" }, "pt").titulo).toBe("A instalar a versão 1.0.7")
   })
 
   it("antes do UAC o ecrã diz que o Windows vai pedir autorização, sem barra", () => {
-    const texto = textoDoArranque({ fase: "a-pedir-autorizacao", versao: "1.0.7" })
+    expect(textoDoArranque({ fase: "a-pedir-autorizacao", versao: "1.0.7" })).toEqual({
+      titulo: "Windows will ask for permission to install version 1.0.7.",
+      detalhe: 'Click "Yes" to continue.',
+      progresso: null,
+    })
+    const texto = textoDoArranque({ fase: "a-pedir-autorizacao", versao: "1.0.7" }, "pt")
     expect(texto).toEqual({
       titulo: "O Windows vai pedir autorização para instalar a versão 1.0.7.",
       detalhe: 'Carrega em "Sim" para continuar.',
@@ -592,7 +601,7 @@ describe("as peças à volta", () => {
   })
 
   it("o código que pinta o ecrã leva os textos escapados", () => {
-    const codigo = codigoDoEstado({ fase: "a-descarregar", versao: "1.0.7", recebidos: 1, total: 2 })
+    const codigo = codigoDoEstado({ fase: "a-descarregar", versao: "1.0.7", recebidos: 1, total: 2 }, "pt")
     expect(codigo).toContain(JSON.stringify("A descarregar a versão 1.0.7"))
     expect(codigo).toContain('"50.0%"')
   })

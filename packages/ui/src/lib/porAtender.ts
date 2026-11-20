@@ -17,13 +17,18 @@ import { estaSilenciado } from "./silenciados.js"
  * badge next to it, which might be a friend request waiting for a week. That
  * is why the rule is deliberately tight.
  *
- * **Communities (channels)**, all unread messages. Until October 27, 2026,
- * only mentions were counted, and the rail had a quiet dot for the rest; now
- * it shows the full number, like Discord does, and the fix for a
- * thirty-person channel became mute it, not hide the number from everyone. The
- * sum is from `repartirPorDestino` over the counts that the sidebar already
- * shows. In a muted place only mentions count (see `lib/silenciados.ts`); the
- * same goes for a direct conversation in Contacts.
+ * **Communities (channels)**, two notices with two shapes (20/11/2026,
+ * option A). The NUMBER is the mentions in every room (`mencoesNosCanais`):
+ * someone called this account. The rest of the unread traffic is a pill on
+ * the left of the button, with no number. History: until 27/10/2026 only
+ * mentions counted, with a quiet dot for the rest; on 27/10 the number became
+ * every unread message, and the dot went away as "the same news told twice".
+ * That number did not say whether anyone was waiting, so on 20/11 the two came
+ * apart again, now with shapes that cannot be confused: a pill is not a
+ * number. The pill reads the counts the sidebar already shows
+ * (`repartirPorDestino`), so a muted place lights nothing but its mentions
+ * (see `lib/silenciados.ts`); the same goes for a direct conversation in
+ * Contacts.
  *
  * **Contacts**, pending friend requests, plus unread messages in direct
  * conversations. Both live in this destination: direct conversations moved
@@ -103,4 +108,25 @@ export function repartirPorDestino(porCanal: ReadonlyMap<string, number>): PorDe
     else canais += quantas
   }
   return { canais, contactos }
+}
+
+/**
+ * The Communities number: mentions of this account in every room of every
+ * channel (20/11/2026, option A).
+ *
+ * Read from the counts per room that the sidebar already draws
+ * (`contarPorSala`), so the rail and the rooms cannot drift apart. A mention
+ * counts in a muted place too: muting makes a place quiet, not deaf to its own
+ * name. Direct conversations and feeds are cut here as in `repartirPorDestino`:
+ * they are attended in Friends and Feed.
+ */
+export function mencoesNosCanais(
+  porSala: ReadonlyMap<string, ReadonlyMap<string, { readonly mencoes: number }>>,
+): number {
+  let soma = 0
+  for (const [canal, salas] of porSala) {
+    if (isFeed(canal) || isDirect(canal)) continue
+    for (const conta of salas.values()) soma += conta.mencoes
+  }
+  return soma
 }

@@ -1,3 +1,4 @@
+import { corpoParaMostrar } from "../../lib/corpoParaMostrar.js"
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { copiarTexto } from "../../lib/copiar.js"
 import { RichText, type Etiquetas } from "../../components/RichText.js"
@@ -33,6 +34,7 @@ import { podeResponder, resumoDoOriginal, type Citacao } from "../../lib/respost
 import { mencionaMe as mencionaAConta } from "../../lib/mentions.js"
 import { marcaDeEntradaNaConversa } from "../../lib/porLerPorSala.js"
 import { lembrarEmoji, useReaccoesRapidas } from "../../lib/emojiFrequentes.js"
+import { blocosOcultos, estaRevelada, revelar } from "../../lib/bloqueados.js"
 
 /** A key pressed in a field is not a shortcut: R for "reply" only counts outside them. */
 function emCampoDeTexto(alvo: EventTarget | null): boolean {
@@ -410,7 +412,7 @@ stays, that is why it travels. */}
         {(message.payload.body ?? "") !== "" && !votacao && (
           <p>
             <RichText nameFor={nomeDeMencao} onMention={onMention} etiquetas={etiquetasDaLinha}>
-              {message.payload.body ?? ""}
+              {corpoParaMostrar(message.payload)}
             </RichText>
           </p>
         )}
@@ -855,6 +857,51 @@ function inicioDa(messages: ChatMessage[], chave: string | null): number {
   return i < 0 ? 0 : i
 }
 
+/**
+ * A line held in place while older lines come in above it ("load older", 1.3.25).
+ * `id` finds it again: the row is drawn anew when the day heading above it moves
+ * to an older line (its wrapper changes), and `linha` is then a stale element.
+ */
+type AncoraDeLinha = { conversa: string; id: string; linha: Element; distancia: number }
+
+/**
+ * How far the BOTTOM of a line is from the top of the scroller, in px (negative: above,
+ * out of view). The bottom, not the top: the first line of a group carries the name and
+ * the hour above its text, and when the older lines that come in are from the same
+ * person, it joins their group and loses them. Its box shrinks at the top; the bottom
+ * is where its text ends, and that is what the reader is looking at.
+ */
+function distanciaAoTopo(scroller: Element, linha: Element): number {
+  return linha.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top
+}
+
+/**
+ * The line of the anchor as drawn now, or `null` when it left the drawn window.
+ * The identifier is compared in JavaScript, never put in a selector (see `data-mensagem`).
+ */
+function linhaDaAncora(scroller: Element, ancora: AncoraDeLinha): Element | null {
+  if (ancora.linha.isConnected) return ancora.linha
+  for (const linha of scroller.querySelectorAll(".message")) {
+    if (linha.getAttribute("data-mensagem") === ancora.id) {
+      ancora.linha = linha
+      return linha
+    }
+  }
+  return null
+}
+
+/** The first line in view, held where it is. `null`: no line with an identifier is drawn. */
+function linhaNoTopo(scroller: HTMLElement | null, conversa: string): AncoraDeLinha | null {
+  if (!scroller) return null
+  for (const linha of scroller.querySelectorAll(".message")) {
+    const id = linha.getAttribute("data-mensagem")
+    if (id === null) continue
+    const distancia = distanciaAoTopo(scroller, linha)
+    if (distancia > 0) return { conversa, id, linha, distancia }
+  }
+  return null
+}
+
 function TimelineInteira({
   channel,
   conversa,
@@ -895,6 +942,7 @@ function TimelineInteira({
   onResponder,
   citacaoDe,
   onIrParaOriginal,
+  ocultar,
 }: {
   channel: string
   /**
@@ -1057,6 +1105,14 @@ function TimelineInteira({
   citacaoDe?: ((id: string) => Citacao) | undefined
   /** Jump to the original of a reply: the shell changes room and loads the history. */
   onIrParaOriginal?: ((id: string) => void) | undefined
+  /**
+   * A message from someone this device blocked, to fold (20/11/2026).
+   *
+   * Folded messages in a row become one line with "Show", which opens only
+   * those, for this visit (`lib/bloqueados.ts`). They never count as unread.
+   * Absent, nothing folds. The shell decides where: in a room, not in a direct.
+   */
+  ocultar?: ((message: ChatMessage) => boolean) | undefined
 }): React.JSX.Element {
   const container = useRef<HTMLDivElement>(null)
 
@@ -1069,12 +1125,24 @@ function TimelineInteira({
    */
   const indiceDoLugar = useMemo(() => {
     if (!lugar) return null
-    // Without `seq` (a report saved without it, a send pending confirmation) it does not say where we came in: it does not count.
-    const indice = messages.findIndex((message) => message.seq >= 0 && message.seq >= lugar.seq)
+    /*
+      Without `seq`, someone else's line (a report saved without it) does not say
+      where we came in: it does not count. A send of ours does: on screen it keeps
+      `seq` -1 until a reload, and skipping it put the marker below everything
+      whoever joined then wrote (diag-miniaturas, 20/11/2026). Read from the vault
+      it carries its order mark (`apos`, the highest `seq` seen when it left),
+      which says which side it is on; still in flight, it was said just now,
+      after the place.
+    */
+    const indice = messages.findIndex((message) => {
+      if (message.seq >= 0) return message.seq >= lugar.seq
+      if (me === null || message.sender !== me) return false
+      return message.apos === undefined || message.apos >= lugar.seq
+    })
     if (indice === -1) return messages.length
     if (indice === 0 && canLoadOlder) return null
     return indice
-  }, [lugar, messages, canLoadOlder])
+  }, [lugar, messages, canLoadOlder, me])
   const marcaDoLugar = lugar ? (
     <div className="timeline-lugar" role="note" data-lugar={lugar.seq}>
       <span className="timeline-lugar-texto">{strings.sincronia.lugar}</span>
@@ -1175,7 +1243,9 @@ function TimelineInteira({
    * Frozen at room entry, see `usePorLer`, which explains why and why it
    * must be a layout effect.
    */
-  const porLer = usePorLer(channel, messages, me)
+  // What is folded is never unread: the mark and the count skip it.
+  const mensagensQueContam = useMemo(() => (ocultar ? messages.filter((message) => !ocultar(message)) : messages), [messages, ocultar])
+  const porLer = usePorLer(channel, mensagensQueContam, me)
   const porLerRef = useRef(porLer)
   porLerRef.current = porLer
   const mensagensRef = useRef(messages)
@@ -1284,6 +1354,23 @@ function TimelineInteira({
   const inicio = janela.conversa === conversaActual ? inicioDa(messages, janela.chave) : Math.max(0, messages.length - JANELA)
   const inicioRef = useRef(inicio)
   inicioRef.current = inicio
+  /** The lines the window draws. */
+  const desenhadas = useMemo(() => (inicio === 0 ? messages : messages.slice(inicio)), [messages, inicio])
+  /**
+   * What "Show" opened, kept in the module for this visit (`lib/bloqueados.ts`)
+   * and mirrored here so the click draws at once.
+   */
+  const [reveladasAgora, setReveladasAgora] = useState(0)
+  const mostrarBloqueadas = useCallback((chaves: readonly string[]) => {
+    revelar(chaves)
+    setReveladasAgora((n) => n + 1)
+  }, [])
+  /** The folded lines of the window, by drawn index. See `blocosOcultos`. */
+  const blocos = useMemo(
+    () => blocosOcultos(desenhadas, (message) => ocultar !== undefined && ocultar(message) && !estaRevelada(chaveDe(message)), chaveDe),
+    // `reveladasAgora` is the cue that the module set changed.
+    [desenhadas, ocultar, reveladasAgora],
+  )
   /** The window of the conversation on screen, saved with its position when we leave it. */
   const chaveDaJanelaQueSai = useRef<string | null>(null)
   /** Distance from the scroller's bottom before the window grew: the reader stays on the same line. */
@@ -1303,6 +1390,20 @@ function TimelineInteira({
   )
   const alargarRef = useRef(alargar)
   alargarRef.current = alargar
+  /*
+    "Load older" asks for the lines above the first one (carregar-antigas, 18/11/2026):
+    the window stays open from the first line, so what comes in is drawn. A short
+    conversation (30 lines or fewer) opened with the window "from the first line"
+    without being marked open, and the page that came in, or the next arrival,
+    closed it on the last 30 lines: the lines just loaded were not drawn.
+  */
+  /** See the layout effect that keeps the reader on this line when older lines come in. */
+  const ancoraDasAntigas = useRef<AncoraDeLinha | null>(null)
+  const carregarAntigas = useCallback(() => {
+    janelaAberta.current.add(conversaActual)
+    ancoraDasAntigas.current = linhaNoTopo(container.current, conversaActual)
+    onLoadOlder?.()
+  }, [conversaActual, onLoadOlder])
   /*
     Older lines arrived above ("load older", 17/11/2026) while the reader sits at
     the top: the window kept its first line, the scroller did not move, and no
@@ -1334,6 +1435,36 @@ function TimelineInteira({
     */
     if (inicioRef.current > 0 && el.scrollTop < el.clientHeight) requestAnimationFrame(() => alargarRef.current())
   }, [inicio])
+  /*
+    Where the reader is when the older lines come in (1.3.25, the owner: like
+    Discord). They go in ABOVE, and the conversation stays on the line the reader
+    was looking at. At `scrollTop` 0 the browser does not anchor, and the reader
+    was thrown up to the oldest line that came in. The anchor is the first line in
+    view and the distance of its bottom from the scroller's top (see
+    `distanciaAoTopo`), taken at the click and again at
+    each scroll (see `onScroll`). It is measured
+    again after the lines come in, so whatever the browser already moved is not
+    moved twice. A room switch drops it.
+  */
+  useLayoutEffect(() => {
+    const ancora = ancoraDasAntigas.current
+    const el = container.current
+    if (!ancora || !el) return
+    if (ancora.conversa !== conversaActual) {
+      ancoraDasAntigas.current = null
+      return
+    }
+    const linha = linhaDaAncora(el, ancora)
+    // The line left the drawn window (the bound cut it, or the window slid at the bottom): nothing to hold.
+    if (!linha) {
+      ancoraDasAntigas.current = null
+      return
+    }
+    const deslocou = distanciaAoTopo(el, linha) - ancora.distancia
+    if (deslocou === 0) return
+    el.scrollTop += deslocou
+    ultimoTopo.current = el.scrollTop
+  }, [primeiraChave, conversaActual])
 
   const itemCount = messages.length + pending.length
 
@@ -1371,6 +1502,29 @@ function TimelineInteira({
     nearBottom.current = true
     setShowJump(false)
   }, [])
+
+  /**
+   * The conversation shrinks from below, and the reader at the bottom stays at
+   * the bottom (20/11/2026).
+   *
+   * Everything under the conversation lives in the grid flow: the reply bar,
+   * the attachment previews, the "who is typing" line, a taller text box, and
+   * on the phone the keyboard (`useVisualViewport`). When one of them grows,
+   * the scroller gets shorter from the bottom. A shorter scroller keeps its
+   * `scrollTop` and fires no `scroll` event, so the last lines went under the
+   * new edge, and the reply bar looked like it sat on top of the text. This
+   * watches the scroller's own size. Who was reading higher up stays on the
+   * same line.
+   */
+  useEffect(() => {
+    const el = container.current
+    if (!el || typeof ResizeObserver !== "function") return
+    const observador = new ResizeObserver(() => {
+      if (nearBottom.current) colarAoFundo()
+    })
+    observador.observe(el)
+    return () => observador.disconnect()
+  }, [colarAoFundo])
 
   /** The gesture of the "new messages" button: here yes, it can slide. */
   const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
@@ -1596,6 +1750,13 @@ function TimelineInteira({
     if (isNearBottom(el)) nearBottom.current = true
     else if (el.scrollTop < ultimoTopo.current) nearBottom.current = false
     ultimoTopo.current = el.scrollTop
+    // The reader moved: the line held for "load older" is now this far from the top.
+    const ancora = ancoraDasAntigas.current
+    if (ancora) {
+      const linha = linhaDaAncora(el, ancora)
+      if (linha) ancora.distancia = distanciaAoTopo(el, linha)
+      else ancoraDasAntigas.current = null
+    }
     if (nearBottom.current) setShowJump(false)
     /*
       Reading down to the end, with the window in front, is done with the unread
@@ -1648,7 +1809,7 @@ function TimelineInteira({
           blank screen, with the explanation half a meter away, were two halves
           of the same sentence in different places. */}
       {!semNada && inicio === 0 && canLoadOlder && onLoadOlder && (
-        <button type="button" className="timeline-load-older" onClick={onLoadOlder}>
+        <button type="button" className="timeline-load-older" onClick={carregarAntigas}>
           {strings.chat.loadOlder}
         </button>
       )}
@@ -1673,7 +1834,8 @@ function TimelineInteira({
           <EmptyState
             title={strings.chat.timelineOlderTitle}
             body={strings.chat.timelineOlderBody}
-            {...(onLoadOlder ? { action: { label: strings.chat.loadOlder, onClick: onLoadOlder } } : {})}
+            /* The gate needs something to open (1.3.25): the same rule as the button above the first line. */
+            {...(canLoadOlder && onLoadOlder ? { action: { label: strings.chat.loadOlder, onClick: carregarAntigas } } : {})}
           />
         ) : porque === "despejado" ? (
           <EmptyState title={strings.chat.timelineKeptTitle} body={strings.chat.timelineKeptBody} />
@@ -1697,7 +1859,7 @@ function TimelineInteira({
         </div>
       )}
 
-      {(inicio === 0 ? messages : messages.slice(inicio)).map((message, i) => {
+      {desenhadas.map((message, i) => {
         const index = inicio + i
         // Consecutive messages from the same person within a few minutes are
         // shown as one block: the repeated name and avatar are noise.
@@ -1720,8 +1882,11 @@ function TimelineInteira({
           message.payload.replyTo === undefined &&
           (message.payload.sentAt ?? 0) - (previous?.payload.sentAt ?? 0) < 5 * 60_000
 
-        const pedido = pedidoDe?.(message) ?? null
         const chave = chaveDe(message)
+        const bloco = blocos[i]
+        // Swallowed by the folded line above it. The place marker, if it falls here, still shows.
+        if (bloco === "dentro") return index === indiceDoLugar ? <Fragment key={`lugar-${chave}`}>{marcaDoLugar}</Fragment> : null
+        const pedido = pedidoDe?.(message) ?? null
         const acesa = mencaoAcesa(message)
         /* The quote, stored as plain values for the line's memo. */
         const replyTo = message.payload.replyTo
@@ -1729,7 +1894,15 @@ function TimelineInteira({
         const original = citacao?.estado === "presente" ? citacao.original : undefined
         const resumo = original ? resumoDoOriginal(original.payload, nameFor) : undefined
 
-        const linha = (
+        const linha = bloco ? (
+          <div key={`bloqueadas-${chave}`} className="timeline-bloqueadas" role="note">
+            <span>{strings.chat.bloqueadas(bloco.quantas)}</span>
+            {" · "}
+            <button type="button" className="timeline-bloqueadas-mostrar" onClick={() => mostrarBloqueadas(bloco.chaves)}>
+              {strings.chat.mostrarBloqueadas}
+            </button>
+          </div>
+        ) : (
           <MessageRow
             // A friend request carries no identifier, it is not something said, it is an action, and the key falls into `t` with the `seq`, which is unique per channel. Without this, two requests in the same conversation shared the key `undefined` and React drew only one.
             key={chave}
@@ -1843,7 +2016,9 @@ function TimelineInteira({
               entry.state === "failed"
                 ? strings.chat.sendFailed
                 : entry.state === "waiting"
-                  ? strings.chat.aEsperaDeLigacao
+                  ? entry.motivo === "sala"
+                    ? strings.chat.aEsperaDaSala
+                    : strings.chat.aEsperaDeLigacao
                   : strings.chat.sending
             }
           >
@@ -1867,7 +2042,9 @@ function TimelineInteira({
             )}
             {entry.state === "waiting" && (
               <div className="outbox-actions">
-                <span className="outbox-espera">{strings.chat.aEsperaDeLigacaoNota}</span>
+                <span className="outbox-espera">
+                  {entry.motivo === "sala" ? strings.chat.aEsperaDaSalaNota : strings.chat.aEsperaDeLigacaoNota}
+                </span>
                 <button type="button" onClick={() => onDiscard(entry.id)}>
                   {strings.chat.discard}
                 </button>

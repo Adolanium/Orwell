@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { DEFAULT_ROOM, SalaAfk } from "@enclave/protocol"
+import { nomeDaSalaNoEcra } from "../lib/nomesDeOrigem.js"
 import type { ChannelRoom, EnclaveBridge } from "../bridge.js"
 import type { ChatMessage } from "../types.js"
 import { categoriaVisivel, type QuemVe } from "../screens/chat/categorias.js"
@@ -63,9 +64,10 @@ export const NOME_POR_OMISSAO = DEFAULT_ROOM.name
  * published, see `SALA_POR_OMISSAO`.
  */
 export function nomeDaSala(salas: readonly ChannelRoom[], room: string): string | undefined {
+  // For drawing: origin names in the reader's language (`nomesDeOrigem.ts`).
   const achada = salas.find((sala) => sala.room === room)
-  if (achada) return achada.name
-  return room === SALA_POR_OMISSAO ? NOME_POR_OMISSAO : undefined
+  if (achada) return nomeDaSalaNoEcra(achada.room, achada.name)
+  return room === SALA_POR_OMISSAO ? nomeDaSalaNoEcra(SALA_POR_OMISSAO, NOME_POR_OMISSAO) : undefined
 }
 
 /**

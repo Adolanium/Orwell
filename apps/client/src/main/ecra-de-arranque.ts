@@ -16,45 +16,42 @@
  */
 import type { EstadoDoEcra } from "./actualizacao-windows.js"
 import { ARTE_DO_ARRANQUE, FONTE_DO_ARRANQUE, TARJAS_DO_ARRANQUE } from "./arte-do-arranque.gen.js"
+import { type LinguaDoAnfitriao, textosDoAnfitriao } from "./lingua-do-anfitriao.js"
 
 /** Whole megabytes: the watcher wants to see the number move, not decimals. */
 function mb(bytes: number): string {
   return `${Math.round(bytes / 1024 / 1024)} MB`
 }
 
-/** The two lines and bar for each phase, in short sentences (STE100). */
-export function textoDoArranque(estado: EstadoDoEcra): { titulo: string; detalhe: string; progresso: number | null } {
+/** The two lines and bar for each phase, in short sentences (STE100), in the app's language. */
+export function textoDoArranque(
+  estado: EstadoDoEcra,
+  lingua: LinguaDoAnfitriao = "en",
+): { titulo: string; detalhe: string; progresso: number | null } {
+  const texto = textosDoAnfitriao(lingua).arranque
   switch (estado.fase) {
     case "a-procurar":
-      return { titulo: "A procurar actualizações", detalhe: "", progresso: null }
+      return { titulo: texto.aProcurar, detalhe: "", progresso: null }
     case "a-descarregar": {
       const fraccao = estado.total > 0 ? Math.min(1, estado.recebidos / estado.total) : 0
       return {
-        titulo: `A descarregar a versão ${estado.versao}`,
-        detalhe: `${mb(estado.recebidos)} de ${mb(estado.total)}`,
+        titulo: texto.aDescarregar(estado.versao),
+        detalhe: texto.recebidos(mb(estado.recebidos), mb(estado.total)),
         progresso: fraccao,
       }
     }
     // Before the UAC window (installation to Program Files). No bar: the title
     // has two lines and takes its place.
     case "a-pedir-autorizacao":
-      return {
-        titulo: `O Windows vai pedir autorização para instalar a versão ${estado.versao}.`,
-        detalhe: 'Carrega em "Sim" para continuar.',
-        progresso: null,
-      }
+      return { titulo: texto.aPedirAutorizacao(estado.versao), detalhe: texto.carregaEmSim, progresso: null }
     case "a-instalar":
-      return {
-        titulo: `A instalar a versão ${estado.versao}`,
-        detalhe: "A aplicação abre de novo quando terminar.",
-        progresso: 1,
-      }
+      return { titulo: texto.aInstalar(estado.versao), detalhe: texto.abreDeNovo, progresso: 1 }
   }
 }
 
 /** The code that puts a state on screen. Only our text, via `JSON.stringify`. */
-export function codigoDoEstado(estado: EstadoDoEcra): string {
-  const { titulo, detalhe, progresso } = textoDoArranque(estado)
+export function codigoDoEstado(estado: EstadoDoEcra, lingua: LinguaDoAnfitriao = "en"): string {
+  const { titulo, detalhe, progresso } = textoDoArranque(estado, lingua)
   const largura = progresso === null ? "null" : JSON.stringify(`${(progresso * 100).toFixed(1)}%`)
   return `(() => {
     document.getElementById("titulo").textContent = ${JSON.stringify(titulo)};
@@ -92,12 +89,12 @@ export const CORES_DO_ARRANQUE = {
  * network. Text and bar remain HTML, because they change per phase. The window
  * is 320×400 (`index.ts`); positions below are from the approved design.
  */
-export function htmlDoArranque(tema: keyof typeof CORES_DO_ARRANQUE): string {
+export function htmlDoArranque(tema: keyof typeof CORES_DO_ARRANQUE, lingua: LinguaDoAnfitriao = "en"): string {
   const cor = CORES_DO_ARRANQUE[tema]
   const fundo = tema !== "claro" ? `${cor.fundo} url("${ARTE_DO_ARRANQUE}") top center / 320px 280px no-repeat` : cor.fundo
   const arte = tema === "claro" ? `\n  <div class="arte" aria-hidden="true">${MARCA_SVG}</div>` : ""
   return `<!doctype html>
-<html lang="pt">
+<html lang="${lingua}">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; script-src 'none'">
@@ -123,11 +120,16 @@ export function htmlDoArranque(tema: keyof typeof CORES_DO_ARRANQUE): string {
 </head>
 <body>${arte}
   <div class="marca" role="img" aria-label="Orwell">${MARCA_SVG}<span aria-hidden="true">rwell</span></div>
-  <div id="titulo">A procurar actualizações</div>
+  <div id="titulo">${escaparHtml(textosDoAnfitriao(lingua).arranque.aProcurar)}</div>
   <div id="barra" hidden><div id="cheio"></div></div>
   <div id="detalhe"></div>
 </body>
 </html>`
+}
+
+/** Our own text in the page: no `<`, `&` or quote reaches it raw. */
+function escaparHtml(texto: string): string {
+  return texto.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
 }
 
 /** The approved dark page, as it always was. */

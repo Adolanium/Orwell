@@ -21,6 +21,14 @@ services:
       dockerfile: infra/Dockerfile
       target: server
     restart: unless-stopped
+    # The container log stays bounded (1.3.25): Docker's json-file grows without end by
+    # default, and what the server prints (accounts, errors) should not live on the disk
+    # for months. Three files of 10 MB at most, the oldest dropped first.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       # The public name users type at account creation. No port: the gateway
       # is reached as wss://<domain>/_enclave/gateway through the edge on 443.
@@ -52,6 +60,11 @@ services:
       # "1.0.0" on cutover day refuses beta apps with the error versao-antiga. Listed because of
       # the trap above.
       ENCLAVE_VERSAO_MINIMA_DO_CLIENTE: ${ENCLAVE_VERSAO_MINIMA_DO_CLIENTE:-}
+      # Who may create an account (1.3.25): aberto (default, as before), convite (a new account
+      # needs a code from scripts/convites-de-registo.mjs) or fechado (no new accounts). Existing
+      # accounts and their new devices always get in. Any other value stops the server at start.
+      # Listed because of the trap above: in .env only, it would silently stay aberto.
+      ENCLAVE_REGISTO: ${ENCLAVE_REGISTO:-aberto}
       # ---------------------------------------------------------------- SFU
       # The media engine. Listed here because of the same trap as the two above, which has already
       # bitten twice: compose only passes to the container what is listed, and a variable only in
@@ -89,6 +102,9 @@ services:
       # arrives after a random delay within the hours in ENCLAVE_DENUNCIA_ATRASO_HORAS
       # (1-6).
       ENCLAVE_DENUNCIAS_DIAS: ${ENCLAVE_DENUNCIAS_DIAS:-90}
+      # Days without subscribers after which a channel's encrypted vault is erased
+      # (apps/server/src/config.ts). 90 when empty; 0 turns the sweep off.
+      ENCLAVE_COFRE_GC_DIAS: ${ENCLAVE_COFRE_GC_DIAS:-90}
       ENCLAVE_DENUNCIA_ATRASO_HORAS: ${ENCLAVE_DENUNCIA_ATRASO_HORAS:-1-6}
       # Web Push (apps/server/src/push.ts): wakes closed apps with an empty notice. Off unless
       # `on`. The VAPID key is /data/push.key.json (0600, made on first start, in the volume
@@ -132,6 +148,14 @@ services:
       dockerfile: infra/Dockerfile
       target: web
     restart: unless-stopped
+    # The container log stays bounded (1.3.25): Docker's json-file grows without end by
+    # default, and what Caddy prints should not live on the disk
+    # for months. Three files of 10 MB at most, the oldest dropped first.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       - server
     environment:

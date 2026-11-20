@@ -92,7 +92,7 @@ const MUTACOES = [
     procurar: "ambito.membros.size >= PARTICIPANTES_POR_AMBITO",
     trocar: "false",
     quebra: "recusa o seguinte com a razão física",
-    porque: "sem tecto, a saída do servidor é o que ceder primeiro, e leva o magnuslab.pt com ela",
+    porque: "sem tecto, a saída do servidor é o que ceder primeiro, e leva os serviços vizinhos com ela",
   },
   {
     nome: "sem-orcamento-de-codec",

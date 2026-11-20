@@ -66,7 +66,7 @@ async function abrir(motor, nome, { browser = null, antiga = false } = {}) {
   return aparelho
 }
 
-const caixa = (page) => page.locator(".chat-composer .composer-line input:not([type])").first()
+const caixa = (page) => page.locator(".chat-composer .composer-line textarea").first()
 const linhaCom = (page, texto) => page.locator(".message").filter({ hasText: texto }).first()
 const errosDe = (nome) => registo.filter((linha) => linha.startsWith(`${nome} PAGEERROR`))
 

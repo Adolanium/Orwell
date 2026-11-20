@@ -4,9 +4,11 @@ import {
   COFRE_BALDE_BYTES,
   COFRE_ENTRADA_MAX_BYTES,
   fromBase64,
+  MODOS_DE_REGISTO,
   parseServerName,
   SINAL_MAX_CARACTERES,
   toBase64,
+  type ModoDeRegisto,
   type ServerName,
 } from "@enclave/protocol"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -118,14 +120,24 @@ export interface ServerConfig {
    */
   versaoMinimaDoCliente?: string
   /**
+   * Who may create an account here (`ENCLAVE_REGISTO`, 1.3.25): `aberto`, the
+   * default, lets any new account in, as before; `convite` only with a
+   * registration invite code (`scripts/convites-de-registo.mjs`); `fechado`
+   * only accounts that already exist. Existing accounts and their new devices
+   * always get in. Announced in `hello.ok`. See `registo.ts` in the protocol.
+   * Optional for the same reason as `versaoMinimaDoCliente`: absent is `aberto`.
+   */
+  registo?: ModoDeRegisto
+  /**
    * Caps for the encrypted vault (`cofre.*`, phase 3a). Optional for the same
    * reason as `sinal`: defaults come from `TECTOS_DO_COFRE`.
    */
   cofre?: Partial<TectosDoCofre>
   /**
    * Days without subscribers after which a channel's vault is erased (decision
-   * D7 of the encrypted state plan: 90). Zero, the default, turns off sweeping:
-   * nothing erases itself until the operator asks with `ENCLAVE_COFRE_GC_DIAS`.
+   * D7 of the encrypted state plan: 90). 90 is also the default since 1.3.25: a
+   * vault nobody reads any more is data kept for no one. Zero turns sweeping off,
+   * only when the operator says so with `ENCLAVE_COFRE_GC_DIAS=0`.
    * See `Store.varrerCofres`.
    */
   cofreGcDias?: number
@@ -239,6 +251,20 @@ export function eVersaoAntiga(config: Pick<ServerConfig, "versaoMinimaDoCliente"
     if ((dela[i] as number) !== (minima[i] as number)) return (dela[i] as number) < (minima[i] as number)
   }
   return false
+}
+
+/**
+ * `ENCLAVE_REGISTO`. Empty is `aberto`. Anything else that is not one of the
+ * three modes is a loud startup error: a typo read as `aberto` would leave the
+ * door open while the operator thinks it is shut, which is the failure this
+ * variable exists to prevent.
+ */
+function readRegisto(raw: string | undefined): ModoDeRegisto {
+  const valor = (raw ?? "").trim().toLowerCase()
+  if (valor === "") return "aberto"
+  const modo = MODOS_DE_REGISTO.find((cada) => cada === valor)
+  if (!modo) throw new Error(`ENCLAVE_REGISTO must be aberto, convite or fechado, got ${JSON.stringify(raw)}`)
+  return modo
 }
 
 /**
@@ -438,15 +464,17 @@ function readTectosDoCofre(env: NodeJS.ProcessEnv): TectosDoCofre {
   }
 }
 
+/** The days for the sweep of vaults with no subscribers when nothing is set (1.3.25). */
+const COFRE_GC_DIAS_POR_OMISSAO = 90
+
 /**
- * The days for the sweep of vaults with no subscribers. Empty or missing is 0 (off);
- * garbage or negative is a startup error, from the lesson of `readRetentionDays`:
- * here a `Number("")` read as 0 is harmless, but a `0,5` read as NaN would
- * silence the sweep the operator asked for without saying so.
+ * The days for the sweep of vaults with no subscribers. Empty or missing is 90;
+ * "0" is off. Garbage or negative is a startup error, from the lesson of
+ * `readRetentionDays`: a `0,5` read as NaN would silence the sweep without saying so.
  */
 function readCofreGcDias(raw: string | undefined): number {
   const trimmed = raw?.trim()
-  if (!trimmed) return 0
+  if (!trimmed) return COFRE_GC_DIAS_POR_OMISSAO
   const dias = Number(trimmed)
   if (!Number.isInteger(dias) || dias < 0) {
     throw new Error(`ENCLAVE_COFRE_GC_DIAS must be a non-negative whole number of days, got ${JSON.stringify(raw)}`)
@@ -569,6 +597,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       .map(parseServerName),
     sinal: readTectosDoSinal(env),
     versaoMinimaDoCliente: readVersaoMinima(env.ENCLAVE_VERSAO_MINIMA_DO_CLIENTE),
+    registo: readRegisto(env.ENCLAVE_REGISTO),
     cofre: readTectosDoCofre(env),
     cofreGcDias: readCofreGcDias(env.ENCLAVE_COFRE_GC_DIAS),
     orcamentoDeSaida: {

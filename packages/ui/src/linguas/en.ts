@@ -55,10 +55,29 @@ export const en: Traducao = {
     connectionConnecting: "connecting…",
     connectionReconnecting: "reconnecting…",
     connectionOffline: "no connection",
+    /** How long ago, and the limits next to a field (20/11/2026). */
+    tempo: {
+      agoraMesmo: "just now",
+      haMinutos: (n: number): string => `${n} min ago`,
+      haHoras: (n: number): string => `${n} h ago`,
+      ontem: "yesterday",
+      hojeAs: (hora: string): string => `today, ${hora}`,
+    },
+    maximo: (limite: string): string => `(max. ${limite})`,
+    /** The header of the diagnostic log the person copies (20/11/2026). */
+    diagnostico: {
+      titulo: "Orwell: diagnostic log",
+      gerado: (quando: string): string => `generated: ${quando}`,
+      conta: (quem: string): string => `account: ${quem}`,
+      ligacao: (estado: string): string => `connection: ${estado}`,
+      canais: (n: number): string => `channels: ${n}`,
+      eventos: (n: number): string => `events: ${n}`,
+    },
     pasteNotImage: "The pasted content is not an image the app can read. Use PNG, JPEG, GIF, WebP or AVIF.",
     imageShrunk: (de: string, para: string): string => `Image reduced from ${de} to ${para}.`,
     gifParado: (tem: string, maximo: string): string =>
       `The GIF is ${tem}. To stay animated, the maximum is ${maximo}. It is now still.`,
+    gifParadoNaMensagem: "This GIF is too large to animate. It will be sent as a still image.",
     imagesShrunk: (n: number, de: string, para: string): string => `${n} images reduced from ${de} to ${para}.`,
     spoilerShow: "Show hidden text",
   },
@@ -182,6 +201,11 @@ export const en: Traducao = {
     reveal: "Show",
     conceal: "Hide",
     serverInvalid: "This server address is not valid.",
+    askInvite: "What is the invite code?",
+    askInviteLead: "This server only accepts new accounts with an invite code. The person who runs the server gives you the code.",
+    invitePlaceholder: "XXXX-XXXX-XXXX-XXXX",
+    inviteCode: "Invite code",
+    registoFechado: "This server does not accept new accounts.",
     askName: "How do you want your name shown?",
     askNameLead: "This is how you appear to the people you talk to. You can change the name later.",
     askPhoto: "Do you want a profile picture?",
@@ -302,6 +326,7 @@ export const en: Traducao = {
     serverUnsupported: "This server cannot pair devices yet.",
     gateHasAccount: "This device already has an account. To pair, use a device without an account.",
     gateInvalid: "This pairing link cannot be read.",
+    fromChat: "This link adds one of your devices. Open it only on the new device, never from a chat.",
     failedTitle: "Pairing failed",
   },
 
@@ -317,6 +342,13 @@ export const en: Traducao = {
     settings: "Settings",
     menu: "Open the side panel",
     porAtender: (quantas: number): string => (quantas === 1 ? "1 unattended" : `${quantas} unattended`),
+    /** A nudge not seen yet, in words, for the Friends button (`AvisosDoCarril`). */
+    cotoveladaPorVer: (nome: string): string => `${nome} nudged you.`,
+    /* The rail notices without a number (20/11/2026), said to whoever cannot
+       see the shapes. Why each one exists is written in `linguas/pt.ts`. */
+    porLer: "Unread messages",
+    chamada: "Call in progress",
+    semLigacao: "No connection",
   },
 
   sidebar: {
@@ -334,6 +366,8 @@ export const en: Traducao = {
     newPost: "New post",
     createRoom: "Create channel",
     newRoom: "New room",
+    criarSalaNaCategoria: "Create room",
+    criarSalaNaCategoriaRotulo: (categoria: string): string => `Create room in ${categoria}`,
     editProfile: "Edit profile",
     joinWithLink: "Join with a link",
     entrarNoCanalOficial: "Join the official Orwell channel",
@@ -398,6 +432,9 @@ export const en: Traducao = {
     sendFailed: "not sent",
     aEsperaDeLigacao: "waiting for a connection",
     aEsperaDeLigacaoNota: "waiting for a connection. It shows the time it is sent.",
+    /** A message written in a deaf room (1.3.25): it goes out when the room is received again. */
+    aEsperaDaSala: "waiting for this room",
+    aEsperaDaSalaNota: "waiting until you receive this room again. It shows the time it is sent.",
     discard: "Discard",
     newMessages: "↓ New messages",
     loadOlder: "Load older",
@@ -430,6 +467,10 @@ export const en: Traducao = {
     },
     unreadMark: "unread",
     unreadJump: (n: number): string => (n === 1 ? "1 unread message: go there" : `${n} unread messages: go there`),
+    /** The folded line in a room for messages from someone you blocked (20/11/2026). */
+    bloqueadas: (n: number): string => (n === 1 ? "Message from a blocked person" : `${n} messages from a blocked person`),
+    /** Opens only the messages of that line, for this visit. */
+    mostrarBloqueadas: "Show",
     imageAdd: "Attach image",
     imageDrop: (nome: string): string => `Remove ${nome}`,
     imageCompressing: "compressing…",
@@ -483,11 +524,20 @@ export const en: Traducao = {
     pinnedDone: "Message pinned in this room.",
     pinnedUndone: "Message unpinned.",
     pinnedMark: "Pinned in this room",
+    /* The bar at the top of the room (fixadas-topo): the newest pin, and the way to the others. */
+    pinnedBarRegion: "Pinned messages at the top of the room",
+    pinnedBarLabel: "Pinned message",
+    pinnedBarCount: (posicao: number, total: number): string => `${posicao} of ${total}`,
+    pinnedBarOpen: "Go to the pinned message",
+    pinnedBarPrevious: "Previous pinned message",
+    pinnedBarNext: "Next pinned message",
+    pinnedBarHide: "Hide this bar in this room",
+    pinnedBarShow: "Show at the top of the room",
+    pinnedBarNotHere: "This message is not on this device. Read the pinned copy in the list.",
     buzzTitle: "Shakes the screen of the other person, with sound.",
     buzzCounting: (segundos: number): string => `${segundos}s`,
     buzzWait: (segundos: number): string =>
       segundos === 1 ? "You can send another in 1 second" : `You can send another in ${segundos} seconds`,
-    buzzMenuWait: (segundos: number): string => `Nudge (${segundos} s)`,
     searchToggle: "Search this conversation",
     searchPlaceholder: "Search",
     searchClear: "Clear",
@@ -1196,6 +1246,10 @@ export const en: Traducao = {
     welcomeDead: "This invitation does not work now. We asked for a new one.",
     channelDeleted: (canal: string): string =>
       `An administrator deleted ${canal}. The app of each member deletes the messages of the channel.`,
+    /** The server started the rooms and feeds again (`channels-reset`, `server-restarted`). */
+    channelsReset: "Rooms and feeds started again. Your account and your profile stay. Ask to be invited again.",
+    serverRestarted:
+      "The server restarted, and the old rooms and feeds do not exist now. Your account and your profile stay. Ask to be invited again.",
   },
 
   notifCenter: {
@@ -1280,6 +1334,9 @@ export const en: Traducao = {
   },
 
   convite: {
+    /** The answer to a channel invite, said in the language of who reads (20/11/2026). */
+    respostaAceite: (onde: string): string => `I accepted the invitation to ${onde}.`,
+    respostaRecusada: (onde: string): string => `I will not join ${onde} for now.`,
     titulo: (sala: string): string => `Invitation to ${sala}`,
     porResponder: "You will see messages from now on. You will not see earlier messages.",
     aceitar: "Join",
@@ -1787,6 +1844,7 @@ export const en: Traducao = {
     markRead: "Mark as read",
     markReadDirect: "Mark as read",
     renameCategory: "Rename the category",
+    criarSalaNaCategoria: "Create room",
     categoryVisibility: "Who sees this category",
     deleteCategory: "Delete category",
   },
@@ -1833,6 +1891,11 @@ export const en: Traducao = {
   },
 
   tickets: {
+    /** The act a message carries, said in the language of who reads (20/11/2026). */
+    actoFechou: (assunto: string): string => (assunto ? `Closed the ticket "${assunto}".` : "Closed this ticket."),
+    actoEmCurso: (assunto: string): string =>
+      assunto ? `Moved the ticket "${assunto}" to in progress.` : "Moved this ticket to in progress.",
+    actoReabriu: (assunto: string): string => (assunto ? `Reopened the ticket "${assunto}".` : "Reopened this ticket."),
     title: "Tickets",
     empty: "There are no tickets in this room yet.",
     emptyHint: "Open one to ask for help. All members of this channel see it.",
@@ -2021,6 +2084,15 @@ export const en: Traducao = {
   },
 
   rooms: {
+    /** The names rooms are born with, in the language of who reads (20/11/2026). */
+    nomesDeOrigem: {
+      geral: "general",
+      anuncios: "announcements",
+      conversa: "chat",
+      voz: "voice",
+      apresentacoes: "introductions",
+      avarias: "bugs",
+    },
     dropBefore: (nome: string): string => `Drop here to put it before ${nome}`,
     dropInCategory: (nome: string): string => `Drop here to put it at the end of ${nome}`,
     dragCategory: (nome: string): string => `Drag ${nome}, with its rooms`,
@@ -2076,6 +2148,16 @@ export const en: Traducao = {
     sent: (nome: string, sala: string): string => `You moved ${nome} to ${sala}.`,
     moved: (quem: string, sala: string): string => `${quem} moved you to ${sala}.`,
     outraSala: "another voice room",
+  },
+
+  formatacao: {
+    barra: "Text format",
+    negrito: "Bold",
+    italico: "Italic",
+    rasurado: "Strikethrough",
+    codigo: "Code",
+    coberto: "Hidden text",
+    dica: (nome: string, tecla: string): string => `${nome} (${tecla})`,
   },
 
   emoji: {
@@ -2258,6 +2340,13 @@ export const en: Traducao = {
     aEnviar: "Sending…",
     enviado: "We received the report. Thank you. We read all reports.",
     fechar: "Close",
+  },
+  legal: {
+    privacidade: "Privacy",
+    termos: "Terms",
+    privacidadeUrl: "https://orwell.pt/privacy.html",
+    termosUrl: "https://orwell.pt/terms.html",
+    idadeEAceitacao: "You must be 16 or older to use Orwell. When you create the account, you accept the Terms.",
   },
   comoFunciona: {
     titulo: "How Orwell works",
@@ -2788,6 +2877,11 @@ export const errosEn: Record<string, FraseDeErro> = {
   "the server refused the notification subscription": "The server refused notifications for this device. Try again later.",
   "the device clock is off": "The clock of this device is wrong. Set the time and try again.",
   "could not read the report inbox": "The server sent an answer we cannot read. Try again later.",
+  "this server does not accept new accounts": "This server does not accept new accounts.",
+  "this server needs a registration invite":
+    "This server only accepts new accounts with an invite code. Type the code you received.",
+  "the registration invite is not valid":
+    "That invite code is not valid, was already used or expired. Ask the person who runs the server for another one.",
   "account-suspended": "Your account is suspended on this server. Read the reason and ask for a review.",
   "the server did not take the review request": "The server did not take the review request. Try again later.",
   "the report needs a note": "Write a note. The reason \"Other\" needs one.",
@@ -2894,6 +2988,9 @@ export const errosEn: Record<string, FraseDeErro> = {
   "you may not create polls in this channel":
     "You cannot create polls in this channel. Ask a channel admin to give you this permission.",
   "the reaction emoji is not valid": "This reaction is not valid. Choose another emoji.",
+  "the app sent a request this version does not read": "The app sent a request this version does not read. Close the app and open it again.",
+  "this device is not receiving this channel":
+    "You are not receiving new messages in this room. The app is asking for your place again.",
   "only a closed ticket can be deleted": "You can delete only a closed ticket. Close it first.",
   "you may not moderate in this channel": "Your role does not let you moderate this channel.",
   "the nickname is too long": (detalhe) => {
@@ -2913,6 +3010,7 @@ export const errosEn: Record<string, FraseDeErro> = {
     "The call could not start on this server. Try again. If it happens again, copy the diagnostic in Settings.",
   "the call has no send path": "The call has no path to send. Join the call again.",
   "the call dropped and did not come back": "The call dropped and did not come back. Join again.",
+  "you joined the call on another device": "You joined the call on another device.",
 
   /* Notices from the core that are not errors, told by the same table (I9). */
   "you are no longer a member of this channel": "You are not a member of this channel now.",

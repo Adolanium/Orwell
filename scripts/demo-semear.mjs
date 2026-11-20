@@ -64,7 +64,7 @@ try {
   await ana.page.locator('.room-tree .room-name:text-is("votações")').first().waitFor({ timeout: 30_000 })
   if (!(await convidar(ana.page, CANAL, bruno.addr)) || !(await aceitarConvite(bruno.page, CANAL))) throw new Error("Bruno não entrou no canal")
 
-  const caixa = ana.page.locator('input[placeholder="Escreve uma mensagem"]')
+  const caixa = ana.page.locator('textarea[placeholder="Escreve uma mensagem"]')
   const poll = async (pergunta, opcoes) => {
     await ana.page.getByRole("button", { name: "Nova votação" }).click()
     await ana.page.locator('.sheet input[placeholder="O que queres perguntar?"]').fill(pergunta)

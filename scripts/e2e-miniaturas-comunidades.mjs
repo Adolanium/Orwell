@@ -47,7 +47,7 @@ mkdirSync(CAPTURAS, { recursive: true })
 mkdirSync(join(RAIZ, ".verify-data"), { recursive: true })
 
 const { check, resumo } = verificador()
-const ESCRITA = 'input[placeholder="Escreve uma mensagem"]'
+const ESCRITA = 'textarea[placeholder="Escreve uma mensagem"]'
 
 async function abrirSala(page, nome) {
   const sala = page

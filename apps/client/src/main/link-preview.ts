@@ -91,7 +91,7 @@ async function preverYoutube(id: string, buscar: typeof fetch, sinal: AbortSigna
       referrerPolicy: "no-referrer",
       signal: sinal,
     })
-    if (!resposta.ok) throw new Error(`o oEmbed respondeu ${resposta.status}`)
+    if (!resposta.ok) throw new Error(`the oEmbed answered ${resposta.status}`)
     const dados = (await resposta.json()) as { title?: unknown; author_name?: unknown; provider_name?: unknown }
     if (typeof dados.title === "string") title = dados.title.slice(0, 200)
     if (typeof dados.author_name === "string") siteName = dados.author_name.slice(0, 100)
@@ -133,7 +133,7 @@ export async function preVisualizarLink(url: string, deps: DepsDePreVisualizacao
       redirect: "follow",
       signal: controlo.signal,
     })
-    if (!resposta.ok) throw new Error(`a página respondeu ${resposta.status}`)
+    if (!resposta.ok) throw new Error(`the page answered ${resposta.status}`)
     const html = (await resposta.text()).slice(0, PAGINA_MAX_CHARS)
     const lida = parsePreviewHtml(html, resposta.url || url)
 

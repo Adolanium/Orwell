@@ -630,6 +630,50 @@ describe("Social — colar imagens", () => {
     expect(document.querySelector(".draft-images")).toBeNull()
   })
 
+  it("um GIF de 1 MB entra no rascunho intacto e animado (1.3.22)", async () => {
+    const user = userEvent.setup()
+    socialMock.post.mockClear()
+    const conteudo = new Uint8Array(1_000_000)
+    conteudo.set(new TextEncoder().encode("GIF89a"))
+    render(<Harness feed={[]} />)
+    colar("", [new File([conteudo as BlobPart], "gato.gif", { type: "image/gif" })])
+    await vi.waitFor(() => expect(document.querySelectorAll(".draft-image img")).toHaveLength(1))
+    expect((document.querySelector(".draft-image img") as HTMLImageElement).src.startsWith("data:image/gif;base64,R0lGODlh")).toBe(true)
+    expect(screen.queryByText(strings.common.gifParadoNaMensagem)).toBeNull()
+    await user.click(screen.getByText(strings.social.publish))
+    expect(socialMock.post).toHaveBeenCalledWith(
+      "",
+      [],
+      expect.objectContaining({ media: [expect.objectContaining({ mediaType: "image/gif" })] }),
+    )
+  })
+
+  it("um GIF que já não cabe na publicação vai parado, com o aviso", async () => {
+    vi.stubGlobal("createImageBitmap", async () => ({ width: 800, height: 600, close: () => undefined }))
+    const contexto = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: () => undefined } as never)
+    const escrever = vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation((tipo?: string) => `data:${tipo ?? "image/png"};base64,AAAA`)
+    try {
+      const enorme = {
+        dataUrl: `data:application/pdf;base64,${"A".repeat(7_800_000)}`,
+        name: "dossiê.pdf",
+        mediaType: "application/pdf",
+        bytes: 5_850_000,
+      }
+      // Under the 1 MiB post cap: it goes still for lack of room, not for weight.
+      const conteudo = new Uint8Array(900_000)
+      conteudo.set(new TextEncoder().encode("GIF89a"))
+      render(<Harness feed={[]} rascunho={{ caption: "", images: [], files: [enorme], links: [] }} />)
+      colar("", [new File([conteudo as BlobPart], "gato.gif", { type: "image/gif" })])
+      expect(await screen.findByText(strings.common.gifParadoNaMensagem)).toBeTruthy()
+      await vi.waitFor(() => expect(document.querySelectorAll(".draft-image img")).toHaveLength(1))
+      expect((document.querySelector(".draft-image img") as HTMLImageElement).src.startsWith("data:image/gif")).toBe(false)
+    } finally {
+      contexto.mockRestore()
+      escrever.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("a quinta imagem é recusada em voz alta, e não deitada fora em silêncio", async () => {
     render(<Harness feed={[]} />)
     for (const [posicao, nome] of ["a.png", "b.png", "c.png", "d.png"].entries()) {

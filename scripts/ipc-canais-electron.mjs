@@ -3,7 +3,7 @@
  *
  *   node scripts/ipc-canais-electron.mjs
  *
- * Builds the REAL `preload` (`apps/client/src/preload/index.ts`) and the bench (`apps/client/testes/bancada-ipc.ts`), opens a hidden window with the same conditions as the application, `sandbox`, `contextIsolation`, no Node in the renderer, and runs all 38 channel operations through, one by one.
+ * Builds the REAL `preload` (`apps/client/src/preload/index.ts`) and the bench (`apps/client/testes/bancada-ipc.ts`), opens a hidden window with the same conditions as the application, `sandbox`, `contextIsolation`, no Node in the renderer, and runs the channel operations through, one by one, with valid and refused arguments.
  *
  * **It exists because `apps/client` had no IPC bench at all**, and it was in that absence that 37 channel operations stayed unhooked without anything complaining. The `vitest` suites measure each side against a double, and a double clones nothing, always has the method asked of it, and passes objects by reference. Three things the real boundary does not do.
  *

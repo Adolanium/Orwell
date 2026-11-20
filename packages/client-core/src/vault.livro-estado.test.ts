@@ -169,7 +169,10 @@ describe("F11: atribuição de cargos pelo carimbo original", () => {
       for (const { roles, at, seq } of ordem) aplicarAtribuicao(c, SALA, BRUNO, roles, { at, seq, por: ANA })
       // Timestamp 20 beats 10; between the two with timestamp 20, seq 3 beats 2.
       expect(c.channelMemberRoles[SALA]?.[BRUNO]).toEqual([])
-      expect(c.channelMemberRolesAt?.[SALA]?.[BRUNO]).toEqual({ at: 20, seq: 3, por: ANA })
+      // The tie that changed the roles leaves its mark when it is applied as a tie (I1 of
+      // the polls-somem review, `seqDoEmpate`); the record itself is the same in every order.
+      const { empateSeq: _empate, ...carimbo } = c.channelMemberRolesAt?.[SALA]?.[BRUNO] ?? { at: 0 }
+      expect(carimbo).toEqual({ at: 20, seq: 3, por: ANA })
     }
   })
 

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron"
 import { CANAIS_DE_ACTUALIZACAO } from "../main/actualizacao.js"
 import { CANAIS_DE_ATALHOS } from "../main/atalhos.js"
 import { CANAIS_DE_CANAL, LEITURAS_DE_CANAL } from "../main/canais.js"
+import { CANAIS_DA_MINIATURA } from "../main/miniaturas-pela-janela.js"
 import { CANAIS_DA_OVERLAY } from "../main/overlay.js"
 import { CANAIS_SFU } from "../main/sfu.js"
 
@@ -50,6 +51,11 @@ contextBridge.exposeInMainWorld("enclaveHost", {
   /** The app's language, for the update question before the window. See `lingua:definir` in main. */
   lingua: {
     definir: (lingua: string) => ipcRenderer.send("lingua:definir", lingua),
+    /** The system languages, most preferred first, for the first frame. See `lingua:sistema` in main. */
+    doSistema: (): string[] => {
+      const lista: unknown = ipcRenderer.sendSync("lingua:sistema")
+      return Array.isArray(lista) ? lista.filter((l): l is string => typeof l === "string") : []
+    },
   },
   /** Write only (the Copy buttons). See `clipboard:write` in main and `ui/lib/copiar.ts`. */
   clipboard: {
@@ -167,6 +173,8 @@ contextBridge.exposeInMainWorld("enclaveHost", {
     capabilities: () => ipcRenderer.invoke("session:capabilities"),
     commonRoom: () => ipcRenderer.invoke("session:common-room"),
     escolherSalaComum: (entrar: boolean) => ipcRenderer.invoke("session:escolher-sala-comum", entrar),
+    sondarRegisto: (servidor: string) => ipcRenderer.invoke("session:sondar-registo", servidor),
+    definirConviteDeRegisto: (codigo: string | null) => ipcRenderer.invoke("session:convite-de-registo", codigo),
     setVisible: (visible: boolean) => ipcRenderer.invoke("session:set-visible", visible),
     latency: () => ipcRenderer.invoke("session:latency"),
     verificarLigacao: (opcoes?: { silencioMinimoMs?: number }) => ipcRenderer.invoke("session:verificar-ligacao", opcoes),
@@ -296,10 +304,31 @@ contextBridge.exposeInMainWorld("enclaveHost", {
     mayCreatePoll: (channel: string, address?: string) =>
       ler(LEITURAS_DE_CANAL.podeCriarVotacoes, channel, ...(address === undefined ? [] : [address])),
     mayInvite: (channel: string) => ler(LEITURAS_DE_CANAL.podeConvidar, channel),
-    moveVoice: (channel: string, address: string, room: string) =>
-      ipcRenderer.invoke(CANAIS_DE_CANAL.moverVoz, channel, address, room),
-    disconnectVoice: (channel: string, address: string) =>
-      ipcRenderer.invoke(CANAIS_DE_CANAL.desligarDaVoz, channel, address),
+    // `de` (the room the person leaves) since 1.3.25: the per-room rule needs it. See `moverVoz` in main.
+    moveVoice: (channel: string, address: string, room: string, de?: string) =>
+      ipcRenderer.invoke(CANAIS_DE_CANAL.moverVoz, channel, address, room, ...(de === undefined ? [] : [de])),
+    disconnectVoice: (channel: string, address: string, de?: string) =>
+      ipcRenderer.invoke(CANAIS_DE_CANAL.desligarDaVoz, channel, address, ...(de === undefined ? [] : [de])),
+    mayMoveIn: (channel: string, de: string, para?: string) =>
+      ler(LEITURAS_DE_CANAL.podeMoverEm, channel, de, ...(para === undefined ? [] : [para])),
+
+    /*
+      The 1.2 permission model, missing here until 1.3.25: without it the
+      roles-and-permissions editor never mounted and "Who writes" never
+      appeared. Nested like the UI bridge, so the renderer can hand it over
+      whole. Reads through `ler`, the one request through `invoke`.
+    */
+    permissoes: {
+      todos: (channel: string) => ler(LEITURAS_DE_CANAL.permissoesDeTodos, channel),
+      em: (channel: string, address: string, lugar?: unknown) =>
+        ler(LEITURAS_DE_CANAL.permissoesEm, channel, address, ...(lugar === undefined ? [] : [lugar])),
+      mayManageRole: (channel: string, role: string) => ler(LEITURAS_DE_CANAL.podeGerirCargo, channel, role),
+      delegacao: (channel: string) => ler(LEITURAS_DE_CANAL.delegacaoDeCargos, channel),
+      sobreposicoes: (channel: string, lugar: unknown) => ler(LEITURAS_DE_CANAL.sobreposicoes, channel, lugar),
+      maySetSobreposicoes: (channel: string, lugar: unknown) => ler(LEITURAS_DE_CANAL.podeSobrepor, channel, lugar),
+      setSobreposicoes: (channel: string, lugar: unknown, perms: unknown) =>
+        ipcRenderer.invoke(CANAIS_DE_CANAL.definirSobreposicoes, channel, lugar, perms),
+    },
 
     // Pinned messages. The text copy travels with the pin, see `pin`.
     pins: (channel: string, room: string) => ler(LEITURAS_DE_CANAL.fixadas, channel, room),
@@ -358,6 +387,7 @@ this channel.
     buzz: (channel: string) => ipcRenderer.invoke("channel:buzz", channel),
     members: (channel: string) => ipcRenderer.invoke("channel:members", channel),
     history: (channel: string) => ipcRenderer.invoke("channel:history", channel),
+    reaccoesGuardadas: (channel: string) => ipcRenderer.invoke("channel:reaccoes-guardadas", channel),
     conversaArquivada: (channel: string, cursor?: number | null) => ipcRenderer.invoke("channel:conversa-arquivada", channel, cursor),
     temConversaArquivada: (channel: string) => ipcRenderer.invoke("channel:tem-conversa-arquivada", channel),
     forget: (channel: string) => ipcRenderer.invoke("channel:forget", channel),
@@ -407,6 +437,7 @@ this channel.
       ipcRenderer.invoke("social:repair-invite", channel, address, force),
     deadWelcomes: () => ipcRenderer.invoke("social:dead-welcomes"),
     deafChannels: () => ipcRenderer.invoke("social:deaf-channels"),
+    canaisSurdos: () => ipcRenderer.invoke("social:canais-surdos"),
     syncCommunity: () => ipcRenderer.invoke("social:sync-community"),
     resyncWelcomes: (channel?: string) => ipcRenderer.invoke("social:resync-welcomes", channel),
     pedirPublicacoes: (channel: string) => ipcRenderer.invoke("social:pedir-publicacoes", channel),
@@ -455,7 +486,8 @@ this channel.
   sfu: {
     /** Does this server advertise the capability? Asked on every call join. */
     suporta: () => ipcRenderer.invoke(CANAIS_SFU.suporta),
-    entrar: (channel: string, scope: string) => ipcRenderer.invoke(CANAIS_SFU.entrar, channel, scope),
+    entrar: (channel: string, scope: string, opcoes?: { tomar?: boolean }) =>
+      opcoes?.tomar === true ? ipcRenderer.invoke(CANAIS_SFU.entrar, channel, scope, { tomar: true }) : ipcRenderer.invoke(CANAIS_SFU.entrar, channel, scope),
     sair: (channel: string, scope: string) => ipcRenderer.invoke(CANAIS_SFU.sair, channel, scope),
     criarTransporte: (channel: string, scope: string, direction: "envio" | "recepcao") =>
       ipcRenderer.invoke(CANAIS_SFU.criarTransporte, channel, scope, direction),
@@ -491,6 +523,10 @@ this channel.
     /** The Settings panel where permission is granted. macOS only. */
     abrirDefinicoes: () => ipcRenderer.invoke("ecra:abrirDefinicoes"),
   },
+  /** The thumbnail the window made for `event:miniatura-pedido`. See `main/miniaturas-pela-janela.ts`. */
+  miniatura: {
+    responder: (id: number, mini: unknown) => ipcRenderer.invoke(CANAIS_DA_MINIATURA.resposta, id, mini),
+  },
   on: {
     message: (handler: (payload: unknown) => void) => subscribe("event:message", handler),
     epoch: (handler: (payload: unknown) => void) => subscribe("event:epoch", handler),
@@ -518,6 +554,8 @@ this channel.
     media: (handler: (payload: unknown) => void) => subscribe("event:media", handler),
     typing: (handler: (payload: unknown) => void) => subscribe("event:typing", handler),
     recuperacao: (handler: (payload: unknown) => void) => subscribe("event:recuperacao", handler),
+    surdez: (handler: (payload: unknown) => void) => subscribe("event:surdez", handler),
+    eco: (handler: (payload: unknown) => void) => subscribe("event:eco", handler),
     buzz: (handler: (payload: unknown) => void) => subscribe("event:buzz", handler),
     voice: (handler: (payload: unknown) => void) => subscribe("event:voice", handler),
     /**
@@ -541,5 +579,7 @@ this channel.
      * leaves `getDisplayMedia` on the other end thinking forever.
      */
     ecraPedido: (handler: (payload: unknown) => void) => subscribe("event:ecra-pedido", handler),
+    /** The main process asks for a thumbnail `nativeImage` cannot make (GIF, WebP): `{ id, bytes, tipo }`. */
+    miniaturaPedido: (handler: (payload: unknown) => void) => subscribe(CANAIS_DA_MINIATURA.pedido, handler),
   },
 })

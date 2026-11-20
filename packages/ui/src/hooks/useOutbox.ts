@@ -34,7 +34,16 @@ export interface OutboxEntry {
    * is what cannot act yet.
    */
   state: "sending" | "failed" | "waiting"
+  /**
+   * Why it waits. `sala`: the room is deaf on this device (1.3.25, P2), and the
+   * message goes out when the room is received again, not when the connection
+   * comes back. Absent: it waits for the connection.
+   */
+  motivo?: "sala"
 }
+
+/** The core error of a send held in a deaf room. See `CANAL_SURDO` in the core. */
+export const SALA_SURDA = "this device is not receiving this channel"
 
 /**
  * Core errors that mean "no path forward", not "rejected". A message hitting
@@ -61,7 +70,7 @@ export type OutboxAction =
   | { type: "remove"; id: string }
   | { type: "failed"; id: string }
   | { type: "sending"; id: string }
-  | { type: "waiting"; id: string }
+  | { type: "waiting"; id: string; motivo?: "sala" }
   | { type: "delivered"; channel: string; body: string }
 
 export function outboxReducer(state: OutboxEntry[], action: OutboxAction): OutboxEntry[] {
@@ -73,9 +82,17 @@ export function outboxReducer(state: OutboxEntry[], action: OutboxAction): Outbo
     case "failed":
       return state.map((entry) => (entry.id === action.id ? { ...entry, state: "failed" as const } : entry))
     case "sending":
-      return state.map((entry) => (entry.id === action.id ? { ...entry, state: "sending" as const } : entry))
+      return state.map((entry) => {
+        if (entry.id !== action.id) return entry
+        const { motivo: _motivo, ...resto } = entry
+        return { ...resto, state: "sending" as const }
+      })
     case "waiting":
-      return state.map((entry) => (entry.id === action.id ? { ...entry, state: "waiting" as const } : entry))
+      return state.map((entry) => {
+        if (entry.id !== action.id) return entry
+        const { motivo: _motivo, ...resto } = entry
+        return { ...resto, state: "waiting" as const, ...(action.motivo ? { motivo: action.motivo } : {}) }
+      })
     case "delivered": {
       /**
        * The session emitted one of our own messages. Its payload id is a UUID
@@ -108,14 +125,22 @@ export function outboxReducer(state: OutboxEntry[], action: OutboxAction): Outbo
  * send that fails because the connection dropped mid-send goes back to
  * `waiting`, not `failed`: nobody rejected it, there was just no path forward.
  *
+ * A send held in a deaf room (`SALA_SURDA`, 1.3.25) also waits, with `motivo:
+ * "sala"`, and goes out when the room leaves `surdos`. The core decides what is
+ * deaf; this only keeps the text and tries again.
+ *
  * **No send sound** (16/11/2026). Sending is an event of this account, and
  * no sound or notice plays for one, from this device or any other. The sound it
  * had (since 3/11/2026) is gone, with its switch.
  */
+const SEM_SURDOS: ReadonlySet<string> = new Set()
+
 export function useOutbox(
   bridge: EnclaveBridge,
   connection: ConnectionState,
   notify: (detail: string, level?: ToastLevel) => void,
+  /** The deaf rooms now. See `bridge.on.surdez`. */
+  surdos: ReadonlySet<string> = SEM_SURDOS,
 ): {
   entries: OutboxEntry[]
   send: (channel: string, body: string, room?: string, extras?: MessageExtras) => void
@@ -140,6 +165,11 @@ export function useOutbox(
           dispatch({ type: "remove", id: entry.id })
         })
         .catch((error: Error) => {
+          // Held in a deaf room: nobody refused it, and there is no warning. The room says why.
+          if (error.message === SALA_SURDA) {
+            dispatch({ type: "waiting", id: entry.id, motivo: "sala" })
+            return
+          }
           // By the error, not just the state: the `.catch` runs before the render that
           // changes `connectionRef`, and a drop mid-send would land on `failed` with a
           // red warning.
@@ -211,6 +241,23 @@ export function useOutbox(
       }
     }
   }, [connection, retry, deliver])
+
+  /*
+    A room that hears again: what waited for it goes out, in the order it was
+    typed. Only when online; offline, the reconnect effect above sends it.
+  */
+  const surdosAntes = useRef(surdos)
+  useEffect(() => {
+    const antes = surdosAntes.current
+    surdosAntes.current = surdos
+    if (connectionRef.current !== "online") return
+    for (const entry of entriesRef.current) {
+      if (entry.state !== "waiting" || entry.motivo !== "sala") continue
+      if (!antes.has(entry.channel) || surdos.has(entry.channel)) continue
+      dispatch({ type: "sending", id: entry.id })
+      deliver(entry)
+    }
+  }, [surdos, deliver])
 
   /*
     A writer that stopped writing (new version, or another writer got the

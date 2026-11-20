@@ -105,6 +105,19 @@
   --danger-fill: var(--rosa-cheio);
   --on-danger: var(--tinta);
   --ok: var(--presenca);
+  /* The rail notices (20/11/2026). Each is a shape on the rail, so each passes
+     3:1 on `--fundo`; the mention carries a number, so its ink passes 4.5:1
+     on its fill (`tokens.contraste.test.ts`). The light blocks change the
+     mention and the nudge: pale cyan on the light rail was 1.1:1. */
+  --aviso-neutro: var(--titulo);
+  --aviso-mencao: var(--acento-cheio);
+  --aviso-mencao-tinta: var(--tinta-acento);
+  --aviso-toque: var(--rosa-cheio);
+  --aviso-toque-tinta: var(--tinta);
+  --aviso-chamada: var(--presenca);
+  --aviso-chamada-tinta: var(--tinta-acento);
+  --aviso-ligacao: var(--warning);
+  --aviso-ligacao-tinta: var(--tinta-acento);
 
   /* Depth: three tiers. The message actions; menus; sheets. */
   --sombra-1: 0 1px 2px rgb(var(--sombra-cor) / calc(0.3 * var(--sombra-forca))),
@@ -260,6 +273,11 @@
   --presence-busy: #d9363a;
   --presence-offline: #72757e;
   --sombra-forca: 0.45;
+  --aviso-mencao: var(--acento);
+  --aviso-mencao-tinta: var(--tinta);
+  --aviso-toque: var(--rosa);
+  --aviso-chamada-tinta: var(--tinta);
+  --aviso-ligacao-tinta: var(--tinta);
 }
 
 @media (prefers-color-scheme: light) {
@@ -292,5 +310,10 @@
     --presence-busy: #d9363a;
     --presence-offline: #72757e;
     --sombra-forca: 0.45;
+    --aviso-mencao: var(--acento);
+    --aviso-mencao-tinta: var(--tinta);
+    --aviso-toque: var(--rosa);
+    --aviso-chamada-tinta: var(--tinta);
+    --aviso-ligacao-tinta: var(--tinta);
   }
 }

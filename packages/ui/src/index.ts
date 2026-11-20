@@ -50,9 +50,9 @@ export type { SystemNotice, SystemNoticeHost } from "./lib/notifications.js"
   in Electron, which has its own, better path, because the main process knows the OS
   language list and the renderer only knows the startup locale.
 
-  Running detection on module load would also catch the jsdom from tests, where `navigator`
-  says "en-US": 2728 assertions written against Portuguese text would start running against
-  English. With no call, the language is the base.
+  Running detection on module load would also catch the jsdom from tests. With
+  no call, the language is the base, English (20/11/2026); the tests of this
+  package ask for Portuguese in `src/testes/lingua-de-teste.ts`.
 */
 export {
   arrancarLingua,
@@ -61,6 +61,7 @@ export {
   linguaActual,
   LINGUA_BASE,
   LINGUAS,
+  linguaDoSistema,
   // The catalog itself, for text the host draws outside the React tree (the new version banner
   // on the web). It is a live link: the current language is read on each access, like inside
   // this package.

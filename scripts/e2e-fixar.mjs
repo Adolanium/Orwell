@@ -99,7 +99,7 @@ await wait(3000)
 
 // ------------------------------------------------------- Bruno says something
 const AVISO = "o código do portão é 4417"
-const caixaBruno = bruno.page.locator('input[placeholder="Escreve uma mensagem"]')
+const caixaBruno = bruno.page.locator('textarea[placeholder="Escreve uma mensagem"]')
 await caixaBruno.click()
 await caixaBruno.fill(AVISO)
 await bruno.page.keyboard.press("Enter")

@@ -93,7 +93,7 @@ const indicador = (page) =>
 check("antes de alguém escrever, não há indicador nenhum", (await indicador(bruno.page)) === null)
 
 // Ana types, key by key, like a person.
-const caixaAna = ana.page.locator('input[placeholder="Escreve uma mensagem"]')
+const caixaAna = ana.page.locator('textarea[placeholder="Escreve uma mensagem"]')
 await caixaAna.click()
 await caixaAna.pressSequentially("olá Bruno, isto é uma frase a ser escrita", { delay: 45 })
 await wait(1200)
@@ -126,7 +126,7 @@ if (enviados !== null) {
 // goes to the group must be HER ADDRESS, while both their screens show the name.
 // It is the complete separation of the feature, and you only see it with both
 // windows open: one writes, the other reads and gets notified.
-const caixaBruno = bruno.page.locator('input[placeholder="Escreve uma mensagem"]')
+const caixaBruno = bruno.page.locator('textarea[placeholder="Escreve uma mensagem"]')
 await caixaBruno.click()
 await caixaBruno.pressSequentially("@", { delay: 60 })
 await wait(1200)

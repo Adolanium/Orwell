@@ -83,7 +83,7 @@ async function abrir(motor, nome, browser = null, contexto = {}) {
   return aparelho
 }
 
-const caixa = (page) => page.locator(".chat-composer .composer-line input:not([type])").first()
+const caixa = (page) => page.locator(".chat-composer .composer-line textarea").first()
 const linha = (page, texto) => page.locator(".message").filter({ hasText: texto }).first()
 const errosDe = (nome) => registo.filter((l) => l.startsWith(`${nome} PAGEERROR`))
 
@@ -91,6 +91,9 @@ async function dizer(page, texto) {
   await caixa(page).click()
   await caixa(page).pressSequentially(texto, { delay: 8 })
   await page.keyboard.press("Enter")
+  // With a finger (a touch context), Enter starts a new line and the send
+  // button sends (1.3.25). The text is still in the box: send it.
+  if ((await caixa(page).inputValue().catch(() => "")) !== "") await page.locator("form.chat-composer .composer-enviar").first().click()
 }
 
 /** Reply from the action bar; `mencionar` false turns "@ Mention" off first. */
@@ -104,6 +107,9 @@ async function responder(page, original, texto, mencionar) {
   if (((await botao.getAttribute("aria-pressed")) === "true") !== mencionar) await botao.click()
   await caixa(page).pressSequentially(texto, { delay: 8 })
   await page.keyboard.press("Enter")
+  // With a finger (a touch context), Enter starts a new line and the send
+  // button sends (1.3.25). The text is still in the box: send it.
+  if ((await caixa(page).inputValue().catch(() => "")) !== "") await page.locator("form.chat-composer .composer-enviar").first().click()
   await ate(async () => (await barra.count()) === 0, 10_000)
 }
 
@@ -116,6 +122,9 @@ async function mencionar(page, procura, escolha, resto) {
   await page.locator(".mention-picker .mention-option").filter({ hasText: escolha }).first().click()
   await campo.pressSequentially(` ${resto}`, { delay: 8 })
   await page.keyboard.press("Enter")
+  // With a finger (a touch context), Enter starts a new line and the send
+  // button sends (1.3.25). The text is still in the box: send it.
+  if ((await campo.inputValue().catch(() => "")) !== "") await page.locator("form.chat-composer .composer-enviar").first().click()
 }
 
 /** Everything measured on one lit or unlit line, read in the page. */
@@ -340,7 +349,7 @@ try {
   check("6,5 s depois do salto não fica realce preso", preso.destacadas === 0, JSON.stringify(preso))
   check("6,5 s depois do salto, com o rato fora, nenhuma barra de acções fica à vista", preso.barras === 0, JSON.stringify(preso))
   await bruno.page.screenshot({ path: join(CAPTURAS, "preso-2-6s-depois-do-salto.png") })
-  await bruno.page.locator(".chat-composer .composer-line input:not([type])").first().click()
+  await bruno.page.locator(".chat-composer .composer-line textarea").first().click()
   await espera(300)
   const depoisDoClique = await bruno.page.evaluate(() => [...document.querySelectorAll(".message .msg-actions")].filter((b) => getComputedStyle(b).opacity !== "0").length)
   check("e depois de clicar na caixa também não", depoisDoClique === 0, `${depoisDoClique}`)

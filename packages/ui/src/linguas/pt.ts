@@ -50,6 +50,24 @@ export const pt = {
     connectionConnecting: "a ligar…",
     connectionReconnecting: "a reconectar…",
     connectionOffline: "sem ligação",
+    /** How long ago, and the limits next to a field (20/11/2026). */
+    tempo: {
+      agoraMesmo: "agora mesmo",
+      haMinutos: (n: number): string => `há ${n} min`,
+      haHoras: (n: number): string => `há ${n} h`,
+      ontem: "ontem",
+      hojeAs: (hora: string): string => `hoje, ${hora}`,
+    },
+    maximo: (limite: string): string => `(máx. ${limite})`,
+    /** The header of the diagnostic log the person copies (20/11/2026). */
+    diagnostico: {
+      titulo: "Orwell: registo de diagnóstico",
+      gerado: (quando: string): string => `gerado: ${quando}`,
+      conta: (quem: string): string => `conta: ${quem}`,
+      ligacao: (estado: string): string => `ligação: ${estado}`,
+      canais: (n: number): string => `canais: ${n}`,
+      eventos: (n: number): string => `eventos: ${n}`,
+    },
 
     /*
       Pasting images, in both composers.
@@ -89,6 +107,8 @@ export const pt = {
     */
     gifParado: (tem: string, maximo: string): string =>
       `O GIF tem ${tem}. Para ficar animado, o máximo é ${maximo}. Ficou parado.`,
+    /* The same, in a message or a post: there the cap also depends on what else the message carries, so no number. */
+    gifParadoNaMensagem: "Este GIF é grande de mais para animar. Vai como imagem parada.",
     imagesShrunk: (n: number, de: string, para: string): string =>
       `${n} imagens reduzidas de ${de} para ${para}.`,
     /**
@@ -303,6 +323,17 @@ export const pt = {
      * palavra-passe"). Switching register halfway through the front door would
      * show more than the formality was worth.
      */
+    /*
+      The registration invite (1.3.25): a server with `ENCLAVE_REGISTO=convite`
+      lets a new account in only with a code from its operator. The page comes
+      right after the name, only on such a server. `registoFechado` is said on
+      the name page, before the vault exists, on a server that takes no new accounts.
+    */
+    askInvite: "Qual é o código de convite?",
+    askInviteLead: "Este servidor só aceita contas novas com um código de convite. Quem gere o servidor dá-te o código.",
+    invitePlaceholder: "XXXX-XXXX-XXXX-XXXX",
+    inviteCode: "Código de convite",
+    registoFechado: "Este servidor não aceita contas novas.",
     askName: "Como queres mostrar o teu nome?",
     askNameLead: "É assim que apareces a quem fala contigo. Podes mudar o nome mais tarde.",
     /*
@@ -498,6 +529,8 @@ export const pt = {
     gateHasAccount: "Este aparelho já tem uma conta. Para emparelhar, usa um aparelho sem conta.",
     /** And the link that cannot even be read. Saying so is better than the silence there was. */
     gateInvalid: "Este link de emparelhamento não se lê.",
+    /* A pairing link clicked in a message (1.3.25): it never opens, here or outside. */
+    fromChat: "Este link serve para juntar um aparelho teu. Abre-o só no aparelho novo, nunca a partir de uma conversa.",
     failedTitle: "O emparelhamento falhou",
     /* The reason for not pairing no longer lives here: it is an error like the
        others, with a code (7xx), and goes through `translatePairingError` in `strings.ts`. */
@@ -585,6 +618,19 @@ export const pt = {
      */
     porAtender: (quantas: number): string =>
       quantas === 1 ? "1 por atender" : `${quantas} por atender`,
+    /** A nudge not seen yet, in words, for the Friends button (`AvisosDoCarril`). */
+    cotoveladaPorVer: (nome: string): string => `${nome} deu-te uma cotovelada.`,
+    /*
+     * The rail notices without a number (20/11/2026, option A), in words.
+     *
+     * The drawing tells them apart by shape: a pill for unread, a glyph for a
+     * nudge, a green seal for a call, an amber seal on the logo for a dropped
+     * connection. The shapes are hidden from screen readers, so each one has
+     * its sentence here, in the button's description next to the count.
+     */
+    porLer: "Mensagens por ler",
+    chamada: "Chamada a decorrer",
+    semLigacao: "Sem ligação",
   },
 
   sidebar: {
@@ -614,6 +660,9 @@ export const pt = {
        words exist to undo. */
     createRoom: "Criar canal",
     newRoom: "Nova sala",
+    /** The `+` left of a category's name (1.3.25): a room created already in that category. */
+    criarSalaNaCategoria: "Criar sala",
+    criarSalaNaCategoriaRotulo: (categoria: string): string => `Criar sala em ${categoria}`,
     editProfile: "Editar perfil",
     joinWithLink: "Entrar com um link",
     /**
@@ -758,6 +807,9 @@ export const pt = {
     aEsperaDeLigacao: "à espera de ligação",
     /** Spelled out on the line: the time shown now is when it was written, and the one that stays is when it was sent. */
     aEsperaDeLigacaoNota: "à espera de ligação. Mostra a hora de envio.",
+    /** A message written in a deaf room (1.3.25): it goes out when the room is received again. */
+    aEsperaDaSala: "à espera desta sala",
+    aEsperaDaSalaNota: "à espera de voltares a receber esta sala. Mostra a hora de envio.",
     discard: "Descartar",
     newMessages: "↓ Novas mensagens",
     loadOlder: "Carregar mais antigas",
@@ -835,6 +887,9 @@ export const pt = {
     unreadMark: "por ler",
     unreadJump: (n: number): string =>
       n === 1 ? "1 mensagem por ler: ir para lá" : `${n} mensagens por ler: ir para lá`,
+    bloqueadas: (n: number): string =>
+      n === 1 ? "Mensagem de uma pessoa bloqueada" : `${n} mensagens de uma pessoa bloqueada`,
+    mostrarBloqueadas: "Mostrar",
 
     imageAdd: "Anexar imagem",
     imageDrop: (nome: string): string => `Tirar ${nome}`,
@@ -980,20 +1035,24 @@ export const pt = {
      * and not only that it is.
      */
     pinnedMark: "Fixada nesta sala",
+    /*
+      The bar at the top of the room (fixadas-topo, 20/11/2026): the newest pin, the
+      count, and the way to the others. Hidden per room on this device; a newer pin
+      shows it again, and the sheet has the button that brings it back.
+    */
+    pinnedBarRegion: "Mensagens fixadas no topo da sala",
+    pinnedBarLabel: "Mensagem fixada",
+    pinnedBarCount: (posicao: number, total: number): string => `${posicao} de ${total}`,
+    pinnedBarOpen: "Ir para a mensagem fixada",
+    pinnedBarPrevious: "Fixada anterior",
+    pinnedBarNext: "Fixada seguinte",
+    pinnedBarHide: "Esconder esta barra nesta sala",
+    pinnedBarShow: "Mostrar no topo da sala",
+    pinnedBarNotHere: "Esta mensagem não está neste aparelho. Lê a cópia fixada na lista.",
     buzzTitle: "Abana o ecrã da outra pessoa, com som.",
     buzzCounting: (segundos: number): string => `${segundos}s`,
     buzzWait: (segundos: number): string =>
       segundos === 1 ? "Podes dar outra dentro de 1 segundo" : `Podes dar outra dentro de ${segundos} segundos`,
-    /**
-     * The same, inside the `+` menu, and shorter on purpose.
-     *
-     * `buzzWait` is a full sentence because it lived in a tooltip read with the
-     * mouse resting on it. In a list of options, a sentence like that pushes
-     * its siblings and hides the gesture's name, and the name is what you look
-     * for when opening the menu. Here it says what it is first, and how long is
-     * left after.
-     */
-    buzzMenuWait: (segundos: number): string => `Cotovelada (${segundos} s)`,
 
     /**
      * Searching the conversation.
@@ -2412,6 +2471,10 @@ export const pt = {
     welcomeDead: "Este convite já não funciona. Pedimos outro.",
     channelDeleted: (canal: string): string =>
       `Um administrador eliminou ${canal}. A app de cada membro apaga as mensagens do canal.`,
+    /** The server started the rooms and feeds again (`channels-reset`, `server-restarted`). */
+    channelsReset: "Salas e feeds recomeçados. A tua conta e o teu perfil mantêm-se. Pede para te convidarem de novo.",
+    serverRestarted:
+      "O servidor foi reiniciado, e as salas e feeds antigos deixaram de existir. A tua conta e o teu perfil mantêm-se. Pede para te convidarem de novo.",
   },
 
   notifCenter: {
@@ -2560,6 +2623,9 @@ export const pt = {
    * the same words Amigos already uses.
    */
   convite: {
+    /** The answer to a channel invite, said in the language of who reads (20/11/2026). */
+    respostaAceite: (onde: string): string => `Aceitei o convite para ${onde}.`,
+    respostaRecusada: (onde: string): string => `Por agora não vou entrar em ${onde}.`,
     titulo: (sala: string): string => `Convite para ${sala}`,
     /**
      * What joining gives, and what it does not: said to whoever is about to press the button.
@@ -3369,6 +3435,8 @@ export const pt = {
        themselves. The words here and in the warning have to say that, or
        "apagar" reads as "delete what is inside". */
     renameCategory: "Mudar o nome da categoria",
+    /** A room created already in this category (1.3.25). The same as the `+` left of its name. */
+    criarSalaNaCategoria: "Criar sala",
     /* "Quem vê" and not "Permissões" or "Privacidade": both promised a
        protection this does not give. The sheet says the rest: see
        `categoryProperties.note`. */
@@ -3445,6 +3513,11 @@ export const pt = {
    * to say them is where the person is looking at the consequence.
    */
   tickets: {
+    /** The act a message carries, said in the language of who reads (20/11/2026). */
+    actoFechou: (assunto: string): string => (assunto ? `Fechou o ticket "${assunto}".` : "Fechou este ticket."),
+    actoEmCurso: (assunto: string): string =>
+      assunto ? `Pôs o ticket "${assunto}" em curso.` : "Pôs este ticket em curso.",
+    actoReabriu: (assunto: string): string => (assunto ? `Reabriu o ticket "${assunto}".` : "Reabriu este ticket."),
     title: "Tickets",
     empty: "Ainda não há tickets nesta sala.",
     emptyHint: "Abre um para pedir ajuda. Quem está neste canal vê-o.",
@@ -3741,6 +3814,15 @@ export const pt = {
    * what these words promise.
    */
   rooms: {
+    /** The names rooms are born with, in the language of who reads (20/11/2026). */
+    nomesDeOrigem: {
+      geral: "geral",
+      anuncios: "anúncios",
+      conversa: "conversa",
+      voz: "voz",
+      apresentacoes: "apresentações",
+      avarias: "avarias",
+    },
     dropBefore: (nome: string): string => `Largar aqui para pôr antes de ${nome}`,
     dropInCategory: (nome: string): string => `Largar aqui para pôr no fim de ${nome}`,
 
@@ -3884,6 +3966,22 @@ export const pt = {
     sent: (nome: string, sala: string): string => `Moveste ${nome} para ${sala}.`,
     moved: (quem: string, sala: string): string => `${quem} moveu-te para ${sala}.`,
     outraSala: "outra sala de voz",
+  },
+
+  /*
+    The formatting bar over a selection in the text box, and its tooltips
+    (20/11/2026). Each name is what the button does to the selected text. The
+    tooltip adds the key, written for this computer ("Ctrl+B" or "⌘B").
+    "Texto escondido" is the same word as `common.spoilerShow`.
+  */
+  formatacao: {
+    barra: "Formatação do texto",
+    negrito: "Negrito",
+    italico: "Itálico",
+    rasurado: "Rasurado",
+    codigo: "Código",
+    coberto: "Texto escondido",
+    dica: (nome: string, tecla: string): string => `${nome} (${tecla})`,
   },
 
   emoji: {
@@ -4164,6 +4262,20 @@ export const pt = {
     aEnviar: "A enviar…",
     enviado: "Recebemos o relato. Obrigado. Lemos todos os relatos.",
     fechar: "Fechar",
+  },
+  /**
+   * The Privacy Policy and the Terms of the orwell.pt site, from the app (GDPR
+   * art. 13). Each language links to the page in that language; English is the
+   * root of the site, Portuguese lives under `pt/`. The age is the one the
+   * Terms set ("at least 16"). Creating the account is the acceptance, as the
+   * Terms say: no checkbox.
+   */
+  legal: {
+    privacidade: "Privacidade",
+    termos: "Termos",
+    privacidadeUrl: "https://orwell.pt/pt/privacidade.html",
+    termosUrl: "https://orwell.pt/pt/termos.html",
+    idadeEAceitacao: "Tens de ter 16 anos ou mais para usar o Orwell. Ao criar a conta, aceitas os Termos.",
   },
   comoFunciona: {
     /* «Como funciona o Orwell»; the registration link stays «Como funciona». */
@@ -4836,6 +4948,11 @@ export const errosPt: Record<string, FraseDeErro> = {
   "the server refused the notification subscription": "O servidor recusou os avisos para este aparelho. Tenta outra vez mais tarde.",
   "the device clock is off": "O relógio deste aparelho está errado. Acerta a hora e tenta outra vez.",
   "could not read the report inbox": "O servidor mandou uma resposta que não conseguimos ler. Tenta outra vez mais tarde.",
+  "this server does not accept new accounts": "Este servidor não aceita contas novas.",
+  "this server needs a registration invite":
+    "Este servidor só aceita contas novas com um código de convite. Escreve o código que recebeste.",
+  "the registration invite is not valid":
+    "Esse código de convite não é válido, já foi usado ou expirou. Pede outro a quem gere o servidor.",
   // The account suspension (reports, §8): the notice and the review request.
   "account-suspended": "A tua conta está suspensa neste servidor. Lê o motivo e pede revisão.",
   "the server did not take the review request": "O servidor não aceitou o pedido de revisão. Tenta outra vez mais tarde.",
@@ -4941,6 +5058,9 @@ export const errosPt: Record<string, FraseDeErro> = {
   "you may not create polls in this channel":
     "Não podes criar votações neste canal. Pede a um administrador do canal que te dê esta permissão.",
   "the reaction emoji is not valid": "Esta reacção não é válida. Escolhe outro emoji.",
+  "the app sent a request this version does not read": "A app enviou um pedido que esta versão não lê. Fecha e abre a app.",
+  "this device is not receiving this channel":
+    "Não recebes mensagens novas desta sala. A app está a pedir o lugar de novo.",
   "only a closed ticket can be deleted": "Só se elimina um ticket fechado. Fecha-o primeiro.",
   "you may not moderate in this channel": "O teu cargo não te deixa moderar este canal.",
   "the nickname is too long": (detalhe) => {
@@ -4960,6 +5080,7 @@ export const errosPt: Record<string, FraseDeErro> = {
     "A chamada não se montou neste servidor. Tenta outra vez. Se repetir, copia o diagnóstico nas Configurações.",
   "the call has no send path": "A chamada não tem caminho de envio. Entra de novo na chamada.",
   "the call dropped and did not come back": "A chamada caiu e não voltou. Entra outra vez.",
+  "you joined the call on another device": "Entraste na chamada noutro aparelho.",
 
   /* Core notices that are not errors, said through the same table (I9). */
   "you are no longer a member of this channel": "Já não és membro deste canal.",

@@ -30,6 +30,8 @@ export function PinnedPanel({
   corpoDe,
   onDesafixar,
   onAbrir,
+  realcada = null,
+  onMostrarBarra,
   onClose,
 }: {
   /**
@@ -55,11 +57,25 @@ export function PinnedPanel({
    */
   corpoDe: (id: string) => string | undefined
   onDesafixar: (id: string) => void
-  /** Jump to the message, if it is in this person's conversation. */
+  /**
+   * Jump to the message. Since fixadas-topo the shell looks for it in the vault
+   * too, and says when this device does not have it (it opens this sheet on it).
+   */
   onAbrir?: ((id: string) => void) | undefined
+  /** The pin this device has no message for: highlighted, in view, and plain text. */
+  realcada?: string | null | undefined
+  /** Present only while the room hides its pinned bar: the button that shows it again. */
+  onMostrarBarra?: (() => void) | undefined
   onClose: () => void
 }): React.JSX.Element {
   const folha = useRef<HTMLDivElement>(null)
+
+  // The pin the sheet opened on comes into view: with twenty, it may be below the fold.
+  useEffect(() => {
+    if (!realcada) return
+    const linha = folha.current?.querySelector<HTMLElement>(".pinned-row.realcada")
+    linha?.scrollIntoView?.({ block: "nearest" })
+  }, [realcada])
 
   useEffect(() => {
     const dispensar = (event: MouseEvent): void => {
@@ -101,17 +117,18 @@ export function PinnedPanel({
             // A message with only a picture is not "(no text)": the picture says what it was.
             const texto = corpo || (anexos.length > 0 ? "" : strings.chat.pinnedNoText)
             return (
-              <li key={fixada.id} className="pinned-row">
+              <li key={fixada.id} className={fixada.id === realcada ? "pinned-row realcada" : "pinned-row"}>
                 <Avatar profile={directory.get(fixada.sender)} fallback={fixada.sender[1] ?? "?"} />
                 <div className="pinned-corpo">
                   <span className="pinned-autor">
                     <NomeDePessoa nome={nameFor(fixada.sender)} endereco={fixada.sender} />
                     <time title={formatStamp(fixada.sentAt)}>{formatRelative(fixada.sentAt)}</time>
                   </span>
-                  {/* The button jumps to the message; with nowhere to jump to
-                      it is just text. A button that leads nowhere
-                      signals that the app is broken. */}
-                  {onAbrir && original !== undefined ? (
+                  {/* The button jumps to the message (the shell also reads the
+                      vault for it). The pin we already know has no message here
+                      is just text: a button that leads nowhere signals that the
+                      app is broken. */}
+                  {onAbrir && fixada.id !== realcada ? (
                     <button type="button" className="pinned-texto" onClick={() => onAbrir(fixada.id)}>
                       {texto || anexos.map((anexo) => anexo.name).join(", ")}
                     </button>
@@ -146,6 +163,13 @@ export function PinnedPanel({
         </ul>
       )}
 
+      {onMostrarBarra && pins.length > 0 && (
+        <div className="pinned-mostrar">
+          <Button variant="ghost" onClick={onMostrarBarra}>
+            {strings.chat.pinnedBarShow}
+          </Button>
+        </div>
+      )}
       <p className="pinned-note">{strings.chat.pinnedNote}</p>
     </div>
   )

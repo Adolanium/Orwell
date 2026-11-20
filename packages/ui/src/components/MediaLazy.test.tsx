@@ -7,6 +7,7 @@ import type { MediaItem } from "../types.js"
 import { AnexosDoItem } from "./AnexoAPedido.js"
 import { MediaLazy } from "./MediaLazy.js"
 import { PostImages } from "./PostImages.js"
+import { Lightbox } from "./Lightbox.js"
 
 /**
  * `MediaLazy` (Task 10, design §8): the box reserved with `w` and `h` before
@@ -195,5 +196,52 @@ describe("MediaLazy", () => {
     act(() => entrar())
     await waitFor(() => expect(screen.getByAltText("b.png").getAttribute("src")).toBeTruthy())
     expect(segundo.container.querySelector(".media-transicao")).toBeNull()
+  })
+})
+
+/**
+ * A GIF that arrives whole animates (1.3.22): in the conversation, in the zoom
+ * and with reduced motion. The app never draws it to a canvas or keeps the
+ * still thumbnail once the original is there: it hands the original bytes to an
+ * `<img>`, typed `image/gif`, and the engine animates it. Reduced motion only
+ * drops the blur transition; the GIF keeps moving (a Windows with animations
+ * off reports reduced motion, and a still GIF there is the bug).
+ */
+describe("MediaLazy — GIF animado", () => {
+  const GIF = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 0, 1, 0])
+
+  for (const comReduzido of [false, true]) {
+    it(`na conversa e na vista ampliada mostra o original GIF, não a miniatura${comReduzido ? ", com movimento reduzido" : ""}`, async () => {
+      reduzido = comReduzido
+      const sha = novoSha()
+      const mini = novoSha()
+      const { bridge } = ponte((s) => (s === mini ? new Uint8Array([9]) : s === sha ? GIF : null))
+      const item: MediaItem = { ref: sha, mini, name: "gato.gif", mediaType: "image/gif", w: 480, h: 270 }
+      const conversa = render(
+        <BridgeContext.Provider value={bridge}>
+          <PostImages media={[item]} onOpen={() => {}} />
+        </BridgeContext.Provider>,
+      )
+      act(() => entrar())
+      await waitFor(() => expect(screen.getByAltText("gato.gif").className).toBe("media-original"))
+      expect(screen.getByAltText("gato.gif").getAttribute("src")).toMatch(/^(data:image\/gif;base64,|blob:)/)
+      expect(conversa.container.querySelector("canvas")).toBeNull()
+      conversa.unmount()
+
+      render(
+        <BridgeContext.Provider value={bridge}>
+          <Lightbox item={item} onClose={() => {}} />
+        </BridgeContext.Provider>,
+      )
+      await waitFor(() => expect(screen.getByAltText("gato.gif").className).toBe("media-original"))
+      expect(screen.getByAltText("gato.gif").getAttribute("src")).toMatch(/^(data:image\/gif;base64,|blob:)/)
+      expect(document.querySelector(".lightbox canvas")).toBeNull()
+    })
+  }
+
+  it("um GIF inline (sem referência) vai directo para um <img>", () => {
+    const inline = "data:image/gif;base64,R0lGODlhAQABAAAAACw="
+    render(<PostImages media={[{ inline, name: "velho.gif", mediaType: "image/gif" }]} onOpen={() => {}} />)
+    expect(screen.getByAltText("velho.gif").getAttribute("src")).toBe(inline)
   })
 })

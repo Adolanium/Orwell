@@ -138,6 +138,44 @@ export function guardarApagada(conteudo: VaultContents, canal: string, id: strin
   for (const velha of ids.slice(0, ids.length - TECTO_DE_APAGADAS)) delete doCanal[velha]
 }
 
+// ------------------------------------------------------------------- held
+
+/**
+ * How many pinned messages a channel holds in the vault, the newest pins.
+ * Twenty per room is the protocol cap; this bounds a channel with many rooms.
+ */
+export const FIXADAS_PRESAS_MAX = 100
+
+/**
+ * The pinned messages the vault cap does not move to the archive, as `sender|id`
+ * (fixadas-topo, 20/11/2026). The same rule as an open poll (`votacoesAbertasPresas`).
+ *
+ * The pin list is a copy and never needed the history. The jump from the bar at the
+ * top of the room does: without the original in the vault, a pin from a busy room
+ * had nowhere to go after a restart. Every room of the channel counts, because the
+ * vault history is per channel. A deleted pin is not held. By author and id, never
+ * by id alone: the id comes from the sender, and another member could reuse it.
+ * Read raw, without the schema: this is the hot path of the cap, and a malformed
+ * entry costs only the hold.
+ */
+export function fixadasPresas(conteudo: VaultContents, canal: string): Set<string> {
+  const salas = conteudo.channelRooms[canal]
+  if (!salas) return new Set()
+  const apagadas = apagadasDe(conteudo, canal)
+  const todas: { chave: string; em: number }[] = []
+  for (const guardada of Object.values(salas)) {
+    const lista = (guardada.payload as { pinned?: unknown }).pinned
+    if (!Array.isArray(lista)) continue
+    for (const bruta of lista) {
+      const fixada = bruta as { id?: unknown; sender?: unknown; pinnedAt?: unknown } | null
+      if (typeof fixada?.id !== "string" || typeof fixada.sender !== "string" || apagadas.has(fixada.id)) continue
+      todas.push({ chave: `${fixada.sender}|${fixada.id}`, em: typeof fixada.pinnedAt === "number" ? fixada.pinnedAt : 0 })
+    }
+  }
+  if (todas.length > FIXADAS_PRESAS_MAX) todas.sort((a, b) => b.em - a.em)
+  return new Set(todas.slice(0, FIXADAS_PRESAS_MAX).map((f) => f.chave))
+}
+
 // ------------------------------------------------------------- attachments
 
 /** The data URL types a thumbnail may have. The same list as the schema. */

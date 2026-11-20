@@ -137,14 +137,17 @@ export async function abrirDirecta(page, texto) {
     await page.getByRole("button", { name: "Abrir o painel lateral" }).click().catch(() => {})
   }
   await botao.click({ timeout: 60_000 })
-  await page.locator('input[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 60_000 })
+  await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 60_000 })
 }
 
 export async function dizer(page, frase) {
-  const caixa = page.locator('input[placeholder="Escreve uma mensagem"]')
+  const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]')
   await caixa.click()
   await caixa.fill(frase)
   await page.keyboard.press("Enter")
+  // With a finger (a touch context), Enter starts a new line and the send
+  // button sends (20/11/2026). The text is still in the box: send it.
+  if ((await caixa.inputValue().catch(() => "")) !== "") await page.locator("form.chat-composer .composer-enviar").first().click()
 }
 
 /** Milliseconds until the message appears, or -1. */
@@ -177,7 +180,7 @@ export async function abrirCanal(page, nome) {
   }
   await linha.click({ timeout: 60_000 })
   if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click().catch(() => {})
-  await page.locator('input[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
+  await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
 }
 
 export async function temCanal(page, nome, timeout = 90_000) {

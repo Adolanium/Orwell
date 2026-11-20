@@ -115,6 +115,11 @@ h3 {
   height: 40px;
 }
 
+/* The unread pill sits where the open pill sits, on the rail's edge. */
+.rail-pill {
+  left: -12px;
+}
+
 .rail-logo {
   color: var(--titulo);
 }
@@ -502,6 +507,7 @@ h3 {
 .prompt input,
 .gate-card input,
 .chat-composer input,
+.chat-composer textarea,
 select {
   background-color: var(--poco);
   border-color: var(--line-forte);

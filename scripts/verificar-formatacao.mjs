@@ -319,9 +319,9 @@ check("a página desenha sem erros", errosDePagina.length === 0, errosDePagina[0
 
   await escrita.fill("isto e urgente")
   await marcar(7, 14)
-  await page.keyboard.press("Control+Shift+E")
+  await page.keyboard.press("Control+Shift+H")
   check(
-    "Ctrl+Shift+E tapa",
+    "Ctrl+Shift+H tapa",
     (await escrita.inputValue()) === "isto e ||urgente||",
     await escrita.inputValue(),
   )

@@ -176,7 +176,7 @@ const medida = (etiqueta, valor) => console.log(`      ${etiqueta}: ${valor}`)
 
 /** Two text boxes, each with its own selector. */
 const CAIXAS = [
-  { nome: "conversa", campo: ".chat-composer input[placeholder]", miniaturas: ".composer-images img" },
+  { nome: "conversa", campo: ".chat-composer textarea[placeholder]", miniaturas: ".composer-images img" },
   { nome: "publicações", campo: "textarea", miniaturas: ".draft-image img" },
 ]
 
@@ -347,7 +347,7 @@ const tipoAceite = await page.evaluate(async (dataUrl) => {
   const dados = new DataTransfer()
   // Advertised as GIF, with PNG inside.
   dados.items.add(new File([bytes], "mentiroso.gif", { type: "image/gif" }))
-  document.querySelector(".chat-composer input[placeholder]").dispatchEvent(
+  document.querySelector(".chat-composer textarea[placeholder]").dispatchEvent(
     new ClipboardEvent("paste", { clipboardData: dados, bubbles: true, cancelable: true }),
   )
   await new Promise((pronto) => setTimeout(pronto, 400))

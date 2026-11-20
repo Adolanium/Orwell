@@ -34,12 +34,21 @@
 
 import { EMOJI_CATEGORY_TABS, type EmojiCategoryId } from "./emoji-categorias.js"
 import { EMOJI_LINES, EMOJI_TONE_LINES } from "./emoji.gen.js"
+import { linguaActual } from "../strings.js"
 
 export interface Emoji {
   /** The glyph. Never normalized: normalizing would break ZWJ sequences. */
   char: string
-  /** Portuguese name, what shows and what the screen reader announces. */
-  name: string
+  /**
+   * The name in the interface language: what shows and what the screen reader
+   * announces (20/11/2026: it was always Portuguese). A getter, so a language
+   * change reaches emojis already built.
+   */
+  readonly name: string
+  /** The Portuguese name. */
+  namePt: string
+  /** The English name (CLDR). */
+  nameEn: string
   /**
    * Name and synonyms, lowercase and without accents, ready to compare.
    * Pre-calculated at startup because search runs on every keystroke.
@@ -92,9 +101,21 @@ function parse(lines: readonly string[]): Emoji[] {
     const space = line.indexOf(" ")
     const rest = line.slice(space + 1)
     const bar = rest.indexOf(" | ")
-    const name = bar === -1 ? rest : rest.slice(0, bar)
+    const nomes = bar === -1 ? rest : rest.slice(0, bar)
     const terms = bar === -1 ? "" : rest.slice(bar + 3)
-    return { char: line.slice(0, space), name, haystack: normalize(terms ? `${name} ${terms}` : name) }
+    const til = nomes.indexOf(" ~ ")
+    const namePt = til === -1 ? nomes : nomes.slice(0, til)
+    const nameEn = til === -1 ? nomes : nomes.slice(til + 3)
+    return {
+      char: line.slice(0, space),
+      namePt,
+      nameEn,
+      get name() {
+        return linguaActual() === "pt" ? namePt : nameEn
+      },
+      // Both names: a search finds the emoji in either language.
+      haystack: normalize([namePt, nameEn === namePt ? "" : nameEn, terms].filter(Boolean).join(" ")),
+    }
   })
 }
 

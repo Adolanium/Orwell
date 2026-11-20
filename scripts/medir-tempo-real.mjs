@@ -110,12 +110,12 @@ const tabela = []
 async function abrirSala(page, nome) {
   const sala = page.locator(".room-row button.room").filter({ has: page.locator(".room-name", { hasText: nome }) }).first()
   await sala.click({ timeout: 30_000 })
-  await page.locator('input[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
+  await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
   await espera(400)
 }
 
 async function escrever(page, frase) {
-  const caixa = page.locator('input[placeholder="Escreve uma mensagem"]')
+  const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]')
   await caixa.click()
   await caixa.fill(frase)
   const enviada = Date.now()

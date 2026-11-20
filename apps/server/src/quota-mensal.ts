@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises"
  *
  * The provider gives the VPS a monthly quota (8 TB by default). When it runs
  * out, the machine drops to 10 Mbit/s for the rest of the month, and with it
- * magnuslab.pt and everyone's voice. A 50-person call with four cameras uses
+ * the other services on the host and everyone's voice. A 50-person call with four cameras uses
  * ~130 GB per hour (measured with `scripts/sfu-carga/`). Once
  * `LIMIAR_DA_QUOTA` is reached, the video budget drops to the reduced one, and
  * the quota lasts the rest of the month.

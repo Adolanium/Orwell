@@ -16,31 +16,34 @@
 export type Lingua = "pt" | "en"
 
 /**
- * The base language. It is the only one required to be complete, and it is
- * where missing text falls back.
+ * The language before anyone starts the language: tests and environments
+ * without `window`, and the static `<html lang>` of the pages (20/11/2026).
  *
- * It is also what the module shows before anyone starts the language: tests
- * and environments without `window`. A real startup (`detectarLingua`) never
- * lands here without a choice: it lands on `LINGUA_SEM_ESCOLHA`.
+ * English, because English is the default. It is not where missing text falls
+ * back: both catalogs are complete, and `linguas/catalogo.test.ts` measures it.
  */
-export const LINGUA_BASE: Lingua = "pt"
+export const LINGUA_BASE: Lingua = "en"
 
 /**
- * The language for someone who has not chosen one (12/11/2026, 1.3.9).
+ * The language for someone who has not chosen one and whose system is not in
+ * Portuguese (20/11/2026).
  *
- * The interface opens in English until the person chooses another language.
- * The browser and the system no longer count: up to 1.3.8 a browser in
- * Portuguese opened in Portuguese without anyone choosing it. What counts is
- * the address (`?lingua=`) and the saved choice.
+ * The rule: English is the default. The app opens in Portuguese only when the
+ * first language of the system or browser is Portuguese (`pt`, `pt-PT`,
+ * `pt-BR`...). Any other language (German, French...) opens in English. The
+ * explicit choice of the person always wins.
+ *
+ * From 1.3.9 to 1.3.24 the system did not count at all, and the app opened in
+ * English for everyone without a choice.
  */
 export const LINGUA_SEM_ESCOLHA: Lingua = "en"
 
 /**
  * What can be saved: a language, or "auto".
  *
- * "auto" used to mean "follow the system". Since 1.3.9 nothing follows the
- * system, so "auto" is read as "no choice": English. It stays a valid value
- * because older versions and sibling devices (through the account) write it.
+ * "auto" means "no choice": the system decides, by the rule in
+ * `LINGUA_SEM_ESCOLHA`. Older versions and sibling devices (through the
+ * account) also write it.
  */
 export type PreferenciaDeLingua = Lingua | "auto"
 
@@ -121,6 +124,12 @@ export interface FontesDaLingua {
   doEndereco?: string | null | undefined
   /** What this person chose, on this device. "auto" means no choice. */
   guardada?: PreferenciaDeLingua | undefined
+  /**
+   * The languages of the system or browser, most preferred first
+   * (`navigator.languages`, or `app.getPreferredSystemLanguages()` in Electron).
+   * Only the first one counts.
+   */
+  doSistema?: readonly string[] | undefined
 }
 
 /**
@@ -129,14 +138,44 @@ export interface FontesDaLingua {
  * Pure function, and that is what makes it the place where the rule is tested:
  * the whole order fits in assertions, no browser and no storage.
  *
- * The order: the address, then the saved choice, then English
- * (`LINGUA_SEM_ESCOLHA`). The browser and the system are not asked (1.3.9).
+ * The order: the address, then the saved choice, then the system (Portuguese
+ * only when its first language is Portuguese), then English.
  */
 export function escolherLingua(fontes: FontesDaLingua = {}): Lingua {
   const pedida = normalizar(fontes.doEndereco ?? undefined)
   if (pedida) return pedida
   if (fontes.guardada && fontes.guardada !== "auto") return fontes.guardada
-  return LINGUA_SEM_ESCOLHA
+  return linguaDoSistema(fontes.doSistema)
+}
+
+/**
+ * The language a system list gives: Portuguese when the FIRST language is
+ * Portuguese, English for everything else.
+ *
+ * Only the first one, on purpose. A German system with Portuguese in third
+ * place is a German system, and a German reader understands English better
+ * than Portuguese. An empty list (or none) is English.
+ */
+export function linguaDoSistema(linguas: readonly string[] | undefined): Lingua {
+  const primeira = linguas?.find((lingua) => typeof lingua === "string" && lingua.trim() !== "")
+  return normalizar(primeira) === "pt" ? "pt" : LINGUA_SEM_ESCOLHA
+}
+
+/**
+ * The browser languages, most preferred first. Empty outside a browser.
+ *
+ * `navigator.languages` is the user's list; `navigator.language` is the
+ * fallback for engines that do not have the list.
+ */
+export function linguasDoNavegador(): readonly string[] {
+  try {
+    if (typeof navigator === "undefined") return []
+    const lista = navigator.languages
+    if (Array.isArray(lista) && lista.length > 0) return lista
+    return typeof navigator.language === "string" && navigator.language !== "" ? [navigator.language] : []
+  } catch {
+    return []
+  }
 }
 
 /**
@@ -156,6 +195,11 @@ function normalizar(etiqueta: string | undefined): Lingua | undefined {
 export interface ArranqueDaLingua {
   /** The address, for those who have it on hand. Defaults to the window's address. */
   endereco?: string | undefined
+  /**
+   * The system languages, when the host knows them better than the browser
+   * (Electron: `app.getPreferredSystemLanguages()`). Defaults to `navigator.languages`.
+   */
+  sistema?: readonly string[] | undefined
 }
 
 /** The `?lingua=` from an address, if present. */
@@ -179,5 +223,6 @@ export function detectarLingua(opcoes: ArranqueDaLingua = {}): Lingua {
   return escolherLingua({
     doEndereco: linguaNoEndereco(opcoes.endereco),
     guardada: lerPreferencia(),
+    doSistema: opcoes.sistema && opcoes.sistema.length > 0 ? opcoes.sistema : linguasDoNavegador(),
   })
 }

@@ -130,7 +130,7 @@ try {
   check("a política da web recusa um iframe do YouTube", (await politicaRecusaIframe(bruno)) !== null)
   check("a política da app de secretária também", (await politicaRecusaIframe(ana)) !== null)
 
-  const escrita = bruno.locator('input[placeholder="Escreve uma mensagem"]')
+  const escrita = bruno.locator('textarea[placeholder="Escreve uma mensagem"]')
   await escrita.click()
   await escrita.fill(`olha isto ${VIDEO}`)
   const titulado = await bruno
@@ -190,7 +190,7 @@ try {
   const linhaDoCanal = bruno.locator(".channel-name").filter({ hasNotText: "Orwell" }).first()
   await linhaDoCanal.waitFor({ timeout: 60_000 })
   await linhaDoCanal.click()
-  await bruno.locator('input[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
+  await bruno.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
   const noBruno = bruno.locator(".message-body .video-facade").first()
   await noBruno.waitFor({ timeout: 30_000 })
   await espera(2000)

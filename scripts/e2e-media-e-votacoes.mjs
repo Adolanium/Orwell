@@ -309,7 +309,7 @@ try {
   await ana.page.locator('.room-tree .room-name:text-is("votacoes")').first().waitFor({ timeout: 30_000 })
   check("Ana criou a sala de votações pelo botão", true)
 
-  const caixa = (page) => page.locator('input[placeholder="Escreve uma mensagem"]')
+  const caixa = (page) => page.locator('textarea[placeholder="Escreve uma mensagem"]')
   const salaDeAna = async (nome) => {
     await ana.page.locator(`.room-tree .room-name:text-is("${nome}")`).first().click()
     await wait(800)

@@ -62,7 +62,7 @@ async function abrir(motor, nome, antiga = false) {
 }
 
 const retratar = (page, nome) => page.screenshot({ path: join(CAPTURAS, `${nome}.png`) }).catch(() => {})
-const caixa = (page) => page.locator(".chat-composer .composer-line input:not([type])").first()
+const caixa = (page) => page.locator(".chat-composer .composer-line textarea").first()
 const linhaDaSala = (page, nome) => page.locator(".room-row", { has: page.locator(`.room-name:text-is("${nome}")`) }).first()
 const linhaDoCanal = (page) => page.locator(".channel-row", { has: page.locator(".channel-name", { hasText: CANAL }) }).first()
 const salaActual = (page) => page.locator(".room-row.current .room-name").first().innerText().catch(() => "")

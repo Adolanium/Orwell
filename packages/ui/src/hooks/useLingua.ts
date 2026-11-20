@@ -6,6 +6,7 @@ import {
   guardarPreferencia,
   lerPreferencia,
   linguaActual,
+  linguasDoSistema,
   LINGUA_BASE,
   type Lingua,
   type PreferenciaDeLingua,
@@ -57,9 +58,9 @@ function aoMudarEscolha(ouvinte: () => void): () => void {
 /**
  * This person's choice, and the action to change it.
  *
- * Returns the PREFERENCE and the language: "auto" (no choice, from before
- * 1.3.9 or from a sibling device) shows English, and settings light the
- * language on screen.
+ * Returns the PREFERENCE and the language: "auto" (no choice) follows the
+ * system (Portuguese only for a Portuguese system, English for the rest), and
+ * settings light the language on screen.
  */
 export function usePreferenciaDeLingua(): {
   preferencia: PreferenciaDeLingua
@@ -87,7 +88,7 @@ export function usePreferenciaDeLingua(): {
  */
 export function aplicarEscolhaDeLingua(proxima: PreferenciaDeLingua): void {
   guardarPreferencia(proxima)
-  definirLingua(escolherLingua({ guardada: proxima }))
+  definirLingua(escolherLingua({ guardada: proxima, doSistema: linguasDoSistema() }))
   for (const ouvinte of [...ouvintesDaEscolha]) ouvinte()
 }
 

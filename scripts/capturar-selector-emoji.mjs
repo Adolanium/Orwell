@@ -147,7 +147,7 @@ try {
     await dentro(page)
     await criarCanal(page, `lagar-${id}`)
     await page.setViewportSize({ width: caso.largura, height: caso.altura })
-    await page.locator('input[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
+    await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
     for (const reduzido of [false, true]) {
       const etiqueta = `${id}${reduzido ? "-reduzido" : ""}`
       await page.emulateMedia({ reducedMotion: reduzido ? "reduce" : "no-preference" })

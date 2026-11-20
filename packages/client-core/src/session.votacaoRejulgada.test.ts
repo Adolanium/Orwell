@@ -538,4 +538,75 @@ describe("uma votação julgada sem os cargos do autor é julgada outra vez quan
     expect(carla.session.mayCreatePoll(CANAL, bento.address)).toBe(true)
     expect(entradaDe(carla, "forjada-0103")?.semVotacao).toBe(true)
   })
+
+  /*
+    I1 of the polls-somem review: a tie of timestamps. `venceCarimbo` gives the win
+    to the larger server `seq` when the date is equal, and `#tinhaOPoder` read only
+    the date stored. Someone with authority over roles, on an altered client, could
+    re-send a definition or an assignment with the date already stored and new
+    content: it won by `seq`, the stored date stayed before the poll, and an old poll
+    of somebody else turned into a poll. An honest client never ties
+    (`#carimboSeguinte`).
+  */
+  it("I1: nunca forja: um cargo redefinido com a data guardada (empate) não valida uma votação antiga", async () => {
+    const { ana, bento, carla } = await canal()
+    await ana.session.defineRole(CANAL, { role: "sondagens", name: "Sondagens", powers: ["reagir"], rank: 1 })
+    await settle(40)
+    await ana.session.assignRoles(CANAL, bento.address, ["sondagens"])
+    await settle(120)
+    vi.spyOn(bento.session, "mayCreatePoll").mockReturnValue(true)
+    umMinutoDepois()
+    await bento.session.send(CANAL, votacao("empate-0001"))
+    await settle(120)
+    expect(entradaDe(carla, "empate-0001")?.semVotacao).toBe(true)
+    // Ana's altered client: the same role, now with `votacoes`, and the date already stored.
+    const definidoEm = carla.vault.contents.channelRoles[CANAL]?.["sondagens"]?.at
+    expect(definidoEm).toBeDefined()
+    await ana.session.send(CANAL, {
+      t: "role.define",
+      role: "sondagens",
+      name: "Sondagens",
+      powers: ["reagir", "votacoes"],
+      position: 0,
+      rank: 1,
+      removed: false,
+      definedAt: definidoEm!,
+    } as never)
+    await settle(120)
+    // The definition is accepted (it won the tie by `seq`): the power is there now.
+    expect(carla.vault.contents.channelRoles[CANAL]?.["sondagens"]?.at).toBe(definidoEm)
+    expect(carla.session.mayCreatePoll(CANAL, bento.address)).toBe(true)
+    // But it changed after the poll, in server order: the old poll stays text.
+    expect(entradaDe(carla, "empate-0001")?.semVotacao).toBe(true)
+    await ana.session.republishAuthority(CANAL)
+    await settle(200)
+    expect(entradaDe(carla, "empate-0001")?.semVotacao).toBe(true)
+    expect(noEcra(carla, "empate-0001")?.payload["poll"]).toBeUndefined()
+  })
+
+  it("I1: nunca forja: uma atribuição re-enviada com a data guardada (empate) não valida uma votação antiga", async () => {
+    const { ana, bento, carla } = await canal()
+    await ana.session.defineRole(CANAL, { role: "sondagens", name: "Sondagens", powers: ["votacoes"], rank: 1 })
+    await settle(40)
+    await ana.session.defineRole(CANAL, { role: "leitores", name: "Leitores", powers: ["reagir"], rank: 0 })
+    await settle(40)
+    await ana.session.assignRoles(CANAL, bento.address, ["leitores"])
+    await settle(120)
+    vi.spyOn(bento.session, "mayCreatePoll").mockReturnValue(true)
+    umMinutoDepois()
+    await bento.session.send(CANAL, votacao("empate-0002"))
+    await settle(120)
+    expect(entradaDe(carla, "empate-0002")?.semVotacao).toBe(true)
+    // Ana's altered client: Bento's assignment with the role that creates polls, and the date already stored.
+    const atribuidoEm = carla.vault.contents.channelMemberRolesAt?.[CANAL]?.[bento.address]?.at
+    expect(atribuidoEm).toBeDefined()
+    await ana.session.send(CANAL, { t: "role.assign", subject: bento.address, roles: ["sondagens"], assignedAt: atribuidoEm! } as never)
+    await settle(120)
+    expect(carla.vault.contents.channelMemberRolesAt?.[CANAL]?.[bento.address]?.at).toBe(atribuidoEm)
+    expect(carla.session.mayCreatePoll(CANAL, bento.address)).toBe(true)
+    expect(entradaDe(carla, "empate-0002")?.semVotacao).toBe(true)
+    await ana.session.republishAuthority(CANAL)
+    await settle(200)
+    expect(entradaDe(carla, "empate-0002")?.semVotacao).toBe(true)
+  })
 })

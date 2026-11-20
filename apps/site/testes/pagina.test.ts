@@ -275,6 +275,12 @@ describe("todas as páginas", () => {
     expect(semCodigoFonte).not.toMatch(/\bno GitHub\b|\bon GitHub\b/i)
   })
 
+  const SITIOS = new Set([
+    "7e1acf1d220278f66bc2a6a45e16e0128c0c52a891a41f44101f048343557db3",
+    "ff5ed18d91790407e95c4d691fb1102d2eaf11ff5ffe2d42eacb714c07503452",
+    "51f4b84a8c6bf5768cae685faacee4abb629738e174da4bfa6f4c69c8d87617b",
+  ])
+
   it.each(paginas)("%s não identifica quem a faz", (_nome, pagina) => {
     // The site has no name, photo, email,
     // phone, IBAN or address of whoever makes Orwell. The only exception is the
@@ -285,9 +291,16 @@ describe("todas as páginas", () => {
     const semResponsavel = pagina
       .replace(/O responsável pelo tratamento dos teus dados é Duarte Bivar\.|The controller of your data is Duarte Bivar\./g, "")
       .replace(/href="https:\/\/github\.com\/magnuslab-sudo\/orwell"/g, "")
-    for (const cadeia of [/duarte/i, /bivar/i, /magnuslab/i, /portalegre/i, /\+351/, /\bPT50\b/]) {
+    for (const cadeia of [/duarte/i, /bivar/i, /\+351/, /\bPT50\b/, /lucky 13/i]) {
       expect(semResponsavel).not.toMatch(cadeia)
     }
+    // The workspace and the places Orwell is made in, kept as the SHA-256 of
+    // the lowercase word, so this file does not spell them out either.
+    const sitios = semResponsavel
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((palavra) => SITIOS.has(createHash("sha256").update(palavra).digest("hex")))
+    expect(sitios).toEqual([])
   })
 
   it.each(paginas)("%s é construída pelo Vite", (nome, pagina) => {

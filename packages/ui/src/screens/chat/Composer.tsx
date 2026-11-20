@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { TextoDeErro } from "../../components/TextoDeErro.js"
 import { bytesQueAindaCabem, caracteresDeDataUrl, FICHEIRO_MAX_BYTES } from "@enclave/client-core"
 import type { ConnectionState, LinkCard, Profile } from "../../bridge.js"
@@ -7,8 +7,10 @@ import type { MessageExtras, OutgoingFile, OutgoingImage } from "../../types.js"
 import { Button } from "../../components/Button.js"
 import { EmojiPicker } from "../../components/EmojiPicker.js"
 import { primeiroEndereco } from "../../components/RichText.js"
-import { useAtalhosDeFormatacao } from "../../hooks/useAtalhosDeFormatacao.js"
-import { BuzzIcon, CloseIcon, EnviarIcon, PlusIcon, SmileyIcon } from "../../icons.js"
+import { useFormatacao } from "../../hooks/useAtalhosDeFormatacao.js"
+import { BarraDeFormatacao } from "./BarraDeFormatacao.js"
+import { CloseIcon, EnviarIcon, PlusIcon, SmileyIcon } from "../../icons.js"
+import { alturaDaCaixa } from "../../lib/alturaDaCaixa.js"
 import { colarImagens } from "../../lib/colar.js"
 import {
   comandosASugerir,
@@ -19,7 +21,14 @@ import {
   type ComandoLido,
 } from "../../lib/comandosDaBarra.js"
 import { extensaoDe, formatarBytes, lerComoDataUrl, nomeSeguro } from "../../lib/ficheiros.js"
-import { compressImage, IMAGE_BUDGETS, resumoDaReducao } from "../../lib/images.js"
+import {
+  avisoDeAnimacaoPerdida,
+  compressImage,
+  IMAGE_BUDGETS,
+  orcamentosDaMensagem,
+  resumoDaReducao,
+  tipoDoDataUrl,
+} from "../../lib/images.js"
 import {
   aplicarMencoesComTodos,
   inserirMencao,
@@ -60,6 +69,15 @@ export const MENSAGEM_MAX_CARACTERES = 2000
 const CONTADOR_A_PARTIR_DE = 1800
 
 const IMAGENS_MAX = 4
+
+/**
+ * Room kept for what can still join the message after the images: the text at
+ * its worst (every character escaped to six in JSON) and a link card (its
+ * thumbnail budget is 72 KB, under 100,000 characters). Only animated GIFs are
+ * measured against the frame (`orcamentosDaMensagem`), and they are the only
+ * images big enough to need this.
+ */
+const FOLGA_DO_TEXTO_E_CARTAO = MENSAGEM_MAX_CARACTERES * 6 + 100_000
 
 /**
  * How many files fit in a message.
@@ -116,6 +134,22 @@ const MOSTRAR_COTOVELADA = true
  * keep exercising everything underneath.
  */
 const MOSTRAR_VOTACOES = false
+
+/** A finger and no mouse: the phone's virtual keyboard. See `enviarComEnter`. */
+function comDedo(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(hover: none) and (pointer: coarse)").matches
+}
+
+/**
+ * The conversation area around this composer: the scroller plus the composer.
+ * Without a scroller (a sheet, a test), the visible height of the window.
+ */
+function areaDaConversa(form: HTMLFormElement | null): number {
+  const rolo = form?.parentElement?.querySelector<HTMLElement>(":scope > .timeline, :scope .timeline")
+  if (form && rolo) return rolo.clientHeight + form.offsetHeight
+  if (typeof window === "undefined") return 0
+  return window.visualViewport?.height ?? window.innerHeight
+}
 
 export function Composer({
   connection,
@@ -278,8 +312,10 @@ export function Composer({
    * discovering it on the other end.
    */
   const [reducao, setReducao] = useState<string | null>(null)
+  /** A GIF that went still: not an error, the image is there, it just does not move. */
+  const [avisoDoGif, setAvisoDoGif] = useState<string | null>(null)
   const [aComprimir, setAComprimir] = useState(false)
-  const field = useRef<HTMLInputElement>(null)
+  const field = useRef<HTMLTextAreaElement>(null)
   /**
    * Starting a reply puts the focus in the box: someone who tapped "Reply"
    * wants to write next. By ID, not by object: changing the mention does not
@@ -296,8 +332,8 @@ export function Composer({
   /** Where the `+` menu is open, or null if it is not. */
   const [maisAberto, setMaisAberto] = useState<{ x: number; y: number } | null>(null)
   const caret = useRef<number | null>(null)
-  /** Cmd/Ctrl+B and friends, on whatever is selected. See the hook. */
-  const formatar = useAtalhosDeFormatacao(value, onChange)
+  /** Cmd/Ctrl+B and friends, on whatever is selected, and the same for the bar's buttons. See the hook. */
+  const { aoTeclar: formatar, aplicar: aplicarFormatacao } = useFormatacao(value, onChange)
 
   // The cursor goes back after the emoji lands. The text is controlled above,
   // so the box only exists with the new value after this render. Before that
@@ -311,6 +347,45 @@ export function Composer({
     node.focus()
     node.setSelectionRange(at, at)
   }, [value])
+
+  /**
+   * The box grows with the text, line by line, up to half of the conversation
+   * area, and then scrolls inside (20/11/2026). See `lib/alturaDaCaixa.ts`.
+   * Measured before paint, so a new line never flashes a scroll bar. After
+   * sending, the value is empty and the box goes back to one line.
+   */
+  /** More than one line: the buttons go to the bottom of the line (`caixaDeEscrita.css`). */
+  const [variasLinhas, setVariasLinhas] = useState(false)
+  const ajustarAltura = useCallback(() => {
+    const caixa = field.current
+    if (!caixa) return
+    caixa.style.height = "auto"
+    // Empty, the box is one line: the placeholder can wrap on a narrow screen,
+    // and its height is not text. No layout (a test DOM): one line too.
+    if (caixa.value === "" || caixa.scrollHeight === 0) {
+      caixa.style.height = ""
+      caixa.style.overflowY = ""
+      setVariasLinhas(false)
+      return
+    }
+    const umaLinha = caixa.offsetHeight
+    const conteudo = caixa.scrollHeight + (caixa.offsetHeight - caixa.clientHeight)
+    const { altura, rola } = alturaDaCaixa({ conteudo, area: areaDaConversa(caixa.form), minima: umaLinha })
+    caixa.style.height = `${altura}px`
+    caixa.style.overflowY = rola ? "auto" : "hidden"
+    setVariasLinhas(altura > umaLinha)
+  }, [])
+  useLayoutEffect(ajustarAltura, [value, ajustarAltura])
+  // The area changes with the window and, on the phone, with the keyboard.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.addEventListener("resize", ajustarAltura)
+    window.visualViewport?.addEventListener("resize", ajustarAltura)
+    return () => {
+      window.removeEventListener("resize", ajustarAltura)
+      window.visualViewport?.removeEventListener("resize", ajustarAltura)
+    }
+  }, [ajustarAltura])
 
   // ------------------------------------------------------------- mentions
   //
@@ -443,10 +518,17 @@ export function Composer({
    * they don't want to see it land after the period. With no known selection,
    * a box that has not been touched yet assumes the end of the text is correct.
    */
+  /**
+   * The box was never focused. An `<input>` keeps its cursor at the end of a
+   * value it was given; a text area keeps it at 0. An emoji picked before
+   * anyone touched the box goes at the end, as it did with the `<input>`.
+   */
+  const tocada = useRef(false)
   const insert = (char: string): void => {
     const node = field.current
-    const start = node?.selectionStart ?? value.length
-    const end = node?.selectionEnd ?? start
+    const intocada = !tocada.current && node !== null && node.selectionStart === 0 && node.selectionEnd === 0
+    const start = intocada ? value.length : (node?.selectionStart ?? value.length)
+    const end = intocada ? start : (node?.selectionEnd ?? start)
     onChange(value.slice(0, start) + char + value.slice(end))
     caret.current = start + char.length
   }
@@ -468,25 +550,35 @@ export function Composer({
     }
     setAviso(null)
     setReducao(null)
+    setAvisoDoGif(null)
     setAComprimir(true)
     const escolhidas = escolhidasTodas.slice(0, espaço)
+    // An animated GIF can weigh five photos: each one keeps its cap only if it
+    // still fits in the message. See `orcamentosDaMensagem`.
+    const orcamentos = orcamentosDaMensagem(escolhidas, ocupado + FOLGA_DO_TEXTO_E_CARTAO, IMAGE_BUDGETS.chat)
     void Promise.all(
-      escolhidas.map(async (file) => {
-        const imagem = await compressImage(file, IMAGE_BUDGETS.chat)
-        return {
+      escolhidas.map(async (file, indice) => {
+        const orcamento = orcamentos[indice] ?? IMAGE_BUDGETS.chat
+        const imagem = await compressImage(file, orcamento)
+        // The type of the bytes that go out, read from the data URL: a GIF
+        // recoded to WebP is no longer a GIF. A file with no type passes intact
+        // as `application/octet-stream`, which is not a type to send an image
+        // with: then the old rule (what the picker or `lib/colar.ts` said).
+        const tipo = tipoDoDataUrl(imagem.dataUrl)
+        const novaImagem: OutgoingImage = {
           dataUrl: imagem.dataUrl,
           name: file.name || "imagem",
-          // The type of the BYTES when it exists: what comes from the file
-          // picker carries what the system declared, and what comes from the clipboard has already
-          // been confirmed byte by byte in `lib/colar.ts`.
-          mediaType: file.type || "image/jpeg",
+          mediaType: tipo.startsWith("image/") ? tipo : file.type || "image/jpeg",
           bytes: imagem.bytes,
         }
+        return { novaImagem, aviso: avisoDeAnimacaoPerdida(file, imagem, orcamento, "mensagem") }
       }),
     )
-      .then((novas) => {
+      .then((resultados) => {
+        const novas = resultados.map((resultado) => resultado.novaImagem)
         setImages((atuais) => [...atuais, ...novas].slice(0, IMAGENS_MAX))
         setReducao(resumoDaReducao(escolhidas, novas))
+        setAvisoDoGif(resultados.find((resultado) => resultado.aviso)?.aviso ?? null)
       })
       // An image that does not fit is an error to show here, not a message that
       // the other side discards entirely and silently. It goes through translation to
@@ -593,6 +685,7 @@ export function Composer({
     setDispensado(null)
     setAviso(null)
     setReducao(null)
+    setAvisoDoGif(null)
     setPicks([])
     setMencao(null)
     setDispensada(null)
@@ -605,6 +698,108 @@ export function Composer({
   const notaOffline = offline && (pediuAnexoOffline || anexosSemLigacao)
   /** Nothing goes out while bytes are still coming in: see `aComprimir` and `aLer`. */
   const ocupada = aComprimir || aLer
+
+  /**
+   * The keys of the text box that the suggestion menus and the reply bar use.
+   * Enter that none of them took goes on to `enviarComEnter`.
+   */
+  const teclarNaCaixa = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    // Formatting first, and only it needs to come first: it always takes Cmd/Ctrl,
+    // so it never fights a key with the suggestions menu, which uses arrows, Enter, Tab and Escape.
+    if (formatar(event)) return
+    /*
+      The list of commands, with the mentions menu keyboard: arrow keys to
+      navigate, Enter or Tab to select, Escape to close without changing
+      the text. Only when the mentions menu is not open.
+    */
+    if (aSugerirComando) {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        event.stopPropagation()
+        setComandosDispensados(true)
+        return
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault()
+        setComandoEscolhido((atual) => (atual + 1) % comandos.length)
+        return
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault()
+        setComandoEscolhido((atual) => (atual - 1 + comandos.length) % comandos.length)
+        return
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        const comando = comandos[comandoEscolhido]
+        if (!comando) return
+        event.preventDefault()
+        escolherComando(comando)
+      }
+      return
+    }
+    if (!aSugerir) {
+      // Without the list open, Esc cancels the reply, like in Discord.
+      // With the list open, Esc belongs to it (closes it), and the reply stays.
+      if (event.key === "Escape" && resposta && onCancelarResposta) {
+        event.preventDefault()
+        event.stopPropagation()
+        onCancelarResposta()
+      }
+      return
+    }
+    /**
+     * With the menu open, the keyboard is its own. Only the keys it uses.
+     *
+     * Escape CLOSES THE MENU AND DELETES NOTHING: it is the key you press
+     * when the menu is in the way, and an Escape that cleared the
+     * text below it would be the worst trade-off in the entire app.
+     * So we store which mention was dismissed instead of changing the text.
+     */
+    if (event.key === "Escape") {
+      event.preventDefault()
+      event.stopPropagation()
+      setDispensada(mencao?.inicio ?? null)
+      return
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault()
+      setEscolhido((atual) => (atual + 1) % sugestoes.length)
+      return
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault()
+      setEscolhido((atual) => (atual - 1 + sugestoes.length) % sugestoes.length)
+      return
+    }
+    // Enter and Tab select. Without `preventDefault`, Enter would reach
+    // the form and send the message while naming someone.
+    if (event.key === "Enter" || event.key === "Tab") {
+      const candidato = sugestoes[escolhido]
+      if (!candidato) return
+      event.preventDefault()
+      escolherMencao(candidato)
+    }
+  }
+
+  /**
+   * Enter sends; Shift+Enter starts a new line (20/11/2026).
+   *
+   * The box is a text area, and a text area does not submit its form on
+   * Enter: here is where it does. Enter that a menu already took
+   * (`defaultPrevented`) does not send. Neither does Enter in the middle of an
+   * IME composition: that Enter picks the characters.
+   *
+   * With a finger, Enter starts a new line and the send button sends, like
+   * Discord on the phone. A virtual keyboard has no Shift+Enter that anyone
+   * finds. Read at each key: the same laptop can have a touch screen.
+   */
+  const enviarComEnter = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key !== "Enter" || event.shiftKey || event.defaultPrevented) return
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return
+    if (comDedo()) return
+    event.preventDefault()
+    event.currentTarget.form?.requestSubmit()
+  }
 
   return (
     <>
@@ -710,6 +905,7 @@ export function Composer({
           aviso ||
           nota ||
           reducao ||
+          avisoDoGif ||
           (endereco && endereco !== dispensado)) && (
           <div className="composer-extras">
             {images.length > 0 && (
@@ -721,7 +917,10 @@ export function Composer({
                       type="button"
                       title={strings.common.remove}
                       aria-label={strings.chat.imageDrop(image.name)}
-                      onClick={() => setImages((atuais) => atuais.filter((_, i) => i !== index))}
+                      onClick={() => {
+                        setImages((atuais) => atuais.filter((_, i) => i !== index))
+                        setAvisoDoGif(null)
+                      }}
                     >
                       ×
                     </button>
@@ -764,6 +963,11 @@ export function Composer({
             {aLer && <p className="field-note">{strings.chat.fileReading}</p>}
             {/* No `warn`: shrinking a photo is not a problem. */}
             {reducao && <p className="field-note">{reducao}</p>}
+            {avisoDoGif && (
+              <p className="field-note" role="status">
+                {avisoDoGif}
+              </p>
+            )}
             {/* In full and not just in the box text: at 375px the box shows
                 about fifteen characters, and this sentence is what tells the user what to do. */}
             {parado && <p className="field-note warn">{strings.connection.separadorParado}</p>}
@@ -792,7 +996,7 @@ export function Composer({
           </div>
         )}
 
-        <div className="composer-line">
+        <div className={variasLinhas ? "composer-line varias-linhas" : "composer-line"}>
           {/* Grows up from the text line, which sits at the bottom:
               a list that dropped from here would be off screen. */}
           {aSugerir && (
@@ -920,8 +1124,9 @@ export function Composer({
           >
             <PlusIcon size={17} />
           </button>
-          <input
+          <textarea
             ref={field}
+            rows={1}
             value={value}
             disabled={parado}
             placeholder={
@@ -952,85 +1157,18 @@ export function Composer({
               if (!aSugerir) reavaliarMencao(node.value, node.selectionStart ?? node.value.length)
             }}
             onPaste={colar}
+            onFocus={() => {
+              tocada.current = true
+            }}
             onKeyDown={(event) => {
-              // Formatting first, and only it needs to come first: it always takes Cmd/Ctrl,
-              // so it never fights a key with the suggestions menu, which uses arrows, Enter, Tab and Escape.
-              if (formatar(event)) return
-              /*
-                The list of commands, with the mentions menu keyboard: arrow keys to
-                navigate, Enter or Tab to select, Escape to close without changing
-                the text. Only when the mentions menu is not open.
-              */
-              if (aSugerirComando) {
-                if (event.key === "Escape") {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  setComandosDispensados(true)
-                  return
-                }
-                if (event.key === "ArrowDown") {
-                  event.preventDefault()
-                  setComandoEscolhido((atual) => (atual + 1) % comandos.length)
-                  return
-                }
-                if (event.key === "ArrowUp") {
-                  event.preventDefault()
-                  setComandoEscolhido((atual) => (atual - 1 + comandos.length) % comandos.length)
-                  return
-                }
-                if (event.key === "Enter" || event.key === "Tab") {
-                  const comando = comandos[comandoEscolhido]
-                  if (!comando) return
-                  event.preventDefault()
-                  escolherComando(comando)
-                }
-                return
-              }
-              if (!aSugerir) {
-                // Without the list open, Esc cancels the reply, like in Discord.
-                // With the list open, Esc belongs to it (closes it), and the reply stays.
-                if (event.key === "Escape" && resposta && onCancelarResposta) {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  onCancelarResposta()
-                }
-                return
-              }
-              /**
-               * With the menu open, the keyboard is its own. Only the keys it uses.
-               *
-               * Escape CLOSES THE MENU AND DELETES NOTHING: it is the key you press
-               * when the menu is in the way, and an Escape that cleared the
-               * text below it would be the worst trade-off in the entire app.
-               * So we store which mention was dismissed instead of changing the text.
-               */
-              if (event.key === "Escape") {
-                event.preventDefault()
-                event.stopPropagation()
-                setDispensada(mencao?.inicio ?? null)
-                return
-              }
-              if (event.key === "ArrowDown") {
-                event.preventDefault()
-                setEscolhido((atual) => (atual + 1) % sugestoes.length)
-                return
-              }
-              if (event.key === "ArrowUp") {
-                event.preventDefault()
-                setEscolhido((atual) => (atual - 1 + sugestoes.length) % sugestoes.length)
-                return
-              }
-              // Enter and Tab select. Without `preventDefault`, Enter would reach
-              // the form and send the message while naming someone.
-              if (event.key === "Enter" || event.key === "Tab") {
-                const candidato = sugestoes[escolhido]
-                if (!candidato) return
-                event.preventDefault()
-                escolherMencao(candidato)
-              }
+              teclarNaCaixa(event)
+              enviarComEnter(event)
             }}
             autoComplete="off"
           />
+          {/* The formatting bar over a selection, right after the box so Tab
+              reaches it. Not with a finger: the system has its own menu there. */}
+          {!comDedo() && <BarraDeFormatacao campo={field} valor={value} aplicar={aplicarFormatacao} />}
           {/* A drawn face, not a `🙂`. See `SmileyIcon`: the emoji came
               from the system font, with its own metrics and color, and that is why
               it was misaligned next to the others in this row. */}
@@ -1048,8 +1186,8 @@ export function Composer({
             The nudge with its own button and icon (12/11/2026: "an
             icon of its own for the nudge, only for private messages"). Only where
             `onBuzz` arrives, and it only arrives in a direct conversation. On a
-            narrow screen the button hides (`screens.css`) and the entry in the "+"
-            menu stays: the 390 px line is the choice of 12/08/2026.
+            narrow screen the button hides (`screens.css`): the 390 px line is the
+            choice of 12/08/2026. Since 20/11/2026 the "+" menu has no nudge.
           */}
           {onBuzz && MOSTRAR_COTOVELADA && <BuzzButton onBuzz={onBuzz} cooldown={buzzCooldown} />}
           {/* The counter, only near the limit: from 1800 it shows how many are left,
@@ -1088,30 +1226,15 @@ export function Composer({
           items={[
             { label: strings.chat.imageAdd, onSelect: () => campoImagens.current?.click() },
             {
-              label: `${strings.chat.fileAdd} (máx. ${formatarBytes(FICHEIRO_MAX_BYTES)})`,
+              label: `${strings.chat.fileAdd} ${strings.common.maximo(formatarBytes(FICHEIRO_MAX_BYTES))}`,
               onSelect: () => campoFicheiros.current?.click(),
             },
             // The poll, next to the other two actions that are not writing.
             // It follows `onVotacao` by the same rule as the nudge: if the caller
             // does not provide it, the input does not appear.
             ...(onVotacao && MOSTRAR_VOTACOES ? [{ label: strings.votacao.criar, onSelect: onVotacao }] : []),
-            /*
-              The nudge only exists where it makes sense, in one-on-one chats -,
-              and that is why the input follows `onBuzz`. The wait time goes in the label
-              instead of the input disappearing: an option that vanishes and reappears on its own
-              makes people doubt what they saw, and `useBuzz` refuses anyway if the time
-              has not come yet.
-            */
-            ...(onBuzz && MOSTRAR_COTOVELADA
-              ? [
-                  {
-                    label: buzzCooldown > 0 ? strings.chat.buzzMenuWait(buzzCooldown) : strings.chat.buzz,
-                    icon: <BuzzIcon size={16} />,
-                    separatorBefore: true,
-                    onSelect: onBuzz,
-                  },
-                ]
-              : []),
+            // No nudge here (20/11/2026, the owner): it lives on the line only,
+            // with its own button. See `BuzzButton`.
           ]}
         />
       )}

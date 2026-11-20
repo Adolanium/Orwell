@@ -209,6 +209,11 @@ export function itensDaSala(ctx: {
 export function itensDaCategoria(ctx: {
   podeOrganizar: boolean
   accoes: {
+    /**
+     * A new room, already in this category (1.3.25): the same as the `+` left of
+     * the category's name. Absent: the entry does not appear.
+     */
+    criarSala?: (() => void) | undefined
     renomear: () => void
     /**
      * Choose which roles see rooms in this category.
@@ -223,8 +228,11 @@ export function itensDaCategoria(ctx: {
 }): MenuItem[] {
   if (!ctx.podeOrganizar) return []
   const visibilidade = ctx.accoes.visibilidade
+  const criarSala = ctx.accoes.criarSala
   return [
-    { label: strings.menu.renameCategory, onSelect: ctx.accoes.renomear },
+    // What goes INTO the category first, apart from what changes the category itself.
+    ...(criarSala ? [{ label: strings.menu.criarSalaNaCategoria, onSelect: criarSala }] : []),
+    { label: strings.menu.renameCategory, ...(criarSala ? { separatorBefore: true } : {}), onSelect: ctx.accoes.renomear },
     /*
       Without `destructive`, like "rename": hiding does not destroy anything. And
       that is exactly why the sheet this opens must say it also protects nothing,       see `categoryProperties.note`.

@@ -42,7 +42,7 @@ import { levantarServidor, RAIZ } from "./servidor-descartavel.mjs"
 
 const FRASE = "frase-de-verificacao-2026"
 const VIDEO = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
-const ESCRITA = 'input[placeholder="Escreve uma mensagem"]'
+const ESCRITA = 'textarea[placeholder="Escreve uma mensagem"]'
 const SALA = "conversa"
 const CANAL = "adega"
 const SEM_SECRETARIA = process.env.ORWELL_E2E_SEM_SECRETARIA === "1"

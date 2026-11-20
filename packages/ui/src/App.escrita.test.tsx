@@ -193,7 +193,7 @@ function ponte(ligar: { current: ((estado: unknown) => void) | null }): EnclaveB
 }
 
 /** The text box. By the form, not the help text, which changes with the connection. */
-const caixa = (): HTMLInputElement => document.querySelector<HTMLInputElement>(".chat-composer .composer-line input:not([type])")!
+const caixa = (): HTMLInputElement => document.querySelector<HTMLInputElement>(".chat-composer .composer-line textarea")!
 
 interface Medida {
   commits: number

@@ -144,7 +144,7 @@ if (temPedido) {
 // B opens the chat and writes a message with a web address.
 await B.page.locator(".people-aside .direct-row .direct-open").first().click()
 await B.page.waitForTimeout(1500)
-const escrita = B.page.locator(".chat-composer input:not([type=file])").first()
+const escrita = B.page.locator(".chat-composer textarea").first()
 await escrita.fill("olha isto https://example.com/artigo")
 await escrita.press("Enter")
 await B.page.waitForTimeout(6000)
@@ -243,8 +243,8 @@ const depois = await A.page.locator(".people-aside .direct-row").count()
 check("fechar tira a conversa da lista", depois === antes - 1, `${antes} → ${depois}`)
 
 // And it comes back when a message arrives. Nothing was deleted.
-await B.page.locator(".chat-composer input:not([type=file])").first().fill("voltei")
-await B.page.locator(".chat-composer input:not([type=file])").first().press("Enter")
+await B.page.locator(".chat-composer textarea").first().fill("voltei")
+await B.page.locator(".chat-composer textarea").first().press("Enter")
 await A.page.waitForTimeout(8000)
 const voltou = await A.page.locator(".people-aside .direct-row").count()
 check("a conversa VOLTA sozinha quando chega mensagem: fechar não apagou", voltou === antes, `${depois} → ${voltou}`)

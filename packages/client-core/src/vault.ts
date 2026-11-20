@@ -4,6 +4,7 @@ import { argon2id } from "@noble/hashes/argon2.js"
 import { fromBase64, toBase64, type CorpoDaDenuncia, type Motivo } from "@enclave/protocol"
 import { chavesDeOrdem, chaveDoEvento, venceCarimbo } from "./dobras.js"
 import { comoNoEcra, lerVoto, votacaoGuardada, votacoesAbertasPresas, votosAGuardar } from "./votos.js"
+import { fixadasPresas } from "./fixadas.js"
 import { carriesBytes, entryMediaBytes, LINK_KEY, MEDIA_KEYS, thumbnailBytes } from "./medidaDeMedia.js"
 import { comCabecalho, semCabecalho, versaoDoFicheiro, type VersaoDoFicheiroDoCofre } from "./cabecalhoDoCofre.js"
 import { registarFicha, type FichaDoCanal, type FichaQueChega } from "./tipoDoCanal.js"
@@ -152,6 +153,15 @@ export interface StoredPeerProfile {
    * the room's own stamp counts for the list. See `fixadas.ts`.
    */
   fixadas?: { at: number; seq?: number; por: string; payload?: StoredPayload }
+  /**
+   * Role definitions only (I1 of the polls-somem review): the server `seq` of the
+   * last event that changed the powers of this version with the SAME timestamp,
+   * winning the tie by `seq` (`venceCarimbo`). An honest client never ties
+   * (`#carimboSeguinte`), so this is an altered client re-sending the stored date.
+   * A poll before it in server order does not count this definition
+   * (`empateDepoisDe`). Leaves with the next version that has a later timestamp.
+   */
+  empateSeq?: number
 }
 
 /**
@@ -695,7 +705,7 @@ export interface VaultContents {
    * to a re-send of an old version. Absent in an older vault: the first assignment to arrive wins,
    * as before.
    */
-  channelMemberRolesAt?: Record<string, Record<string, { at: number; seq?: number; por?: string; autoria?: unknown }>>
+  channelMemberRolesAt?: Record<string, Record<string, { at: number; seq?: number; por?: string; autoria?: unknown; empateSeq?: number }>>
   /**
    * The rooms of each channel, for the same reason as the name: they have to be on screen
    * before the connection opens. Foreign key is the channel, internal key is the room id.
@@ -1387,16 +1397,24 @@ function porOrdem(list: readonly StoredChatMessage[]): StoredChatMessage[] {
  * An open poll stays (`presas`, diag-votacao): the cap takes the next oldest instead, so
  * the poll is not archived while people can still vote. Asked only when something leaves.
  */
-function apararConversa(list: StoredChatMessage[], presas: () => ReadonlySet<string> = () => new Set()): StoredChatMessage[] {
+function apararConversa(
+  list: StoredChatMessage[],
+  presas: () => ReadonlySet<string> = () => new Set(),
+  fixadas: () => ReadonlySet<string> = () => new Set(),
+): StoredChatMessage[] {
   let comuns = 0
   for (const entry of list) if (tipoDoEstado(entry) === null) comuns += 1
   let tirar = Math.max(0, comuns - HISTORY_MAX_PER_CHANNEL)
   if (tirar === 0) return []
   const abertas = presas()
+  // A pinned message stays too (`fixadasPresas`, fixadas-topo): by author and id.
+  const presasPorFixar = fixadas()
   const presa = (entry: StoredChatMessage): boolean => {
-    if (abertas.size === 0) return false
+    if (abertas.size === 0 && presasPorFixar.size === 0) return false
     const id = entry.payload["id"]
-    return typeof id === "string" && abertas.has(id) && votacaoGuardada(comoNoEcra(entry)) !== null
+    if (typeof id !== "string") return false
+    if (presasPorFixar.has(`${entry.sender}|${id}`) && entry.payload["t"] === "message") return true
+    return abertas.has(id) && votacaoGuardada(comoNoEcra(entry)) !== null
   }
   const tiradas: StoredChatMessage[] = []
   let escrita = 0
@@ -1651,7 +1669,7 @@ function enforceHistoryLimits(contents: VaultContents, channel: string): void {
       votacoesAbertasPresas(conversa, ler).size === 0
         ? new Set()
         : votacoesAbertasPresas([...conversa, ...(contents.estadoDoCanal?.[channel] ?? [])], ler)
-    const tiradas = apararConversa(conversa, presas).filter((entrada) => !entrada.herdado)
+    const tiradas = apararConversa(conversa, presas, () => fixadasPresas(contents, channel)).filter((entrada) => !entrada.herdado)
     if (tiradas.length > 0) {
       contents.porArquivar ??= {}
       ;(contents.porArquivar[channel] ??= []).push(...tiradas)
@@ -1712,8 +1730,50 @@ export function appendHistory(contents: VaultContents, channel: string, entry: S
   const guardada = jaGuardada(list, entry, peso)
   if (guardada === "confirmou-com-bytes") enforceHistoryLimits(contents, channel)
   if (guardada !== "nova") return
-  list.push({ ...entry, payload: structuredClone(entry.payload) })
+  inserirPorSeq(list, { ...entry, payload: structuredClone(entry.payload) })
   enforceHistoryLimits(contents, channel)
+}
+
+/**
+ * Put an arrival at the end, or, with a server `seq`, before the tail that the
+ * server numbered after it (ordem-resposta, 20/11/2026).
+ *
+ * The tail is the run of last entries whose sort key (`chavesDeOrdem`) is larger
+ * than this `seq`: a send of ours whose echo already came with a larger `seq`, and
+ * the sends of ours without echo that left after it (their key is that `seq`). A
+ * reply of ours can reach the server after the message it answers and still enter
+ * this list first: our send is stored when it leaves, and the message the server
+ * numbered before it may still be on its way to this device. Pushed to the end, the
+ * reply stayed above it, on screen after a restart too. An entry with a smaller key
+ * stops the walk, so an arrival in order costs one comparison.
+ */
+function inserirPorSeq(list: StoredChatMessage[], entry: StoredChatMessage): void {
+  const ultima = list.at(-1)
+  if (entry.seq < 0 || !ultima || (ultima.seq >= 0 && ultima.seq < entry.seq)) {
+    list.push(entry)
+    return
+  }
+  const chaves = chavesDeOrdem(list)
+  let lugar = list.length
+  while (lugar > 0 && (chaves[lugar - 1] ?? -1) > entry.seq) lugar -= 1
+  list.splice(lugar, 0, entry)
+}
+
+/**
+ * After our send at `indice` gains its echo `seq`: the entries after it that the
+ * server numbered BEFORE it go in front of it, in their order (ordem-resposta,
+ * 20/11/2026). The rest of the tail stays behind it, in its order: what has a
+ * larger `seq`, and the sends of ours without echo, which left after this one and
+ * which the server numbers after it (one send at a time per channel).
+ */
+function recuarOQueVeioAntes(list: StoredChatMessage[], indice: number): void {
+  const nossa = list[indice]
+  if (!nossa || nossa.seq < 0) return
+  const antes: StoredChatMessage[] = []
+  const depois: StoredChatMessage[] = []
+  for (const entrada of list.slice(indice + 1)) (entrada.seq >= 0 && entrada.seq < nossa.seq ? antes : depois).push(entrada)
+  if (antes.length === 0) return
+  list.splice(indice, list.length - indice, ...antes, nossa, ...depois)
 }
 
 /** The entry with this `seq` in either list. */
@@ -2128,10 +2188,12 @@ export function canaisComEntradas(contents: VaultContents): string[] {
 export function confirmarSeq(contents: VaultContents, channel: string, chave: string, seq: number): boolean {
   if (seq < 0 || seqGuardado(contents, channel, seq)) return false
   for (const list of [contents.estadoDoCanal?.[channel] ?? [], contents.history[channel] ?? []]) {
-    const entrada = list.find((guardada) => guardada.seq < 0 && chaveDoEvento(guardada) === chave)
+    const indice = list.findIndex((guardada) => guardada.seq < 0 && chaveDoEvento(guardada) === chave)
+    const entrada = list[indice]
     if (!entrada) continue
     entrada.seq = seq
     delete entrada.apos
+    recuarOQueVeioAntes(list, indice)
     return true
   }
   return false
@@ -2267,9 +2329,15 @@ export function aplicarAtribuicao(
   carimbo: { at: number; seq: number; por: string; autoria?: unknown },
 ): boolean {
   const carimbos = contents.channelMemberRolesAt?.[channel] ?? {}
-  if (!venceCarimbo(carimbos[address], carimbo)) return false
+  const guardado = carimbos[address]
+  if (!venceCarimbo(guardado, carimbo)) return false
   const doCanal = contents.channelMemberRoles[channel] ?? {}
-  doCanal[address] = [...new Set(roles)]
+  const antes = new Set(doCanal[address] ?? [])
+  const depois = new Set(roles)
+  const mudou = antes.size !== depois.size || [...depois].some((role) => !antes.has(role))
+  // A tie that changes the roles (I1 of the polls-somem review). See `seqDoEmpate`.
+  const empateSeq = seqDoEmpate(guardado, carimbo, mudou)
+  doCanal[address] = [...depois]
   contents.channelMemberRoles[channel] = doCanal
   // The authorship of who assigned (phase 1 of 1.1): the payload is remade with the timestamp and verified in the portrait.
   carimbos[address] = {
@@ -2277,9 +2345,47 @@ export function aplicarAtribuicao(
     ...(carimbo.seq >= 0 ? { seq: carimbo.seq } : {}),
     por: carimbo.por,
     ...(carimbo.autoria !== undefined ? { autoria: structuredClone(carimbo.autoria) } : {}),
+    ...(empateSeq !== undefined ? { empateSeq } : {}),
   }
   contents.channelMemberRolesAt = { ...contents.channelMemberRolesAt, [channel]: carimbos }
   return true
+}
+
+/**
+ * The `empateSeq` a role record keeps when a proposal replaces it (I1 of the
+ * polls-somem review).
+ *
+ * `venceCarimbo` gives a tie of timestamps to the larger server `seq`. That is right
+ * for the record, and it was a way in for the polls judged again: someone with
+ * authority over roles re-sent a definition or an assignment with the date already
+ * stored and new powers, the date stayed before an old poll, and the poll of somebody
+ * else turned valid. An honest client never ties (`#carimboSeguinte` is always above
+ * what is stored), so a tie that changes something is marked with its `seq`, and a
+ * poll before it in server order does not count the record (`empateDepoisDe`).
+ *
+ * A later timestamp is a new version: no mark. The same timestamp with the same
+ * content (a cascade, a signed copy) keeps the mark that was there. An unknown
+ * `seq` (our own send) marks for every poll: it can only take a power away.
+ */
+export function seqDoEmpate(
+  guardado: { at: number; empateSeq?: number | undefined } | undefined,
+  proposta: { at: number; seq?: number | undefined },
+  mudou: boolean,
+): number | undefined {
+  if (!guardado || guardado.at !== proposta.at) return undefined
+  if (!mudou) return guardado.empateSeq
+  const seq = proposta.seq !== undefined && proposta.seq >= 0 ? proposta.seq : Number.MAX_SAFE_INTEGER
+  return Math.max(seq, guardado.empateSeq ?? -1)
+}
+
+/**
+ * Whether a role record changed by a tie after the poll with this `seq`, in server
+ * order (I1 of the polls-somem review). A poll with no `seq` (a report) is before
+ * any mark. See `seqDoEmpate`.
+ */
+export function empateDepoisDe(registo: { empateSeq?: number | undefined } | undefined, seq: number): boolean {
+  if (registo?.empateSeq === undefined) return false
+  return seq < 0 || registo.empateSeq > seq
 }
 
 /** Keep the freshest profile per address, compared by the sender's own clock. */

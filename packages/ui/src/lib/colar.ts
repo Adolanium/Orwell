@@ -209,11 +209,11 @@ async function confirmar(file: File): Promise<File | null> {
 function primeirosBytes(file: File): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     const leitor = new FileReader()
-    leitor.onerror = () => reject(new Error("não foi possível ler o que foi colado"))
+    leitor.onerror = () => reject(new Error("could not read what was pasted"))
     leitor.onload = () => {
       const resultado = leitor.result
       if (resultado instanceof ArrayBuffer) resolve(new Uint8Array(resultado))
-      else reject(new Error("os bytes colados não vieram como bytes"))
+      else reject(new Error("the pasted bytes did not come as bytes"))
     }
     leitor.readAsArrayBuffer(file.slice(0, BYTES_DE_ASSINATURA))
   })

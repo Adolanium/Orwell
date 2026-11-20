@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { envolver, marcadorDe } from "./atalhosDeFormatacao.js"
+import { envolver, estaEnvolvido, marcadorDe, type Marcador } from "./atalhosDeFormatacao.js"
+import { ATALHOS_POR_OMISSAO, combinacaoDeEvento } from "./atalhosDeVoz.js"
 
 /**
  * What the key combination means.
@@ -17,14 +18,42 @@ describe("marcadorDe", () => {
 
   it("os dois com Shift: rasurado e coberto", () => {
     expect(marcadorDe({ key: "x", metaKey: true, shiftKey: true })).toBe("~~")
-    expect(marcadorDe({ key: "e", metaKey: true, shiftKey: true })).toBe("||")
+    expect(marcadorDe({ key: "h", metaKey: true, shiftKey: true })).toBe("||")
+  })
+
+  it("Cmd/Ctrl+E é código, sem Shift", () => {
+    expect(marcadorDe({ key: "e", metaKey: true })).toBe("`")
+    expect(marcadorDe({ key: "e", ctrlKey: true })).toBe("`")
+  })
+
+  it("Cmd/Ctrl+Shift+E já não é o coberto: é o ecrã partilhado", () => {
+    // In a call, the same key put `||` in the box and also started the screen
+    // share, because `useAtalhos` listens on the whole document.
+    expect(marcadorDe({ key: "E", ctrlKey: true, shiftKey: true })).toBeNull()
+    expect(marcadorDe({ key: "e", metaKey: true, shiftKey: true })).toBeNull()
+  })
+
+  it("nenhum atalho de formatação colide com um atalho de voz de fábrica", () => {
+    for (const [accao, combinacao] of Object.entries(ATALHOS_POR_OMISSAO)) {
+      if (combinacao === null) continue
+      const partes = combinacao.split("+")
+      const tecla = (partes.at(-1) ?? "").toLowerCase()
+      const evento = {
+        key: partes.includes("Shift") ? tecla.toUpperCase() : tecla,
+        ctrlKey: partes.includes("Mod"),
+        shiftKey: partes.includes("Shift"),
+        altKey: partes.includes("Alt"),
+      }
+      expect(combinacaoDeEvento(evento), accao).toBe(combinacao)
+      expect(marcadorDe(evento), `${accao}: ${combinacao}`).toBeNull()
+    }
   })
 
   it("com Shift carregado, a tecla chega em maiúscula — e conta na mesma", () => {
     // The browser delivers "X" in `key` for Shift+x. Comparing without lowercasing
     // made the shortcut work in theory and never in practice.
     expect(marcadorDe({ key: "X", metaKey: true, shiftKey: true })).toBe("~~")
-    expect(marcadorDe({ key: "E", ctrlKey: true, shiftKey: true })).toBe("||")
+    expect(marcadorDe({ key: "H", ctrlKey: true, shiftKey: true })).toBe("||")
   })
 
   it("uma letra sozinha é uma letra, e nunca um atalho", () => {
@@ -97,8 +126,8 @@ describe("envolver", () => {
     })
   })
 
-  it("envolver e voltar a envolver devolve o texto original, para os quatro", () => {
-    for (const marcador of ["**", "*", "~~", "||"] as const) {
+  it("envolver e voltar a envolver devolve o texto original, para os cinco", () => {
+    for (const marcador of ["**", "*", "~~", "`", "||"] as const) {
       const original = "vai isto"
       const posto = envolver(original, 4, 8, marcador)
       const tirado = envolver(posto.texto, posto.inicio, posto.fim, marcador)
@@ -125,11 +154,11 @@ describe("envolver", () => {
 
   it("as letras de fora da selecção nunca são tocadas", () => {
     const original = "antes MEIO depois"
-    for (const marcador of ["**", "*", "~~", "||"] as const) {
+    for (const marcador of ["**", "*", "~~", "`", "||"] as const) {
       const feito = envolver(original, 6, 10, marcador)
       expect(feito.texto.startsWith("antes "), marcador).toBe(true)
       expect(feito.texto.endsWith(" depois"), marcador).toBe(true)
-      expect(feito.texto.replace(/[*~|]/g, ""), marcador).toBe(original)
+      expect(feito.texto.replace(/[*~|`]/g, ""), marcador).toBe(original)
     }
   })
 
@@ -137,5 +166,41 @@ describe("envolver", () => {
     // Dragging the mouse right to left gives `selectionStart` larger than
     // `selectionEnd` on some paths. Without this, the text got cut off.
     expect(envolver("isto é urgente", 14, 7, "**").texto).toBe("isto é **urgente**")
+  })
+})
+
+/**
+ * Is the selection already wrapped? The formatting bar shows the answer as a
+ * pressed button, so it has to agree with what `envolver` will do.
+ */
+describe("estaEnvolvido", () => {
+  it("sim, com os marcadores por fora ou por dentro da selecção", () => {
+    expect(estaEnvolvido("isto é **urgente**", 9, 16, "**")).toBe(true)
+    expect(estaEnvolvido("isto é **urgente**", 7, 18, "**")).toBe(true)
+    expect(estaEnvolvido("vê `npm ci`", 4, 10, "`")).toBe(true)
+  })
+
+  it("não, quando não há marcadores ou são de outro", () => {
+    expect(estaEnvolvido("isto é urgente", 7, 14, "**")).toBe(false)
+    expect(estaEnvolvido("isto é **urgente**", 9, 16, "~~")).toBe(false)
+    // The asterisk next to "a" is half of the bold, not an italic.
+    expect(estaEnvolvido("**a**", 2, 3, "*")).toBe(false)
+  })
+
+  it("diz sempre o mesmo que o envolver vai fazer", () => {
+    const casos: [string, number, number][] = [
+      ["isto é **urgente**", 9, 16],
+      ["isto é urgente", 7, 14],
+      ["~~a~~ e ||b||", 2, 3],
+      ["~~a~~ e ||b||", 10, 11],
+      ["`x`", 0, 3],
+      ["**a**", 2, 3],
+    ]
+    for (const [texto, inicio, fim] of casos) {
+      for (const marcador of ["**", "*", "~~", "`", "||"] as Marcador[]) {
+        const tira = envolver(texto, inicio, fim, marcador).texto.length < texto.length
+        expect(estaEnvolvido(texto, inicio, fim, marcador), `${texto} ${marcador}`).toBe(tira)
+      }
+    }
   })
 })

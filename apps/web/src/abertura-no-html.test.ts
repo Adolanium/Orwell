@@ -72,7 +72,7 @@ describe("o splash no index.html", () => {
     expect(folha?.children).toContain('html[lang="en"] .abertura-texto>[lang="en"]')
   })
 
-  it("o guião marca a língua pela regra do arranque: o endereço, a escolha guardada, e inglês sem escolha", async () => {
+  it("o guião marca a língua pela regra do arranque: o endereço, a escolha guardada, o sistema, e inglês", async () => {
     const { guiao } = await correr()
     const marcar = (o: { href: string; guardada?: string; sistema: string[] }): string => {
       const html = { lang: "pt", dataset: {} as Record<string, string> }
@@ -88,8 +88,11 @@ describe("o splash no index.html", () => {
     expect(marcar({ href: "https://orwell.pt/app/", sistema: ["en-GB", "pt"] })).toBe("en")
     expect(marcar({ href: "https://orwell.pt/app/", sistema: ["fr-FR"] })).toBe("en")
     expect(marcar({ href: "https://orwell.pt/app/", sistema: [] })).toBe("en")
-    // 1.3.9: English until the person chooses; a browser in Portuguese does not count.
-    expect(marcar({ href: "https://orwell.pt/app/", sistema: ["pt-PT"] })).toBe("en")
+    // 20/11/2026: Portuguese only when the FIRST browser language is Portuguese.
+    expect(marcar({ href: "https://orwell.pt/app/", sistema: ["pt-PT"] })).toBe("pt")
+    expect(marcar({ href: "https://orwell.pt/app/", sistema: ["pt-BR", "en"] })).toBe("pt")
+    expect(marcar({ href: "https://orwell.pt/app/", sistema: ["de-DE", "pt-PT"] })).toBe("en")
+    expect(marcar({ href: "https://orwell.pt/app/", guardada: "en", sistema: ["pt-PT"] })).toBe("en")
     expect(marcar({ href: "https://orwell.pt/app/", guardada: "pt", sistema: ["en-US"] })).toBe("pt")
     expect(marcar({ href: "https://orwell.pt/app/?lingua=en", guardada: "pt", sistema: ["pt-PT"] })).toBe("en")
   })

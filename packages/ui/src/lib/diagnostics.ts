@@ -1,3 +1,5 @@
+import { strings } from "../strings.js"
+
 /**
  * A short, in-memory record of what this session has been doing.
  *
@@ -93,14 +95,15 @@ export interface DiagnosticHeader {
  * contain — so nobody has to take the word "metadata" on trust.
  */
 export function formatDiagnostics(entries: DiagnosticEntry[], header: DiagnosticHeader): string {
+  const texto = strings.common.diagnostico
   const lines = [
-    "Orwell — registo de diagnóstico",
+    texto.titulo,
     header.note,
-    `gerado: ${new Date().toISOString()}`,
-    ...(header.address ? [`conta: ${shortActor(header.address)}`] : []),
-    ...(header.connection ? [`ligação: ${header.connection}`] : []),
-    ...(header.channels === undefined ? [] : [`canais: ${header.channels}`]),
-    `eventos: ${entries.length}`,
+    texto.gerado(new Date().toISOString()),
+    ...(header.address ? [texto.conta(shortActor(header.address))] : []),
+    ...(header.connection ? [texto.ligacao(header.connection)] : []),
+    ...(header.channels === undefined ? [] : [texto.canais(header.channels)]),
+    texto.eventos(entries.length),
     "—",
   ]
 

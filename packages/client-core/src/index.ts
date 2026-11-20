@@ -1,3 +1,4 @@
+export * from "./actosEmTexto.js"
 export * from "./anexos.js"
 export * from "./apelidos.js"
 export * from "./nomeDeApresentacao.js"

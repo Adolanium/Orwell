@@ -5,12 +5,14 @@ import {
   CANAIS_DE_CANAL,
   LEITURAS_DE_CANAL,
   ligarCanais,
+  PEDIDO_MAL_FORMADO,
   type RegistarLeitura,
   type RegistarPedido,
   type Resposta,
   type SessaoDeCanais,
 } from "../src/main/canais.js"
 import { embrulharErros } from "../src/main/envelope.js"
+import { codigoDoErro } from "../../../packages/ui/src/lib/codigosDeErro.js"
 
 /**
  * The IPC test suite for `apps/client`, on the main process side.
@@ -166,6 +168,54 @@ const sessao: SessaoDeCanais = {
     feito.push(`may:${channel}:${power}`)
     return power !== "expulsar"
   },
+  categoryTombstonesOf: (channel) => {
+    feito.push(`categoryTombstonesOf:${channel}`)
+    return []
+  },
+  mayTransmit: () => true,
+  mayCreatePoll: () => true,
+
+  /*
+    The 1.2 permission model (1.3.25). Each answer depends on its arguments, so
+    a constant answer, or arguments swapped on the way, fail the bench: moving
+    is allowed and disconnecting (no `para`) is not; the default room (`""`)
+    and no place at all answer differently.
+  */
+  mayMoveIn: (channel, de, para) => {
+    feito.push(`mayMoveIn:${channel}:${de}:${para}`)
+    return para !== undefined
+  },
+  todosOf: (channel) => {
+    feito.push(`todosOf:${channel}`)
+    return { powers: ["escrever"], definido: true }
+  },
+  permissoesEm: (channel, address, lugar) => {
+    feito.push(`permissoesEm:${channel}:${address}:${JSON.stringify(lugar)}`)
+    return lugar === undefined ? ["fixar"] : ["escrever"]
+  },
+  mayManageRole: (channel, role) => {
+    feito.push(`mayManageRole:${channel}:${role}`)
+    return role === "guarda"
+  },
+  delegacaoDeCargos: (channel) => {
+    feito.push(`delegacaoDeCargos:${channel}`)
+    return true
+  },
+  sobreposicoesDe: (channel, lugar) => {
+    feito.push(`sobreposicoesDe:${channel}:${JSON.stringify(lugar)}`)
+    return [{ role: "guarda", allow: ["escrever"], deny: ["fixar"] }]
+  },
+  maySetSobreposicoes: (channel, lugar) => {
+    feito.push(`maySetSobreposicoes:${channel}:${JSON.stringify(lugar)}`)
+    return "sala" in lugar
+  },
+  setSobreposicoes: async (channel, lugar, perms) => {
+    feito.push(`setSobreposicoes:${channel}:${JSON.stringify(lugar)}:${JSON.stringify(perms)}`)
+  },
+  reaccoesGuardadas: (channel) => {
+    feito.push(`reaccoesGuardadas:${channel}`)
+    return REACCOES_GUARDADAS
+  },
 
   upsertRoom: async (channel, next) => {
     feito.push(`upsertRoom:${channel}:${JSON.stringify(next)}`)
@@ -201,11 +251,17 @@ const sessao: SessaoDeCanais = {
   setNickname: async (channel, subject, nick) => {
     feito.push(`setNickname:${channel}:${subject}:${nick}`)
   },
-  moveVoice: async (channel, subject, room) => {
-    feito.push(`moveVoice:${channel}:${subject}:${room}`)
+  moveVoice: async (channel, subject, room, de) => {
+    feito.push(`moveVoice:${channel}:${subject}:${room}${de === undefined ? "" : `:de=${de}`}`)
   },
-  disconnectVoice: async (channel, subject) => {
-    feito.push(`disconnectVoice:${channel}:${subject}`)
+  disconnectVoice: async (channel, subject, de) => {
+    feito.push(`disconnectVoice:${channel}:${subject}${de === undefined ? "" : `:de=${de}`}`)
+  },
+  reorderRoles: async (channel, ordem) => {
+    feito.push(`reorderRoles:${channel}:${ordem.join("+")}`)
+  },
+  reactToMessage: async (channel, target, emoji, remove) => {
+    feito.push(`reactToMessage:${channel}:${target}:${emoji}:${remove}`)
   },
   assignRole: async (channel, subject, admin) => {
     feito.push(`assignRole:${channel}:${subject}:${admin}`)
@@ -258,6 +314,15 @@ const CANAL_DO_RASTO = "bancada:rasto"
 const CANAL_IMPOSSIVEL = "bancada:impossivel"
 const CANAL_ERRO_SIMPLES = "bancada:erro-simples"
 const CANAL_ERRO_FUNCAO = "bancada:erro-funcao"
+/** The literal `index.ts` registers for `social.canaisSurdos` and the preload invokes. */
+const CANAL_CANAIS_SURDOS = "social:canais-surdos"
+/** The deaf channels, as `Session.canaisSurdos` returns them. */
+const CANAIS_SURDOS = ["!surdo:servidor", "!outro-surdo:servidor"]
+/** Stored chat reactions, the shape `Session.reaccoesGuardadas` returns. */
+const REACCOES_GUARDADAS = [
+  { seq: 5, sender: "@outro:servidor", at: 50, payload: { t: "reaction", target: "m1", emoji: "👩🏻‍❤️‍💋‍👨🏻" } },
+  { seq: 6, sender: "@quem:servidor", at: 60, apos: 4, payload: { t: "reaction", target: "m1", emoji: "🔥", remove: true } },
+]
 
 /**
  * Global shortcuts (1.0.6), with a fake `globalShortcut` that stores the
@@ -312,6 +377,19 @@ function registarPontes(): void {
   }
 
   ligarCanais({ registarPedido, registarLeitura, sessao })
+
+  /*
+    `social.canaisSurdos` (1.3.25) is registered in `index.ts`, outside
+    `ligarCanais`, with no argument: wired here by hand under the same name, so
+    what is measured is the preload's name and the list crossing the clone.
+  */
+  ipcMain.handle(
+    CANAL_CANAIS_SURDOS,
+    embrulharErros(() => {
+      feito.push("canaisSurdos")
+      return CANAIS_SURDOS
+    }),
+  )
 
   ipcMain.handle(CANAIS_DE_ATALHOS.definir, embrulharErros((_evento, pedido: unknown) => atalhosDaBancada.definir(pedido)))
   ipcMain.handle(CANAIS_DE_ATALHOS.suspender, embrulharErros(() => ({ ok: true })))
@@ -404,9 +482,17 @@ async function medir(janela: BrowserWindow): Promise<Prova[]> {
       "releaseTicket",
       "editMessage",
       "deleteMessage",
+      "mayMoveIn",
+      "reaccoesGuardadas",
     ])}
     const emFalta = esperadas.filter((nome) => typeof canais[nome] !== "function")
-    prender("as 40 operações atravessam o contextBridge", emFalta.length === 0, emFalta.join(", "))
+    prender("as " + esperadas.length + " operações atravessam o contextBridge", emFalta.length === 0, emFalta.join(", "))
+
+    // O modelo de permissões 1.2 vem aninhado, como na ponte da interface: 7 funções.
+    const DO_MODELO = ["todos", "em", "mayManageRole", "delegacao", "sobreposicoes", "maySetSobreposicoes", "setSobreposicoes"]
+    const permissoes = canais.permissoes
+    const faltaNoModelo = permissoes ? DO_MODELO.filter((nome) => typeof permissoes[nome] !== "function") : DO_MODELO
+    prender("as 7 operações de channels.permissoes atravessam o contextBridge", faltaNoModelo.length === 0, faltaNoModelo.join(", "))
 
     // ------------------------------------------- as leituras, pelo sendSync
     const CANAL = "!geral:servidor"
@@ -445,6 +531,22 @@ async function medir(janela: BrowserWindow): Promise<Prova[]> {
         { id: "t1", subject: "a porta", state: "working", opener: "@quem:servidor", assignee: "@outro:servidor", openedAt: 1, updatedAt: 2, messages: 3 },
       ]],
       ["mayDecideTicket", () => canais.mayDecideTicket(CANAL, "sala", "t1"), true],
+
+      // O modelo de permissões 1.2 (1.3.25). A sessão responde conforme os argumentos.
+      ["mayMoveIn mover", () => canais.mayMoveIn(CANAL, "a", "v"), true],
+      ["mayMoveIn desligar", () => canais.mayMoveIn(CANAL, "a"), false],
+      ["mayMoveIn para a sala de omissão", () => canais.mayMoveIn(CANAL, "a", ""), true],
+      ["permissoes.todos", () => permissoes.todos(CANAL), { powers: ["escrever"], definido: true }],
+      ["permissoes.em no canal", () => permissoes.em(CANAL, "@alguem:servidor"), ["fixar"]],
+      ["permissoes.em na sala de omissão", () => permissoes.em(CANAL, "@alguem:servidor", { sala: "" }), ["escrever"]],
+      ["permissoes.mayManageRole o seu", () => permissoes.mayManageRole(CANAL, "guarda"), true],
+      ["permissoes.mayManageRole outro", () => permissoes.mayManageRole(CANAL, "porteiro"), false],
+      ["permissoes.delegacao", () => permissoes.delegacao(CANAL), true],
+      ["permissoes.sobreposicoes", () => permissoes.sobreposicoes(CANAL, { categoria: "geral" }), [
+        { role: "guarda", allow: ["escrever"], deny: ["fixar"] },
+      ]],
+      ["permissoes.maySetSobreposicoes sala", () => permissoes.maySetSobreposicoes(CANAL, { sala: "a" }), true],
+      ["permissoes.maySetSobreposicoes categoria", () => permissoes.maySetSobreposicoes(CANAL, { categoria: "geral" }), false],
     ]
 
     for (const [nome, ler, esperado] of leituras) {
@@ -466,6 +568,41 @@ async function medir(janela: BrowserWindow): Promise<Prova[]> {
         continue
       }
       prender("leitura " + nome, igual(resposta.valor, esperado), "recebido: " + JSON.stringify(resposta.valor))
+    }
+
+    // ------------------------- argumentos recusados nas leituras (Erro 385)
+    /*
+      A forma que a ponte da interface não declara volta no envelope com a
+      chave do Erro 385, e a sessão nunca a vê: o rasto mede essa metade.
+    */
+    const MAL_FORMADO = ${JSON.stringify(PEDIDO_MAL_FORMADO)}
+    const recusadas = [
+      ["mayMoveIn com de que não é texto", () => canais.mayMoveIn(CANAL, 7, "v")],
+      ["mayMoveIn com canal vazio", () => canais.mayMoveIn("", "a", "v")],
+      ["mayMoveIn com para que não é texto", () => canais.mayMoveIn(CANAL, "a", { sala: "v" })],
+      ["permissoes.todos com canal que não é texto", () => permissoes.todos(42)],
+      ["permissoes.em com sala e categoria", () => permissoes.em(CANAL, "@alguem:servidor", { sala: "a", categoria: "geral" })],
+      ["permissoes.em com endereço vazio", () => permissoes.em(CANAL, "")],
+      ["permissoes.em com lugar null", () => permissoes.em(CANAL, "@alguem:servidor", null)],
+      ["permissoes.mayManageRole com cargo vazio", () => permissoes.mayManageRole(CANAL, "")],
+      ["permissoes.delegacao sem canal", () => permissoes.delegacao(null)],
+      ["permissoes.sobreposicoes com categoria vazia", () => permissoes.sobreposicoes(CANAL, { categoria: "" })],
+      ["permissoes.sobreposicoes sem lugar", () => permissoes.sobreposicoes(CANAL)],
+      ["permissoes.maySetSobreposicoes com lugar em lista", () => permissoes.maySetSobreposicoes(CANAL, ["sala"])],
+    ]
+    for (const [nome, ler] of recusadas) {
+      let resposta
+      try {
+        resposta = ler()
+      } catch (erro) {
+        prender("recusa " + nome, false, "atirou no renderer: " + erro.message)
+        continue
+      }
+      prender(
+        "recusa " + nome,
+        resposta && resposta.ok === false && resposta.erro === MAL_FORMADO,
+        "recebido: " + JSON.stringify(resposta),
+      )
     }
 
     // ------------------------------------- o que o structuredClone faz ao meio
@@ -550,12 +687,72 @@ async function medir(janela: BrowserWindow): Promise<Prova[]> {
       feitos.push("editMessage")
       await canais.deleteMessage(CANAL, "m1")
       feitos.push("deleteMessage")
-      return feitos
+
+      // 1.3.25: a origem nos gestos de voz, as sobreposições e as reacções guardadas.
+      await canais.moveVoice(CANAL, "@alguem:servidor", "v", "a")
+      feitos.push("moveVoice com de")
+      await canais.disconnectVoice(CANAL, "@alguem:servidor", "a")
+      feitos.push("disconnectVoice com de")
+      const definido = await permissoes.setSobreposicoes(CANAL, { categoria: "geral" }, [
+        { role: "guarda", allow: ["escrever"], deny: [] },
+        { role: "porteiro", lixo: "não passa" },
+      ])
+      feitos.push("setSobreposicoes:" + JSON.stringify(definido))
+      const guardadas = await canais.reaccoesGuardadas(CANAL)
+      feitos.push("reaccoesGuardadas:" + JSON.stringify(guardadas))
+      // Outside the channel operations, so outside the count: the deaf channels, no argument.
+      const surdos = await anfitriao.social.canaisSurdos()
+
+      // Pedidos recusados: o envelope traz a chave do 385 e, no detalhe, o argumento.
+      const pedidosRecusados = [
+        ["setSobreposicoes com allow que não é lista", () => permissoes.setSobreposicoes(CANAL, { sala: "a" }, [{ role: "guarda", allow: "escrever" }])],
+        ["setSobreposicoes com 17 entradas", () => permissoes.setSobreposicoes(CANAL, { sala: "a" }, Array.from({ length: 17 }, (_, i) => ({ role: "c" + i })))],
+        ["setSobreposicoes com lugar a mais", () => permissoes.setSobreposicoes(CANAL, { sala: "a", extra: 1 }, [])],
+        ["setSobreposicoes sem cargo", () => permissoes.setSobreposicoes(CANAL, { sala: "a" }, [{ allow: [] }])],
+        ["moveVoice com de que não é texto", () => canais.moveVoice(CANAL, "@alguem:servidor", "v", 5)],
+        ["disconnectVoice com de que não é texto", () => canais.disconnectVoice(CANAL, "@alguem:servidor", { sala: "a" })],
+        ["reaccoesGuardadas com canal que não é texto", () => canais.reaccoesGuardadas(42)],
+        ["reaccoesGuardadas com canal vazio", () => canais.reaccoesGuardadas("")],
+      ]
+      const recusas = []
+      for (const [nome, pedir] of pedidosRecusados) {
+        let resposta
+        try {
+          resposta = await pedir()
+        } catch (erro) {
+          resposta = { rebentou: String(erro) }
+        }
+        recusas.push([nome, resposta])
+      }
+      return { feitos, recusas, surdos }
     })()
 
     return pedidos.then(
-      (feitos) => {
-        prender("os 19 pedidos atravessam por invoke", feitos.length === 19, feitos.join(", "))
+      ({ feitos, recusas, surdos }) => {
+        prender("os 24 pedidos atravessam por invoke", feitos.length === 24, feitos.join(", "))
+        prender(
+          "social.canaisSurdos responde, sem argumentos, com a lista inteira",
+          JSON.stringify(surdos) === ${JSON.stringify(JSON.stringify(CANAIS_SURDOS))},
+          "recebido: " + JSON.stringify(surdos),
+        )
+        prender(
+          "setSobreposicoes responde ok",
+          feitos.includes('setSobreposicoes:{"ok":true}'),
+          feitos.filter((cada) => cada.startsWith("setSobreposicoes")).join(""),
+        )
+        prender(
+          "as reacções guardadas atravessam inteiras, emoji composto e campos opcionais",
+          feitos.includes("reaccoesGuardadas:" + ${JSON.stringify(JSON.stringify(REACCOES_GUARDADAS))}),
+          feitos.filter((cada) => cada.startsWith("reaccoesGuardadas")).join(""),
+        )
+        for (const [nome, resposta] of recusas) {
+          prender(
+            "recusa " + nome,
+            resposta && resposta.ok === false && resposta.chave === MAL_FORMADO &&
+              resposta.detalhe && typeof resposta.detalhe.argumento === "string" && typeof resposta.detalhe.esperado === "string",
+            "recebido: " + JSON.stringify(resposta),
+          )
+        }
         prender(
           "abrir um ticket devolve o identificador",
           feitos.some((cada) => cada === 'openTicket:{"ok":true,"id":"t-novo"}'),
@@ -564,7 +761,7 @@ async function medir(janela: BrowserWindow): Promise<Prova[]> {
         return JSON.stringify(provas)
       },
       (erro) => {
-        prender("os 19 pedidos atravessam por invoke", false, erro.message)
+        prender("os 24 pedidos atravessam por invoke", false, erro.message)
         return JSON.stringify(provas)
       },
     )
@@ -600,12 +797,60 @@ function provasDoRasto(): Prova[] {
     ["mover a voz leva a pessoa e a sala", `moveVoice:${CANAL}:@alguem:servidor:v`],
     ["desligar da voz leva a pessoa", `disconnectVoice:${CANAL}:@alguem:servidor`],
     ["emendar leva o alvo e o corpo", `editMessage:${CANAL}:m1:assim é que é`],
+    // 1.3.25: the 1.2 permission model and the origin of the voice gestures.
+    ["mover a voz leva a sala de origem", `moveVoice:${CANAL}:@alguem:servidor:v:de=a`],
+    ["desligar da voz leva a sala de origem", `disconnectVoice:${CANAL}:@alguem:servidor:de=a`],
+    ["mayMoveIn leva origem e destino por ordem", `mayMoveIn:${CANAL}:a:v`],
+    ["mayMoveIn sem destino chega como desligar", `mayMoveIn:${CANAL}:a:undefined`],
+    ["mayMoveIn para a sala de omissão leva o texto vazio", `mayMoveIn:${CANAL}:a:`],
+    ["permissoes.em sem lugar chega sem lugar", `permissoesEm:${CANAL}:@alguem:servidor:undefined`],
+    ["permissoes.em na sala de omissão leva { sala: \"\" }", `permissoesEm:${CANAL}:@alguem:servidor:${JSON.stringify({ sala: "" })}`],
+    ["sobreposicoes leva a categoria", `sobreposicoesDe:${CANAL}:${JSON.stringify({ categoria: "geral" })}`],
+    [
+      "setSobreposicoes copia campo a campo: o lixo fica, allow e deny por omissão",
+      `setSobreposicoes:${CANAL}:${JSON.stringify({ categoria: "geral" })}:${JSON.stringify([
+        { role: "guarda", allow: ["escrever"], deny: [] },
+        { role: "porteiro", allow: [], deny: [] },
+      ])}`,
+    ],
+    ["as reacções guardadas levam o canal", `reaccoesGuardadas:${CANAL}`],
   ]
-  return esperados.map(([nome, procurado]) => ({
+  const provas = esperados.map(([nome, procurado]) => ({
     nome,
     passou: tem(procurado),
     detalhe: tem(procurado) ? "" : `não veio: ${procurado}`,
   }))
+
+  /*
+    The other half of a refusal: the session never saw it. The refused calls
+    use markers no valid call uses (an empty channel, 7, 42, 5, 17 overrides,
+    an `extra` key); any of them in the trace means a check was skipped.
+  */
+  const marcasDeRecusa = [
+    (cada: string) => cada.startsWith("mayMoveIn::"),
+    (cada: string) => cada.startsWith(`mayMoveIn:${CANAL}:7:`),
+    (cada: string) => cada.startsWith(`mayMoveIn:${CANAL}:a:[object`),
+    (cada: string) => cada.startsWith("todosOf:42"),
+    (cada: string) => cada.startsWith("permissoesEm:") && (cada.includes('"categoria":"geral","sala"') || cada.includes('"sala":"a","categoria"') || cada.endsWith(":null") || cada.includes(`${CANAL}::`)),
+    (cada: string) => cada === `mayManageRole:${CANAL}:`,
+    (cada: string) => cada.startsWith("delegacaoDeCargos:null"),
+    (cada: string) => cada.startsWith("sobreposicoesDe:") && !cada.endsWith(JSON.stringify({ categoria: "geral" })),
+    (cada: string) => cada.startsWith("maySetSobreposicoes:") && cada.includes("["),
+    (cada: string) => cada.startsWith("setSobreposicoes:") && !cada.includes(JSON.stringify({ categoria: "geral" })),
+    (cada: string) => /^(moveVoice|disconnectVoice):.*:de=(5|\[object)/.test(cada),
+  ]
+  const fugidas = feito.filter((cada) => marcasDeRecusa.some((marca) => marca(cada)))
+  provas.push({
+    nome: "nenhum argumento recusado chegou à sessão",
+    passou: fugidas.length === 0,
+    detalhe: fugidas.join("; "),
+  })
+  provas.push({
+    nome: "a chave das recusas é o Erro 385",
+    passou: codigoDoErro(PEDIDO_MAL_FORMADO) === 385,
+    detalhe: `codigoDoErro deu ${codigoDoErro(PEDIDO_MAL_FORMADO)}`,
+  })
+  return provas
 }
 
 /**
@@ -647,7 +892,7 @@ async function medirOImpossivel(): Promise<Prova> {
   const resposta = JSON.parse(cru) as { ok?: boolean; erro?: string } | null
   return {
     nome: "uma resposta que não atravessa o IPC chega como QUEIXA, não como silêncio",
-    passou: resposta?.ok === false && String(resposta.erro).includes("não atravessa o IPC"),
+    passou: resposta?.ok === false && String(resposta.erro).includes("does not cross the IPC"),
     detalhe: JSON.stringify(resposta),
   }
 }

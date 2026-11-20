@@ -140,44 +140,176 @@
 }
 
 /*
-  The count above the icon: unread items at that destination.
-  
-  It lived on this sheet and had no caller at all, leftover from when the bell
-  lived in the rail, and it's the design the bell badge copies (`.me-bell-count`).
-  It has an owner again, and moved next to the button it belongs to, where it
-  reads against the dot and against the active state pill.
-  
-  **Absolutely positioned, and that's the only thing keeping it out of the flow.**
-  The icon is centered on a 40px grid; a badge in the flow pushed it sideways, and
-  an icon that jumps when a message arrives is worse than no notice at all. Here it
-  takes no space and the icon doesn't move.
-  
-  No lateral padding and minimum width equal to height: that's what makes a single
-  digit a circle, not an oval pill. "9+" measures about twelve pixels at 10px bold
-  and fits in the same width, so the shape doesn't change with the number, that's
-  what stops the button corner from dancing between 9 and 10.
-  
-  The ring takes the rail color, not the button color: it sits on the button's
-  edge, and that edge has to look broken underneath. Same for the active
-  destination button, which is the only one with its own background.
-  
-  Nothing cuts it: there's no closed `overflow` between here and the column.
-  */
+  The rail notices (20/11/2026, option A, "pill and pastille"). Markup in
+  `components/AvisosDoCarril.tsx`; colours in `tokens.css` (`--aviso-*`).
+
+  Each notice has its own shape, so colour is never the only difference: a
+  pill with no number (unread), a pastille with a number (waiting for you), a
+  red outline and a glyph (a nudge), a green seal (a call), an amber seal on
+  the logo (the connection dropped).
+
+  **All absolutely positioned, and that is the only thing keeping them out of
+  the flow.** The icon is centred on the button's grid; a notice in the flow
+  pushed it sideways, and an icon that jumps when a message arrives is worse
+  than no notice at all.
+
+  The seals' ring takes the rail colour, not the button colour: they sit on
+  the button's edge, and that edge has to look broken underneath. Nothing cuts
+  them: there is no closed `overflow` between here and the column.
+*/
+
+/* Unread, nobody waiting: the short pill on the left, the same pill that
+   grows on hover and stands tall on the open destination. */
+.rail-pill {
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  translate: 0 -50%;
+  width: 4px;
+  height: 8px;
+  border-radius: 0 4px 4px 0;
+  background: var(--aviso-neutro);
+  pointer-events: none;
+}
+
+/*
+  Waiting for you: the number, at the bottom right.
+
+  No lateral padding and a minimum width equal to the height: one digit is a
+  circle, not an oval, and "9+" (about thirteen pixels at 11 px bold) fits the
+  same width, so the corner does not dance between 9 and 10. It is the same
+  kind of number as the bell's (`.me-bell-count`).
+*/
 .rail-count {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  min-width: 15px;
-  height: 15px;
+  right: -4px;
+  bottom: -4px;
+  min-width: 16px;
+  height: 16px;
   border-radius: var(--radius-full);
-  background: var(--accent-deep);
-  color: var(--on-accent);
-  font-size: 10px;
+  background: var(--aviso-mencao);
+  color: var(--aviso-mencao-tinta);
+  font-size: 11px;
   font-weight: 700;
-  line-height: 15px;
+  line-height: 16px;
   text-align: center;
-  border: 2px solid var(--bg-rail);
+  font-variant-numeric: tabular-nums;
+  border: 3px solid var(--bg-rail);
   box-sizing: content-box;
+  pointer-events: none;
+}
+
+/* A nudge not seen yet: the button outlined in red, and the red pastille with
+   the vibration glyph in the number's place. */
+.rail-btn.tocado {
+  box-shadow: inset 0 0 0 2px var(--aviso-toque);
+  color: var(--aviso-toque);
+}
+
+.rail-toque,
+.rail-chamada,
+.rail-offline {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  display: grid;
+  place-items: center;
+  border: 3px solid var(--bg-rail);
+  box-sizing: content-box;
+  pointer-events: none;
+}
+
+.rail-toque svg,
+.rail-chamada svg {
+  width: 11px;
+  height: 11px;
+}
+
+.rail-toque {
+  right: -4px;
+  bottom: -4px;
+  background: var(--aviso-toque);
+  color: var(--aviso-toque-tinta);
+}
+
+.rail-toque svg {
+  animation: rail-abanar 1.6s ease-in-out infinite;
+}
+
+@keyframes rail-abanar {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  20% {
+    transform: rotate(-12deg);
+  }
+  40% {
+    transform: rotate(10deg);
+  }
+  60% {
+    transform: rotate(-6deg);
+  }
+  80% {
+    transform: rotate(3deg);
+  }
+}
+
+/* A call in progress here: the green seal at the top right, opposite the number. */
+.rail-chamada {
+  right: -4px;
+  top: -4px;
+  background: var(--aviso-chamada);
+  color: var(--aviso-chamada-tinta);
+}
+
+/* The connection dropped: the mark at 45 % and the amber seal with "!". */
+.rail-logo {
+  position: relative;
+}
+
+.rail-logo.sem-ligacao > svg {
+  opacity: 0.45;
+}
+
+.rail-offline {
+  right: -8px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+  background: var(--aviso-ligacao);
+  color: var(--aviso-ligacao-tinta);
+}
+
+.rail-offline svg {
+  width: 9px;
+  height: 9px;
+}
+
+/* Reduced motion: the nudge still moves, three times slower and half as far.
+   `!important` against the universal rule in `base.css`. */
+@media (prefers-reduced-motion: reduce) {
+  .rail-toque svg {
+    animation: rail-abanar-calmo 4.8s ease-in-out infinite !important;
+  }
+}
+
+@keyframes rail-abanar-calmo {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-6deg);
+  }
+  50% {
+    transform: rotate(5deg);
+  }
+  75% {
+    transform: rotate(-3deg);
+  }
 }
 
 /* --------------------------------------------------------------- sidebar */
@@ -1066,6 +1198,44 @@
 .category-toggle .room-count {
   margin-left: auto;
   letter-spacing: 0;
+}
+
+/*
+  The `+` left of a category's name (1.3.25): a room created already in it. Only
+  for whoever organizes rooms, so the header is a row only then. Dim like the arrow,
+  and it takes the accent of the name under the pointer.
+*/
+.room-category.com-criar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.room-category.com-criar .category-toggle {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.category-criar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.category-criar:hover,
+.category-criar:focus-visible {
+  color: var(--accent);
 }
 
 /* Compact: rooms shrink like everything else shrinks. */
@@ -2677,7 +2847,8 @@ numbers again. */
   text-align: center;
 }
 
-.chat-composer input {
+.chat-composer input,
+.chat-composer textarea {
   flex: 1;
   min-width: 0; /* may shrink below its intrinsic size on narrow screens */
   /*
@@ -2697,7 +2868,8 @@ numbers again. */
   color: var(--text);
 }
 
-.chat-composer input:focus {
+.chat-composer input:focus,
+.chat-composer textarea:focus {
   border-color: var(--accent-deep);
 }
 
@@ -6922,7 +7094,8 @@ button.tag-pill[aria-pressed="true"] {
   padding: var(--space-2) var(--space-5) var(--space-3);
 }
 
-[data-density="compacta"] .chat-composer input {
+[data-density="compacta"] .chat-composer input,
+[data-density="compacta"] .chat-composer textarea {
   padding: var(--space-3) var(--space-4);
 }
 
@@ -8685,7 +8858,8 @@ button.tag-pill[aria-pressed="true"] {
     padding-right: var(--space-2);
   }
 
-  form.chat-composer .composer-line > input {
+  form.chat-composer .composer-line > input,
+  form.chat-composer .composer-line > textarea {
     padding-left: var(--space-3);
     padding-right: var(--space-3);
   }
@@ -8717,7 +8891,7 @@ button.tag-pill[aria-pressed="true"] {
 
 /* The nudge button lives in the line only on a wide screen (12/11/2026). At
    390 px the line is the text box and the two everyday buttons, by the
-   choice of 12/08/2026: there the nudge is reached through the "+" menu. */
+   choice of 12/08/2026. Since 20/11/2026 the "+" menu has no nudge either. */
 @media (max-width: 480px) {
   .composer-line .composer-buzz {
     display: none;
@@ -9823,6 +9997,158 @@ button.pinned-texto:hover {
   border-top: 1px solid var(--line);
   font-size: var(--font-xs);
   color: var(--text-faint);
+}
+
+/* The pin the sheet opened on, because this device has no message for it (fixadas-topo). */
+.pinned-row.realcada {
+  background: var(--accent-soft);
+}
+
+.pinned-mostrar {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-2) var(--space-5) 0;
+}
+
+/* ---------------------------------------------------------- pinned bar */
+
+/**
+ * The conversation and the pinned bar, in the `timeline` area (fixadas-topo, 20/11/2026).
+ *
+ * A column: the bar takes its own height and the scroller the rest. The bar is in
+ * the flow, so it never covers a line of text, and the scroller shrinks by its
+ * height. The wrapper is always there; see `ChatScreen`.
+ */
+.conversa {
+  grid-area: timeline;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.conversa > .timeline {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.barra-fixadas {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  min-width: 0;
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-4);
+  /* Opaque, with a clear line below (owner's review, 20/11/2026): the line cut
+     under it is the edge of the conversation, never something behind the bar. */
+  border-bottom: 1px solid var(--line-forte);
+  background: var(--bg-main);
+  color: var(--text);
+}
+
+.barra-fixadas-abrir {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border: 0;
+  /* The accent line on the left says "pinned" before the words do, as in Telegram. */
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.barra-fixadas-abrir:hover {
+  background: var(--bg-hover);
+}
+
+.barra-fixadas-miniatura {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.barra-fixadas-texto {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.barra-fixadas-rotulo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--accent);
+  font-size: var(--font-xs);
+  font-weight: 600;
+}
+
+.barra-fixadas-conta {
+  color: var(--text-faint);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.barra-fixadas-conta::before {
+  content: "·";
+  margin-right: var(--space-1);
+}
+
+/* One line: whoever said it, then the first line of the text, cut with an ellipsis. */
+.barra-fixadas-linha {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--font-sm);
+}
+
+.barra-fixadas-autor {
+  font-weight: 600;
+}
+
+.barra-fixadas-corpo {
+  color: var(--text-dim);
+}
+
+.barra-fixadas-setas {
+  display: flex;
+  flex: none;
+}
+
+.barra-fixadas-botao {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.barra-fixadas-botao:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* A finger needs 44 px (`toque.test.ts`); the mouse keeps the slim bar. */
+@media (pointer: coarse) {
+  .barra-fixadas-botao {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 /* ---------------------------------------------------------------- procura */
@@ -12968,4 +13294,29 @@ button.message-citacao:focus-visible {
   margin: 8px auto 4px;
   max-width: 60ch;
   text-align: center;
+}
+
+/*
+  Messages from someone this device blocked, folded in a room (20/11/2026): one
+  quiet line in the place of the run, with "Show" to open only those.
+*/
+.timeline-bloqueadas {
+  flex: none;
+  margin: var(--space-2) 0;
+  padding: 0 var(--space-3);
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+}
+.timeline-bloqueadas-mostrar {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.timeline-bloqueadas-mostrar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

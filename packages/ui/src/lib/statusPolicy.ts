@@ -84,6 +84,10 @@ export function fraseDoStatus(status: SessionStatus, labelFor: (channel: string)
       return strings.avisosDoNucleo.channelRemoved(status.channel ? labelFor(status.channel) : "?")
     case "welcome-dead":
       return strings.avisosDoNucleo.welcomeDead
+    case "channels-reset":
+      return strings.avisosDoNucleo.channelsReset
+    case "server-restarted":
+      return strings.avisosDoNucleo.serverRestarted
     case "channel-deleted": {
       // The core forgets the channel before warning: the name comes in `detail`, after the key.
       const nome = /^channel-deleted: (.+)$/s.exec(status.detail)?.[1]

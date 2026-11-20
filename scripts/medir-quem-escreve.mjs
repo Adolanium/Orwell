@@ -45,7 +45,7 @@ const LARGURAS = [
 ]
 /** The strip, new and old: the old one only exists while someone types. */
 const FAIXA = ".chat-a-escrever, .timeline-typing"
-const CAIXA = 'input[placeholder="Escreve uma mensagem"]'
+const CAIXA = 'textarea[placeholder="Escreve uma mensagem"]'
 
 const { check, resumo } = verificador()
 const srv = await levantarServidor({ frente: 8796, servidor: 8797, sfu: 0, dist: DIST, etiqueta: "quem-escreve" })
@@ -69,7 +69,7 @@ async function dizer(page, frase) {
 const medir = (page) =>
   page.evaluate((FAIXA) => {
     const tl = document.querySelector(".timeline")
-    const caixa = document.querySelector('input[placeholder="Escreve uma mensagem"]')
+    const caixa = document.querySelector('textarea[placeholder="Escreve uma mensagem"]')
     const faixa = document.querySelector(FAIXA)
     const t = tl.getBoundingClientRect()
     const mensagens = [...tl.querySelectorAll("article.message")]

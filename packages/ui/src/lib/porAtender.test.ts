@@ -3,7 +3,7 @@ import { lembrarFichasDosCanais } from "./tipoDoCanal.js"
 import { beforeEach, describe, expect, it } from "vitest"
 import type { ChatMessage } from "../types.js"
 import { countUnreads } from "../hooks/useUnreads.js"
-import { dirigidaAMim, repartirPorDestino } from "./porAtender.js"
+import { dirigidaAMim, mencoesNosCanais, repartirPorDestino } from "./porAtender.js"
 
 // The sheet for each channel (1.0 "Arca", slice 6b): no sheet, a channel is a room.
 beforeEach(() =>
@@ -161,3 +161,32 @@ function soma(contagens: ReadonlyMap<string, number>): number {
   for (const quantas of contagens.values()) total += quantas
   return total
 }
+
+/**
+ * The Communities number counts mentions only (20/11/2026, option A). The rest
+ * of the unread traffic is the pill, with no number.
+ */
+describe("mencoesNosCanais", () => {
+  const sala = (todas: number, mencoes: number) => ({ todas, mencoes })
+
+  it("soma as menções de todas as salas de todos os canais", () => {
+    const porSala = new Map([
+      [CANAL, new Map([["", sala(5, 1)], ["vinha", sala(3, 2)]])],
+      [OUTRO, new Map([["", sala(12, 0)]])],
+    ])
+    expect(mencoesNosCanais(porSala)).toBe(3)
+  })
+
+  it("as conversas privadas e o mural ficam de fora: atendem-se noutro destino", () => {
+    const porSala = new Map([
+      [DIRECTA, new Map([["", sala(4, 4)]])],
+      [MEU_FEED, new Map([["", sala(2, 2)]])],
+      [CANAL, new Map([["", sala(1, 1)]])],
+    ])
+    expect(mencoesNosCanais(porSala)).toBe(1)
+  })
+
+  it("sem menções, zero, por muito que haja por ler", () => {
+    expect(mencoesNosCanais(new Map([[CANAL, new Map([["", sala(30, 0)]])]]))).toBe(0)
+  })
+})

@@ -46,6 +46,36 @@ body { margin: 0; background: var(--fundo); }
   <h1>Release notes</h1>
   <p class="subtitulo">Orwell version Carmelo 1.3</p>
   <section class="versao">
+    <h2><span class="numero">1.3.25</span> <time class="data" datetime="2026-11-20">November 20, 2026</time></h2>
+    <ul>
+      <li><span class="tipo tipo-nova">New</span><span class="texto">One call per account: joining a call on another device takes the call there, and the first device leaves it with a notice instead of reconnecting.</span></li>
+      <li><span class="tipo tipo-nova">New</span><span class="texto">Server admins choose who may create an account: open, invite only or closed (ENCLAVE_REGISTO). Existing accounts and their new devices always get in.</span></li>
+      <li><span class="tipo tipo-nova">New</span><span class="texto">English is the default language. The app opens in Portuguese when the system's first language is Portuguese, and your own choice always wins.</span></li>
+      <li><span class="tipo tipo-nova">New</span><span class="texto">Animated GIFs: up to 2 MiB in messages and 1 MiB in posts, sent intact and still moving. The desktop app makes their thumbnails too.</span></li>
+      <li><span class="tipo tipo-nova">New</span><span class="texto">Shift+Enter starts a new line, and the message box grows up to half the conversation. On a phone, Enter starts a new line and the button sends.</span></li>
+      <li><span class="tipo tipo-nova">New</span><span class="texto">Pinned messages: the newest pin shows on a bar at the top of the room, and a pinned message stays in the vault however old it gets.</span></li>
+      <li><span class="tipo tipo-nova">New</span><span class="texto">Formatting from the message box: Cmd/Ctrl+E for code, Cmd/Ctrl+Shift+H for hidden text (it was Shift+E, the screen share key), undo works after a formatting key, and a bar over selected text.</span></li>
+      <li><span class="tipo tipo-nova">New</span><span class="texto">Blocking reaches shared rooms: a blocked person's messages fold into one line with Show, ring nothing, count nowhere, and their reactions leave the counts.</span></li>
+      <li><span class="tipo tipo-nova">New</span><span class="texto">A nudge is heard anywhere in the app and shows on the Friends button until you open Friends or the conversation.</span></li>
+      <li><span class="tipo tipo-nova">New</span><span class="texto">Privacy Policy and Terms links when you create an account on orwell.pt, and in Settings › Help.</span></li>
+      <li><span class="tipo tipo-nova">New</span><span class="texto">A + next to a category's name creates a room in it.</span></li>
+      <li><span class="tipo tipo-nova">New</span><span class="texto">A device that falls behind in a room now tells you, holds your messages until it catches up, and asks for its place again.</span></li>
+      <li><span class="tipo tipo-melhoria">Improvement</span><span class="texto">Rail badges have a shape each: a pill for unread, a number for what waits for you, a glyph for a nudge, a green seal for a call, an amber seal when the connection drops. The Communities number counts mentions only.</span></li>
+      <li><span class="tipo tipo-melhoria">Improvement</span><span class="texto">Self-hosting: stored ciphertext for offline members is swept after 90 days by default (ENCLAVE_COFRE_GC_DIAS, 0 turns it off), and the compose file bounds container logs.</span></li>
+      <li><span class="tipo tipo-fix">Fix</span><span class="texto">Load older loads whole lines of the conversation, keeps what it loaded and leaves you on the line you were reading.</span></li>
+      <li><span class="tipo tipo-fix">Fix</span><span class="texto">Invite and friend links open inside the app instead of the browser.</span></li>
+      <li><span class="tipo tipo-fix">Fix</span><span class="texto">Desktop app: room permissions work, so &quot;Who can write&quot;, roles and read-only rooms behave as on the web.</span></li>
+      <li><span class="tipo tipo-fix">Fix</span><span class="texto">A device asking for its place in a room no longer pushes your other devices out, even when they are offline.</span></li>
+      <li><span class="tipo tipo-fix">Fix</span><span class="texto">Keys refill when they run out, so a seat that failed for lack of keys can be given again.</span></li>
+      <li><span class="tipo tipo-fix">Fix</span><span class="texto">The &quot;Receiving the channel&quot; bar no longer sticks.</span></li>
+      <li><span class="tipo tipo-fix">Fix</span><span class="texto">A quick reply no longer shows above the message it answers.</span></li>
+      <li><span class="tipo tipo-fix">Fix</span><span class="texto">Reaction counts on older messages include every reaction this device has stored, not only the ones in memory.</span></li>
+      <li><span class="tipo tipo-fix">Fix</span><span class="texto">The conversation stays at the bottom when the reply bar or a taller message box opens under it.</span></li>
+      <li><span class="tipo tipo-fix">Fix</span><span class="texto">The &quot;You joined here&quot; marker no longer lands below the messages you sent right after joining.</span></li>
+      <li><span class="tipo tipo-fix">Fix</span><span class="texto">Pinned images get their thumbnail again, and an image left without one asks again on the next opening.</span></li>
+    </ul>
+  </section>
+  <section class="versao">
     <h2><span class="numero">1.3.24</span> <time class="data" datetime="2026-11-19">November 19, 2026</time></h2>
     <ul>
       <li><span class="tipo tipo-fix">Fix</span><span class="texto">Polls that showed as plain text because this device did not yet know their author's role come back as polls once the role arrives.</span></li>

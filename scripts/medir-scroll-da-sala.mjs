@@ -57,7 +57,7 @@ async function enviar(page, texto, imagens = []) {
     await page.waitForFunction(() => !document.querySelector(".chat-composer .field-note"), undefined, { timeout: 20_000 }).catch(() => {})
     await espera(400)
   }
-  const caixa = page.locator(".chat-composer textarea, .chat-composer input:not([type=file])").first()
+  const caixa = page.locator(".chat-composer textarea").first()
   await caixa.fill(texto)
   if (/youtu/.test(texto)) {
     // The preview is composed by the sender: give it time to arrive.
@@ -322,7 +322,7 @@ try {
   // The input box in its most loaded state: an image to send and a link with a card.
   await bob.page.locator('.chat-composer input[type=file][accept*="image"]').setInputFiles([imagens[0], imagens[3]])
   await espera(1500)
-  await bob.page.locator(".chat-composer input:not([type=file])").first().fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ e mais texto")
+  await bob.page.locator(".chat-composer textarea").first().fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ e mais texto")
   await espera(3500)
   relatorio.transbordos = {}
   for (const [w, h] of [

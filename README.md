@@ -7,8 +7,8 @@ direct messages and a wall for each account. Everything is end-to-end
 encrypted, so the server that carries your messages cannot read them. It runs
 at [orwell.pt](https://orwell.pt), in the browser and as a desktop app for
 Windows and macOS, with a Linux version on the way. The current version is
-1.3.24 "Carmelo" on the web, with the desktop installers at 1.3.22 and the
-homeserver at 1.3.21. I build it on my own, and I have put hundreds of hours
+1.3.25 "Carmelo", on the web, in the desktop installers and on the
+homeserver. I build it on my own, and I have put hundreds of hours
 into it so far.
 
 <p align="center">

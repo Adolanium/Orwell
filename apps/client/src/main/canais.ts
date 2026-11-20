@@ -1,5 +1,5 @@
-import type { FichaDoCanal, Ticket } from "@enclave/client-core"
-import type { PinnedMessage, Power, RoleColour, Sobreposicao, TicketState } from "@enclave/protocol"
+import type { FichaDoCanal, StoredChatMessage, Ticket } from "@enclave/client-core"
+import type { Lugar, PinnedMessage, Power, RoleColour, Sobreposicao, TicketState } from "@enclave/protocol"
 
 /**
  * The channel operations on the main process side.
@@ -62,6 +62,13 @@ export const CANAIS_DE_CANAL = {
   apagarMensagem: "channel:delete-message",
   reagir: "channel:react",
   eliminarCanal: "channel:remove",
+  definirSobreposicoes: "channel:set-overrides",
+  /*
+    Every chat reaction the vault holds for a channel (B6, 1.3.25). A request,
+    not a sync read: it reads the vault, and the reactions change with every
+    message, so nothing is cached on the other side.
+  */
+  reaccoesGuardadas: "channel:reaccoes-guardadas",
 } as const
 
 /**
@@ -100,6 +107,19 @@ export const LEITURAS_DE_CANAL = {
   podeCriarVotacoes: "channel:may-create-poll",
   apelidos: "channel:nicknames",
   fichas: "channel:fichas",
+  /*
+    The 1.2 permission model (`permissoes` in the UI bridge), missing from the
+    installed app until 1.3.25. Without it `CargosEPermissoes` never mounted
+    and "Who writes" (read-only rooms) never appeared in the room editor. The
+    core refused the same way; the desktop app just never offered it.
+  */
+  podeMoverEm: "channel:may-move-in",
+  permissoesDeTodos: "channel:perms-everyone",
+  permissoesEm: "channel:perms-in",
+  podeGerirCargo: "channel:may-manage-role",
+  delegacaoDeCargos: "channel:role-delegation",
+  sobreposicoes: "channel:overrides",
+  podeSobrepor: "channel:may-set-overrides",
 } as const
 
 /** What a sync read answers with. See the envelope note above. */
@@ -127,7 +147,7 @@ export function provarQueAtravessa<T>(canal: string, resposta: Resposta<T>): Res
   try {
     return structuredClone(resposta)
   } catch (erro) {
-    return { ok: false, erro: `a resposta de ${canal} não atravessa o IPC: ${(erro as Error).message}` }
+    return { ok: false, erro: `the reply of ${canal} does not cross the IPC: ${(erro as Error).message}` }
   }
 }
 
@@ -185,6 +205,16 @@ export interface SessaoDeCanais {
   mayModerate(channel: string, address?: string): boolean
   /** The channel's nicknames, by address (phase 3). */
   nicknamesOf(channel: string): Record<string, string>
+  /** Per-room move and disconnect (1.2). See `Session.mayMoveIn`. */
+  mayMoveIn(channel: string, de: string | undefined, para?: string): boolean
+  /** The `@todos` base powers (1.2). See `Session.todosOf`. */
+  todosOf(channel: string): { powers: Power[]; definido: boolean }
+  /** What `address` can do in the channel, a room or a category (1.2). See `Session.permissoesEm`. */
+  permissoesEm(channel: string, address: string, lugar?: Lugar): Power[]
+  mayManageRole(channel: string, role: string): boolean
+  delegacaoDeCargos(channel: string): boolean
+  sobreposicoesDe(channel: string, lugar: Lugar): Sobreposicao[]
+  maySetSobreposicoes(channel: string, lugar: Lugar): boolean
 
   // ------------------------------------------------------------ the requests
   upsertRoom(
@@ -222,8 +252,9 @@ export interface SessaoDeCanais {
   deleteTicket(channel: string, room: string, ticket: string): Promise<void>
   /** Someone's nickname in this channel: themselves or whoever moderates (phase 3). */
   setNickname(channel: string, subject: string, nick: string): Promise<void>
-  moveVoice(channel: string, subject: string, room: string): Promise<void>
-  disconnectVoice(channel: string, subject: string): Promise<void>
+  /** `de` is the room the person leaves (1.2, per-room `mover`). Absent, the destination counts alone. */
+  moveVoice(channel: string, subject: string, room: string, de?: string): Promise<void>
+  disconnectVoice(channel: string, subject: string, de?: string): Promise<void>
   assignRole(channel: string, subject: string, admin: boolean): Promise<void>
   assignRoles(channel: string, subject: string, roles: string[]): Promise<void>
   defineRole(
@@ -239,6 +270,76 @@ export interface SessaoDeCanais {
   deleteMessage(channel: string, target: string): Promise<void>
   reactToMessage(channel: string, target: string, emoji: string, remove?: boolean): Promise<void>
   deleteChannel(channel: string): Promise<void>
+  /** The overrides of a room or category (1.2). See `Session.setSobreposicoes`. */
+  setSobreposicoes(channel: string, lugar: Lugar, perms: Sobreposicao[]): Promise<void>
+  reaccoesGuardadas(channel: string): StoredChatMessage[]
+}
+
+/*
+  What the renderer sends, checked before it reaches the session.
+
+  The renderer is the less trusted side of this boundary: what it sends is
+  untyped at runtime, and a session method reads `lugar.sala !== undefined`
+  to choose between a room and a category. A `{ sala: 1 }` or a
+  `{ sala: "a", categoria: "b" }` would choose wrongly instead of failing. So
+  the new operations (the 1.2 permission model, 1.3.25) accept exactly the
+  shapes the UI bridge declares and refuse the rest with an error. The core
+  parses the overrides again with its own schema; this is the boundary's own
+  check, not a second copy of the rule.
+*/
+
+/**
+ * The one message for every refused argument: it can reach the screen (a
+ * request that throws becomes a toast), so it has a code (385 in
+ * `codigosDeErro.ts`), and what was wrong goes in `cause`, never in the key.
+ */
+export const PEDIDO_MAL_FORMADO = "the app sent a request this version does not read"
+
+function recusar(argumento: string, esperado: string): never {
+  throw new Error(PEDIDO_MAL_FORMADO, { cause: { argumento, esperado } })
+}
+
+/** A non-empty string, or an error that names the argument. */
+export function texto(valor: unknown, nome: string): string {
+  if (typeof valor !== "string" || valor.length === 0) recusar(nome, "a non-empty string")
+  return valor
+}
+
+/** An optional string: `undefined`, or a string. Anything else is an error. */
+export function textoOpcional(valor: unknown, nome: string): string | undefined {
+  if (valor === undefined) return undefined
+  if (typeof valor !== "string") recusar(nome, "a string or nothing")
+  return valor
+}
+
+/** `{ sala }` or `{ categoria }`, never both, never anything else. See `LugarDaSobreposicao` in the UI. */
+export function lugarDoPedido(valor: unknown): Lugar {
+  if (valor === null || typeof valor !== "object" || Array.isArray(valor)) recusar("lugar", "{ sala } or { categoria }")
+  const chaves = Object.keys(valor)
+  const cru = valor as Record<string, unknown>
+  if (chaves.length === 1 && chaves[0] === "sala" && typeof cru.sala === "string") return { sala: cru.sala }
+  if (chaves.length === 1 && chaves[0] === "categoria" && typeof cru.categoria === "string" && cru.categoria.length > 0) {
+    return { categoria: cru.categoria }
+  }
+  return recusar("lugar", "{ sala } or { categoria }")
+}
+
+/** The overrides of one place: at most `MAX_SOBREPOSICOES` (16), each `{ role, allow, deny }` of strings. */
+export function sobreposicoesDoPedido(valor: unknown): Sobreposicao[] {
+  if (!Array.isArray(valor) || valor.length > 16) recusar("perms", "a list of at most 16 overrides")
+  const listaDeTextos = (lista: unknown, nome: string): string[] => {
+    if (lista === undefined) return []
+    if (!Array.isArray(lista) || lista.length > 32 || !lista.every((cada) => typeof cada === "string")) {
+      recusar(`perms.${nome}`, "a list of names")
+    }
+    return [...(lista as string[])]
+  }
+  return valor.map((entrada: unknown) => {
+    if (entrada === null || typeof entrada !== "object") recusar("perms", "objects")
+    const cru = entrada as Record<string, unknown>
+    // Copied field by field: what crosses to the session is only what the schema names.
+    return { role: texto(cru.role, "perms.role"), allow: listaDeTextos(cru.allow, "allow"), deny: listaDeTextos(cru.deny, "deny") }
+  })
 }
 
 /**
@@ -436,15 +537,59 @@ export function ligarCanais({ registarPedido, registarLeitura, sessao }: PortasD
   */
   leitura(LEITURAS_DE_CANAL.podeExpulsar, (channel: string) => sessao.may(channel, "expulsar"))
 
-  registarPedido(CANAIS_DE_CANAL.moverVoz, async (channel: string, address: string, room: string) => {
-    await sessao.moveVoice(channel, address, room)
+  /*
+    `de`, the room the person is in, travels since 1.3.25. Before, this side
+    dropped it: the core then checked `mover` in the destination only, and a
+    disconnect against the whole channel, so someone with `mover` in one room
+    only saw the gesture in the browser and was refused, or offered, wrongly
+    here. The web bridge has always passed it.
+  */
+  registarPedido(CANAIS_DE_CANAL.moverVoz, async (channel: string, address: string, room: string, de?: unknown) => {
+    const origem = textoOpcional(de, "de")
+    await (origem === undefined ? sessao.moveVoice(channel, address, room) : sessao.moveVoice(channel, address, room, origem))
     return { ok: true }
   })
 
-  registarPedido(CANAIS_DE_CANAL.desligarDaVoz, async (channel: string, address: string) => {
-    await sessao.disconnectVoice(channel, address)
+  registarPedido(CANAIS_DE_CANAL.desligarDaVoz, async (channel: string, address: string, de?: unknown) => {
+    const origem = textoOpcional(de, "de")
+    await (origem === undefined ? sessao.disconnectVoice(channel, address) : sessao.disconnectVoice(channel, address, origem))
     return { ok: true }
   })
+
+  // --------------------------------------------- the 1.2 permission model
+  /*
+    `permissoes` in the UI bridge, and `mayMoveIn`. Reads like every other
+    read (sync, in the envelope); the one request clears the renderer's cache
+    like every other request. The arguments are checked first: a shape the UI
+    bridge does not declare is an error in the envelope, not a guess.
+  */
+  leitura(LEITURAS_DE_CANAL.podeMoverEm, (channel: unknown, de: unknown, para?: unknown) =>
+    sessao.mayMoveIn(texto(channel, "channel"), textoOpcional(de, "de"), textoOpcional(para, "para")),
+  )
+  leitura(LEITURAS_DE_CANAL.permissoesDeTodos, (channel: unknown) => sessao.todosOf(texto(channel, "channel")))
+  leitura(LEITURAS_DE_CANAL.permissoesEm, (channel: unknown, address: unknown, lugar?: unknown) =>
+    lugar === undefined
+      ? sessao.permissoesEm(texto(channel, "channel"), texto(address, "address"))
+      : sessao.permissoesEm(texto(channel, "channel"), texto(address, "address"), lugarDoPedido(lugar)),
+  )
+  leitura(LEITURAS_DE_CANAL.podeGerirCargo, (channel: unknown, role: unknown) =>
+    sessao.mayManageRole(texto(channel, "channel"), texto(role, "role")),
+  )
+  leitura(LEITURAS_DE_CANAL.delegacaoDeCargos, (channel: unknown) => sessao.delegacaoDeCargos(texto(channel, "channel")))
+  leitura(LEITURAS_DE_CANAL.sobreposicoes, (channel: unknown, lugar: unknown) =>
+    sessao.sobreposicoesDe(texto(channel, "channel"), lugarDoPedido(lugar)),
+  )
+  leitura(LEITURAS_DE_CANAL.podeSobrepor, (channel: unknown, lugar: unknown) =>
+    sessao.maySetSobreposicoes(texto(channel, "channel"), lugarDoPedido(lugar)),
+  )
+
+  registarPedido(CANAIS_DE_CANAL.definirSobreposicoes, async (channel: unknown, lugar: unknown, perms: unknown) => {
+    await sessao.setSobreposicoes(texto(channel, "channel"), lugarDoPedido(lugar), sobreposicoesDoPedido(perms))
+    return { ok: true }
+  })
+
+  // The channel is checked here, like every other argument from the renderer (Error 385).
+  registarPedido(CANAIS_DE_CANAL.reaccoesGuardadas, async (channel: unknown) => sessao.reaccoesGuardadas(texto(channel, "channel")))
 
   // ------------------------------------------------------- as fixadas
   leitura(LEITURAS_DE_CANAL.fixadas, (channel: string, room: string) => sessao.pinnedOf(channel, room))

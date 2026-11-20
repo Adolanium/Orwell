@@ -1,3 +1,4 @@
+import { nomeDaSalaNoEcra } from "../../lib/nomesDeOrigem.js"
 import { nomeVisivel } from "@enclave/client-core"
 import { memo, useEffect, useRef, useState } from "react"
 import type { Activity, ChannelRoom, ConnectionState, Profile } from "../../bridge.js"
@@ -263,7 +264,7 @@ function RoomRow({
           <span className={ehVoz && presentes.length > 0 ? "room-glyph room-live" : "room-glyph"} aria-hidden="true">
             <RoomGlyph kind={sala.kind} layout={sala.layout} size={14} />
           </span>
-          <span className="room-name">{sala.name}</span>
+          <span className="room-name">{nomeDaSalaNoEcra(sala.room, sala.name)}</span>
           {sala.afk && (
             <span className="marca-afk" title={strings.salaAfk.marcaTitulo}>
               {strings.salaAfk.marca}
@@ -424,6 +425,7 @@ function ChannelSidebarInteira({
   onReopenRoom,
   onRemoveRoom,
   onNewRoom,
+  onNewRoomInCategory,
   presenceForChannel,
   presenceHint,
   active,
@@ -595,6 +597,11 @@ function ChannelSidebarInteira({
   onReopenRoom?: ((room: string) => void) | undefined
   /** Only those who manage the channel see what organizes the rooms. */
   onNewRoom?: (() => void) | undefined
+  /**
+   * A new room already in this category: the `+` left of the category's name
+   * (1.3.25). Same rule as `onNewRoom`: missing for whoever does not organize rooms.
+   */
+  onNewRoomInCategory?: ((category: string) => void) | undefined
   /** The other person's presence, for DM rows; null for rooms. */
   presenceForChannel?: ((channel: string) => "active" | "away" | "busy" | "idle" | null) | undefined
   presenceHint?: string | undefined
@@ -1076,6 +1083,7 @@ function ChannelSidebarInteira({
                               <h3
                                 className={[
                                   "room-category",
+                                  onNewRoomInCategory ? "com-criar" : "",
                                   // Three marks for three results. Receiving a room lights up the header,
                                   // because it goes INSIDE this category; receiving a category draws a line,
                                   // above or below, because it sits NEXT TO. Mixing them would mix the
@@ -1142,6 +1150,20 @@ function ChannelSidebarInteira({
                                     ? { title: strings.rooms.dragCategory(grupo.category) }
                                     : {})}
                               >
+                                {/* Left of the name, a sibling of the toggle: a button cannot hold
+                                    another, and a click here must not fold the category. */}
+                                {onNewRoomInCategory && (
+                                  <button
+                                    type="button"
+                                    className="category-criar"
+                                    aria-label={strings.sidebar.criarSalaNaCategoriaRotulo(grupo.category)}
+                                    title={strings.sidebar.criarSalaNaCategoria}
+                                    draggable={false}
+                                    onClick={() => onNewRoomInCategory(grupo.category)}
+                                  >
+                                    <PlusIcon size={11} />
+                                  </button>
+                                )}
                                 <button
                                   className="category-toggle"
                                   aria-expanded={categoriaAberta}
@@ -1260,7 +1282,7 @@ function ChannelSidebarInteira({
                                       <span className="room-glyph" aria-hidden="true">
                                         <RoomGlyph kind={sala.kind} layout={sala.layout} size={14} />
                                       </span>
-                                      <span className="room-name">{sala.name}</span>
+                                      <span className="room-name">{nomeDaSalaNoEcra(sala.room, sala.name)}</span>
                                       <span className="room-reopen">{strings.rooms.reopen}</span>
                                     </button>
                                     {/* The default room closes but is not deleted: it is where messages without

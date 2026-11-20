@@ -196,7 +196,7 @@ export function EmojiPicker({
     // better than making it vanish from someone's list because of an edit here.
     const frequentes: Emoji[] = recents.map((char) => {
       const conhecido = catalog?.findEmoji(char)
-      return conhecido ? { ...conhecido, char } : { char, name: char, haystack: "" }
+      return conhecido ? { ...conhecido, char } : { char, name: char, namePt: char, nameEn: char, haystack: "" }
     })
     const categorias: Seccao[] = (catalog?.CATEGORIES ?? []).map((categoria) => ({
       id: categoria.id,

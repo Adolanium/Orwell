@@ -164,7 +164,7 @@ export function electronFalso({
           emitir("diagnostic", { code: "call-ecra-cancelado", detail: nome })
           return false
         }
-        emitir("error", { detail: "Não foi possível partilhar o ecrã." })
+        emitir("error", { detail: "could not share the screen" })
         return false
       }
     },

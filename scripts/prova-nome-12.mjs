@@ -141,7 +141,7 @@ try {
     }
     await linhaDaSala.click({ timeout: 90_000 })
     if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click().catch(() => {})
-    const caixa = page.locator('input[placeholder="Escreve uma mensagem"]').first()
+    const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]').first()
     await caixa.waitFor({ timeout: 60_000 })
     // Bruno is the room's first member, and admits whoever arrives; then says something.
     const sala = bruno.commonRoom

@@ -77,7 +77,7 @@ for (const quem of [alice, bob]) {
   await quem.page.locator(".chat-composer").waitFor({ timeout: 90_000 })
 }
 
-const escrita = (page) => page.locator(".chat-composer input[type=text], .chat-composer input:not([type])").first()
+const escrita = (page) => page.locator(".chat-composer textarea").first()
 
 // ------------------------------------------------------- 1. send the PDF and the ZIP
 const clipe = alice.page.locator('.composer-attach:has(input:not([accept]))').locator("input")

@@ -63,7 +63,7 @@ describe("formatDiagnostics", () => {
       { note: "só metadados", address: "@k4x7m2pq8rtv:orwell.pt", connection: "online", channels: 12 },
     )
 
-    expect(text).toContain("Orwell — registo de diagnóstico")
+    expect(text).toContain("Orwell: registo de diagnóstico")
     expect(text).toContain("só metadados")
     expect(text).toContain("conta: @k4x7m2p…")
     expect(text).toContain("canais: 12")

@@ -1,0 +1,41 @@
+/*
+  The formatting bar over a selection in the text box (20/11/2026). See
+  `BarraDeFormatacao`. Fixed to the window: the component places it over the
+  selected line, so no ancestor decides where it goes. The colours are the
+  menu's (`overlays.css`), so each theme draws it as it draws its menus.
+*/
+.barra-de-formatacao {
+  position: fixed;
+  z-index: var(--z-menu);
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--sombra-2);
+}
+
+.barra-de-formatacao > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.barra-de-formatacao > button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* The selection already carries this marker: the next press removes it. */
+.barra-de-formatacao > button[aria-pressed="true"] {
+  color: var(--accent);
+}

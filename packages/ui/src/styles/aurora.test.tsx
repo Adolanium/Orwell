@@ -59,6 +59,23 @@ function folhaDa1319(): string {
     .join(":root")
 }
 
+/**
+ * The text box is a text area since 20/11/2026. 1.3.19 styled it as an
+ * `<input>` (`.chat-composer input`): the reference gives the text area what
+ * 1.3.19 gave the input, so the comparison is about the same box.
+ */
+function comACaixaDeTexto(folha: string): string {
+  const raiz = postcss.parse(folha)
+  raiz.walkRules((regra) => {
+    const extra = regra.selectors
+      .filter((seletor) => /\.chat-composer\b/.test(seletor) && /\binput(?=[:\s]|$)(?![^\s]*\[type)/.test(seletor))
+      .map((seletor) => seletor.replace(/\binput(?=[:\s]|$)/g, "textarea"))
+      .filter((seletor) => !regra.selectors.includes(seletor))
+    if (extra.length > 0) regra.selectors = [...regra.selectors, ...extra]
+  })
+  return raiz.toString()
+}
+
 const EU = "@eu:s"
 const OUTRA = "@outra:s"
 const PNG = `data:image/png;base64,${Buffer.from(
@@ -256,7 +273,7 @@ afterAll(async () => {
 })
 
 describe("o tema Aurora é a 1.3.19", () => {
-  const referencia = folhaDa1319()
+  const referencia = comACaixaDeTexto(folhaDa1319())
   const hoje = folhaDeHoje()
 
   it.each(Object.keys(FIXTURAS))("%s: as mesmas cores, contornos, sombras, letra e caixas", async (nome) => {

@@ -678,7 +678,7 @@ describe("ChannelSidebar — símbolos", () => {
   })
 
   it("o nome que não cabe corta com reticências, mas fica inteiro no título", () => {
-    const nome = "Produção Audiovisual do Alto Alentejo"
+    const nome = "Produção Audiovisual da Velha Guarda"
     const { container } = render(povoada({ labelFor: () => nome }))
     expect(container.querySelector(".channel-name")?.getAttribute("title")).toBe(nome)
   })
@@ -1530,5 +1530,32 @@ describe("a sala de votações é uma sala como as outras", () => {
     fireEvent.dragOver(linha("avisos"))
     fireEvent.drop(linha("avisos"))
     expect(onReorderRoom).toHaveBeenCalledWith("pv", { antesDe: "r1" })
+  })
+})
+
+/**
+ * The `+` left of a category's name (1.3.25, the owner): a room created already
+ * in that category. Only for whoever organizes rooms, the same rule as "New room".
+ */
+describe("ChannelSidebar — criar sala numa categoria", () => {
+  it("com quem organize, o + à esquerda do nome cria a sala naquela categoria", async () => {
+    const user = userEvent.setup()
+    const onNewRoomInCategory = vi.fn()
+    const { container } = render(povoada({ onNewRoom: noop, onNewRoomInCategory }))
+    const mais = screen.getByRole("button", { name: strings.sidebar.criarSalaNaCategoriaRotulo("Início") })
+    expect(mais.getAttribute("title")).toBe(strings.sidebar.criarSalaNaCategoria)
+    // Left of the name: before the toggle that carries it, in the same header.
+    const cabecalho = mais.closest(".room-category") as HTMLElement
+    expect(cabecalho.firstElementChild).toBe(mais)
+    expect(cabecalho.querySelector(".category-name")?.textContent).toBe("Início")
+    await user.click(mais)
+    expect(onNewRoomInCategory).toHaveBeenCalledWith("Início")
+    // The click is the +'s: the category does not fold.
+    expect(container.querySelector(".category-toggle")?.getAttribute("aria-expanded")).toBe("true")
+  })
+
+  it("sem quem organize, não há +", () => {
+    render(povoada())
+    expect(screen.queryByRole("button", { name: strings.sidebar.criarSalaNaCategoriaRotulo("Início") })).toBeNull()
   })
 })

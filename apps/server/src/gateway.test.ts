@@ -2912,3 +2912,125 @@ describe("gateway: a idade atestada da conta", () => {
     ana.close()
   })
 })
+
+/**
+ * Which device asks for a seat (1.3.25, C1 of the 1.3.20 review).
+ *
+ * The members take out only the leaf of the device that asked. Before, the request
+ * said only the account, and a member took out every leaf of it without proof of
+ * life, also a sibling that was merely offline. The server knows the device: it is
+ * the key the connection proved at login with the device chain. It never takes it
+ * from the client.
+ */
+describe("gateway: channel.rejoin diz o aparelho que pede", () => {
+  async function entrarComCadeia(client: TestClient, identity: ReturnType<typeof generateIdentity>): Promise<void> {
+    client.send({ t: "hello", version: PROTOCOL_VERSION, capabilities: ["commit-after-echo"] })
+    await client.nextOf("hello.ok")
+    client.address = identity.address
+    client.send({
+      t: "auth.begin",
+      address: identity.address,
+      signingKey: toBase64(identity.deviceSigningPublicKey),
+      accountKey: toBase64(identity.signingPublicKey),
+      deviceCert: toBase64(identity.credential.signature),
+    })
+    const challenge = await client.next()
+    if (challenge.t !== "auth.challenge") throw new Error(`sem desafio: ${challenge.t}`)
+    client.send({ t: "auth.finish", signature: toBase64(signWithDevice(identity, fromBase64(challenge.nonce))) })
+    const ok = await client.next()
+    if (ok.t !== "auth.ok") throw new Error(`login falhou: ${ok.t}`)
+  }
+
+  it("com a cadeia do aparelho: o channel.rejoin leva a chave do aparelho que pediu, a todos", async () => {
+    const canal = moradaDeSala(HOME)
+    const pc = generateIdentity(HOME)
+    const telemovel = identityFromPrivateKey(pc.signingPrivateKey, HOME)
+    const ligPc = await TestClient.connect(gatewayUrl)
+    const ligTelemovel = await TestClient.connect(gatewayUrl)
+    await entrarComCadeia(ligPc, pc)
+    await entrarComCadeia(ligTelemovel, telemovel)
+    ligPc.send({ t: "channel.subscribe", channels: [canal] })
+    await ligPc.sync()
+    ligTelemovel.send({ t: "channel.subscribe", channels: [canal] })
+    await ligTelemovel.sync()
+
+    // A `device` from the client is not in the schema: the server never reads one.
+    ligTelemovel.send({ t: "channel.rejoin.request", channel: canal })
+    const noPc = await ligPc.nextOf("channel.rejoin")
+    expect(noPc).toEqual({ t: "channel.rejoin", channel: canal, address: pc.address, device: toBase64(telemovel.deviceSigningPublicKey) })
+    // The asker gets the echo too, with its own key: that is how it knows the echo is its own.
+    const eco = await ligTelemovel.nextOf("channel.rejoin")
+    expect(eco.device).toBe(toBase64(telemovel.deviceSigningPublicKey))
+    expect((await ligTelemovel.nextOf("channel.rejoin.sent")).ouviram).toBe(2)
+    ligPc.close()
+    ligTelemovel.close()
+  }, 20_000)
+
+  it("sem a cadeia (um cliente antigo): o channel.rejoin sai como antes, sem aparelho", async () => {
+    const canal = moradaDeSala(HOME)
+    const antigo = generateIdentity(HOME)
+    const lig = await TestClient.connect(gatewayUrl)
+    expect((await login(lig, antigo)).t).toBe("auth.ok")
+    lig.send({ t: "channel.subscribe", channels: [canal] })
+    await lig.sync()
+    lig.send({ t: "channel.rejoin.request", channel: canal })
+    const eco = await lig.nextOf("channel.rejoin")
+    expect(eco).toEqual({ t: "channel.rejoin", channel: canal, address: antigo.address })
+    expect("device" in eco).toBe(false)
+    lig.close()
+  }, 20_000)
+})
+
+/**
+ * `channel.rejoin.request` has a ceiling (1.3.25 review, finding 3).
+ *
+ * Each request is relayed to every connection of the channel (hundreds in the
+ * common room), and each 1.3.25 client queues it. An honest client asks at most once
+ * a minute per channel (`#pedirLugar`), and its deafness requests take a bucket of 3
+ * and one every 2 s across channels. A new phone asks in every channel it lacks at
+ * once (57 in a real account). So: 6 a minute per account and channel, and 120 a
+ * minute per account.
+ */
+describe("gateway: tecto dos pedidos de lugar", () => {
+  async function entrar(identity: ReturnType<typeof generateIdentity>): Promise<TestClient> {
+    const client = await TestClient.connect(gatewayUrl)
+    expect((await login(client, identity)).t).toBe("auth.ok")
+    return client
+  }
+
+  it("um canal: o sétimo pedido no mesmo minuto não chega a ninguém", async () => {
+    const canal = moradaDeSala(HOME)
+    const quem = generateIdentity(HOME)
+    const lig = await entrar(quem)
+    lig.send({ t: "channel.subscribe", channels: [canal] })
+    await lig.sync()
+    for (let i = 0; i < 7; i++) lig.send({ t: "channel.rejoin.request", channel: canal })
+    lig.send({ t: "ping" })
+    // The echo of each relayed request comes back to the asker, with its receipt.
+    const recebidas: string[] = []
+    for (let i = 0; i < 40; i++) {
+      const trama = await lig.next()
+      if (trama.t === "pong" || (trama.t === "error" && trama.code === "timeout")) break
+      recebidas.push(trama.t)
+    }
+    expect(recebidas.filter((t) => t === "channel.rejoin.sent")).toHaveLength(Gateway.PEDIDOS_DE_LUGAR_POR_CANAL)
+    lig.close()
+  }, 30_000)
+
+  it("vários canais: um telemóvel novo pede em 57 canais de uma vez, e todos saem", async () => {
+    const quem = generateIdentity(HOME)
+    const lig = await entrar(quem)
+    const canais = Array.from({ length: 57 }, () => moradaDeSala(HOME))
+    lig.send({ t: "channel.subscribe", channels: canais })
+    await lig.sync()
+    for (const canal of canais) lig.send({ t: "channel.rejoin.request", channel: canal })
+    let recibos = 0
+    for (let i = 0; i < 200 && recibos < 57; i++) {
+      const trama = await lig.next()
+      if (trama.t === "error" && trama.code === "timeout") break
+      if (trama.t === "channel.rejoin.sent") recibos += 1
+    }
+    expect(recibos).toBe(57)
+    lig.close()
+  }, 60_000)
+})

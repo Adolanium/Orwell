@@ -41,6 +41,8 @@ export class Cliente {
   #socket: WebSocket
   #fila: ServerFrame[] = []
   #esperas: ((frame: ServerFrame) => void)[] = []
+  /** What arrived between `auth.ok` and the pong of the login (`keypackage.low`, among others). */
+  aoEntrar: ServerFrame[] = []
 
   private constructor(socket: WebSocket) {
     this.#socket = socket
@@ -79,7 +81,7 @@ export class Cliente {
     const desafio = await cliente.proximoDe("auth.challenge")
     cliente.enviar({ t: "auth.finish", signature: toBase64(sign(identidade, fromBase64(desafio.nonce))) })
     await cliente.proximoDe("auth.ok")
-    await cliente.ateAoPong()
+    cliente.aoEntrar = await cliente.ateAoPong()
     return cliente
   }
 
@@ -107,7 +109,7 @@ export class Cliente {
     const desafio = await cliente.proximoDe("auth.challenge")
     cliente.enviar({ t: "auth.finish", signature: toBase64(signWithDevice(identidade, fromBase64(desafio.nonce))) })
     await cliente.proximoDe("auth.ok")
-    await cliente.ateAoPong()
+    cliente.aoEntrar = await cliente.ateAoPong()
     return cliente
   }
 

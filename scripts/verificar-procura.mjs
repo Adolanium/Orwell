@@ -35,7 +35,7 @@ await page.goto(URL, { waitUntil: "networkidle" })
 await criarContaEEntrar(page, { nome: "Régua", frase: "regua-da-procura-2026", servidor: SERVIDOR })
 await page.locator(".chat-composer").waitFor({ timeout: 90_000 })
 
-const escrita = page.locator(".chat-composer input:not([type=file])").first()
+const escrita = page.locator(".chat-composer textarea").first()
 const enviar = async (texto) => {
   await escrita.fill(texto)
   await page.getByRole("button", { name: "Enviar" }).click()

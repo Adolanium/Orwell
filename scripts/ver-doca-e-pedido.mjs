@@ -170,7 +170,7 @@ await ana.page.waitForTimeout(8000)
 // was a line in the conversation.
 await ana.page.locator(".people-aside .direct-row .direct-open").first().click()
 await ana.page.waitForTimeout(2000)
-const escrita = ana.page.locator(".chat-composer input:not([type=file])").first()
+const escrita = ana.page.locator(".chat-composer textarea").first()
 for (let i = 0; i < 8; i++) {
   await escrita.fill(`assunto ${i}`)
   await escrita.press("Enter")

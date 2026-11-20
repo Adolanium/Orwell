@@ -12,6 +12,7 @@ import { registerSystemNoticeHost, type EnclaveBridge, type SystemNotice } from 
 import { Device } from "mediasoup-client"
 import type { FonteDeEcra, PermissaoDeEcra } from "@enclave/ui"
 import { desembrulharAnfitriao } from "./envelope.js"
+import { servirMiniaturasAoAnfitriao, type AnfitriaoDasMiniaturas } from "./miniaturas.js"
 
 /**
  * The desktop host, seen from the renderer.
@@ -48,6 +49,24 @@ type Fichas = ReturnType<NonNullable<CanaisDaInterface["fichas"]>>
 type Papeis = ReturnType<CanaisDaInterface["roles"]>
 type Fixadas = ReturnType<NonNullable<CanaisDaInterface["pins"]>>
 type Tickets = ReturnType<NonNullable<CanaisDaInterface["tickets"]>>
+/** The 1.2 permission model, as the UI consumes it. */
+type PermissoesDaInterface = NonNullable<CanaisDaInterface["permissoes"]>
+type Lugar = Parameters<PermissoesDaInterface["sobreposicoes"]>[1]
+type Poderes = ReturnType<PermissoesDaInterface["em"]>
+
+/**
+ * The permission reads, as the `preload` exposes them: the same arguments,
+ * the envelope back. `setSobreposicoes` is a request and keeps its signature.
+ */
+interface PermissoesDoAnfitriao {
+  todos?: (channel: string) => Resposta<ReturnType<PermissoesDaInterface["todos"]>>
+  em?: (channel: string, address: string, lugar?: Lugar) => Resposta<Poderes>
+  mayManageRole?: (channel: string, role: string) => Resposta<boolean>
+  delegacao?: (channel: string) => Resposta<boolean>
+  sobreposicoes?: (channel: string, lugar: Lugar) => Resposta<ReturnType<PermissoesDaInterface["sobreposicoes"]>>
+  maySetSobreposicoes?: (channel: string, lugar: Lugar) => Resposta<boolean>
+  setSobreposicoes?: PermissoesDaInterface["setSobreposicoes"]
+}
 
 /**
  * What `preload` exposes in `channels`.
@@ -73,6 +92,7 @@ interface CanaisDoAnfitriao {
   buzz?: CanaisDaInterface["buzz"]
   members?: CanaisDaInterface["members"]
   history?: CanaisDaInterface["history"]
+  reaccoesGuardadas?: NonNullable<CanaisDaInterface["reaccoesGuardadas"]>
   conversaArquivada?: CanaisDaInterface["conversaArquivada"]
   temConversaArquivada?: CanaisDaInterface["temConversaArquivada"]
   forget?: CanaisDaInterface["forget"]
@@ -131,13 +151,16 @@ interface CanaisDoAnfitriao {
   mayPin?: (channel: string) => Resposta<boolean>
   tickets?: (channel: string, room: string) => Resposta<Tickets>
   mayDecideTicket?: (channel: string, room: string, ticket: string) => Resposta<boolean>
+  mayMoveIn?: (channel: string, de: string, para?: string) => Resposta<boolean>
+  /** Nested like the UI bridge. See `permissoesDe` below. */
+  permissoes?: PermissoesDoAnfitriao
 }
 
 interface HostApi {
   /** The colour theme, reported to the main process (`renderer/tema.ts`). Optional: tests and older preloads lack it. */
   tema?: { definir: (tema: string) => void }
   /** The app's language, reported to the main process (`renderer/tema.ts`). Optional for the same reason. */
-  lingua?: { definir: (lingua: string) => void }
+  lingua?: { definir: (lingua: string) => void; doSistema?: () => string[] }
   vault: {
     status: EnclaveBridge["vault"]["status"]
     create: (passphrase: string | null) => Promise<{ ok: boolean }>
@@ -167,6 +190,9 @@ interface HostApi {
     commonRoom: () => Promise<string | null>
     /** The account choice on the common channel. See `bridge.ts` in `@enclave/ui`. */
     escolherSalaComum: (entrar: boolean) => Promise<{ ok: boolean }>
+    /** Who may create an account on a server, and the invite code (1.3.25). See `bridge.ts` in `@enclave/ui`. Optional: an old `preload` does not bring them. */
+    sondarRegisto?: (servidor: string) => Promise<"aberto" | "convite" | "fechado" | null>
+    definirConviteDeRegisto?: (codigo: string | null) => Promise<{ ok: boolean }>
     setVisible: (visible: boolean) => Promise<{ ok: boolean }>
     /** A round trip to the server, in ms. See `bridge.ts` in `@enclave/ui`. */
     latency: () => Promise<number | null>
@@ -234,6 +260,7 @@ interface HostApi {
     entrar: (
       channel: string,
       scope: string,
+      opcoes?: { tomar?: boolean },
     ) => Promise<{ rtpCapabilities: unknown; producers: { id: string; kind: "audio" | "video"; address: string }[] }>
     sair: (channel: string, scope: string) => Promise<{ ok: boolean }>
     criarTransporte: (
@@ -317,12 +344,18 @@ interface HostApi {
     /** Cross the IPC as plain objects; the shape is restored in the bridge. */
     typing: (handler: (payload: unknown) => void) => () => void
     recuperacao?: (handler: (payload: unknown) => void) => () => void
+    /** The deaf rooms (1.3.25, P5). Optional: an older preload lacks it. */
+    surdez?: (handler: (payload: unknown) => void) => () => void
+    eco?: (handler: (payload: unknown) => void) => () => void
     buzz: (handler: (payload: unknown) => void) => () => void
     noticeOpen: (handler: (payload: unknown) => void) => () => void
     windowState: (handler: (payload: unknown) => void) => () => void
     /** Someone clicked share screen, and now needs to pick which one. */
     ecraPedido: (handler: (payload: unknown) => void) => () => void
+    /** A thumbnail the main process cannot make. Optional: an old `preload` does not bring it. */
+    miniaturaPedido?: (handler: (payload: unknown) => void) => () => void
   }
+  miniatura?: NonNullable<AnfitriaoDasMiniaturas["miniatura"]>
 }
 
 /**
@@ -363,13 +396,13 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
 
     const valor = ((): T => {
       if (!pedir) {
-        queixar(nome, "o anfitrião não traz esta leitura")
+        queixar(nome, "the host does not bring this read")
         return omissao
       }
       const resposta = pedir()
       // A host from another version may respond with anything; the envelope is the contract, and what doesn't meet it is not a value at all.
       if (!resposta || typeof resposta !== "object" || !("ok" in resposta)) {
-        queixar(nome, "resposta sem envelope")
+        queixar(nome, "answer without an envelope")
         return omissao
       }
       if (!resposta.ok) {
@@ -400,6 +433,7 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
   }
 
   const canais = host.channels
+  const permissoes = permissoesDe(canais.permissoes, ler, pedido)
 
   const canaisDaPonte: EnclaveBridge["channels"] = {
     // ------------------------------------------------------- what was already there
@@ -416,6 +450,8 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
     buzz: pedido("buzz", canais.buzz),
     members: pedido("members", canais.members),
     history: pedido("history", canais.history),
+    // A request, not a cached read: the reactions change with every message.
+    reaccoesGuardadas: pedido("reaccoesGuardadas", canais.reaccoesGuardadas),
     conversaArquivada: pedido("conversaArquivada", canais.conversaArquivada),
     temConversaArquivada: pedido("temConversaArquivada", canais.temConversaArquivada),
     forget: pedido("forget", canais.forget),
@@ -536,6 +572,16 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
       ? { mayInvite: (channel: string) => ler("mayInvite", [channel], () => canais.mayInvite!(channel), false) }
       : {}),
     ...(canais.moveVoice ? { moveVoice: pedido("moveVoice", canais.moveVoice) } : {}),
+    // Per-room move (1.2). Absent, the UI reads `mayMove`, as before.
+    ...(canais.mayMoveIn
+      ? {
+          mayMoveIn: (channel: string, de: string, para?: string) =>
+            // Without `para` is "may disconnect", and `""` is the default room: two questions, two keys.
+            ler("mayMoveIn", [channel, de, para === undefined ? "\u0001desligar" : `\u0001para:${para}`], () => canais.mayMoveIn!(channel, de, para), false),
+        }
+      : {}),
+    // The 1.2 permission model, whole or not at all. See `permissoesDe`.
+    ...(permissoes ? { permissoes } : {}),
     ...(canais.disconnectVoice ? { disconnectVoice: pedido("disconnectVoice", canais.disconnectVoice) } : {}),
     ...(canais.adminRole
       ? { adminRole: (channel: string) => ler("adminRole", [channel], () => canais.adminRole!(channel), null) }
@@ -562,6 +608,52 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
   }
 
   return { canais: canaisDaPonte, esquecer }
+}
+
+/** A place as part of a cache key. Room and category are separate namespaces: a room called "x" is not the category "x". */
+function chaveDoLugar(lugar: Lugar | undefined): string {
+  if (lugar === undefined) return ""
+  return "sala" in lugar ? `sala\u0001${lugar.sala}` : `categoria\u0001${lugar.categoria}`
+}
+
+/**
+ * The 1.2 permission model on this side of the boundary (1.3.25).
+ *
+ * **Whole or not at all.** In the UI bridge every function inside `permissoes`
+ * is required: the editor that mounts on its presence calls all of them. A
+ * `preload` that brings half would mount an editor that breaks on the missing
+ * half, so a partial host reads as an old host, complains once, and the UI
+ * keeps the screens it had before.
+ *
+ * Reads use the same cache as the other channel reads, and it is cleared by
+ * the same events: a `channel.meta` with `perms` is a message, and
+ * `setSobreposicoes`, like any request, clears it at the end. The safe
+ * defaults are "cannot" and "nothing": an empty `em` reads as "cannot write
+ * here", which is the core's answer too while the session cannot answer.
+ */
+function permissoesDe(
+  anfitriao: PermissoesDoAnfitriao | undefined,
+  ler: <T>(nome: string, argumentos: (string | undefined)[], pedir: (() => Resposta<T>) | undefined, omissao: T) => T,
+  pedido: <A extends unknown[], R>(nome: string, fazer: ((...argumentos: A) => Promise<R>) | undefined) => (...argumentos: A) => Promise<R>,
+): PermissoesDaInterface | undefined {
+  if (!anfitriao) return undefined
+  const { todos, em, mayManageRole, delegacao, sobreposicoes, maySetSobreposicoes, setSobreposicoes } = anfitriao
+  if (!todos || !em || !mayManageRole || !delegacao || !sobreposicoes || !maySetSobreposicoes || !setSobreposicoes) {
+    console.error("[ponte] channels.permissoes: o anfitrião traz o modelo de permissões incompleto")
+    return undefined
+  }
+  return {
+    todos: (channel) => ler("permissoes.todos", [channel], () => todos(channel), { powers: [], definido: false }),
+    em: (channel, address, lugar) =>
+      ler("permissoes.em", [channel, address, chaveDoLugar(lugar)], () => (lugar === undefined ? em(channel, address) : em(channel, address, lugar)), []),
+    mayManageRole: (channel, role) => ler("permissoes.mayManageRole", [channel, role], () => mayManageRole(channel, role), false),
+    delegacao: (channel) => ler("permissoes.delegacao", [channel], () => delegacao(channel), false),
+    sobreposicoes: (channel, lugar) =>
+      ler("permissoes.sobreposicoes", [channel, chaveDoLugar(lugar)], () => sobreposicoes(channel, lugar), []),
+    maySetSobreposicoes: (channel, lugar) =>
+      ler("permissoes.maySetSobreposicoes", [channel, chaveDoLugar(lugar)], () => maySetSobreposicoes(channel, lugar), false),
+    setSobreposicoes: pedido("permissoes.setSobreposicoes", setSobreposicoes),
+  }
 }
 
 /**
@@ -688,6 +780,8 @@ export function createDesktopBridge(): EnclaveBridge {
   const host = desembrulharAnfitriao(window.enclaveHost)
 
   ligarAvisosDoSistema(host)
+  // GIF and WebP thumbnails, which the main process cannot decode. See `miniaturas.ts`.
+  servirMiniaturasAoAnfitriao(host)
 
   /**
    * Rooms, roles, tickets, and the cache that makes them affordable.
@@ -823,8 +917,8 @@ export function createDesktopBridge(): EnclaveBridge {
         }
       },
       criarDispositivo: () => new Device(),
-      sfuEntrarNoAmbito: async (channel, scope) => {
-        const resposta = await host.sfu.entrar(channel, scope)
+      sfuEntrarNoAmbito: async (channel, scope, opcoes) => {
+        const resposta = await (opcoes?.tomar === true ? host.sfu.entrar(channel, scope, { tomar: true }) : host.sfu.entrar(channel, scope))
         // The address comes from the other process as a string, and the mark is ours, as
         // everywhere on the boundary: the schema validated it, on the other side.
         return {
@@ -873,13 +967,8 @@ export function createDesktopBridge(): EnclaveBridge {
    * AFTER gets heard, ever, with no error anywhere.
    */
   host.on.sfu((cru) => {
-    const aviso = cru as {
-      t: "producer.new" | "producer.closed"
-      channel: string
-      scope: string
-      producer: string
-      address?: UserAddress
-    }
+    // Also `scope.closed` (1.3.25): the account joined the call on another device.
+    const aviso = cru as Parameters<typeof call.handleSfuAviso>[0]
     void call.handleSfuAviso(aviso).catch((error: unknown) => {
       call.emit("error", erroDaChamada(error, "the call media failed"))
     })
@@ -1148,6 +1237,8 @@ export function createDesktopBridge(): EnclaveBridge {
       typing: (handler) =>
         host.on.typing((raw) => handler(raw as { channel: string; from: string; room: string; until: number })),
       recuperacao: (handler) => host.on.recuperacao?.((raw) => handler(raw as { canais: string[] })) ?? (() => {}),
+      surdez: (handler) => host.on.surdez?.((raw) => handler(raw as { canais: string[] })) ?? (() => {}),
+      eco: (handler) => host.on.eco?.((raw) => handler(raw as { channel: string; id: string; seq: number })) ?? (() => {}),
       buzz: (handler) => host.on.buzz((raw) => handler(raw as { channel: string; from: string; at: number })),
       callActivity: (handler) => {
         activityHandlers.add(handler)

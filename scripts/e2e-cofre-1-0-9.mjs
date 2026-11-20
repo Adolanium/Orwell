@@ -206,7 +206,7 @@ for (const nomeDoMotor of escolhidos) {
     await page.locator("form.prompt input").first().fill(canal)
     await page.locator("form.prompt button.primary").first().click()
     await page.getByRole("heading", { name: canal }).waitFor({ timeout: 30_000 })
-    const caixaDeTexto = page.locator('input[placeholder="Escreve uma mensagem"]')
+    const caixaDeTexto = page.locator('textarea[placeholder="Escreve uma mensagem"]')
     await caixaDeTexto.click()
     await caixaDeTexto.fill(frase)
     await page.keyboard.press("Enter")

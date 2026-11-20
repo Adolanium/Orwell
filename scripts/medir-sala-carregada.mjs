@@ -3,7 +3,7 @@
  *
  *   npx tsc -b && npm run build -w @enclave/web     (and the server dist)
  *   node scripts/medir-sala-carregada.mjs --motor chromium --rotulo depois
- *   node scripts/medir-sala-carregada.mjs --motor webkit --dist ~/Laboratorium/Backups/orwell/web-dist-1.3.10 --rotulo antes
+ *   node scripts/medir-sala-carregada.mjs --motor webkit --dist <backups>/orwell/web-dist-1.3.10 --rotulo antes
  *
  * Owner reports, 12/11/2026, on 1.3.10: "the app restarts on mobile for no
  * obvious reason" (iPhone) and "every time, it does not respond after entering;

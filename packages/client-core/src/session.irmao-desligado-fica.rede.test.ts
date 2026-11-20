@@ -30,8 +30,9 @@ import {
  * the two friends are offline (nobody else answers). In the second friend's feed the
  * PC's record of the tablet (`aparelhoVistoNoCanal`) is also erased. The tablet is
  * older than the repair's "new" (shortened for the test). The tablet's leaf
- * must stay the same in both feeds and in a room of the owner, and no key package of
- * the tablet is claimed.
+ * must stay the same in both feeds, in a room of the owner and in the account
+ * channel, and no key package of the tablet is claimed. The account channel has its
+ * own repair (`#repararCanalDaConta`), and it took the tablet's leaf the same way.
  */
 
 const ATRASO_DA_REPOSICAO_MS = 100_000
@@ -121,6 +122,14 @@ describe("um irmão desligado não perde o lugar", () => {
     )
     const chaveDoTablet = tablet.session.identity.deviceSigningPublicKey
     const aparelho = toBase64(chaveDoTablet)
+    // And in the account channel, where the phone asks for its seat too.
+    const canalDaConta = dono!.session.canalDaConta
+    await ate(
+      () => !["", "sem grupo"].includes(folhaDe(dono!.session, canalDaConta, dono!.address, aparelho)),
+      "o tablet no canal da conta",
+      120_000,
+      500,
+    )
     // The tablet reads and never writes. Then it and both friends go offline.
     await tablet.session.flush()
     tablet.session.disconnect()
@@ -150,7 +159,7 @@ describe("um irmão desligado não perde o lugar", () => {
     await pc.connect()
     const donoRecarregado: ContaDeTeste = { ...dono!, session: pc, vault: recarregado.vault, avisos }
 
-    const canais = [sala, muralDaEva, muralDaRita]
+    const canais = [sala, muralDaEva, muralDaRita, canalDaConta]
     const antes = canais.map((canal) => folhaDe(pc, canal, dono!.address, aparelho))
     expect(antes.every((folha) => folha !== "" && folha !== "sem grupo")).toBe(true)
     const reclamadosAntes = reclamadosDe(dono!.address, chaveDoTablet)
@@ -175,7 +184,12 @@ describe("um irmão desligado não perde o lugar", () => {
     await ate(() => friendsOfTies(telemovel.session.friendTies()).length === 2, "o telemóvel sabe das duas amigas", 90_000, 200)
     telemovel.session.disconnect()
     await telemovel.session.connect()
-    await ate(() => pedidos.has(muralDaEva) && pedidos.has(muralDaRita), "o telemóvel pede lugar nos dois murais", 90_000, 200)
+    await ate(
+      () => pedidos.has(muralDaEva) && pedidos.has(muralDaRita) && pedidos.has(canalDaConta),
+      "o telemóvel pede lugar nos dois murais e no canal da conta",
+      90_000,
+      200,
+    )
     // The PC's answer: proof of life, the turn, the claim, and the commits behind
     // the seats it is still giving the phone.
     await new Promise((resolve) => setTimeout(resolve, 45_000))

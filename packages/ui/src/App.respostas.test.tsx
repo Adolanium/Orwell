@@ -147,7 +147,7 @@ async function noCanal(historico: StoredChatMessage[] = []): Promise<{
 }
 
 /** The text box. By the form not the help text, which changes with the connection. */
-const caixa = (): HTMLInputElement => document.querySelector<HTMLInputElement>(".chat-composer .composer-line input:not([type])")!
+const caixa = (): HTMLInputElement => document.querySelector<HTMLInputElement>(".chat-composer .composer-line textarea")!
 
 async function responderPeloMenu(user: ReturnType<typeof userEvent.setup>, texto: string): Promise<void> {
   await user.pointer({ keys: "[MouseRight]", target: await screen.findByText(texto) })

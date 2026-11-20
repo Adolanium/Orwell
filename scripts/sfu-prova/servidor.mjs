@@ -39,7 +39,7 @@ const PACOTES_A_GUARDAR = Number(process.env.PROVA_PACOTES_A_GUARDAR ?? 40)
 /**
  * ONE worker, not one per core.
  *
- * The VPS has two cores and eight GB, and shares them with magnuslab.pt, nginx,
+ * The VPS has two cores and eight GB, and shares them with other services, nginx,
  * Postgres, the bots and the site. One media worker leaves an entire core for
  * them. The temptation to scale by `os.cpus().length` is everyone's recipe and
  * it is wrong on this machine: the dominant cost of an SFU is network, not

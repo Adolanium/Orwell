@@ -60,6 +60,63 @@ describe("o que se abre no browser do sistema", () => {
   })
 })
 
+describe("os links para esta app, no servidor da conta, não saem para o browser (1.3.25)", () => {
+  /*
+    An invite link carries a bearer secret in its fragment. In the system
+    browser it would stay in that browser's history, and open a second copy of
+    the app there. The interface opens these in the window; this is the rule
+    for a click that still reaches `setWindowOpenHandler`.
+  */
+  const SERVIDOR = "orwell.pt"
+
+  it("convite, amigo e mensagem do próprio servidor ficam cá", () => {
+    for (const url of [
+      "https://orwell.pt/c#abcd2345.0123456789abcdef",
+      "https://orwell.pt/app/c#abcd2345.0123456789abcdef",
+      "https://orwell.pt/app/convite#!sala%3Aorwell.pt/segredo",
+      "https://orwell.pt/a#ana",
+      "https://orwell.pt/app/a#ana",
+      "https://orwell.pt/app/amigo#@ana:orwell.pt",
+      "https://orwell.pt/app/m#m=!sala%3Aorwell.pt//m1",
+      "https://ORWELL.pt/c#abcd2345.0123456789abcdef",
+      "https://orwell.pt:443/a#ana",
+    ]) {
+      expect(enderecoParaAbrirFora(url, SERVIDOR), url).toBeNull()
+    }
+    expect(podeAbrirFora("https://orwell.pt/c#abcd2345.0123456789abcdef", "Orwell.PT.")).toBe(false)
+  })
+
+  it("o resto do próprio servidor, e os mesmos caminhos noutro servidor, saem como antes", () => {
+    for (const url of [
+      "https://orwell.pt/",
+      "https://orwell.pt/privacidade",
+      "https://orwell.pt/app/",
+      "https://outro.pt/c#abcd2345.0123456789abcdef",
+      "https://outro.pt/a#ana",
+      "https://orwell.pt.mau.pt/c#abcd2345.0123456789abcdef",
+    ]) {
+      expect(enderecoParaAbrirFora(url, SERVIDOR), url).not.toBeNull()
+    }
+  })
+
+  it("sem conta aberta, nada é \"da app\": a regra antiga mantém-se", () => {
+    expect(podeAbrirFora("https://orwell.pt/c#abcd2345.0123456789abcdef")).toBe(true)
+    expect(podeAbrirFora("https://orwell.pt/c#abcd2345.0123456789abcdef", null)).toBe(true)
+  })
+
+  it("o link de emparelhamento nunca sai, de servidor nenhum, com ou sem conta", () => {
+    for (const servidor of [SERVIDOR, null]) {
+      expect(enderecoParaAbrirFora("https://orwell.pt/app/emparelhar#segredo", servidor)).toBeNull()
+      expect(enderecoParaAbrirFora("https://outro.pt/app/emparelhar#segredo", servidor)).toBeNull()
+    }
+  })
+
+  it("loopback com porta conta como o servidor (desenvolvimento)", () => {
+    expect(enderecoParaAbrirFora("http://localhost:8448/a#ana", "localhost:8448")).toBeNull()
+    expect(enderecoParaAbrirFora("http://localhost:9999/a#ana", "localhost:8448")).not.toBeNull()
+  })
+})
+
 describe("a política da janela principal", () => {
   /* The path is passed as a variable: see `toque.test.ts` in the interface. */
   const relativo = "./index.ts"
@@ -72,7 +129,7 @@ describe("a política da janela principal", () => {
 
   it("só entrega ao sistema o endereço que `enderecoParaAbrirFora` leu", () => {
     expect(fonte).toMatch(
-      /setWindowOpenHandler\(\(\{ url \}\) => \{\s*const destino = enderecoParaAbrirFora\(url\)\s*if \(destino\) void shell\.openExternal\(destino\)/,
+      /setWindowOpenHandler\(\(\{ url \}\) => \{\s*const destino = enderecoParaAbrirFora\(url, servidorDaConta\(\)\)\s*if \(destino\) void shell\.openExternal\(destino\)/,
     )
     // And no other `openExternal` with raw text.
     expect(fonte).not.toMatch(/openExternal\(url\)/)

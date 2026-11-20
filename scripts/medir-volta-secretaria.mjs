@@ -32,7 +32,7 @@ const arg = (nome, omissao) => {
   return i >= 0 ? process.argv[i + 1] : omissao
 }
 const casa_ = (p) => resolve(String(p).replace(/^~/, process.env.HOME ?? "~"))
-const CASO = casa_(arg("--caso", "~/Laboratorium/Backups/orwell/fluidez-caso"))
+const CASO = casa_(arg("--caso", "~/.orwell/fluidez-caso"))
 const OUT = casa_(arg("--out", join(RAIZ, "apps/client/out")))
 const ROTULO = arg("--rotulo", "agora")
 const MINUTOS = Number(arg("--minutos", 5))

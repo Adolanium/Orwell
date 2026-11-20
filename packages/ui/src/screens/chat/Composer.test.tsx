@@ -585,6 +585,71 @@ describe("Composer — colar imagens", () => {
 })
 
 /**
+ * The animated GIF in a message (1.3.22).
+ *
+ * Before, a GIF over 400 KB was recoded and stopped, with no word, and went out
+ * as `image/gif` with WebP bytes. Now a GIF up to 2 MiB goes intact; above it
+ * goes still, with a sentence, and the type is the type of the bytes.
+ */
+describe("Composer — GIF animado", () => {
+  /** A GIF with real bytes: the six that say GIF89a, and zeros. */
+  function gif(nome: string, bytes: number): File {
+    const conteudo = new Uint8Array(bytes)
+    conteudo.set(new TextEncoder().encode("GIF89a"))
+    return new File([conteudo as BlobPart], nome, { type: "image/gif" })
+  }
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("um GIF de 1 MB sai intacto e animado, como image/gif", async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    render(<Harness onSend={onSend} />)
+    await user.upload(campoDeImagens(), gif("gato.gif", 1_000_000))
+    const miniatura = (await screen.findByAltText("gato.gif")) as HTMLImageElement
+    expect(miniatura.src.startsWith("data:image/gif;base64,R0lGODlh")).toBe(true)
+    expect(screen.queryByText(strings.common.gifParadoNaMensagem)).toBeNull()
+    await user.click(screen.getByText(strings.chat.send))
+    const imagens = (onSend.mock.calls[0]?.[1] as { images: { mediaType: string; dataUrl: string; bytes: number }[] }).images
+    expect(imagens).toHaveLength(1)
+    expect(imagens[0]?.mediaType).toBe("image/gif")
+    expect(imagens[0]?.bytes).toBe(1_000_000)
+  })
+
+  it("colar um GIF (com os bytes de um GIF) também o mantém animado", async () => {
+    render(<Harness />)
+    fireEvent.paste(box(), {
+      clipboardData: {
+        types: ["image/gif"],
+        getData: () => "",
+        items: [{ kind: "file", type: "image/gif", getAsFile: () => gif("", 900_000) }],
+        files: [],
+      } as unknown as DataTransfer,
+    })
+    const miniatura = (await screen.findByAltText(/\.gif$/)) as HTMLImageElement
+    expect(miniatura.src.startsWith("data:image/gif")).toBe(true)
+  })
+
+  it("um GIF acima de 2 MiB vai parado, com o aviso, e o tipo é o dos bytes que saem", async () => {
+    // jsdom cannot decode or draw: a decoder and a canvas that write WebP.
+    vi.stubGlobal("createImageBitmap", async () => ({ width: 800, height: 600, close: () => undefined }))
+    const contexto = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: () => undefined } as never)
+    const escrever = vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation((tipo?: string) => `data:${tipo ?? "image/png"};base64,AAAA`)
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    render(<Harness onSend={onSend} />)
+    await user.upload(campoDeImagens(), gif("pesado.gif", 2 * 1024 * 1024 + 1))
+    expect(await screen.findByText(strings.common.gifParadoNaMensagem)).toBeTruthy()
+    await user.click(screen.getByText(strings.chat.send))
+    const imagens = (onSend.mock.calls[0]?.[1] as { images: { mediaType: string; dataUrl: string }[] }).images
+    expect(imagens[0]?.dataUrl.startsWith("data:image/gif")).toBe(false)
+    expect(imagens[0]?.mediaType).toBe(imagens[0]?.dataUrl.slice(5, imagens[0]?.dataUrl.indexOf(";")))
+    contexto.mockRestore()
+    escrever.mockRestore()
+  })
+})
+
+/**
  * The buzz button in the input bar.
  *
  * It moved here from the header, and the move brought a trap that did not
@@ -601,9 +666,6 @@ describe("Composer — colar imagens", () => {
   the label. The one-per-minute cap lives in `useBuzz` (see `useBuzz.test.tsx`).
 */
 describe("Composer — a cotovelada", () => {
-  const entradaDaCotovelada = (): HTMLElement =>
-    screen.getByRole("menuitem", { name: new RegExp(strings.chat.buzz) })
-
   it("não existe quando a conversa não a admite", async () => {
     // In a group channel the screen above does not deliver any `onBuzz`: thirty
     // buzzes at once are not a buzz, they are an alarm.
@@ -613,40 +675,14 @@ describe("Composer — a cotovelada", () => {
     expect(screen.queryByRole("menuitem", { name: new RegExp(strings.chat.buzz) })).toBeNull()
   })
 
-  it("aparece no menu quando a conversa a admite, depois dos anexos", async () => {
-    const user = userEvent.setup()
-    render(<Harness onBuzz={vi.fn()} />)
-    await abrirMais(user)
-    const entradas = screen.getAllByRole("menuitem").map((item) => item.textContent ?? "")
-    expect(entradas.at(-1)).toContain(strings.chat.buzz)
-  })
-
-  it("dá a cotovelada SEM enviar a mensagem que estava escrita", async () => {
-    // The trap stays the same with the menu in front: what comes out here cannot
-    // submit the form and send the half-written text. It is also why the menu
-    // lives OUTSIDE the <form>.
-    const user = userEvent.setup()
-    const onSend = vi.fn()
-    const onBuzz = vi.fn()
-    render(<Harness onSend={onSend} onBuzz={onBuzz} initial="frase a meio" />)
-    await abrirMais(user)
-    await user.click(entradaDaCotovelada())
-    expect(onBuzz).toHaveBeenCalledTimes(1)
-    expect(onSend).not.toHaveBeenCalled()
-    expect(box().value).toBe("frase a meio")
-  })
-
-  it("enquanto o intervalo corre, a entrada diz quantos segundos faltam", async () => {
-    /*
-      The input does not disappear during the wait, and that is a choice: an
-      option that vanishes and returns on its own makes the person doubt what
-      they saw. It says the time, and `useBuzz` still refuses if it is not time
-      yet, the guard lives there and never here.
-    */
+  it("o menu + não leva a cotovelada, nem numa conversa que a admite", async () => {
+    // 20/11/2026, the owner: take the nudge out of the "+" menu. The button on
+    // the line stays, with its own icon.
     const user = userEvent.setup()
     render(<Harness onBuzz={vi.fn()} buzzCooldown={5} />)
     await abrirMais(user)
-    expect(entradaDaCotovelada().textContent).toContain("5")
+    const entradas = screen.getAllByRole("menuitem").map((item) => item.textContent ?? "")
+    expect(entradas.some((texto) => texto.includes(strings.chat.buzz))).toBe(false)
   })
 
   it("numa conversa que a admite, tem botão próprio na linha, com o ícone desenhado", async () => {
@@ -670,13 +706,6 @@ describe("Composer — a cotovelada", () => {
     render(<Harness />)
     expect(screen.queryByTitle(strings.chat.buzzTitle)).toBeNull()
     expect(document.querySelector(".composer-buzz")).toBeNull()
-  })
-
-  it("a entrada do menu leva o mesmo ícone desenhado", async () => {
-    const user = userEvent.setup()
-    render(<Harness onBuzz={vi.fn()} />)
-    await abrirMais(user)
-    expect(entradaDaCotovelada().querySelector("svg")).toBeTruthy()
   })
 
   it("os botões da linha são ícones desenhados, sem um símbolo à vista", () => {

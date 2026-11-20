@@ -224,6 +224,8 @@ interface Aparelho {
   eventos: EventoDoHistorico[]
   ligado: boolean
   aparelho: string
+  /** Called after each vault write, at once: lets a test act at an exact state. */
+  depoisDeGravar?: () => void
 }
 
 const CANAL_DA_CONTA = "!conta:localhost"
@@ -260,7 +262,11 @@ function doisAparelhos(
           if (outro !== eu && outro.ligado) void outro.historico.aoSinal({ channel: CANAL_DA_CONTA, from: conta.address, sinal })
         }
       },
-      gravar: (mudar) => mudar(contents),
+      gravar: (mudar) => {
+        const r = mudar(contents)
+        eu.depoisDeGravar?.()
+        return r
+      },
       temGrupo: (canal) => canal in contents.history || canal in contents.estadoDoCanal,
       bloqueado: () => false,
       lugar: () => undefined,
@@ -396,13 +402,23 @@ describe("o fio entre dois aparelhos", () => {
     const { a, b } = doisAparelhos()
     encher(a.contents)
     b.contents.historico = { inicial: { desde: Date.now() } }
+    /*
+      The connection drops at the first write that leaves a channel half done, not
+      when a 20 ms poll happens to see it. Polling missed the state when the copy ran
+      fast (alone, it failed every time) and waited for it under load.
+    */
+    let plano: unknown
+    b.depoisDeGravar = () => {
+      if (plano !== undefined || !Object.values(b.contents.historico?.plano?.canais ?? {}).some((canal) => canal.cursor !== null && !canal.fim)) return
+      plano = structuredClone(b.contents.historico?.plano)
+      b.ligado = false
+      queueMicrotask(() => b.historico.aoDesligar())
+    }
     a.historico.aoLigar()
     b.historico.aoLigar()
     try {
-      await ate(() => Object.values(b.contents.historico?.plano?.canais ?? {}).some((canal) => canal.cursor !== null && !canal.fim), "a meio")
-      b.ligado = false
-      b.historico.aoDesligar()
-      const plano = structuredClone(b.contents.historico?.plano)
+      await ate(() => plano !== undefined, "a meio")
+      b.depoisDeGravar = undefined
       expect(plano).toBeDefined()
       await new Promise((resolve) => setTimeout(resolve, 100))
       b.ligado = true
@@ -415,7 +431,9 @@ describe("o fio entre dois aparelhos", () => {
       a.historico.aoDesligar()
       b.historico.aoDesligar()
     }
-  })
+    // Above its own two deadlines of 10 s (`ate`): if it ever stalls, it fails naming
+    // the step, not on vitest's 5 s default with no label.
+  }, 30_000)
 
   it("entre irmãos já emparelhados, só os canais que mudaram, e nunca um que este aparelho não tem", async () => {
     const { a, b } = doisAparelhos()

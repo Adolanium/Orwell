@@ -120,7 +120,7 @@ export function formatarBytes(bytes: number): string {
  */
 export function bytesDeDataUrl(dataUrl: string): Uint8Array {
   const virgula = dataUrl.indexOf(",")
-  if (virgula < 0) throw new Error("data URL sem corpo")
+  if (virgula < 0) throw new Error("data URL without a body")
   const base64 = dataUrl.slice(virgula + 1)
   const binario = atob(base64)
   const bytes = new Uint8Array(binario.length)
@@ -186,11 +186,11 @@ export function pesoDeDataUrl(dataUrl: string): number {
 export function lerComoDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const leitor = new FileReader()
-    leitor.onerror = () => reject(new Error("não foi possível ler o ficheiro"))
+    leitor.onerror = () => reject(new Error("could not read the file"))
     leitor.onload = () => {
       const resultado = leitor.result
       if (typeof resultado === "string") resolve(resultado)
-      else reject(new Error("o ficheiro não veio como data URL"))
+      else reject(new Error("the file did not come as a data URL"))
     }
     leitor.readAsDataURL(file)
   })

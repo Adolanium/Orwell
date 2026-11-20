@@ -30,12 +30,14 @@ import { candidatoDeCargo, candidatoDeSala } from "./lib/etiquetas.js"
 import type { Activity, ChannelRoom, ConnectionState, EnclaveBridge, Profile, StartupFriend } from "./bridge.js"
 import type { ChatMessage, MessageExtras, SocialDraft, Stage, View } from "./types.js"
 import { ChatIcon, FeedIcon, FriendsIcon, GearIcon, MenuIcon, OrwellMark, PersonIcon } from "./icons.js"
+import { AvisosDoCarril, classeDoBotaoDoCarril, descricaoDoCarril, GlifoSemLigacao } from "./components/AvisosDoCarril.js"
 import { useAmizade, estadoDaAmizade } from "./hooks/useAmizade.js"
 import { useLacosDeAmizade } from "./hooks/useLacosDeAmizade.js"
 import { useSucessoes } from "./hooks/useSucessoes.js"
 import { chaveDaOferta, escondidasPorSucessao, ofertasDeSucessao, type OfertaDeSucessao } from "./lib/sucessoes.js"
 import { useBloqueioAutomatico } from "./hooks/useBloqueioAutomatico.js"
 import { useChamadaEmSegundoPlano } from "./hooks/useChamadaEmSegundoPlano.js"
+import { useCotoveladaPorVer } from "./hooks/useCotoveladaPorVer.js"
 import { ehPwaDoIos } from "./lib/plataforma.js"
 import { useMarcaDaVolta } from "./hooks/useMarcaDaVolta.js"
 import { useEstavel } from "./hooks/useEstavel.js"
@@ -77,6 +79,9 @@ import { SalaDeVotacoes } from "./screens/chat/SalaDeVotacoes.js"
 import { EscolherSalaDeVotacoes } from "./screens/chat/EscolherSalaDeVotacoes.js"
 import { listarVotacoes, rastosDeVotacoes, type VotacaoListada } from "./lib/listarVotacoes.js"
 import { useLigacaoDeMensagem } from "./hooks/useLigacaoDeMensagem.js"
+import { useLigacoesInternas } from "./hooks/useLigacoesInternas.js"
+import type { LigacaoInterna } from "./lib/ligacaoInterna.js"
+import { membrosDaSala } from "./lib/membrosDaSala.js"
 import {
   admiteAdministracao,
   comEmendas,
@@ -104,7 +109,7 @@ import { arquivar, desarquivar, esquecerEstadoDoBrowser, lerEstadoDaConta, ligar
 import { aceitesAEspera, conviteDaMensagem, convitesDe } from "./lib/convites.js"
 import { nomeSeguro } from "./lib/ficheiros.js"
 import { escritaNaDirecta } from "./lib/friendship.js"
-import { repartirPorDestino } from "./lib/porAtender.js"
+import { mencoesNosCanais, repartirPorDestino } from "./lib/porAtender.js"
 import {
   chaveDaConversa,
   chaveDaLidaDaSala,
@@ -182,6 +187,7 @@ import {
   type AppNotification,
 } from "./lib/notifications.js"
 import { mencionaMe } from "./lib/mentions.js"
+import { deQuemBloqueei, semBloqueados } from "./lib/bloqueados.js"
 import { recordDiagnostic } from "./lib/diagnostics.js"
 import {
   avisoDaChamada,
@@ -364,6 +370,19 @@ export function reaccoesParaDobrar(messages: readonly ChatMessage[], channel: st
   return reaccoes
 }
 
+/**
+ * The vault's reactions of a channel and memory's, each act once (B6, 1.3.25).
+ *
+ * Memory wins: it is the newest copy, and it carries the mark of a send of ours
+ * still in flight (`reaccoesParaDobrar`). The vault's go first, they are older.
+ * `dobrarReaccoes` orders by the server anyway, and the same act twice changes nothing.
+ */
+export function reaccoesComAsDoCofre(doCofre: readonly ChatMessage[], daMemoria: readonly ChatMessage[]): ChatMessage[] {
+  if (doCofre.length === 0) return [...daMemoria]
+  const naMemoria = new Set(daMemoria.map(keyOf))
+  return [...doCofre.filter((message) => message.payload.t === "reaction" && !naMemoria.has(keyOf(message))), ...daMemoria]
+}
+
 /** A poll vote: a `post.reaction` with a numeric `vote` (see `votosDe`). */
 const ehVoto = (message: ChatMessage): boolean =>
   message.payload.t === "post.reaction" && typeof (message.payload as { vote?: unknown }).vote === "number"
@@ -398,6 +417,67 @@ function semVotosAMais(lista: ChatMessage[], channel: string): ChatMessage[] {
   return lista.filter((item) => !largar.has(item))
 }
 
+/**
+ * The sort key of a line of `channel` at `indice`, the vault's (`chavesDeOrdem`):
+ * its `seq`; for a send of ours without echo, its order mark (`apos`), or else the
+ * `seq` of the nearest line of the channel before it (memory keeps them ascending).
+ */
+function chaveNaMemoria(lista: readonly ChatMessage[], indice: number): number {
+  const linha = lista[indice] as ChatMessage
+  if (linha.seq >= 0) return linha.seq
+  if (linha.apos !== undefined && linha.apos >= 0) return linha.apos
+  for (let i = indice - 1; i >= 0; i--) {
+    const antes = lista[i] as ChatMessage
+    if (antes.channel === linha.channel && antes.seq >= 0) return antes.seq
+  }
+  return -1
+}
+
+/**
+ * Where a live arrival enters memory (ordem-resposta, 20/11/2026): at the end, or,
+ * with a server `seq` N, before the lines of its channel at the end with a larger
+ * key. Those are our sends whose echo gave them a larger `seq`, and our later sends
+ * without echo. The vault's rule (`inserirPorSeq` in `vault.ts`). The first line of
+ * the channel with a smaller key stops the walk: an arrival in order costs one
+ * comparison of its channel.
+ */
+export function lugarPorSeq(lista: readonly ChatMessage[], message: ChatMessage): number {
+  let lugar = lista.length
+  if (message.seq < 0) return lugar
+  for (let i = lista.length - 1; i >= 0; i--) {
+    if ((lista[i] as ChatMessage).channel !== message.channel) continue
+    if (chaveNaMemoria(lista, i) <= message.seq) break
+    lugar = i
+  }
+  return lugar
+}
+
+/**
+ * The echo of our message gave it the server `seq` (`bridge.on.eco`, ordem-resposta).
+ * The line takes it, and the lines of its channel after it that the server numbered
+ * BEFORE it move in front of it, in their order: the vault's rule
+ * (`recuarOQueVeioAntes`). Without the line in memory, the list stays as it is.
+ */
+export function confirmarNaMemoria(lista: ChatMessage[], eco: { channel: string; id: string; seq: number }): ChatMessage[] {
+  let indice = -1
+  for (let i = lista.length - 1; i >= 0; i--) {
+    const linha = lista[i] as ChatMessage
+    if (linha.channel === eco.channel && linha.seq < 0 && linha.payload.t === "message" && linha.payload.id === eco.id) {
+      indice = i
+      break
+    }
+  }
+  if (indice < 0) return lista
+  const { apos: _marca, ...semMarca } = lista[indice] as ChatMessage
+  const nossa: ChatMessage = { ...semMarca, seq: eco.seq }
+  const antes: ChatMessage[] = []
+  const depois: ChatMessage[] = []
+  for (const linha of lista.slice(indice + 1)) {
+    ;(linha.channel === eco.channel && linha.seq >= 0 && linha.seq < eco.seq ? antes : depois).push(linha)
+  }
+  return [...lista.slice(0, indice), ...antes, nossa, ...depois]
+}
+
 /** What is conversation on screen. Everything else (channels, roles, banner) is state the vault already stores. */
 const DA_CONVERSA: ReadonlySet<string> = new Set(["message", "edit", "redact", "reaction"])
 
@@ -418,12 +498,16 @@ const DA_CONVERSA: ReadonlySet<string> = new Set(["message", "edit", "redact", "
  * votes leave first, then those for no poll on screen, then the oldest
  * (`votosAGuardar`, the vault's rule).
  */
-export function appendBounded(current: ChatMessage[], message: ChatMessage): ChatMessage[] {
-  const next = semVotosAMais([...current, message], message.channel)
+export function appendBounded(current: ChatMessage[], message: ChatMessage, tecto: number = MEMORY_HARD_CAP): ChatMessage[] {
+  const lugar = lugarPorSeq(current, message)
+  const next = semVotosAMais(
+    lugar === current.length ? [...current, message] : [...current.slice(0, lugar), message, ...current.slice(lugar)],
+    message.channel,
+  )
   const conta = (item: ChatMessage): boolean => item.channel === message.channel && !ehVoto(item)
   const inChannel = next.reduce((count, item) => (conta(item) ? count + 1 : count), 0)
-  if (inChannel <= MEMORY_HARD_CAP) return next
-  let toDrop = inChannel - MEMORY_HARD_CAP
+  if (inChannel <= tecto) return next
+  let toDrop = inChannel - tecto
   const largar = new Set<ChatMessage>()
   for (const item of next) {
     if (toDrop === 0) break
@@ -453,11 +537,49 @@ export function appendBounded(current: ChatMessage[], message: ChatMessage): Cha
  */
 const PRAZO_DO_QUADRO_MS = 100
 
-export function juntarLote(current: ChatMessage[], lote: readonly ChatMessage[]): ChatMessage[] {
+/**
+ * `tectoDe`: the memory bound of each channel, `MEMORY_HARD_CAP` plus what the reader
+ * loaded by hand there (carregar-antigas, 18/11/2026). See `loadOlder`.
+ */
+export function juntarLote(
+  current: ChatMessage[],
+  lote: readonly ChatMessage[],
+  tectoDe: (channel: string) => number = () => MEMORY_HARD_CAP,
+): ChatMessage[] {
   let lista = current
-  for (const message of lote) lista = juntarCopiaAoVivo(lista, message) ?? appendBounded(lista, message)
+  for (const message of lote) lista = juntarCopiaAoVivo(lista, message) ?? appendBounded(lista, message, tectoDe(message.channel))
   return lista
 }
+
+/**
+ * One click of "load older" from the vault: the newest entries memory does not hold,
+ * up to `linhas` lines of the open conversation (carregar-antigas, 18/11/2026).
+ *
+ * The vault read is the conversation and the state book together, every room: votes,
+ * reactions, edits, tombstones. A page of 100 ENTRIES was the rule, and in a channel
+ * with a busy polls room a page was all votes: the click drew nothing, eight times in
+ * a row. Now the page counts lines of the open conversation (`daConversa`) and brings
+ * the state between them with it. `esgotou`: nothing older is left in the vault.
+ */
+export function paginaDoCofre(
+  missing: readonly ChatMessage[],
+  daConversa: (message: ChatMessage) => boolean,
+  linhas: number = HISTORY_PAGE,
+): { pagina: ChatMessage[]; linhas: number; esgotou: boolean } {
+  let contadas = 0
+  let inicio = missing.length
+  while (inicio > 0 && contadas < linhas) {
+    inicio -= 1
+    if (daConversa(missing[inicio] as ChatMessage)) contadas += 1
+  }
+  return { pagina: missing.slice(inicio), linhas: contadas, esgotou: inicio === 0 }
+}
+
+/** Archive pages one click reads at most while they hold no line of the open conversation. */
+const PAGINAS_DO_ARQUIVO_POR_TOQUE = 20
+
+/** What counts toward a channel's memory bound (`appendBounded`): everything but poll votes. */
+const contaNoTecto = (lista: readonly ChatMessage[]): number => lista.reduce((n, message) => (ehVoto(message) ? n : n + 1), 0)
 
 export function useBridge(): EnclaveBridge {
   const bridge = useContext(BridgeContext)
@@ -551,6 +673,22 @@ export function App({
     setAmigoInvalido(false)
   }, [startupFriend])
   /*
+    An invite or friend link clicked INSIDE the app (1.3.25): the same pending
+    state as the startup link, so it follows the same path after the gate. A
+    new link replaces the one waiting, whatever form each takes. Message links
+    are opened in the `Shell`, which knows the channels. See `useLigacoesInternas`.
+  */
+  const abrirLigacaoInterna = useCallback((ligacao: LigacaoInterna) => {
+    if (ligacao.tipo === "convite" || ligacao.tipo === "convite-curto" || ligacao.tipo === "convite-invalido") {
+      setConviteAEspera(ligacao.tipo === "convite" ? ligacao.convite : null)
+      setConviteCurtoAEspera(ligacao.tipo === "convite-curto" ? ligacao.curta : null)
+      setConviteInvalido(ligacao.tipo === "convite-invalido")
+    } else if (ligacao.tipo === "amigo" || ligacao.tipo === "amigo-invalido") {
+      setAmigoAEspera(ligacao.tipo === "amigo" ? ligacao.address : null)
+      setAmigoInvalido(ligacao.tipo === "amigo-invalido")
+    }
+  }, [])
+  /*
     Deleting the account takes the invite with it.
 
     The pending invite is from WHO opened the link. Locking does not touch it:
@@ -600,6 +738,7 @@ export function App({
             amigoAEspera={amigoAEspera}
             amigoInvalido={amigoInvalido}
             onAmigoResolvido={resolverAmigo}
+            onLigacaoInterna={abrirLigacaoInterna}
             {...(startupPairing ? { emparelhamentoDeArranque: startupPairing } : {})}
           />
         </ConfirmarProvider>
@@ -628,6 +767,7 @@ function Shell({
   amigoAEspera = null,
   amigoInvalido = false,
   onAmigoResolvido,
+  onLigacaoInterna,
   emparelhamentoDeArranque,
 }: {
   /** See `App`'s `lotePorQuadro`. */
@@ -644,6 +784,8 @@ function Shell({
   /** The page opened from a friend link that cannot be read. */
   amigoInvalido?: boolean
   onAmigoResolvido?: () => void
+  /** An invite or friend link clicked inside the app. See `abrirLigacaoInterna` in `App`. */
+  onLigacaoInterna?: (ligacao: LigacaoInterna) => void
   emparelhamentoDeArranque?: StartupPairing
 }): React.JSX.Element {
   const bridge = useBridge()
@@ -892,6 +1034,8 @@ function Shell({
   const [propriedadesNosPapeis, setPropriedadesNosPapeis] = useState(false)
   /** Channel where a room is being created. */
   const [novaSalaEm, setNovaSalaEm] = useState<string | null>(null)
+  /** The category a new room starts in, from a category's `+` or menu (1.3.25). Empty: none. */
+  const [categoriaDaNovaSala, setCategoriaDaNovaSala] = useState("")
   /** Internal channel (room) under the context menu. */
   const [roomMenu, setRoomMenu] = useState<{ room: string; at: { x: number; y: number } } | null>(null)
   /** Right click on a category header. See `itensDaCategoria`. */
@@ -1084,13 +1228,45 @@ function Shell({
 
   /** Mirrored for callbacks that must read the current list without re-binding. */
   const messagesRef = useRef<ChatMessage[]>([])
+  /**
+   * Per channel, how much the reader loaded by hand with "load older" (carregar-antigas,
+   * 18/11/2026). The next arrival used to drop the oldest lines, which were exactly the
+   * ones just asked for. With something loaded by hand, the bound is what was loaded plus
+   * twice `MEMORY_HARD_CAP`: memory was often already at the bound before the click (a
+   * catch-up fills it), and the reader at the top gets a full bound of arrivals before
+   * anything above them is cut. Only grows by a click, and only for this session.
+   */
+  const carregadasAMao = useRef(new Map<string, number>())
   messagesRef.current = messages
 
   // Provided by ToastProvider above the shell; stable, so it can be handed to
   // subscriptions registered once on mount.
   const pushToast = useToast()
   const confirmar = useConfirmar()
-  const outbox = useOutbox(bridge, connection, pushToast)
+  /** The rooms this device cannot read now (1.3.25, P5). The room says so; the outbox waits for them. */
+  const [canaisSurdos, setCanaisSurdos] = useState<ReadonlySet<string>>(() => new Set())
+  useEffect(() => {
+    /*
+      The event says each change; the read says the state now. Without the read,
+      a desktop window that reloads in the middle of a session showed no notice
+      until the set changed again. An event that arrives first wins: it is newer.
+    */
+    let porEvento = false
+    const largar = bridge.on.surdez?.((evento) => {
+      porEvento = true
+      setCanaisSurdos(new Set(evento.canais))
+    })
+    void bridge.social.canaisSurdos?.()
+      .then((canais) => {
+        if (!porEvento) setCanaisSurdos(new Set(canais))
+      })
+      .catch(() => {})
+    return () => {
+      porEvento = true
+      largar?.()
+    }
+  }, [bridge])
+  const outbox = useOutbox(bridge, connection, pushToast, canaisSurdos)
   // Notifications when the app is closed: renewed on each connect and settings change. See `usePushFechada`.
   const avisarDoPush = useCallback((erro: Error) => pushToast(traduzirErro(erro), "error"), [pushToast])
   usePushFechada(bridge, connection, avisarDoPush)
@@ -1188,6 +1364,8 @@ function Shell({
    */
   const curtaPedida = useRef<string | null>(null)
   useEffect(() => {
+    // Resolved or dropped: the same link clicked again in the app is a new request (1.3.25).
+    if (!conviteCurtoAEspera) curtaPedida.current = null
     if (!conviteCurtoAEspera || stage !== "ready" || connection !== "online") return
     if (curtaPedida.current === conviteCurtoAEspera) return
     curtaPedida.current = conviteCurtoAEspera
@@ -2067,6 +2245,8 @@ function Shell({
     me: null,
     nameFor: nomeEmFalta,
   })
+  /** Who is blocked on this device, for the session handlers. Written where the set is made. */
+  const bloqueadosRef = useRef<ReadonlySet<string>>(new Set())
 
   /**
    * The same mirror, for the operating system alert.
@@ -2518,6 +2698,24 @@ function Shell({
   const refrescarCanais = useRef<() => void>(() => {})
   /** Live messages waiting for the next batch. See `juntarLote`. */
   const porJuntar = useRef<ChatMessage[]>([])
+  /*
+    The echo of our message (ordem-resposta, 20/11/2026): the line takes its server
+    `seq` and its server place, in memory and in the batch still waiting. A message
+    the server numbered before ours, still in the batch, then enters before it
+    (`lugarPorSeq`). Without this the line kept `seq` -1 and arrival order until a restart.
+  */
+  useEffect(
+    () =>
+      bridge.on.eco?.((eco) => {
+        porJuntar.current = porJuntar.current.map((message) =>
+          message.channel === eco.channel && message.seq < 0 && message.payload.t === "message" && message.payload.id === eco.id
+            ? { ...message, seq: eco.seq }
+            : message,
+        )
+        setMessages((current) => confirmarNaMemoria(current, eco))
+      }),
+    [bridge],
+  )
   const loteAgendado = useRef(false)
   /** The batch waiting for its frame, if any: run now when the page hides. */
   const juntarPendente = useRef<(() => void) | null>(null)
@@ -2596,8 +2794,13 @@ function Shell({
             the outbox entry leaves in the same render, or the line blinks.
           */
           const nossas = lote.some((m) => m.seq < 0 || (notifyRef.current.me !== null && m.sender === notifyRef.current.me))
-          if (lotePorQuadro && !nossas) startTransition(() => setMessages((current) => juntarLote(current, lote)))
-          else setMessages((current) => juntarLote(current, lote))
+          const tectoDe = (channel: string): number => {
+            const carregadas = carregadasAMao.current.get(channel) ?? 0
+            // Loaded by hand: room for what was loaded and for a full bound of arrivals after it.
+            return carregadas > 0 ? 2 * MEMORY_HARD_CAP + carregadas : MEMORY_HARD_CAP
+          }
+          if (lotePorQuadro && !nossas) startTransition(() => setMessages((current) => juntarLote(current, lote, tectoDe)))
+          else setMessages((current) => juntarLote(current, lote, tectoDe))
           // Our own sends come back through here (seq -1); the matching outbox
           // entry has served its purpose the moment the real message exists.
           // In the same tick as the list, or the message would blink out for one frame.
@@ -2649,6 +2852,13 @@ function Shell({
        * vault and this shell would only have in memory.
        */
       const { me } = notifyRef.current
+      /*
+        Someone I blocked: the message stays in the list (a room folds it, see
+        `Timeline`), and nothing else. No sound, no bell, no system notice, in
+        any channel. The core already drops what they say in a direct or a wall;
+        this is the shared room, where it lets it through. See `lib/bloqueados.ts`.
+      */
+      if (me && message.sender !== me && bloqueadosRef.current.has(message.sender)) return
       // The sound for what does not go through the bell: tickets and publications.
       // The rest (direct, mention, requests) rings as the bell entry comes. Without
       // knowing who I am, there is no way to know whose message it is: it stays silent.
@@ -3817,35 +4027,56 @@ function Shell({
    * Page older stored messages into state, newest missing slice first: the
    * vault, then the conversation archived past it, page by page. Never a silent
    * stop: the end says it is the end, and a page that does not open says so.
+   *
+   * A page is up to `HISTORY_PAGE` LINES of the open conversation (`daConversa`), not
+   * entries: see `paginaDoCofre`. The archive is read page by page until one brings a
+   * line of it, or it ends (`PAGINAS_DO_ARQUIVO_POR_TOQUE` at most per click). What
+   * comes in raises the channel's memory bound (`carregadasAMao`), so it stays.
    */
   const loadOlder = useCallback(
-    (channel: string) => {
+    (channel: string, daConversa: (message: ChatMessage) => boolean) => {
       const known = (): Set<string> => new Set(messagesRef.current.filter((message) => message.channel === channel).map(keyOf))
       const acrescentar = (page: ChatMessage[]): void => {
-        if (page.length > 0) setMessages((current) => [...page, ...current])
+        if (page.length === 0) return
+        carregadasAMao.current.set(channel, (carregadasAMao.current.get(channel) ?? 0) + contaNoTecto(page))
+        setMessages((current) => {
+          const vistas = new Set(current.filter((message) => message.channel === channel).map(keyOf))
+          return [...page.filter((message) => !vistas.has(keyOf(message))), ...current]
+        })
+      }
+      const fimDoAparelho = (): void => {
+        setOlderAvailable((current) => new Map(current).set(channel, false))
+        setInicioDoAparelho((actual) => new Set(actual).add(channel))
       }
       const doArquivo = async (): Promise<void> => {
         const ler = bridge.channels.conversaArquivada
-        const cursor = cursorDoArquivo.current.get(channel)
-        if (!ler || cursor === null) {
-          setOlderAvailable((current) => new Map(current).set(channel, false))
-          setInicioDoAparelho((actual) => new Set(actual).add(channel))
-          return
+        for (let pagina = 0; pagina < PAGINAS_DO_ARQUIVO_POR_TOQUE; pagina++) {
+          const cursor = cursorDoArquivo.current.get(channel)
+          if (!ler || cursor === null) return fimDoAparelho()
+          let novas: ChatMessage[]
+          try {
+            const { entradas, seguinte, falhou } = await ler(channel, cursor)
+            cursorDoArquivo.current.set(channel, seguinte)
+            // A page that does not open: say it; the cursor already goes past it.
+            if (falhou) pushToast(traduzirErro(new Error("conversation archive page is missing")), "error")
+            const vistas = known()
+            novas = entradas.map((entry) => toChatMessage(channel, entry)).filter((message) => !vistas.has(keyOf(message)))
+          } catch (error) {
+            // A page that does not open: say it, and the next tap goes past it.
+            if (typeof cursor === "number") cursorDoArquivo.current.set(channel, cursor > 0 ? cursor - 1 : null)
+            pushToast(traduzirErro(error as Error), "error")
+            return
+          }
+          acrescentar(novas)
+          const seguinte = cursorDoArquivo.current.get(channel)
+          if (seguinte === null) return fimDoAparelho()
+          if (novas.some(daConversa)) {
+            setOlderAvailable((current) => new Map(current).set(channel, true))
+            return
+          }
         }
-        try {
-          const { entradas, seguinte, falhou } = await ler(channel, cursor)
-          cursorDoArquivo.current.set(channel, seguinte)
-          // A page that does not open: say it; the cursor already goes past it.
-          if (falhou) pushToast(traduzirErro(new Error("conversation archive page is missing")), "error")
-          const vistas = known()
-          acrescentar(entradas.map((entry) => toChatMessage(channel, entry)).filter((message) => !vistas.has(keyOf(message))))
-          setOlderAvailable((current) => new Map(current).set(channel, seguinte !== null))
-          if (seguinte === null) setInicioDoAparelho((actual) => new Set(actual).add(channel))
-        } catch (error) {
-          // A page that does not open: say it, and the next tap goes past it.
-          if (typeof cursor === "number") cursorDoArquivo.current.set(channel, cursor > 0 ? cursor - 1 : null)
-          pushToast(traduzirErro(error as Error), "error")
-        }
+        // Pages without a line of this conversation: the next tap goes on from here.
+        setOlderAvailable((current) => new Map(current).set(channel, true))
       }
       void bridge.channels
         .history(channel)
@@ -3854,16 +4085,17 @@ function Shell({
           const missing = entries
             .map((entry) => toChatMessage(channel, entry))
             .filter((message) => !vistas.has(keyOf(message)))
-          const page = missing.slice(-HISTORY_PAGE)
-          if (page.length === 0) return doArquivo()
-          acrescentar(page)
-          // The vault is exhausted with this page: the archive decides what comes next.
-          if (missing.length > page.length) {
+          const { pagina, linhas, esgotou } = paginaDoCofre(missing, daConversa)
+          acrescentar(pagina)
+          // No line of this conversation is left in the vault: the archive brings the next ones.
+          if (linhas === 0) return doArquivo()
+          if (!esgotou) {
             setOlderAvailable((current) => new Map(current).set(channel, true))
             return
           }
+          // The vault is exhausted with this page: the archive decides what comes next.
           return bridge.channels.temConversaArquivada?.(channel).then((tem) => {
-            setOlderAvailable((current) => new Map(current).set(channel, tem))
+            setOlderAvailable((current) => new Map(current).set(channel, tem && cursorDoArquivo.current.get(channel) !== null))
             if (!tem) setInicioDoAparelho((actual) => new Set(actual).add(channel))
           })
         })
@@ -4182,12 +4414,13 @@ function Shell({
    * sized to handle it.
    */
   const trazerTudoDoCofre = useCallback(
-    (channel: string): Promise<void> =>
+    (channel: string): Promise<StoredChatMessage[]> =>
       bridge.channels.history(channel).then((entries) => {
         const known = new Set(messagesRef.current.filter((message) => message.channel === channel).map(keyOf))
         const missing = entries.map((entry) => toChatMessage(channel, entry)).filter((message) => !known.has(keyOf(message)))
         if (missing.length > 0) setMessages((current) => [...missing, ...current])
         setOlderAvailable((current) => new Map(current).set(channel, false))
+        return entries
       }),
     [],
   )
@@ -4450,6 +4683,42 @@ function Shell({
   )
 
   /**
+   * Go to a pinned message of the open room, from the bar at the top or the sheet (fixadas-topo).
+   *
+   * In memory: light it up, and `Timeline` widens its window to it. Not in memory: read
+   * everything the vault holds (a pinned message stays there, see `fixadasPresas` in the
+   * core), then light it up. `false` when the vault does not have it either: someone who
+   * joined later, or a message the cap moved to the archive before pins were held. The
+   * screen then opens the sheet on the copy.
+   *
+   * The same release as `irParaOriginal`, so pressing the same pin again lights it again.
+   */
+  const abrirFixada = useCallback(
+    async (id: string): Promise<boolean> => {
+      if (!active) return false
+      const canal = active
+      const ehEsta = (payload: { t?: unknown; id?: unknown }): boolean => payload.t === "message" && payload.id === id
+      const acender = (): void => {
+        if (destacada === id) {
+          setDestacada(null)
+          setTimeout(() => setDestacada(id), 0)
+        } else {
+          setDestacada(id)
+        }
+      }
+      if (messagesRef.current.some((message) => message.channel === canal && ehEsta(message.payload))) {
+        acender()
+        return true
+      }
+      const entradas = await trazerTudoDoCofre(canal)
+      if (!entradas.some((entrada) => ehEsta(entrada.payload as { t?: unknown; id?: unknown }))) return false
+      acender()
+      return true
+    },
+    [active, trazerTudoDoCofre, destacada],
+  )
+
+  /**
    * Go to the original of a reply, by the quote.
    *
    * The same jump as search: the original's room, and the highlight. If the
@@ -4508,6 +4777,54 @@ function Shell({
   }, [messages, active, address, bridge, podeContarVoto])
 
   /**
+   * The state of all friendships, folded by the CORE and read from the bridge.
+   *
+   * One source of truth, and the Friends screen and the bell drink from it. There is no
+   * list being maintained nor cleanup being scheduled: a request stays open
+   * as long as it has no answer, and the answer can come from either of the
+   * two places, or from the other side, or from a cross request that resolved
+   * itself, in all cases it leaves both surfaces at the same time,
+   * because there never were two states.
+   *
+   * Until phase 1d the interface folded `messages` on its own, and that was
+   * a second fold next to the core's: in a cross request it showed "pending" next to "accepted".
+   * See `useLacosDeAmizade`.
+   */
+  const friendships = useLacosDeAmizade(bridge, stage === "ready")
+  /**
+   * The friendship gestures, one function for each gate: the person's
+   * menu, the profile page, the conversation card, Pending, and the bell. Each
+   * one resolves the channel inside. See `useAmizade`.
+   */
+  const amizade = useAmizade({
+    bridge,
+    friendships,
+    aviso: pushToast,
+    nomeDe: (who) => notifyRef.current.nameFor(who),
+    estaLigado: (who) => online.has(who),
+    pronto: stage === "ready",
+  })
+  /**
+   * The blocked people on this device, as a set. The Friends list hides them, and
+   * in a shared room they fold, ring nothing and count nothing (`lib/bloqueados.ts`).
+   * Up here, before the counts and the reaction chips that read it.
+   */
+  const conjuntoDeBloqueados = useMemo(
+    () => new Set(amizade.bloqueados.map((entrada) => entrada.address)),
+    [amizade.bloqueados],
+  )
+  bloqueadosRef.current = conjuntoDeBloqueados
+  /**
+   * Fold in the timeline: a message from someone I blocked, in a room. Not in a
+   * direct: there the core already keeps them out, and the history from before the
+   * block stays as it was.
+   */
+  const ocultarBloqueada = useCallback(
+    (message: ChatMessage) => !isDirect(message.channel) && deQuemBloqueei(message, address, conjuntoDeBloqueados),
+    [address, conjuntoDeBloqueados],
+  )
+
+  /**
    * The reaction chips of the open channel, by the id of the message.
    *
    * Up here for the reason votes are: a `reaction` has no room label. Our own
@@ -4519,9 +4836,33 @@ function Shell({
    * memoized lines with reactions do not redraw on every arriving message.
    */
   const reaccoesAnteriores = useRef(new Map<string, FichaDeReaccao[]>())
+  /*
+    The reactions the vault holds for the open channel, read when it opens (B6, 1.3.25).
+    Memory holds the newest 200 entries of a channel, and the chips of a line came only
+    from there. Memory still brings what arrives after the read (live, our own sends).
+  */
+  const [reaccoesDoCofre, setReaccoesDoCofre] = useState<{ channel: string; messages: ChatMessage[] } | null>(null)
+  useEffect(() => {
+    const ler = bridge.channels.reaccoesGuardadas
+    if (!active || !ler) return
+    let vivo = true
+    ler(active)
+      .then((entradas) => {
+        if (vivo) setReaccoesDoCofre({ channel: active, messages: entradas.map((entrada) => toChatMessage(active, entrada)) })
+      })
+      .catch(() => {
+        // The vault read failed: the chips come from memory, as before.
+      })
+    return () => {
+      vivo = false
+    }
+  }, [active, bridge])
   const reaccoesDoCanal = useMemo(() => {
     if (!active) return new Map<string, FichaDeReaccao[]>()
-    const novas = dobrarReaccoes(reaccoesParaDobrar(messages, active), address)
+    const guardadas = reaccoesDoCofre?.channel === active ? reaccoesDoCofre.messages : []
+    // The reactions of someone I blocked do not count in the chips (`lib/bloqueados.ts`).
+    const todas = reaccoesComAsDoCofre(guardadas, reaccoesParaDobrar(messages, active))
+    const novas = dobrarReaccoes(semBloqueados(todas, address, conjuntoDeBloqueados), address)
     const antes = reaccoesAnteriores.current
     for (const [alvo, fichas] of novas) {
       const velhas = antes.get(alvo)
@@ -4529,7 +4870,7 @@ function Shell({
     }
     reaccoesAnteriores.current = novas
     return novas
-  }, [messages, active, address])
+  }, [messages, active, address, reaccoesDoCofre, conjuntoDeBloqueados])
 
   /** Press or release an emoji on a message: the opposite of what this account has now. */
   const reagirNaConversa = useCallback(
@@ -5135,6 +5476,14 @@ function Shell({
     return { podeMover: destinos.some((sala) => sala.room !== de) || podeDesligar, salasDeVoz: destinos, podeDesligar }
   }
 
+  /**
+   * What counts: the messages without those of someone I blocked. They stay on
+   * screen (folded in a room), but they never light a number. See `lib/bloqueados.ts`.
+   */
+  const mensagensQueContam = useMemo(
+    () => semBloqueados(messages, address, conjuntoDeBloqueados),
+    [messages, address, conjuntoDeBloqueados],
+  )
   // Unread counts: in-memory message timestamps against a per-channel mark in
   // localStorage. Simple, and honest about what it is — this device's memory.
   const {
@@ -5143,7 +5492,7 @@ function Shell({
     dirigidas,
     marcaDe,
     read: darPorLido,
-  } = useUnreads(messages, active, address, prefsDaPresenca.silenciados)
+  } = useUnreads(mensagensQueContam, active, address, prefsDaPresenca.silenciados)
 
   useEffect(() => {
     document.title = unreadTotal > 0 ? `(${unreadTotal}) Orwell` : "Orwell"
@@ -5211,7 +5560,7 @@ function Shell({
   const porLerPorSala = useMesmoValor(useMemo(
     () =>
       contarPorSala(
-        messages,
+        mensagensQueContam,
         lidasDosCanais,
         lidasPorSala,
         { canal: active, sala: activeRoom },
@@ -5219,7 +5568,7 @@ function Shell({
         (canal, etiqueta) => (canal === active ? salaDeLeitura(etiqueta) : etiqueta),
         silenciados,
       ),
-    [messages, lidasDosCanais, lidasPorSala, active, activeRoom, address, salaDeLeitura, silenciados],
+    [mensagensQueContam, lidasDosCanais, lidasPorSala, active, activeRoom, address, salaDeLeitura, silenciados],
   ))
   /**
    * Having a room open means reading it, just as having the channel open reads
@@ -5282,8 +5631,8 @@ function Shell({
    * This map is what the Friends column and its badge read.
    */
   const mencoesPorCanal = useMemo(
-    () => countUnreads(messages, lidasDosCanais, active, address, (message) => mencionaMe(message.payload.mentions, address)),
-    [messages, lidasDosCanais, active, address],
+    () => countUnreads(mensagensQueContam, lidasDosCanais, active, address, (message) => mencionaMe(message.payload.mentions, address)),
+    [mensagensQueContam, lidasDosCanais, active, address],
   )
   const comSilencio = useCallback(
     (contas: Map<string, number>): Map<string, number> => {
@@ -5308,16 +5657,17 @@ function Shell({
    */
   const porDestino = useMemo(() => repartirPorDestino(comSilencio(dirigidas)), [comSilencio, dirigidas])
   /**
-   * The Communities badge: unread messages in all channels.
+   * The Communities notices (20/11/2026, option A): two shapes, two meanings.
    *
-   * This replaces the old rule ("messages in
-   * a channel to the side don't show a number"): Communities sums unread room
-   * content, the way Friends sums direct conversations. It counts the same as
-   * the sidebar shows next to each channel, so the top number and the ones
-   * below cannot drift apart. Feeds and direct conversations stay out through
-   * the cut in `repartirPorDestino`.
+   * `porLerEmCanais` is everything unread the sidebar shows next to the
+   * channels, and on the rail it is only the pill, with no number.
+   * `mencoesEmCanais` is the number: someone called this account. A number
+   * that summed all the traffic (27/10 to 20/11) did not say whether anyone
+   * was waiting. Feeds and direct conversations stay out through the same cut
+   * as `repartirPorDestino`. See `lib/porAtender.ts`.
    */
   const porLerEmCanais = useMemo(() => repartirPorDestino(porLerNosCanais).canais, [porLerNosCanais])
+  const mencoesEmCanais = useMemo(() => mencoesNosCanais(porLerPorSala), [porLerPorSala])
   /** My wall, which is the channel where comments on my posts land. */
   const meuFeed = useMemo(() => (address ? feedChannelOf(address) : null), [address])
   const comentariosNoMural = useMemo(
@@ -5586,6 +5936,19 @@ function Shell({
     [rooms, abrirConversa, trazerTudoDoCofre, pushToast],
   )
   useLigacaoDeMensagem(address !== null && rooms.length > 0, abrirLigacaoDeMensagem)
+  /*
+    Links to this app clicked inside it (1.3.25): message links open here, as
+    above, and invite and friend links go up to `App`, into the startup path.
+  */
+  const tratarLigacaoInterna = useCallback(
+    (ligacao: LigacaoInterna) => {
+      if (ligacao.tipo === "mensagem") abrirLigacaoDeMensagem(ligacao.alvo)
+      else if (ligacao.tipo === "emparelhamento") pushToast(strings.pairing.fromChat, "error")
+      else if (ligacao.tipo !== "mensagem-invalida") onLigacaoInterna?.(ligacao)
+    },
+    [abrirLigacaoDeMensagem, onLigacaoInterna, pushToast],
+  )
+  useLigacoesInternas(stage === "ready" && address !== null ? serverOf(address) : null, tratarLigacaoInterna)
 
   /**
    * The sidebar channels where the person on the page is also a member.
@@ -5721,34 +6084,6 @@ function Shell({
    */
   const conversaNoEcra = view === "chat" || (view === "pessoas" && directa !== null)
 
-  /**
-   * The state of all friendships, folded by the CORE and read from the bridge.
-   *
-   * One source of truth, and the Friends screen and the bell drink from it. There is no
-   * list being maintained nor cleanup being scheduled: a request stays open
-   * as long as it has no answer, and the answer can come from either of the
-   * two places, or from the other side, or from a cross request that resolved
-   * itself, in all cases it leaves both surfaces at the same time,
-   * because there never were two states.
-   *
-   * Until phase 1d the interface folded `messages` on its own, and that was
-   * a second fold next to the core's: in a cross request it showed "pending" next to "accepted".
-   * See `useLacosDeAmizade`.
-   */
-  const friendships = useLacosDeAmizade(bridge, stage === "ready")
-  /**
-   * The friendship gestures, one function for each gate: the person's
-   * menu, the profile page, the conversation card, Pending, and the bell. Each
-   * one resolves the channel inside. See `useAmizade`.
-   */
-  const amizade = useAmizade({
-    bridge,
-    friendships,
-    aviso: pushToast,
-    nomeDe: (who) => notifyRef.current.nameFor(who),
-    estaLigado: (who) => online.has(who),
-    pronto: stage === "ready",
-  })
 
   /*
     The "request sent" alert goes away when it stops being the news (1.3.6):
@@ -6011,6 +6346,30 @@ function Shell({
    * from disagreeing with the bottom numbers.
    */
   const porAtenderEmContactos = porDestino.contactos + openRequests.length
+  /**
+   * A nudge not seen yet (20/11/2026): its sound lives in `useCotoveladaPorVer`;
+   * the Friends button draws it with the rail's own shapes (a red outline and
+   * the vibration glyph, `AvisosDoCarril`), and says who sent it in words.
+   */
+  const cotoveladaPorVer = useCotoveladaPorVer(bridge, { eu: address, emAmigos: view === "pessoas", directaAberta: directa })
+  const toquePorVer = cotoveladaPorVer !== null
+  /** Where the call on screen is attended: a direct one in Friends, the rest in Communities. */
+  const chamadaEm = callChannel === null ? null : isDirect(callChannel) ? "pessoas" : "chat"
+  const avisosDosCanais = {
+    id: "cracha-canais",
+    quantas: mencoesEmCanais,
+    porLer: porLerEmCanais > 0,
+    activo: view === "chat",
+    chamada: chamadaEm === "chat",
+  }
+  const avisosDoSocial = { id: "cracha-social", quantas: comentariosNoMural, activo: view === "social" }
+  const avisosDosAmigos = {
+    id: "cracha-contactos",
+    quantas: porAtenderEmContactos,
+    activo: view === "pessoas",
+    toque: cotoveladaPorVer ? strings.rail.cotoveladaPorVer(nameFor(cotoveladaPorVer.de)) : undefined,
+    chamada: chamadaEm === "pessoas",
+  }
   const lastActivity = useMemo(() => lastActivityOf(messages), [messages])
   /*
     With live presence the last activity is not read, and it changes on every
@@ -6153,11 +6512,6 @@ function Shell({
       return amizade.cancelouJa(tie) ? undefined : tie
     },
     [friendships, amizade],
-  )
-  /** The blocked people on this device, as a set: the Friends list hides them. */
-  const conjuntoDeBloqueados = useMemo(
-    () => new Set(amizade.bloqueados.map((entrada) => entrada.address)),
-    [amizade.bloqueados],
   )
   /** The circle that the Friends list draws: in community mode, everyone. */
   const circuloDosAmigos = useMemo(
@@ -6501,6 +6855,30 @@ function Shell({
       adminCor: embutido?.colour ?? null,
     }
   }, [active, bridge, papeisVersao, sinalDosCargos])
+
+  /*
+    The people of the open room (1.3.25): in a room of a restricted category,
+    only who sees it. Computed once per room, member list and role change
+    (`autoridade` carries `sinalDosCargos`), never per render; an open room
+    returns `membrosVisiveis` itself. Tidying, not security: see `lib/membrosDaSala.ts`.
+  */
+  const exigidosDaSala = useMemo(() => {
+    if (activeRoom === "") return undefined
+    const categoria = salasDoCanal.find((sala) => sala.room === activeRoom)?.category ?? ""
+    if (categoria === "") return undefined
+    return categoriasDeclaradas.find((entrada) => entrada.category === categoria)?.roles
+  }, [activeRoom, salasDoCanal, categoriasDeclaradas])
+  const membrosDaSalaAberta = useMemo(() => {
+    if (!active || !exigidosDaSala || exigidosDaSala.length === 0) return membrosVisiveis
+    return [
+      ...membrosDaSala(membrosVisiveis, exigidosDaSala, {
+        fundador: autoridade?.fundador ?? null,
+        admins: autoridade?.admins ?? new Set<string>(),
+        papeisQueAdministram: new Set(papeis.filter((papel) => papel.powers.includes("renomear")).map((papel) => papel.role)),
+        papeisDe: (quem) => bridge.channels.rolesFor?.(active, quem) ?? [],
+      }),
+    ]
+  }, [active, exigidosDaSala, membrosVisiveis, autoridade, papeis, bridge])
 
   /**
    * The roles of ANY channel, not just the one open.
@@ -7405,6 +7783,17 @@ function Shell({
     },
     [active, callChannel, callRoom, screenStream, minhaMusica, micMuted, soundOff, address, nameFor, directory, presenceFor, naSalaDaChamada, participants, vozPorSala, transmitePorSala],
   )
+  /** "New room" already in a category: its `+` in the sidebar, or its menu (1.3.25). */
+  const abrirNovaSalaNaCategoria = (category: string): void => {
+    if (!active) return
+    setCategoriaDaNovaSala(category)
+    setNovaSalaEm(active)
+  }
+  /** The sheet closes: the next "New room" starts in no category. */
+  const fecharNovaSala = (): void => {
+    setNovaSalaEm(null)
+    setCategoriaDaNovaSala("")
+  }
   const barra = {
     abrirSala: useEstavel((room: string) => {
       // A room is a different place: the person's page moves out of the way.
@@ -7422,6 +7811,7 @@ function Shell({
     novaSala: useEstavel(() => {
       if (active) setNovaSalaEm(active)
     }),
+    novaSalaNaCategoria: useEstavel((category: string) => abrirNovaSalaNaCategoria(category)),
     fechar: useEstavel(() => setSidebarOpen(false)),
     escolherCanal: useEstavel((channel: string) => {
       // The sidebar lists channels and only channels, and picking one goes to
@@ -7750,7 +8140,7 @@ function Shell({
       onShareScreen={pedirPartilhaDeEcra}
       cameraOff={cameraOff}
       onToggleCamera={alternarCamara}
-      members={membrosVisiveis}
+      members={membrosDaSalaAberta}
       membersState={membersState}
       onRetryMembers={retryMembers}
       directory={directory}
@@ -7758,6 +8148,7 @@ function Shell({
       connection={connection}
       connectionDetail={connectionDetail}
       outbox={outbox.entries.filter((entry) => entry.channel === active)}
+      surda={active !== null && canaisSurdos.has(active)}
       onSend={(channel, body, extras) => {
         sendMessage(channel, body, activeRoom || undefined, extras)
         // The response went out: the bar closes. A message without `replyTo` leaves it open.
@@ -7777,7 +8168,13 @@ function Shell({
       hasStoredHistory={active !== null && seededChannels.has(active)}
       canLoadOlder={active !== null && olderAvailable.get(active) === true}
       inicioDoAparelho={active !== null && inicioDoAparelho.has(active)}
-      onLoadOlder={() => active && loadOlder(active)}
+      onLoadOlder={() =>
+        active &&
+        loadOlder(
+          active,
+          (message) => message.payload.t === "message" && salaDeLeitura((message.payload as { room?: string }).room ?? "") === activeRoom,
+        )
+      }
       labelFor={labelFor}
       iconFor={iconFor}
       oficial={active !== null && oficialFor(active)}
@@ -7808,6 +8205,7 @@ function Shell({
       apuramentos={apuramentosDoCanal}
       onVotar={votarNaConversa}
       reaccoes={reaccoesDoCanal}
+      ocultar={ocultarBloqueada}
       etiquetas={etiquetasDaConversa}
       {...(bridge.channels.react ? { onReagir: reagirNaConversa } : {})}
       onVotacao={podeCriarVotacoes ? () => setVotacaoNoCanal(active) : undefined}
@@ -7841,6 +8239,7 @@ function Shell({
       onCancelarResposta={cancelarResposta}
       citacaoDe={citacaoDoCanal}
       onIrParaOriginal={irParaOriginal}
+      onAbrirFixada={abrirFixada}
       /* The friend request from this conversation, standing on top of it and outside the
          scrolling list. A single card, and this is it: see `pedidoDeAmizade`. */
       pedidoDeAmizade={pedidoDeAmizade}
@@ -8009,8 +8408,20 @@ function Shell({
           236px column with the `1fr` one empty next to it. See `.app.sem-barra`. */}
       <div className={`${view === "pessoas" ? "app sem-barra" : "app"}${soPalco && painelDaChamadaNoEcra ? " so-palco" : ""}`}>
         <nav className="rail">
-          <span className="rail-logo" title="Orwell">
+          {/* The connection dropped after being online: the mark fades and takes
+              an amber seal with "!" (20/11/2026). Not before the first
+              connection: starting up is not a drop. The banner over the
+              conversation says the rest; here the words are for readers. */}
+          <span className={caiuEm === null ? "rail-logo" : "rail-logo sem-ligacao"} title="Orwell">
             <OrwellMark size={24} />
+            {caiuEm !== null && (
+              <>
+                <span className="rail-offline" aria-hidden="true">
+                  <GlifoSemLigacao />
+                </span>
+                <span className="sr-only">{strings.rail.semLigacao}</span>
+              </>
+            )}
           </span>
           {/* Only exists on narrow screens (CSS-hidden when the sidebar is a
               plain column): opens this destination's drawer over the content.
@@ -8035,44 +8446,44 @@ function Shell({
           >
             <PersonIcon />
           </button>
+          {/* The notices of each destination: the pill for unread, the number for
+              what waits for you, the glyph for a nudge, the green seal for a
+              call. See `components/AvisosDoCarril.tsx`. */}
           <button
-            className={view === "chat" ? "rail-btn active" : "rail-btn"}
+            className={classeDoBotaoDoCarril({ activo: view === "chat", toque: false })}
             data-tip={strings.rail.chat}
             data-tip-side="right"
             aria-label={strings.rail.chat}
-            aria-describedby={descritoPor("cracha-canais", porLerEmCanais)}
+            aria-describedby={descricaoDoCarril(avisosDosCanais)}
             aria-current={view === "chat" ? "page" : undefined}
             onClick={() => setView("chat")}
           >
             <ChatIcon />
-            {/* Just the count. The discrete dot ("there are things to read, none for
-                you") went away with the old rule: now every unread message
-                counts, and the dot would be the same news told twice. */}
-            <Cracha id="cracha-canais" quantas={porLerEmCanais} />
+            <AvisosDoCarril {...avisosDosCanais} />
           </button>
           <button
-            className={view === "social" ? "rail-btn active" : "rail-btn"}
+            className={classeDoBotaoDoCarril({ activo: view === "social", toque: false })}
             data-tip={strings.rail.social}
             data-tip-side="right"
             aria-label={strings.rail.social}
-            aria-describedby={descritoPor("cracha-social", comentariosNoMural)}
+            aria-describedby={descricaoDoCarril(avisosDoSocial)}
             aria-current={view === "social" ? "page" : undefined}
             onClick={() => setView("social")}
           >
             <FeedIcon />
-            <Cracha id="cracha-social" quantas={comentariosNoMural} />
+            <AvisosDoCarril {...avisosDoSocial} />
           </button>
           <button
-            className={view === "pessoas" ? "rail-btn active" : "rail-btn"}
+            className={classeDoBotaoDoCarril({ activo: view === "pessoas", toque: toquePorVer })}
             data-tip={strings.rail.people}
             data-tip-side="right"
             aria-label={strings.rail.people}
-            aria-describedby={descritoPor("cracha-contactos", porAtenderEmContactos)}
+            aria-describedby={descricaoDoCarril(avisosDosAmigos)}
             aria-current={view === "pessoas" ? "page" : undefined}
             onClick={() => setView("pessoas")}
           >
             <FriendsIcon />
-            <Cracha id="cracha-contactos" quantas={porAtenderEmContactos} />
+            <AvisosDoCarril {...avisosDosAmigos} />
           </button>
           <div className="rail-spacer" />
           <button
@@ -8134,6 +8545,7 @@ function Shell({
           onRoomMenu={barra.menuDaSala}
           {...(editaOCanal ? { onCategoryMenu: barra.menuDaCategoria } : {})}
           onNewRoom={editaOCanal ? barra.novaSala : undefined}
+          onNewRoomInCategory={editaOCanal ? barra.novaSalaNaCategoria : undefined}
           presenceForChannel={presenceForChannel}
           presenceHint={presenceHint}
           active={active}
@@ -9010,6 +9422,7 @@ function Shell({
             items={itensDaCategoria({
               podeOrganizar: bridge.channels.mayEdit?.(active) ?? false,
               accoes: {
+                criarSala: () => abrirNovaSalaNaCategoria(categoriaMenu.category),
                 renomear: () => setARenomear({ tipo: "categoria", canal: active, categoria: categoriaMenu.category }),
                 // Without `setCategory` there is nowhere for the choice to go-an
                 // older host does not bring it, and the entry does not appear.
@@ -9150,6 +9563,7 @@ function Shell({
         {novaSalaEm && (
           <NewRoom
             categorias={roomGroups.map((grupo) => grupo.category).filter(Boolean)}
+            categoria={categoriaDaNovaSala}
             /* The room's AFK timeout that the channel already has, or 15. Read-only. */
             {...((bridge.channels.mayEdit?.(novaSalaEm) ?? false)
               ? { minutosAfk: bridge.channels.rooms(novaSalaEm).find((sala) => sala.afk)?.afk?.minutos ?? 15 }
@@ -9158,7 +9572,7 @@ function Shell({
             {...(bridge.channels.permissoes && (bridge.channels.mayEdit?.(novaSalaEm) ?? false)
               ? { cargos: papeisDe(novaSalaEm) }
               : {})}
-            onCancel={() => setNovaSalaEm(null)}
+            onCancel={fecharNovaSala}
             onSubmit={async ({ soLeitura, ...next }) => {
               await bridge.channels.setRoom(novaSalaEm, {
                 ...next,
@@ -9167,7 +9581,7 @@ function Shell({
                 ...(soLeitura ? { perms: comSoLeitura(undefined, soLeitura) } : {}),
               })
               refreshRooms()
-              setNovaSalaEm(null)
+              fecharNovaSala()
               pushToast(strings.newRoom.created)
             }}
           />
@@ -9306,45 +9720,12 @@ function Shell({
   )
 }
 
-/**
- * The small number above a destination's icon.
- *
- * Zero draws nothing. A badge with zero inside is a lit badge saying
- * there's nothing, which is the trap of a permanent counter seen from the other
- * side.
- *
- * **Above nine it writes "9+", and it's measure not style.** The button is 40px and the
- * badge sits in its corner; three digits would push it out of the
- * button, and in a rail of 60px that's out of the column. It's the same rule and the
- * same design as the bell badge (`.me-bell-count`), because they're the same type
- * of number saying the same type of thing in two places.
- *
- * **They're two elements not one, and the reason is description.** The button describes itself
- * by the `aria-describedby` pointing to the `id` here, and a description is read by the
- * TEXT of the pointed element, an `aria-label` on the drawn badge isn't enough.
- * One `span` says "9+" for eyes, hidden from readers, and another
- * with the full sentence for ears, hidden from eyes by the house's `.sr-only`.
- * Whoever listens gets the number in words; the abbreviation is a forty-pixel
- * limit not a thing we want to say.
+/*
+ * The small number above a destination's icon used to live here (`Cracha`).
+ * Since 20/11/2026 (rail notices, option A) every notice of a rail button,
+ * the number included, is drawn by `components/AvisosDoCarril.tsx`, with the
+ * reasons for "9+" and for the words in `aria-describedby`.
  */
-function Cracha({ id, quantas }: { id: string; quantas: number }): React.JSX.Element | null {
-  if (quantas <= 0) return null
-  return (
-    <>
-      <span className="rail-count" aria-hidden="true">
-        {quantas > 9 ? "9+" : quantas}
-      </span>
-      <span className="sr-only" id={id}>
-        {strings.rail.porAtender(quantas)}
-      </span>
-    </>
-  )
-}
-
-/** The button only describes itself when there's something to describe. */
-function descritoPor(id: string, quantas: number): string | undefined {
-  return quantas > 0 ? id : undefined
-}
 
 /** How many alerted ids `idsNoSino` remembers. The bell holds 50; a day of messages fits. */
 const IDS_NO_SINO_MAX = 2_000

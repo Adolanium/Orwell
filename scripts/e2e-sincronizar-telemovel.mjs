@@ -142,10 +142,13 @@ async function abrirDirectaEVer(page, texto) {
   return (await page.locator("body").innerText()).includes(texto)
 }
 async function dizer(page, frase) {
-  const caixa = page.locator('input[placeholder="Escreve uma mensagem"]')
+  const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]')
   await caixa.click()
   await caixa.fill(frase)
   await page.keyboard.press("Enter")
+  // With a finger (a touch context), Enter starts a new line and the send
+  // button sends (1.3.25). The text is still in the box: send it.
+  if ((await caixa.inputValue().catch(() => "")) !== "") await page.locator("form.chat-composer .composer-enviar").first().click()
 }
 
 

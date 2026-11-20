@@ -104,10 +104,10 @@ export async function fetchLinkPreview(url: string, deps: PreviewDeps = {}): Pro
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch
   const shrink = deps.shrink ?? shrinkToThumbnail
   const target = normaliseUrl(url)
-  if (!target) throw new Error("sem endereço")
+  if (!target) throw new Error("no address")
 
   const response = await fetchImpl(target, { credentials: "omit", referrerPolicy: "no-referrer", redirect: "follow" })
-  if (!response.ok) throw new Error(`a página respondeu ${response.status}`)
+  if (!response.ok) throw new Error(`the page answered ${response.status}`)
   const html = (await response.text()).slice(0, PAGE_MAX_BYTES)
   const parsed = parsePreviewHtml(html, response.url || target)
 
@@ -148,7 +148,7 @@ export interface HostPreview {
  */
 function dataUrlToBlob(dataUrl: string): Blob {
   const virgula = dataUrl.indexOf(",")
-  if (!dataUrl.startsWith("data:") || virgula < 0) throw new Error("não é uma data URL")
+  if (!dataUrl.startsWith("data:") || virgula < 0) throw new Error("not a data URL")
   const cabecalho = dataUrl.slice(5, virgula)
   const tipo = cabecalho.split(";")[0] || "application/octet-stream"
   const corpo = dataUrl.slice(virgula + 1)
@@ -186,7 +186,7 @@ export async function fetchPreviewViaHost(
   deps: PreviewDeps = {},
 ): Promise<PreviewFields> {
   const target = normaliseUrl(url)
-  if (!target) throw new Error("sem endereço")
+  if (!target) throw new Error("no address")
 
   const shrink = deps.shrink ?? shrinkToThumbnail
   const hosted = await viaHost(target)

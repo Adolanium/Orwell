@@ -240,8 +240,8 @@ describe("o motor levanta-se", () => {
    * The two bandwidth-saving measures, read from the router and not from what was written.
    *
    * Without `usedtx=1` Opus sends encoded silence all the time, close to seventy
-   * percent more traffic in a conversation, and on a machine shared with magnuslab.pt
-   * that is bandwidth taken from the site. This test exists because the way to lose them
+   * percent more traffic in a conversation, and on a host that runs other services
+   * that is bandwidth taken from them. This test exists because the way to lose them
    * is someone "tidying up" the codec object, and nothing else in this suite would
    * notice.
    */

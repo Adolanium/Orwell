@@ -293,8 +293,8 @@ try {
 
   // --- Ana's page, opened by Bruno from one of her messages ----------------
   await a.locator('.room-tree button.room', { hasText: "geral" }).first().click()
-  await a.locator('input[placeholder="Escreve uma mensagem"]').fill("olá do largo")
-  await a.locator('input[placeholder="Escreve uma mensagem"]').press("Enter")
+  await a.locator('textarea[placeholder="Escreve uma mensagem"]').fill("olá do largo")
+  await a.locator('textarea[placeholder="Escreve uma mensagem"]').press("Enter")
   await abrirGaveta()
   await b.locator('.room-tree button.room', { hasText: "geral" }).first().tap()
   await wait(1500)
@@ -313,7 +313,7 @@ try {
     if (await outra.isVisible().catch(() => false)) {
       await outra.tap()
       await wait(1200)
-      console.log("PÁGINA → conversa: vista-guardada =", await b.locator(".vista-guardada").evaluate((el) => getComputedStyle(el).display), "| caixa:", await b.locator('input[placeholder="Escreve uma mensagem"]').isVisible())
+      console.log("PÁGINA → conversa: vista-guardada =", await b.locator(".vista-guardada").evaluate((el) => getComputedStyle(el).display), "| caixa:", await b.locator('textarea[placeholder="Escreve uma mensagem"]').isVisible())
       if (CAPTURAS) await b.screenshot({ path: join(CAPTURAS, "b-p3-depois.png") })
     }
   }

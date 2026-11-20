@@ -348,7 +348,7 @@ try {
   await vesna.page.getByRole("heading", { name: "nexo" }).waitFor({ timeout: 30_000 })
   const sala = (page, nome) => page.locator(`.room-tree .room-name:text-is("${nome}")`).first()
   await sala(vesna.page, "conversa").click()
-  const caixa = () => vesna.page.locator(".chat-composer input:not([type=file])").first()
+  const caixa = () => vesna.page.locator(".chat-composer textarea").first()
   await caixa().waitFor({ timeout: 60_000 })
   /*
     A normal conversation between friends, nothing about the app itself. The
@@ -381,7 +381,7 @@ try {
   await kaori.page.getByRole("button", { name: "Entrar", exact: true }).click()
   await kaori.page.getByRole("heading", { name: "nexo" }).waitFor({ timeout: 60_000 })
   await sala(kaori.page, "conversa").click()
-  const kcaixa = kaori.page.locator(".chat-composer input:not([type=file])").first()
+  const kcaixa = kaori.page.locator(".chat-composer textarea").first()
   await kcaixa.fill("Disse que chegava em 5.")
   await kcaixa.press("Enter")
   await vesna.page.getByText("Disse que chegava em 5.").first().waitFor({ timeout: 60_000 })

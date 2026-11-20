@@ -4,9 +4,13 @@ import {
   compressImage,
   dataUrlBytes,
   IMAGE_BUDGETS,
+  orcamentoDaImagem,
+  orcamentosDaMensagem,
   resetFormatoDetectado,
+  tipoDoDataUrl,
   type CompressDeps,
 } from "./images.js"
+import { PAYLOAD_MAX_CHARS, caracteresDeDataUrl } from "@enclave/client-core"
 
 /**
  * Compression is the difference between a server that holds up and one that doesn't.
@@ -243,9 +247,131 @@ describe("compressImage — o GIF animado", () => {
   })
 
   it("noutros orçamentos, um GIF recodificado não promete animação nenhuma", async () => {
-    const saida = await compressImage(ficheiro(4_000_000, "image/gif"), IMAGE_BUDGETS.chat, deps(1200, 900))
+    const saida = await compressImage(ficheiro(400_000, "image/gif"), IMAGE_BUDGETS.thumbnail, deps(1200, 900))
     expect(saida.recoded).toBe(true)
     expect(saida.animacaoPerdida).toBeUndefined()
+  })
+})
+
+/**
+ * The animated GIF in a message and a post (1.3.22).
+ *
+ * Before, `chat` and `post` had no animated cap: any GIF over 400 KB or over
+ * 1600 px was recoded and stopped at the first frame, with no warning, and went
+ * out labelled `image/gif` with WebP bytes.
+ */
+describe("compressImage — o GIF animado na mensagem", () => {
+  it("um GIF de 1 MB passa intacto e animado, mesmo maior que 1600 px", async () => {
+    for (const orcamento of [IMAGE_BUDGETS.chat, IMAGE_BUDGETS.post]) {
+      const original = ficheiro(1_000_000, "image/gif")
+      const saida = await compressImage(original, orcamento, deps(2000, 1200))
+      expect(saida.recoded).toBe(false)
+      expect(saida.dataUrl.startsWith("data:image/gif;base64,")).toBe(true)
+      expect(saida.bytes).toBe(1_000_000)
+      expect(saida.animacaoPerdida).toBeUndefined()
+      expect(avisoDeAnimacaoPerdida(original, saida, orcamento, "mensagem")).toBeNull()
+      expect(tipoDoDataUrl(saida.dataUrl)).toBe("image/gif")
+    }
+  })
+
+  it("no tecto exacto de 2 MiB ainda passa; um byte acima fica parado, com o aviso", async () => {
+    const tecto = IMAGE_BUDGETS.chat.maxBytesAnimado
+    expect(tecto).toBe(2 * 1024 * 1024)
+    const noTecto = await compressImage(ficheiro(tecto, "image/gif"), IMAGE_BUDGETS.chat, deps(800, 600))
+    expect(noTecto.recoded).toBe(false)
+
+    const original = ficheiro(tecto + 1, "image/gif")
+    const saida = await compressImage(original, IMAGE_BUDGETS.chat, deps(800, 600))
+    expect(saida.recoded).toBe(true)
+    expect(saida.animacaoPerdida).toBe(true)
+    expect(saida.bytes).toBeLessThanOrEqual(IMAGE_BUDGETS.chat.maxBytes)
+    expect(tipoDoDataUrl(saida.dataUrl)).not.toBe("image/gif")
+    expect(avisoDeAnimacaoPerdida(original, saida, IMAGE_BUDGETS.chat, "mensagem")).toBe(
+      "Este GIF é grande de mais para animar. Vai como imagem parada.",
+    )
+  })
+
+  it("no mural o tecto é 1 MiB: um GIF de 1 MiB e um byte anima no chat e fica parado no post", async () => {
+    expect(IMAGE_BUDGETS.post.maxBytesAnimado).toBe(1024 * 1024)
+    const noTecto = await compressImage(ficheiro(1024 * 1024, "image/gif"), IMAGE_BUDGETS.post, deps(800, 600))
+    expect(noTecto.recoded).toBe(false)
+
+    const original = ficheiro(1024 * 1024 + 1, "image/gif")
+    const noChat = await compressImage(original, IMAGE_BUDGETS.chat, deps(800, 600))
+    expect(noChat.recoded).toBe(false)
+    const noPost = await compressImage(original, IMAGE_BUDGETS.post, deps(800, 600))
+    expect(noPost.recoded).toBe(true)
+    expect(avisoDeAnimacaoPerdida(original, noPost, IMAGE_BUDGETS.post, "mensagem")).toBe(
+      "Este GIF é grande de mais para animar. Vai como imagem parada.",
+    )
+  })
+
+  it("o tecto das fotografias não muda: um PNG de 1 MB é recodificado", async () => {
+    const saida = await compressImage(ficheiro(1_000_000, "image/png"), IMAGE_BUDGETS.chat, deps(1200, 900, 0.2))
+    expect(saida.recoded).toBe(true)
+    expect(saida.bytes).toBeLessThanOrEqual(400 * 1024)
+    expect(saida.animacaoPerdida).toBeUndefined()
+  })
+
+  it("o perfil continua a dizer o peso e o máximo", () => {
+    const parada = { dataUrl: "", bytes: 1, width: 1, height: 1, recoded: true, animacaoPerdida: true }
+    expect(avisoDeAnimacaoPerdida({ size: 400_000 }, parada, IMAGE_BUDGETS.avatar)).toBe(
+      "O GIF tem 400 kB. Para ficar animado, o máximo é 160 kB. Ficou parado.",
+    )
+  })
+})
+
+describe("orcamentosDaMensagem — o GIF só anima se ainda couber na mensagem", () => {
+  const dois = 2 * 1024 * 1024
+
+  it("um GIF numa mensagem vazia anima", () => {
+    const [orcamento] = orcamentosDaMensagem([ficheiro(dois, "image/gif")], 0, IMAGE_BUDGETS.chat)
+    expect(orcamento).toBe(IMAGE_BUDGETS.chat)
+  })
+
+  it("quatro GIF de 2 MiB: só os que cabem na moldura animam, e o total cabe sempre", () => {
+    const gifs = [0, 1, 2, 3].map(() => ficheiro(dois, "image/gif"))
+    const orcamentos = orcamentosDaMensagem(gifs, 0, IMAGE_BUDGETS.chat)
+    const animados = orcamentos.filter((o) => o.maxBytesAnimado === IMAGE_BUDGETS.chat.maxBytesAnimado).length
+    // Each still one is counted at 400 KB: two animate, two go still.
+    expect(animados).toBe(2)
+    expect(orcamentos.map((o) => o.maxBytesAnimado)).toEqual([dois, dois, 0, 0])
+    const total =
+      animados * caracteresDeDataUrl(dois, "image/gif") + (4 - animados) * caracteresDeDataUrl(400 * 1024, "image/gif")
+    expect(total).toBeLessThanOrEqual(PAYLOAD_MAX_CHARS)
+  })
+
+  it("as fotografias contam primeiro, seja qual for a ordem", () => {
+    const escolhidas = [
+      ficheiro(dois, "image/gif"),
+      ficheiro(dois, "image/gif"),
+      ficheiro(dois, "image/gif"),
+      ficheiro(3_000_000, "image/jpeg"),
+    ]
+    const orcamentos = orcamentosDaMensagem(escolhidas, 0, IMAGE_BUDGETS.chat)
+    // Every image holds a still place first, so the third GIF no longer fits.
+    expect(orcamentos.map((o) => o.maxBytesAnimado)).toEqual([dois, dois, 0, dois])
+    expect(orcamentos[3]).toBe(IMAGE_BUDGETS.chat)
+  })
+
+  it("um GIF que já não cabe vai parado e devolve o aviso", async () => {
+    const original = ficheiro(1_000_000, "image/gif")
+    const orcamento = orcamentoDaImagem(original, PAYLOAD_MAX_CHARS - 500_000, IMAGE_BUDGETS.post)
+    expect(orcamento.maxBytesAnimado).toBe(0)
+    const saida = await compressImage(original, orcamento, deps(800, 600))
+    expect(saida.recoded).toBe(true)
+    expect(avisoDeAnimacaoPerdida(original, saida, orcamento, "mensagem")).toBe(
+      "Este GIF é grande de mais para animar. Vai como imagem parada.",
+    )
+  })
+})
+
+describe("tipoDoDataUrl", () => {
+  it("lê o tipo dos bytes, não o do ficheiro", () => {
+    expect(tipoDoDataUrl("data:image/webp;base64,AAAA")).toBe("image/webp")
+    expect(tipoDoDataUrl("data:image/gif;base64,AAAA")).toBe("image/gif")
+    expect(tipoDoDataUrl("não é")).toBe("")
+    expect(tipoDoDataUrl("data:;base64,AA")).toBe("")
   })
 })
 

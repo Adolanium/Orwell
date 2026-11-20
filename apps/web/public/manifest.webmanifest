@@ -1,8 +1,8 @@
 {
   "name": "Orwell",
   "short_name": "Orwell",
-  "description": "Conversa em comunidade, cifrada de ponta a ponta.",
-  "lang": "pt",
+  "description": "Community chat, end-to-end encrypted.",
+  "lang": "en",
   "dir": "ltr",
   "id": "/app/",
   "start_url": "/app/",

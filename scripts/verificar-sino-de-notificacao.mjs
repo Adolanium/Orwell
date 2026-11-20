@@ -233,7 +233,7 @@ async function corrida(movimento) {
   await limpar([ana, bruno])
   await ana.page.locator(".people-aside .direct-row .direct-open").first().click()
   await ana.page.waitForTimeout(1500)
-  const escrita = ana.page.locator(".chat-composer input:not([type=file])").first()
+  const escrita = ana.page.locator(".chat-composer textarea").first()
   await escrita.fill("olá")
   await escrita.press("Enter")
   await bruno.page.waitForTimeout(9000)

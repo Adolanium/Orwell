@@ -316,7 +316,7 @@ try {
   await sala(ines.page, "conversa").click()
 
   const escrever = async (pessoa, frase) => {
-    const caixa = pessoa.page.locator(".chat-composer input:not([type=file])").first()
+    const caixa = pessoa.page.locator(".chat-composer textarea").first()
     await caixa.waitFor({ timeout: 60_000 })
     await caixa.fill(frase)
     await caixa.press("Enter")

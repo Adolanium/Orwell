@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   aoMudarLingua,
@@ -8,6 +11,7 @@ import {
   guardarPreferencia,
   lerPreferencia,
   linguaActual,
+  linguaDoSistema,
   linguaNoEndereco,
   LINGUA_BASE,
   strings,
@@ -16,33 +20,33 @@ import {
 
 /**
  * The language: who chooses it, what happens when text is missing, and the
- * promise that tests in this suite depend on without ever writing it.
+ * default.
  *
- * That promise is the first assertion in the file: **with no one calling
- * anything, the language is Portuguese**. Two thousand seven hundred assertions
- * in this suite are written against Portuguese text, and none of them ask for
- * it. If detection started running on module load, jsdom, whose `navigator`
- * says "en-US", would make them all run against English overnight.
+ * The rule of the owner (20/11/2026): English is the default. The app opens in
+ * Portuguese only when the system or browser is in Portuguese (`pt`, `pt-PT`,
+ * `pt-BR`...). Any other language opens in English. The explicit choice of the
+ * person always wins.
+ *
+ * The suite reads Portuguese because `testes/lingua-de-teste.ts` asks for it.
+ * The default itself is `LINGUA_BASE`, measured below.
  */
 
-// Each case leaves the language as it found it. Without this, the first test
-// that switched to English would carry the rest along, and order would start to matter.
+// Each case leaves the language as the setup file left it: Portuguese.
 afterEach(() => {
-  definirLingua(LINGUA_BASE)
+  definirLingua("pt")
   localStorage.removeItem(CHAVE_DA_LINGUA)
 })
 
 describe("a língua por omissão", () => {
-  it("é o português, sem ninguém a pedir nada", () => {
-    expect(linguaActual()).toBe("pt")
-    expect(strings.menu.leave).toBe("Sair do canal")
+  it("é o inglês: a base do módulo, antes de o anfitrião arrancar a língua", () => {
+    expect(LINGUA_BASE).toBe("en")
   })
 
-  it("e o `navigator` do jsdom não a muda, porque ninguém detectou nada", () => {
-    // Proof from inside: here `navigator.language` IS English. The interface
-    // speaks Portuguese anyway, because `arrancarLingua()` was not called.
-    expect(navigator.language.startsWith("en")).toBe(true)
-    expect(linguaActual()).toBe("pt")
+  it("o `lang` fixo das páginas é inglês", () => {
+    for (const pagina of ["../../../apps/web/index.html", "../../../apps/client/src/renderer/index.html"]) {
+      const html = readFileSync(join(AQUI, pagina), "utf8")
+      expect(html, pagina).toMatch(/<html lang="en"/)
+    }
   })
 })
 
@@ -70,34 +74,71 @@ describe("escolherLingua — a ordem de quem manda", () => {
   })
 })
 
-describe("o browser e o sistema já não contam (1.3.9)", () => {
+describe("o sistema conta: português só quando a primeira língua é português (20/11/2026)", () => {
   const original = Object.getOwnPropertyDescriptor(Navigator.prototype, "languages")
   afterEach(() => {
     if (original) Object.defineProperty(navigator, "languages", { ...original, configurable: true })
     delete (navigator as unknown as Record<string, unknown>)["languages"]
   })
 
-  it("um browser em português abre em inglês", () => {
-    Object.defineProperty(navigator, "languages", { value: ["pt-PT", "pt"], configurable: true })
+  it.each([
+    [["de-DE", "de"], "en"],
+    [["pt-BR"], "pt"],
+    [["pt-PT", "pt"], "pt"],
+    [["pt"], "pt"],
+    [["fr"], "en"],
+    [["en-US"], "en"],
+    [["de-DE", "pt-PT"], "en"],
+    [[], "en"],
+  ] as const)("sistema %j dá %s", (sistema, esperada) => {
+    expect(linguaDoSistema(sistema)).toBe(esperada)
+    expect(escolherLingua({ doSistema: sistema })).toBe(esperada)
+  })
+
+  it("um browser em alemão abre em inglês", () => {
+    Object.defineProperty(navigator, "languages", { value: ["de-DE", "de"], configurable: true })
     expect(detectarLingua({ endereco: "http://localhost/app/" })).toBe("en")
   })
 
-  it("com a escolha guardada, a escolha", () => {
+  it("um browser em português abre em português", () => {
+    Object.defineProperty(navigator, "languages", { value: ["pt-BR", "en"], configurable: true })
+    expect(detectarLingua({ endereco: "http://localhost/app/" })).toBe("pt")
+  })
+
+  it("a lista do anfitrião (Electron) ganha ao `navigator`", () => {
     Object.defineProperty(navigator, "languages", { value: ["en-US"], configurable: true })
+    expect(detectarLingua({ endereco: "http://localhost/app/", sistema: ["pt-PT"] })).toBe("pt")
+    expect(detectarLingua({ endereco: "http://localhost/app/", sistema: ["de-DE"] })).toBe("en")
+  })
+
+  it("a escolha guardada ganha ao sistema, nos dois sentidos", () => {
+    Object.defineProperty(navigator, "languages", { value: ["pt-PT"], configurable: true })
+    guardarPreferencia("en")
+    expect(detectarLingua({ endereco: "http://localhost/app/" })).toBe("en")
+    Object.defineProperty(navigator, "languages", { value: ["de-DE"], configurable: true })
     guardarPreferencia("pt")
     expect(detectarLingua({ endereco: "http://localhost/app/" })).toBe("pt")
   })
 
   it("com `?lingua=pt`, português, sem guardar nada", () => {
+    Object.defineProperty(navigator, "languages", { value: ["de-DE"], configurable: true })
     expect(detectarLingua({ endereco: "http://localhost/app/?lingua=pt" })).toBe("pt")
     expect(lerPreferencia()).toBe("auto")
   })
 
-  it("arrancar sem escolha dá inglês, num browser em português", async () => {
+  it("arrancar sem escolha num browser alemão dá inglês", async () => {
     const { arrancarLingua } = await import("./strings.js")
-    Object.defineProperty(navigator, "languages", { value: ["pt-PT"], configurable: true })
+    Object.defineProperty(navigator, "languages", { value: ["de-DE"], configurable: true })
     expect(arrancarLingua({ endereco: "http://localhost/app/" })).toBe("en")
-    expect(strings.menu.leave).not.toBe("Sair do canal")
+    expect(strings.menu.leave).toBe("Leave the channel")
+  })
+
+  it("arrancar sem escolha num browser em português dá português", async () => {
+    const { arrancarLingua } = await import("./strings.js")
+    definirLingua("en")
+    Object.defineProperty(navigator, "languages", { value: ["pt-PT"], configurable: true })
+    expect(arrancarLingua({ endereco: "http://localhost/app/" })).toBe("pt")
+    expect(strings.menu.leave).toBe("Sair do canal")
   })
 })
 
@@ -217,17 +258,35 @@ describe("translateError — o único recurso que não é o português", () => {
   })
 })
 
-describe('"auto" guardado (de antes da 1.3.9, ou de outro aparelho) é inglês', () => {
-  it("escolher português e depois voltar a \"auto\" dá inglês", async () => {
+describe('"auto" guardado volta a seguir o sistema', () => {
+  const original = Object.getOwnPropertyDescriptor(Navigator.prototype, "languages")
+  afterEach(() => {
+    if (original) Object.defineProperty(navigator, "languages", { ...original, configurable: true })
+    delete (navigator as unknown as Record<string, unknown>)["languages"]
+  })
+
+  it("num sistema alemão, escolher português e depois \"auto\" dá inglês", async () => {
+    Object.defineProperty(navigator, "languages", { value: ["de-DE"], configurable: true })
     const { aplicarEscolhaDeLingua } = await import("./hooks/useLingua.js")
     aplicarEscolhaDeLingua("pt")
     expect(linguaActual()).toBe("pt")
     aplicarEscolhaDeLingua("auto")
     expect(linguaActual()).toBe("en")
   })
+
+  it("num sistema em português, escolher inglês e depois \"auto\" dá português", async () => {
+    Object.defineProperty(navigator, "languages", { value: ["pt-PT"], configurable: true })
+    const { aplicarEscolhaDeLingua } = await import("./hooks/useLingua.js")
+    aplicarEscolhaDeLingua("en")
+    expect(linguaActual()).toBe("en")
+    aplicarEscolhaDeLingua("auto")
+    expect(linguaActual()).toBe("pt")
+  })
 })
 
 /* ------------------------------------------------------------------ ferramentas */
+
+const AQUI = dirname(fileURLToPath(import.meta.url))
 
 /** The same merge the module does, over a sample overlay. */
 function juntarComoOModulo(porCima: Record<string, unknown>): typeof strings {

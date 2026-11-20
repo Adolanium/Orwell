@@ -50,7 +50,7 @@ async function abrir(motor, nome, browser = null) {
   return aparelho
 }
 
-const caixa = (page) => page.locator('input[placeholder="Escreve uma mensagem"]').first()
+const caixa = (page) => page.locator('textarea[placeholder="Escreve uma mensagem"]').first()
 
 /** The mention list names, with @ alone in the box. Leaves the box empty. */
 async function sugestoesDaArroba(page) {

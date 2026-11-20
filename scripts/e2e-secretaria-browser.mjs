@@ -81,7 +81,7 @@ try {
   await pedirAmizade(bruno, enderecoAna)
   const msPedido = await aceitarAmizade(ana)
   check("o pedido de amizade do browser chega à secretária, e a Ana aceita", msPedido >= 0, `${msPedido} ms até aparecer`)
-  const msAmigos = await ate(async () => (await bruno.locator('input[placeholder="Escreve uma mensagem"]').count()) > 0 || (await bruno.locator(".people-bar-title").innerText().catch(() => "")).includes("(1)"), 60_000, 1000)
+  const msAmigos = await ate(async () => (await bruno.locator('textarea[placeholder="Escreve uma mensagem"]').count()) > 0 || (await bruno.locator(".people-bar-title").innerText().catch(() => "")).includes("(1)"), 60_000, 1000)
   check("o Bruno vê a aceitação", msAmigos >= 0, `${msAmigos} ms`)
 
   // -------

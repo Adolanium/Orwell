@@ -15,6 +15,8 @@ import { registarDenuncias } from "./denuncia.js"
 import { registarBugs } from "./bugs.js"
 import { NoncesVistos } from "./pedido-assinado.js"
 import { registarRelatos } from "./relato.js"
+import { registarContagemDoRegisto } from "./registo.js"
+import { registarContagemDosLugares } from "./lugares.js"
 import { Store } from "./store.js"
 
 export interface Enclave {
@@ -84,7 +86,7 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
    * The media engine, if the operator gave it a port.
    *
    * **Failing to bring it up must not take the server down.** The common case is
-   * the port being in use, and on a machine shared with magnuslab.pt that is a
+   * the port being in use, and on a host that runs other services that is a
    * matter of time, not a hypothesis. A server that refused to start because of that
    * would take with it the text, the history, and federation, everything that
    * works without media, for a feature that doesn't even have a client yet.
@@ -226,6 +228,10 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
    * traffic-analysis feed for anyone who polls it.
    */
   app.get("/_enclave/health", async () => ({ ok: true, server: config.serverName }))
+  // How many accounts were created lately, for the operator's alert (1.3.25, C1). Loopback only. See `registo.ts`.
+  registarContagemDoRegisto(app, store, config.registo ?? "aberto")
+  // Seat repairs as numbers, for the operator (1.3.25, P8). Loopback only, outside `/_enclave/`. See `lugares.ts`.
+  registarContagemDosLugares(app, gateway.lugares)
 
   /*
     The meter for the "Support" section of the website: the GoFundMe campaign
@@ -266,8 +272,8 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
   const welcomeSweep = setInterval(() => store.pruneSupersededWelcomes(), 3_600_000)
   welcomeSweep.unref()
 
-  // Sweep of the vaults of channels with no subscribers (decision D7). Off
-  // by default: runs only with ENCLAVE_COFRE_GC_DIAS above zero. Hourly, like
+  // Sweep of the vaults of channels with no subscribers (decision D7). 90 days
+  // by default since 1.3.25; ENCLAVE_COFRE_GC_DIAS=0 turns it off. Hourly, like
   // the Welcome sweep; see `Store.varrerCofres`.
   const diasDoCofre = config.cofreGcDias ?? 0
   const varrerCofres = (): void => {

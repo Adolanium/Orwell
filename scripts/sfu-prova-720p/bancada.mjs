@@ -23,7 +23,7 @@ const AQUI = fileURLToPath(new URL(".", import.meta.url))
 const PORTO_HTTP = Number(process.env.PROVA_PORTO_HTTP ?? 8463)
 const PORTO_MEDIA = Number(process.env.PROVA_PORTO_MEDIA ?? 44330)
 
-/** A worker, like on the VPS: two cores, one of them from magnuslab.pt. */
+/** A worker, like on the VPS: two cores, one of them left to the other services on the host. */
 const worker = await mediasoup.createWorker({ logLevel: "warn" })
 
 const CODECS = [

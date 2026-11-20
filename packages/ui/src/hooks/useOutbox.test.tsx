@@ -3,7 +3,7 @@ import { act, cleanup, renderHook } from "@testing-library/react"
 import type { ConnectionState, EnclaveBridge } from "../bridge.js"
 import type { ChatMessage } from "../types.js"
 import { strings } from "../strings.js"
-import { outboxReducer, useOutbox, type OutboxEntry } from "./useOutbox.js"
+import { SALA_SURDA, outboxReducer, useOutbox, type OutboxEntry } from "./useOutbox.js"
 import { motor } from "../sons/motor.js"
 
 afterEach(cleanup)
@@ -324,5 +324,46 @@ describe("enviar não faz som (16/11/2026)", () => {
     expect(send).toHaveBeenCalledTimes(1)
     expect(tocar).not.toHaveBeenCalled()
     tocar.mockRestore()
+  })
+})
+
+describe("useOutbox: uma sala surda (1.3.25, P2)", () => {
+  it("o envio retido numa sala surda fica à espera da sala, sem aviso vermelho, e sai quando a sala volta a ouvir", async () => {
+    let surda = true
+    const send = vi.fn(async () => {
+      if (surda) throw new Error(SALA_SURDA)
+      return { ok: true }
+    })
+    const notify = vi.fn()
+    const nenhum: ReadonlySet<string> = new Set()
+    const comAGeral: ReadonlySet<string> = new Set(["!geral:s"])
+    const { result, rerender } = renderHook(
+      ({ surdos }: { surdos: ReadonlySet<string> }) => useOutbox(bridgeWith(send), "online", notify, surdos),
+      { initialProps: { surdos: comAGeral } },
+    )
+
+    await act(async () => {
+      result.current.send("!geral:s", "para ninguém, por agora")
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.entries.map((e) => [e.state, e.motivo])).toEqual([["waiting", "sala"]])
+    expect(notify).not.toHaveBeenCalled()
+
+    // Another room going deaf or not changes nothing here.
+    await act(async () => {
+      rerender({ surdos: new Set(["!geral:s", "!outra:s"]) })
+      await Promise.resolve()
+    })
+    expect(send).toHaveBeenCalledTimes(1)
+
+    surda = false
+    await act(async () => {
+      rerender({ surdos: nenhum })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(result.current.entries).toHaveLength(0)
   })
 })

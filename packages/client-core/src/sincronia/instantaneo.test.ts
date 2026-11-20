@@ -405,6 +405,65 @@ describe("o instantâneo a quem entra tarde (§5.1, §5.2)", () => {
   })
 })
 
+describe("a barra presa em \"a receber\" (20/11/2026, P6)", () => {
+  /** Carla joins and asks for the snapshot; Ana and Bruno receive the `pt` and never answer it. */
+  async function instantaneoSemResposta(): Promise<{ rede: Rede; carla: No }> {
+    const { rede, ana, bruno, carla } = canalCheio()
+    for (const calado of [ana, bruno]) {
+      const original = calado.anti.aoSinal.bind(calado.anti)
+      calado.anti.aoSinal = (frame) => (corpoDe(frame.sinal)["k"] === "pt" ? Promise.resolve() : original(frame))
+    }
+    await carla.anti.aoWelcome(CANAL)
+    await ateSilencio(rede, 2_000)
+    return { rede, carla }
+  }
+
+  it("aoLigar sem aoDesligar avisa a interface, e o instantâneo volta a ficar por pedir", async () => {
+    TECTOS_DA_SINCRONIA.esperaDoPedidoMs = 60_000
+    const { carla } = await instantaneoSemResposta()
+    expect(carla.anti.estadoDoCanal(CANAL).aReceber).toBe(true)
+    const antes = carla.mudancas
+    carla.anti.aoLigar([CANAL])
+    // Before: the descent was dropped in silence, and the screen kept the old state.
+    expect(carla.mudancas).toBeGreaterThan(antes)
+    expect(carla.anti.instantaneoPorPedir(CANAL)).toBe(true)
+  })
+
+  it("sem progresso durante o tecto, no relógio de parede, a barra sai e o estado é \"sem resposta\"", async () => {
+    TECTOS_DA_SINCRONIA.esperaDoPedidoMs = 60_000
+    const { carla } = await instantaneoSemResposta()
+    expect(carla.anti.estadoDoCanal(CANAL)).toMatchObject({ aReceber: true })
+    // The phone slept: no timer ran, but the wall clock moved on.
+    carla.desvio = TECTOS_DA_SINCRONIA.semProgressoMs + 1_000
+    expect(carla.anti.estadoDoCanal(CANAL)).toMatchObject({ estado: "sem-resposta", aReceber: false })
+    // Back to the foreground: one emission puts the screen right.
+    const antes = carla.mudancas
+    carla.anti.revistar()
+    expect(carla.mudancas).toBe(antes + 1)
+    expect(carla.anti.estadoDoCanal(CANAL)).toMatchObject({ estado: "sem-resposta", aReceber: false })
+  })
+
+  it("com os temporizadores a correr, o tecto dispara sozinho e avisa a interface", async () => {
+    TECTOS_DA_SINCRONIA.esperaDoPedidoMs = 60_000
+    TECTOS_DA_SINCRONIA.semProgressoMs = 3_000
+    const { carla } = await instantaneoSemResposta()
+    expect(carla.anti.estadoDoCanal(CANAL).aReceber).toBe(true)
+    const antes = carla.mudancas
+    await new Promise((resolve) => setTimeout(resolve, 3_500))
+    expect(carla.mudancas).toBeGreaterThan(antes)
+    expect(carla.anti.estadoDoCanal(CANAL)).toMatchObject({ estado: "sem-resposta", aReceber: false })
+  })
+
+  it("um instantâneo que avança não é cortado pelo tecto", async () => {
+    TECTOS_DA_SINCRONIA.semProgressoMs = 5_000
+    const { rede, ana, carla } = canalCheio()
+    await carla.anti.aoWelcome(CANAL)
+    await ateSilencio(rede)
+    expect(diferemNoInstantaneo(ana, carla)).toEqual([])
+    expect(carla.anti.estadoDoCanal(CANAL)).toMatchObject({ estado: "igual", aReceber: false })
+  })
+})
+
 describe("os anexos a pedido (§5.4)", () => {
   it("o instantâneo leva o anexo sem os bytes; a pedido, chegam e conferem com a autoria", async () => {
     const { rede, carla, posts } = canalCheio()

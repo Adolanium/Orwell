@@ -37,6 +37,13 @@ export const TECTOS_DA_SINCRONIA = {
   vidaMs: 120_000,
   /** No reply to a request in 15 s, move to the next leaf (§4.4). */
   esperaDoPedidoMs: 15_000,
+  /**
+   * The "Receiving channel…" bar with no progress for this long gives up and shows
+   * the real state (20/11/2026, P6). Measured on the wall clock (`agora()`), not by a
+   * timer alone: a phone in the background stops `setTimeout`, and the bar must be
+   * right the moment the page comes back (`AntiEntropia.revistar`).
+   */
+  semProgressoMs: 60_000,
   /** At most three leaves per request; then wait for the next batch. */
   tentativasPorPedido: 3,
   /** The deletion step: position in the list times this (§4.4). */

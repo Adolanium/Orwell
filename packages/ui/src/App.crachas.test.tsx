@@ -44,9 +44,14 @@ const MEU_FEED = moradaDeTeste("mural eu", "casa.pt")
  */
 
 let onMessage: ((message: unknown) => void) | null = null
+let onConnection: ((event: unknown) => void) | null = null
+type OuvinteDoToque = (event: { channel: string; from: string; at: number }) => void
+const ouvintesDoToque = new Set<OuvinteDoToque>()
 
 function ponte(): EnclaveBridge {
   onMessage = null
+  onConnection = null
+  ouvintesDoToque.clear()
   return comLacosDoNucleo({
     vault: {
       status: async () => ({ exists: true, supportsOsProtection: true }),
@@ -119,11 +124,21 @@ function ponte(): EnclaveBridge {
       },
       epoch: () => () => {},
       status: () => () => {},
-      connection: () => () => {},
+      connection: (handler: (event: unknown) => void) => {
+        onConnection = handler
+        return () => {
+          onConnection = null
+        }
+      },
       channels: () => () => {},
       presence: () => () => {},
       typing: () => () => {},
-      buzz: () => () => {},
+      buzz: (handler: OuvinteDoToque) => {
+        ouvintesDoToque.add(handler)
+        return () => {
+          ouvintesDoToque.delete(handler)
+        }
+      },
       callActivity: () => () => {},
     },
     call: { on: () => () => {}, setMuted: () => {} },
@@ -152,10 +167,27 @@ function cracha(destino: string): string | null {
   return botao.querySelector(".rail-count")?.textContent ?? null
 }
 
-/** The quiet dot: "there are unread things here, but none for you." */
-function temPonto(destino: string): boolean {
+/**
+ * The pill on the left of the button: "there are unread things here, but none
+ * for you". It carries no number on purpose (20/11/2026, option A).
+ */
+function temPilula(destino: string): boolean {
   const botao = screen.getByRole("button", { name: destino })
-  return botao.querySelector(".rail-dot") !== null
+  return botao.querySelector(".rail-pill") !== null
+}
+
+/**
+ * The pill, read from outside Communities, and back again.
+ *
+ * The app opens on Communities, and the open destination draws no small pill:
+ * its own pill already stands 40 px tall on the same edge, and the sidebar
+ * next to it shows every channel's count. So the pill is read from Friends.
+ */
+async function pilulaVistaDeFora(user: ReturnType<typeof userEvent.setup>): Promise<boolean> {
+  await user.click(screen.getByRole("button", { name: strings.rail.people }))
+  const ha = temPilula(strings.rail.chat)
+  await user.click(screen.getByRole("button", { name: strings.rail.chat }))
+  return ha
 }
 
 async function abrir(): Promise<ReturnType<typeof userEvent.setup>> {
@@ -174,20 +206,51 @@ beforeEach(() => {
 })
 
 /*
- * The old rule said "messages in a side channel don't put a number": only
- * mention lit Communities, and the rest was a quiet dot. The owner replaced it
- * on 27 October 2026: Communities now sums unread messages in rooms, just like
- * Friends sums private conversations.
+ * History of this rule. Until 27 October 2026 only a mention lit Communities
+ * with a number, and the rest was a quiet dot. From 27 October
+ * Communities summed every unread message. On 20 November 2026 (rail notices,
+ * option A) the two came apart again, each with its own shape: unread is a
+ * pill on the left with no number, a mention is the number. A number that
+ * counts all traffic did not say whether anyone was waiting for you.
  */
-describe("Carril — Comunidades soma as mensagens por ler nos canais", () => {
-  it("mensagens num canal ao lado põem o número por cima do ícone", async () => {
-    await abrir()
+describe("Carril — Comunidades: pílula para o que está por ler, número para as menções", () => {
+  it("mensagens sem menção num canal ao lado acendem a pílula, sem número", async () => {
+    const user = await abrir()
+    await user.click(screen.getByRole("button", { name: strings.rail.people }))
     for (const texto of ["bom dia", "alguém sabe da chave", "eu sei"]) {
       await chega({ channel: ADEGA, sender: ANA, payload: { t: "message", body: texto, sentAt: agora() } })
     }
-    expect(cracha(strings.rail.chat)).toBe("3")
-    // The quiet dot is gone: with the number, it was the same news told twice.
-    expect(temPonto(strings.rail.chat)).toBe(false)
+    expect(cracha(strings.rail.chat)).toBeNull()
+    expect(temPilula(strings.rail.chat)).toBe(true)
+  })
+
+  it("uma menção põe o número, e a pílula sai: o número já diz que há o que ler", async () => {
+    await abrir()
+    await chega({ channel: ADEGA, sender: ANA, payload: { t: "message", id: "a", body: "bom dia", sentAt: agora() } })
+    await chega({
+      channel: ADEGA,
+      sender: ANA,
+      payload: { t: "message", id: "b", body: "vens?", mentions: [EU], sentAt: agora() },
+    })
+    expect(cracha(strings.rail.chat)).toBe("1")
+    expect(temPilula(strings.rail.chat)).toBe(false)
+  })
+
+  it("a pílula diz-se por palavras a quem não vê o ecrã", async () => {
+    const user = await abrir()
+    await user.click(screen.getByRole("button", { name: strings.rail.people }))
+    await chega({ channel: ADEGA, sender: ANA, payload: { t: "message", body: "bom dia", sentAt: agora() } })
+    expect(
+      screen.getByRole("button", { name: strings.rail.chat, description: strings.rail.porLer }),
+    ).toBeTruthy()
+  })
+
+  it("no destino aberto a pílula não aparece: a pílula alta do activo já está lá", async () => {
+    const user = await abrir()
+    await user.click(screen.getByRole("button", { name: strings.rail.people }))
+    await user.click(screen.getByRole("button", { name: strings.rail.chat }))
+    await chega({ channel: ADEGA, sender: ANA, payload: { t: "message", body: "bom dia", sentAt: agora() } })
+    expect(temPilula(strings.rail.chat)).toBe(false)
   })
 
   it("abrir o canal apaga o número", async () => {
@@ -210,20 +273,19 @@ describe("Carril — Comunidades soma as mensagens por ler nos canais", () => {
 
   it("a menção conta uma vez, e não duas", async () => {
     await abrir()
-    await chega({ channel: ADEGA, sender: ANA, payload: { t: "message", id: "a", body: "bom dia", sentAt: agora() } })
     await chega({
       channel: ADEGA,
       sender: ANA,
       payload: { t: "message", id: "b", body: "vens?", mentions: [EU], sentAt: agora() },
     })
-    expect(cracha(strings.rail.chat)).toBe("2")
+    expect(cracha(strings.rail.chat)).toBe("1")
   })
 
   it("uma conversa privada não acende Comunidades: não é lá que ela se atende", async () => {
     await abrir()
     await chega({ channel: DIRECTA, sender: ANA, payload: { t: "message", body: "olá", sentAt: agora() } })
     expect(cracha(strings.rail.chat)).toBeNull()
-    expect(temPonto(strings.rail.chat)).toBe(false)
+    expect(temPilula(strings.rail.chat)).toBe(false)
     expect(cracha(strings.rail.people)).toBe("1")
   })
 
@@ -231,6 +293,7 @@ describe("Carril — Comunidades soma as mensagens por ler nos canais", () => {
     await abrir()
     await chega({ channel: ADEGA, sender: EU, payload: { t: "message", body: "eu", sentAt: agora() } })
     expect(cracha(strings.rail.chat)).toBeNull()
+    expect(temPilula(strings.rail.chat)).toBe(false)
   })
 })
 
@@ -248,10 +311,11 @@ describe("Carril e barra — o por ler de uma sala do canal aberto", () => {
     await chega({ channel: LAGAR, sender: ANA, payload: { t: "message", id: "v1", body: "a uva", room: "vinha", sentAt: agora() } })
     await chega({ channel: LAGAR, sender: ANA, payload: { t: "message", id: "v2", body: "já", room: "vinha", sentAt: agora() } })
     expect(linhaDaSala("vinha")?.querySelector(".room-unread")?.textContent).toBe("2")
-    expect(cracha(strings.rail.chat)).toBe("2")
+    expect(await pilulaVistaDeFora(user)).toBe(true)
 
     await user.click(within(linhaDaSala("vinha")!).getByRole("button", { name: /vinha/ }))
     expect(linhaDaSala("vinha")?.querySelector(".room-unread")).toBeFalsy()
+    expect(await pilulaVistaDeFora(user)).toBe(false)
     expect(cracha(strings.rail.chat)).toBeNull()
   })
 
@@ -260,6 +324,7 @@ describe("Carril e barra — o por ler de uma sala do canal aberto", () => {
     await screen.findByText("vinha")
     await chega({ channel: LAGAR, sender: ANA, payload: { t: "message", id: "g1", body: "olá", sentAt: agora() } })
     expect(cracha(strings.rail.chat)).toBeNull()
+    expect(temPilula(strings.rail.chat)).toBe(false)
     expect(document.querySelectorAll(".room-unread")).toHaveLength(0)
   })
 })
@@ -281,6 +346,7 @@ describe("Carril e barra — o que está silenciado não acende", () => {
     await abrir()
     await chega({ channel: ADEGA, sender: ANA, payload: { t: "message", id: "a", body: "bom dia", sentAt: agora() } })
     expect(cracha(strings.rail.chat)).toBeNull()
+    expect(temPilula(strings.rail.chat)).toBe(false)
     expect(linhaDoCanal("adega").querySelector(".badge")).toBeNull()
     expect(linhaDoCanal("adega").classList.contains("silenciado")).toBe(true)
     expect(within(linhaDoCanal("adega")).getByRole("img", { name: strings.silencio.marca })).toBeTruthy()
@@ -301,16 +367,18 @@ describe("Carril e barra — o que está silenciado não acende", () => {
 
   it("uma sala silenciada do canal aberto não acende, e as outras sim", async () => {
     silenciar(`${LAGAR}/vinha`)
-    await abrir()
+    const user = await abrir()
     await screen.findByText("vinha")
     await chega({ channel: LAGAR, sender: ANA, payload: { t: "message", id: "v1", body: "a uva", room: "vinha", sentAt: agora() } })
     await chega({ channel: ADEGA, sender: ANA, payload: { t: "message", id: "a1", body: "olá", sentAt: agora() } })
-    expect(cracha(strings.rail.chat)).toBe("1")
     const vinha = [...document.querySelectorAll<HTMLElement>(".room-row")].find(
       (linha) => linha.querySelector(".room-name")?.textContent === "vinha",
     )!
     expect(vinha.querySelector(".room-unread")).toBeNull()
     expect(vinha.classList.contains("silenciado")).toBe(true)
+    // Adega lights the pill; the muted room adds nothing, and nothing is a number.
+    expect(cracha(strings.rail.chat)).toBeNull()
+    expect(await pilulaVistaDeFora(user)).toBe(true)
   })
 
   it("uma conversa privada silenciada não conta em Amigos", async () => {
@@ -326,19 +394,19 @@ describe("Carril e barra — o que está silenciado não acende", () => {
     const user = await abrir()
     await screen.findByText("vinha")
     await chega({ channel: LAGAR, sender: ANA, payload: { t: "message", id: "v1", body: "a uva", room: "vinha", sentAt: agora() } })
-    expect(cracha(strings.rail.chat)).toBe("1")
+    expect(await pilulaVistaDeFora(user)).toBe(true)
     const vinha = (): HTMLElement =>
       [...document.querySelectorAll<HTMLElement>(".room-row")].find(
         (linha) => linha.querySelector(".room-name")?.textContent === "vinha",
       )!
     await user.pointer({ keys: "[MouseRight]", target: vinha() })
     await user.click(await screen.findByRole("menuitem", { name: strings.silencio.silenciar }))
-    expect(cracha(strings.rail.chat)).toBeNull()
+    expect(await pilulaVistaDeFora(user)).toBe(false)
     expect(within(vinha()).getByRole("img", { name: strings.silencio.marca })).toBeTruthy()
 
     await user.pointer({ keys: "[MouseRight]", target: vinha() })
     await user.click(await screen.findByRole("menuitem", { name: strings.silencio.ativar }))
-    expect(cracha(strings.rail.chat)).toBe("1")
+    expect(await pilulaVistaDeFora(user)).toBe(true)
   })
 })
 
@@ -508,5 +576,70 @@ describe("Carril — o número dito por palavras a quem não vê o ecrã", () =>
     expect(
       screen.getByRole("button", { name: strings.rail.chat, description: strings.rail.porAtender(12) }),
     ).toBeTruthy()
+  })
+})
+
+/**
+ * The mark at the top of the rail says when the server connection dropped
+ * (20/11/2026): the logo at 45 % and an amber seal with "!". Only after the
+ * app was online once: the first connection at start-up is not a drop.
+ */
+describe("Carril — o logo diz quando a ligação caiu", () => {
+  function logo(): HTMLElement {
+    return document.querySelector(".rail-logo") as HTMLElement
+  }
+  async function ligacao(state: string): Promise<void> {
+    await act(async () => {
+      onConnection?.({ state })
+      await Promise.resolve()
+    })
+  }
+
+  it("ao arrancar, antes da primeira ligação, o logo está como sempre", async () => {
+    await abrir()
+    await ligacao("connecting")
+    expect(logo().classList.contains("sem-ligacao")).toBe(false)
+    expect(logo().querySelector(".rail-offline")).toBeNull()
+  })
+
+  it("quando a ligação cai, o logo esbate e leva o selo; quando volta, o selo sai", async () => {
+    await abrir()
+    await ligacao("online")
+    await ligacao("reconnecting")
+    expect(logo().classList.contains("sem-ligacao")).toBe(true)
+    expect(logo().querySelector(".rail-offline")).not.toBeNull()
+    expect(within(logo()).getByText(strings.rail.semLigacao)).toBeTruthy()
+
+    await ligacao("online")
+    expect(logo().classList.contains("sem-ligacao")).toBe(false)
+    expect(logo().querySelector(".rail-offline")).toBeNull()
+  })
+})
+
+/*
+ * The nudge on the Friends button (1.3.25): the event and its sound come from
+ * `useCotoveladaPorVer`, the drawing from `AvisosDoCarril`. One shape (the
+ * outline and the glyph, no red fill), and one sentence that names the sender.
+ */
+describe("o toque por ver no botão Amigos", () => {
+  it("uma cotovelada da Ana desenha o contorno e o glifo e diz quem a deu; abrir os Amigos apaga", async () => {
+    const user = await abrir()
+    const amigos = (): HTMLElement => screen.getByRole("button", { name: strings.rail.people })
+    expect(amigos().classList.contains("tocado")).toBe(false)
+
+    await act(async () => {
+      for (const ouvinte of ouvintesDoToque) ouvinte({ channel: DIRECTA, from: ANA, at: Date.now() })
+      await Promise.resolve()
+    })
+    expect(amigos().classList.contains("tocado")).toBe(true)
+    expect(amigos().classList.contains("cotovelada-por-ver")).toBe(false)
+    expect(amigos().querySelector(".rail-toque svg")).not.toBeNull()
+    const descricao = document.getElementById(amigos().getAttribute("aria-describedby") ?? "")?.textContent ?? ""
+    expect(descricao).toMatch(/deu-te uma cotovelada\./)
+    expect(descricao).not.toContain("Recebeu um toque")
+
+    await user.click(amigos())
+    expect(amigos().classList.contains("tocado")).toBe(false)
+    expect(amigos().querySelector(".rail-toque")).toBeNull()
   })
 })

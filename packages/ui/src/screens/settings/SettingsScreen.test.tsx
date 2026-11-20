@@ -155,6 +155,19 @@ describe("Configurações — uma secção de cada vez", () => {
     expect(link.getAttribute("rel")).toBe("noopener noreferrer")
   })
 
+  it("o mesmo cartão leva à Política de privacidade e aos Termos, na língua da app (RGPD)", () => {
+    renderSettings({ seccao: "ajuda" })
+    const cartao = screen.getByRole("heading", { name: strings.settings.sobreVersao(VERSAO_DA_APP) }).closest("section")!
+    const privacidade = within(cartao).getByRole("link", { name: "Privacidade" })
+    const termos = within(cartao).getByRole("link", { name: "Termos" })
+    expect(privacidade.getAttribute("href")).toBe("https://orwell.pt/pt/privacidade.html")
+    expect(termos.getAttribute("href")).toBe("https://orwell.pt/pt/termos.html")
+    for (const link of [privacidade, termos]) {
+      expect(link.getAttribute("target")).toBe("_blank")
+      expect(link.getAttribute("rel")).toBe("noopener noreferrer")
+    }
+  })
+
   it('Privacidade já não tem "O que a app guarda" nem a nota dos pedidos (dono, 28 de Outubro de 2026)', () => {
     renderSettings({ seccao: "privacidade" })
     expect(screen.queryByRole("heading", { name: strings.settings.oQueGuarda })).toBeNull()

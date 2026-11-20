@@ -71,6 +71,7 @@ adds a line here.
 | Ciphertext and its size | It stores and forwards it | Every message is padded to at least 512 bytes. Short messages look alike; longer ones show their size |
 | That an account sent to a channel, to the minute | It assigns sequence numbers | Kept as long as events. Live, the gateway sees who sends where |
 | Commits per channel (`channel_epochs`) | One commit per epoch | A count from the clear MLS header. Retention keeps it on purpose; `scripts/limpar-servidor.mjs` wipes it |
+| Registration invite codes, as hashes (`registration_invites`, from 1.3.25, only with `ENCLAVE_REGISTO=convite`): uses allowed and spent, creation and expiry | New accounts get in only with a code (`scripts/convites-de-registo.mjs`), checked and spent at first login | No column links a code to the account that used it. The code is printed once and never stored; 80 random bits. On loopback only, the server also counts accounts created in the last hour and 24 hours (`/_interno/registo`), numbers `accounts.created_minute` already held |
 | Which peer servers a channel reaches | Federation must route | Never the membership list |
 | Pairing boxes, ephemeral signals, vault entries | See their sections | Memory only, or no author on disk |
 | Invite records, including short codes in the clear | It manages invites | See "Invites" |
@@ -267,8 +268,8 @@ server will learn when one does.
   or incomplete state.
 - **Ceilings** (`TECTOS_DO_COFRE`): 64 KiB per entry, 4096 entries, 16 MiB per
   channel, 2 MiB per account, 120 writes and 60 reads per minute. Not federated.
-  Entries live until rewritten or swept (`ENCLAVE_COFRE_GC_DIAS`, off by
-  default).
+  Entries live until rewritten or swept (`ENCLAVE_COFRE_GC_DIAS`, 90 days by
+  default since 1.3.25; `0` turns the sweep off).
 
 ## Content sync between accounts
 
@@ -573,6 +574,26 @@ The founder and `admin` always have it; no other role has it by default.
 - **What it cannot stop.** An altered client can still send the poll; it just
   never shows as a poll on other members' devices. Polls the server received
   before the rule went live keep their card.
+
+## Which device asks for a seat (`channel.rejoin.device`, from 1.3.25)
+
+When a device asks the members of a channel for a new seat
+(`channel.rejoin.request`), the server adds to the `channel.rejoin` it relays
+the device key that connection proved at login. The client never states it. A
+login without the device chain gets no `device`, and an older server sends none.
+
+- **Why.** Members take out only that device's leaf. Before, the request named
+  only the account, and a member took out every leaf of it with no proof of life
+  in the epoch: an offline sibling lost its seat each time another device of the
+  account asked.
+- **What it reveals.** Members connected to the channel learn which of the
+  account's devices asked. They already see every device key in the group's
+  tree; the link between the request and one of them is new. The server learns
+  nothing new.
+- **A lying server** can only narrow a repair. A sibling takes out the named
+  leaf only if it has no proof of life in the epoch. Another account takes out
+  the named leaf; the same request without a name took out every leaf of that
+  account, which the server could always cause.
 
 ## Other known limits
 

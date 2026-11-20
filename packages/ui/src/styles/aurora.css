@@ -105,3 +105,118 @@
   gap: var(--space-2);
   align-self: flex-start;
 }
+
+/* The text box is a text area since 20/11/2026. The 1.3.19 rules name the
+   old `<input>` (`.chat-composer input`), so the text area gets them here,
+   the same values, from `aurora.gen.css`. */
+:root[data-theme="aurora"] .chat-composer textarea {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  color: var(--text);
+}
+
+:root[data-theme="aurora"] .chat-composer textarea:focus {
+  border-color: var(--accent-deep);
+}
+
+:root[data-theme="aurora"][data-density="compacta"] .chat-composer textarea,
+:root[data-theme="aurora"] [data-density="compacta"] .chat-composer textarea {
+  padding: var(--space-3) var(--space-4);
+}
+
+@media (max-width: 480px) {
+  :root[data-theme="aurora"] form.chat-composer .composer-line > textarea {
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+  }
+}
+
+:root[data-theme="aurora"] .chat-composer .composer-line textarea {
+  background: transparent;
+  border-color: transparent;
+}
+
+/*
+  The rail notices (20/11/2026, option A). The flat skin draws them
+  (`screens.css`); 1.3.19's `.rail-count` comes back here scoped (top right,
+  15 px, the brand fill) and would win, so it is put back to option A at the
+  Aurora weight. The colours are the Aurora layer-1 values, measured in
+  `tokens.contraste.test.ts`.
+*/
+:root[data-theme="aurora"]:root {
+  --aviso-neutro: var(--titulo);
+  --aviso-mencao: var(--acento);
+  --aviso-mencao-tinta: var(--tinta);
+  --aviso-toque: var(--rosa);
+  --aviso-toque-tinta: var(--tinta);
+  --aviso-chamada: var(--presenca);
+  --aviso-chamada-tinta: var(--tinta);
+  --aviso-ligacao: var(--warning);
+  --aviso-ligacao-tinta: var(--tinta);
+}
+
+:root[data-theme="aurora"] .rail-count {
+  top: auto;
+  right: -4px;
+  bottom: -4px;
+  min-width: 16px;
+  height: 16px;
+  background: var(--aviso-mencao);
+  color: var(--aviso-mencao-tinta);
+  font-size: 11px;
+  line-height: 16px;
+  border-width: 3px;
+}
+
+/* Aurora hides the open pill (its open button is outlined instead), but the
+   unread pill has no other shape to fall back on: it stays, on the rail's
+   edge. 76 px of rail and 44 px of button on a wide screen leave 16. */
+@media (min-width: 841px) {
+  :root[data-theme="aurora"] .rail-pill {
+    left: -16px;
+  }
+}
+
+/* The nudge outline: Aurora's buttons already have a 1 px border, so the
+   border turns red too, under the inset ring. */
+:root[data-theme="aurora"] .rail-btn.tocado {
+  border-color: var(--aviso-toque);
+}
+
+/* 1.3.19's universal reduced-motion rule comes back scoped and outweighs the
+   flat skin's calm nudge: the same calm version, at the Aurora weight. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme="aurora"] .rail-toque svg {
+    animation: rail-abanar-calmo 4.8s ease-in-out infinite !important;
+  }
+}
+
+/* The pinned bar is new since 1.3.19: in Aurora it is a pane like the header above
+   it, with a gap before the conversation. Solid, not glass: nothing may show through
+   it, and the lower edge is a clear line. */
+:root[data-theme="aurora"] .barra-fixadas {
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--vidro-contorno);
+  border-bottom-color: var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--vidro-solido);
+}
+
+/* 1.3.19's reset, scoped, zeroes the padding of every element and weighs more than the
+   flat skin's class: the bar and its button take theirs back here. */
+:root[data-theme="aurora"] .barra-fixadas {
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-1);
+}
+
+:root[data-theme="aurora"] .barra-fixadas-abrir {
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+}
+
+:root[data-theme="aurora"] .pinned-mostrar {
+  padding: var(--space-2) var(--space-5) 0;
+}

@@ -82,7 +82,7 @@ function Pagina() {
         connectionDetail={null}
         canaisFundados={[
           { canal: "!fotografia:exemplo.pt", nome: "Fotografia" },
-          { canal: "!livros:exemplo.pt", nome: "Livros do Alentejo" },
+          { canal: "!livros:exemplo.pt", nome: "Livros de Viagem" },
         ]}
         onAbrirCanal={(canal) => { window.__aberto = canal }}
       />

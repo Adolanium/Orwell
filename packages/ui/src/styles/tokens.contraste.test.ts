@@ -152,3 +152,74 @@ describe("a chamada: o que está por cima de uma imagem", () => {
     expect(ecras).not.toMatch(/0 10px 28px rgb\(0 0 0/)
   })
 })
+
+/**
+ * The rail notices (option A, 20/11/2026), in the three themes.
+ *
+ * Each notice is a shape on the rail (`--fundo`), so the shape must pass 3:1
+ * against it (WCAG 1.4.11). The mention carries a number, so its ink must pass
+ * 4.5:1 on its fill. The nudge, the call and the dropped connection carry a
+ * glyph, never text: 3:1 is enough there.
+ *
+ * The tokens point at layer 1 with `var()`; here they are followed to the hex.
+ * Aurora is read from its own root (`aurora.gen.css`) and the hand sheet
+ * (`aurora.css`), over the dark values.
+ */
+describe("os avisos do carril", () => {
+  function blocoDe(folha: string, selector: string): string {
+    const limpa = folha.replace(/\/\*[\s\S]*?\*\//g, "")
+    const inicio = limpa.indexOf(`${selector} {`)
+    if (inicio < 0) throw new Error(`falta ${selector}`)
+    const abre = limpa.indexOf("{", inicio)
+    return limpa.slice(abre + 1, limpa.indexOf("}", abre))
+  }
+  const auroraRaiz = ':root[data-theme="aurora"]:root'
+  const aurora = new Map([
+    ...escuro,
+    ...valores(blocoDe(ler("./aurora.gen.css"), auroraRaiz)),
+    ...valores(blocoDe(ler("./aurora.css"), auroraRaiz)),
+  ])
+
+  /** Follows `var(--x)` until a hex. */
+  function cor(tema: Map<string, string>, nome: string): Rgb {
+    let atual = nome
+    for (let passo = 0; passo < 8; passo++) {
+      const valor = tema.get(atual) ?? ""
+      const m = /^var\((--[a-z0-9-]+)\)$/.exec(valor)
+      if (!m) return hex(tema, atual)
+      atual = m[1] as string
+    }
+    throw new Error(`${nome}: var() sem fim`)
+  }
+
+  const FORMAS = ["--aviso-neutro", "--aviso-mencao", "--aviso-toque", "--aviso-chamada", "--aviso-ligacao"]
+  const GLIFOS = [
+    ["--aviso-toque-tinta", "--aviso-toque"],
+    ["--aviso-chamada-tinta", "--aviso-chamada"],
+    ["--aviso-ligacao-tinta", "--aviso-ligacao"],
+  ] as const
+
+  describe.each([
+    ["escuro", escuro],
+    ["claro", claro],
+    ["aurora", aurora],
+  ] as const)("no tema %s", (_nome, tema) => {
+    it.each(FORMAS)("%s passa 3:1 sobre o fundo do carril", (forma) => {
+      expect(contraste(cor(tema, forma), cor(tema, "--fundo"))).toBeGreaterThanOrEqual(3)
+    })
+
+    it("o número da menção passa 4,5:1 sobre a pastilha", () => {
+      expect(contraste(cor(tema, "--aviso-mencao-tinta"), cor(tema, "--aviso-mencao"))).toBeGreaterThanOrEqual(4.5)
+    })
+
+    it.each(GLIFOS)("o glifo %s passa 3:1 sobre %s", (tinta, fundo) => {
+      expect(contraste(cor(tema, tinta), cor(tema, fundo))).toBeGreaterThanOrEqual(3)
+    })
+  })
+
+  it("o claro escolhido e o do sistema têm os mesmos avisos", () => {
+    for (const nome of FORMAS.flatMap((f) => [f, `${f}-tinta`])) {
+      expect(claroDoSistema.get(nome), nome).toBe(claroEscolhido.get(nome))
+    }
+  })
+})

@@ -12,17 +12,22 @@
  *
  * **The key table and why these:**
  *
- *   `Cmd/Ctrl+B` bold · `Cmd/Ctrl+I` italic
- *   `Cmd/Ctrl+Shift+X` strikethrough · `Cmd/Ctrl+Shift+E` spoiler
+ *   `Cmd/Ctrl+B` bold · `Cmd/Ctrl+I` italic · `Cmd/Ctrl+E` code
+ *   `Cmd/Ctrl+Shift+X` strikethrough · `Cmd/Ctrl+Shift+H` spoiler
  *
- * The first two are the only ones Discord actually has, for strikethrough and
- * spoiler it publishes no shortcut, so there is no habit to respect. The second
- * two were chosen by elimination from the combinations the browser sends us:
- * `Ctrl+Shift+B` is Chrome's bookmarks bar, `Ctrl+Shift+I` and `Ctrl+Shift+J`
- * are the developer tools, `Ctrl+Shift+O` is the bookmarks manager,
- * `Ctrl+Shift+N` is the private window, and `Ctrl+Shift+M` is already the
- * microphone here. Few options left. X strikes and E hides, which is the best
- * mnemonic available.
+ * Bold and italic are the only ones Discord actually has; for strikethrough,
+ * code and spoiler it publishes no shortcut, so there is no habit to respect.
+ * `Cmd/Ctrl+E` for code is the key Notion uses for inline code. The two with Shift were chosen by elimination from the
+ * combinations the browser sends us: `Ctrl+Shift+B` is Chrome's bookmarks bar,
+ * `Ctrl+Shift+I` and `Ctrl+Shift+J` are the developer tools, `Ctrl+Shift+O` is
+ * the bookmarks manager, `Ctrl+Shift+N` is the private window, and the voice
+ * commands already hold `Ctrl+Shift+M`, `D`, `V`, `E` and `L`
+ * (`ATALHOS_POR_OMISSAO` in `atalhosDeVoz.ts`). X strikes and H hides.
+ *
+ * **Why the spoiler left `Cmd/Ctrl+Shift+E` (20/11/2026).** That is the default
+ * key to share the screen, and `useAtalhos` listens on the whole document: in a
+ * call, the same key put `||` in the box AND started or stopped the screen
+ * share. A test now crosses this table with the voice defaults.
  *
  * **Discord's `Cmd/Ctrl+U` does not exist here** because underline is not
  * syntax in this product, it is written why in `formatacao.ts`, and it has to
@@ -30,13 +35,34 @@
  * the reader does not recognize would promise formatting and deliver
  * punctuation.
  *
- * **The known cost:** on Firefox, `Ctrl+Shift+E` opens the network monitor.
- * This is noted because it is a real loss on that browser and not something you
- * discover later; on others, and in Electron, the combination is free.
+ * **The known cost:** on Firefox, `Ctrl+Shift+H` opens the history sidebar and
+ * `Ctrl+E` goes to the search bar; in Chrome, `Ctrl+E` goes to the address bar.
+ * In a text box the shortcut takes the key first (`preventDefault`), so these
+ * browser keys do not work while the box has the focus. In Electron the
+ * combinations are free.
  */
 
-/** The four markers that a shortcut can write. */
-export type Marcador = "**" | "*" | "~~" | "||"
+import { combinacaoDeEvento } from "./atalhosDeVoz.js"
+
+/** The five markers that a shortcut or the formatting bar can write. */
+export type Marcador = "**" | "*" | "~~" | "`" | "||"
+
+/**
+ * The key table, in the same notation as the voice shortcuts ("Mod" is Ctrl or
+ * Cmd). One table for the keyboard and for the tooltips of the formatting bar,
+ * so the tooltip can never name a key that does something else.
+ */
+export const ATALHOS_DE_FORMATACAO: Readonly<Record<Marcador, string>> = {
+  "**": "Mod+B",
+  "*": "Mod+I",
+  "~~": "Mod+Shift+X",
+  "`": "Mod+E",
+  "||": "Mod+Shift+H",
+}
+
+const MARCADOR_DA_COMBINACAO = new Map<string, Marcador>(
+  Object.entries(ATALHOS_DE_FORMATACAO).map(([marcador, combinacao]) => [combinacao, marcador as Marcador]),
+)
 
 /**
  * What marker this combination asks for, if any.
@@ -44,6 +70,13 @@ export type Marcador = "**" | "*" | "~~" | "||"
  * Separated from the effect so it can be tested without a document, the same
  * split that `accaoDe` in `hooks/useAtalhos.ts` does, and for the same reason:
  * what matters to lock is the table.
+ *
+ * The event is read by `combinacaoDeEvento`, the voice shortcuts' reader:
+ * `Ctrl` or `Cmd` both count as "Mod" (on macOS Cmd is what the hand does
+ * without thinking), the letter is compared in uppercase (with Shift the
+ * browser sends "X", not "x"), and a combination with `Alt` matches nothing
+ * here, because `Alt` is the gate to accents on several keyboards and to menus
+ * on Windows.
  */
 export function marcadorDe(event: {
   key: string
@@ -52,25 +85,9 @@ export function marcadorDe(event: {
   shiftKey?: boolean
   altKey?: boolean
 }): Marcador | null {
-  // `Ctrl` or `Cmd`: on macOS the second is what the hand does without thinking,
-  // and requiring `Ctrl` there would be a shortcut nobody gets right the first
-  // time.
-  const comando = event.ctrlKey === true || event.metaKey === true
-  if (!comando) return null
-  // With `Alt` it is not ours. It is the gate to accents on several keyboards and
-  // to menus on Windows, and taking it breaks things we should not break.
-  if (event.altKey === true) return null
-
-  const shift = event.shiftKey === true
-  // With Shift pressed the browser sends the letter in uppercase. Comparing
-  // without lowercasing made the shortcut work in theory and never in practice.
-  const tecla = event.key.toLowerCase()
-
-  if (!shift && tecla === "b") return "**"
-  if (!shift && tecla === "i") return "*"
-  if (shift && tecla === "x") return "~~"
-  if (shift && tecla === "e") return "||"
-  return null
+  const combinacao = combinacaoDeEvento(event)
+  if (combinacao === null) return null
+  return MARCADOR_DA_COMBINACAO.get(combinacao) ?? null
 }
 
 /** The text after the shortcut, and where the selection lands. */
@@ -100,15 +117,12 @@ export function envolver(texto: string, inicioBruto: number, fimBruto: number, m
   const inicio = Math.min(inicioBruto, fimBruto)
   const fim = Math.max(inicioBruto, fimBruto)
   const largura = marcador.length
+  const onde = ondeEstaoOsMarcadores(texto, inicio, fim, marcador)
 
   // ------------------------------------------------------------- remove
   //
   // Markers are outside the selection: `isto é **[urgente]**`.
-  if (
-    texto.slice(inicio - largura, inicio) === marcador &&
-    texto.slice(fim, fim + largura) === marcador &&
-    !metadeDeOutro(texto, inicio - largura, fim + largura, marcador)
-  ) {
+  if (onde === "fora") {
     return {
       texto: texto.slice(0, inicio - largura) + texto.slice(inicio, fim) + texto.slice(fim + largura),
       inicio: inicio - largura,
@@ -117,13 +131,8 @@ export function envolver(texto: string, inicioBruto: number, fimBruto: number, m
   }
 
   // And inside it: `isto é [**urgente**]`.
-  const dentro = texto.slice(inicio, fim)
-  if (
-    dentro.length > largura * 2 &&
-    dentro.startsWith(marcador) &&
-    dentro.endsWith(marcador) &&
-    !metadeDeOutro(texto, inicio, fim, marcador)
-  ) {
+  if (onde === "dentro") {
+    const dentro = texto.slice(inicio, fim)
     const limpo = dentro.slice(largura, dentro.length - largura)
     return {
       texto: texto.slice(0, inicio) + limpo + texto.slice(fim),
@@ -142,6 +151,40 @@ export function envolver(texto: string, inicioBruto: number, fimBruto: number, m
     inicio: inicio + largura,
     fim: fim + largura,
   }
+}
+
+/**
+ * Does the selection already carry this marker? Then the next press removes it.
+ *
+ * The formatting bar uses it to show the button as pressed (`aria-pressed`), so
+ * the button says the same thing that a press will do.
+ */
+export function estaEnvolvido(texto: string, inicioBruto: number, fimBruto: number, marcador: Marcador): boolean {
+  const inicio = Math.min(inicioBruto, fimBruto)
+  const fim = Math.max(inicioBruto, fimBruto)
+  return ondeEstaoOsMarcadores(texto, inicio, fim, marcador) !== null
+}
+
+/** The two ways a selection can already be wrapped. See `envolver`. */
+function ondeEstaoOsMarcadores(texto: string, inicio: number, fim: number, marcador: Marcador): "fora" | "dentro" | null {
+  const largura = marcador.length
+  if (
+    texto.slice(inicio - largura, inicio) === marcador &&
+    texto.slice(fim, fim + largura) === marcador &&
+    !metadeDeOutro(texto, inicio - largura, fim + largura, marcador)
+  ) {
+    return "fora"
+  }
+  const dentro = texto.slice(inicio, fim)
+  if (
+    dentro.length > largura * 2 &&
+    dentro.startsWith(marcador) &&
+    dentro.endsWith(marcador) &&
+    !metadeDeOutro(texto, inicio, fim, marcador)
+  ) {
+    return "dentro"
+  }
+  return null
 }
 
 /**

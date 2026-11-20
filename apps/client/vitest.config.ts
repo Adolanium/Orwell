@@ -18,5 +18,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["src/renderer/**/*.test.ts", "src/main/**/*.test.ts"],
+    // Portuguese for the catalog assertions, asked for: see inside.
+    setupFiles: ["./testes/lingua-de-teste.ts"],
   },
 })

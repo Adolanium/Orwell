@@ -603,7 +603,7 @@ describe("a montagem de uma chamada por SFU", () => {
 
     // Only on the router, Chrome ignores them. Measured in Phase 0 and written in point 4
     // of what it said to assume. Without DTX, Opus sends encoded silence all the time:
-    // seventy percent more bandwidth on a two-core machine shared with magnuslab.pt.
+    // seventy percent more bandwidth on a two-core host that runs other services.
     const opcoes = dispositivo.transportes.flatMap((cada) => cada.opcoesDeCodec)
     expect(opcoes).toHaveLength(1)
     expect(opcoes[0]).toMatchObject({ opusDtx: true, opusStereo: false, opusMaxAverageBitrate: 32_000 })
