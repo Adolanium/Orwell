@@ -1534,7 +1534,7 @@ describe("a sala de votações é uma sala como as outras", () => {
 })
 
 /**
- * The `+` left of a category's name (1.3.25, the owner): a room created already
+ * The `+` left of a category's name (1.3.25): a room created already
  * in that category. Only for whoever organizes rooms, the same rule as "New room".
  */
 describe("ChannelSidebar — criar sala numa categoria", () => {

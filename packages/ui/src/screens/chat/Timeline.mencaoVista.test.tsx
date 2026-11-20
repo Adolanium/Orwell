@@ -10,7 +10,7 @@ import { chaveDaConversa, entrarNaConversa, esquecerEntradasNasConversas } from 
 import { Timeline } from "./Timeline.js"
 
 /**
- * A mention lights while it is unread, and not forever (17/11/2026, the owner:
+ * A mention lights while it is unread, and not forever (17/11/2026, as reported:
  * "it is a reply, but it stays marked forever").
  *
  * The rule: a line that mentions me (my address, `@all`, a role I hold, a reply

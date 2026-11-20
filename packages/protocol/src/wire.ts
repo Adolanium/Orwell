@@ -1718,8 +1718,9 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
    * roster is by address, and that goodbye would erase the other device from
    * everyone's screen.
    *
-   * A client before 1.3.25 drops this frame (unknown `t`). See the 1.3.25
-   * report for what it does then.
+   * A client before 1.3.25 drops this frame (unknown `t`). Such a client
+   * rebuilds the call with a plain join, and the server refuses it with
+   * `noutro-aparelho` while the other device is in the call.
    */
   z.object({
     t: z.literal("sfu.scope.closed"),

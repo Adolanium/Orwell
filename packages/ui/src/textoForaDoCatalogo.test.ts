@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest"
 /**
  * No Portuguese text outside the catalogs (20/11/2026).
  *
- * The rule of the owner: English is the default, and Portuguese shows only to
+ * The rule: English is the default, and Portuguese shows only to
  * whoever has a Portuguese system or chose it. A sentence written straight in
  * the code skips that rule: it shows in Portuguese on a German system. That
  * happened, and it is a defect.

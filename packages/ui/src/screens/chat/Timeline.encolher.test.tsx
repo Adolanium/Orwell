@@ -9,7 +9,7 @@ import { Timeline } from "./Timeline.js"
  * The conversation shrinks from below, and the reader at the bottom stays at
  * the bottom (20/11/2026).
  *
- * The bug, from the owner: "the Replying to bar sits on top of the
+ * The bug, as reported: "the Replying to bar sits on top of the
  * conversation text". Measured live (`scripts/capturar-composer-toques.mjs`):
  * the composer is in the grid flow, and the conversation does shrink by 48 px
  * when the bar opens. But a shrinking scroller keeps its `scrollTop`, and

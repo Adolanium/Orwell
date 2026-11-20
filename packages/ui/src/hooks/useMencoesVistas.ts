@@ -8,7 +8,7 @@ const NENHUMA: ReadonlySet<string> = new Set()
 
 /**
  * The lit lines (a mention of me) seen in this visit to the conversation
- * (17/11/2026, the owner: "it is a reply, but it stays marked forever").
+ * (17/11/2026, as reported: "it is a reply, but it stays marked forever").
  *
  * A lit line counts as seen after `MENCAO_VISTA_MS` with at least half of it in
  * the scroller (or half the scroller, for a line taller than that), the page

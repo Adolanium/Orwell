@@ -1,5 +1,5 @@
 /**
- * The control panel at the bottom of the column, design P1 from the owner
+ * The control panel at the bottom of the column, design P1
  * (28 October 2026), read in the sheet.
  *
  * jsdom doesn't apply CSS: this file pins down what the design agreed on (the

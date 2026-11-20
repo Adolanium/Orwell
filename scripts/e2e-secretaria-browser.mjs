@@ -1,6 +1,6 @@
 /**
  * The desktop app (Electron) and a browser (Chromium), different accounts,
- * the same local server. This is line 1 of phase 7, the one the owner saw fail:
+ * the same local server. This is line 1 of phase 7, the one seen failing:
  * "last time the desktop app was not communicating with browser users".
  *
  *   npm run build && node scripts/e2e-secretaria-browser.mjs           (called in mesh)

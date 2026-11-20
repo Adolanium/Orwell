@@ -9,7 +9,7 @@ import { moradaDeTeste } from "../testes/moradas.js"
 const MURAL_EU = moradaDeTeste("mural eu", "casa.pt")
 
 /**
- * A room created in a category from the sidebar (1.3.25, the owner): the `+` left
+ * A room created in a category from the sidebar (1.3.25): the `+` left
  * of the category's name and "Create room" in its menu open "New room" with that
  * category already chosen. Only for whoever organizes the channel's rooms.
  */

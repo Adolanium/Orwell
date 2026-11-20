@@ -71,7 +71,8 @@ adds a line here.
 | Ciphertext and its size | It stores and forwards it | Every message is padded to at least 512 bytes. Short messages look alike; longer ones show their size |
 | That an account sent to a channel, to the minute | It assigns sequence numbers | Kept as long as events. Live, the gateway sees who sends where |
 | Commits per channel (`channel_epochs`) | One commit per epoch | A count from the clear MLS header. Retention keeps it on purpose; `scripts/limpar-servidor.mjs` wipes it |
-| Registration invite codes, as hashes (`registration_invites`, from 1.3.25, only with `ENCLAVE_REGISTO=convite`): uses allowed and spent, creation and expiry | New accounts get in only with a code (`scripts/convites-de-registo.mjs`), checked and spent at first login | No column links a code to the account that used it. The code is printed once and never stored; 80 random bits. On loopback only, the server also counts accounts created in the last hour and 24 hours (`/_interno/registo`), numbers `accounts.created_minute` already held |
+| Registration invite codes, as hashes (`registration_invites`, from 1.3.25, only with `ENCLAVE_REGISTO=convite`): uses allowed and spent, creation and expiry | New accounts get in only with a code (`scripts/convites-de-registo.mjs`), checked and spent at first login | No column links a code to the account that used it. The running server sees the code once, at that login; a single-use code and the minute an account was created let the operator who handed it out guess which account it became. The code is printed once and never stored; 80 random bits. On loopback only, the server also counts accounts created in the last hour and 24 hours (`/_interno/registo`), numbers `accounts.created_minute` already held. If your reverse proxy runs on the same host as the server, do not forward `/_interno/` |
+| Seat repairs as counts (from 1.3.25): requests carried, requests nobody heard, Welcomes that answered one, claims that found no key package, `keypackage.low` sent, commits refused as stale | The operator must see that seats fail | Memory only, per minute for 24 hours, gone at restart. No address, channel or device in the counts or in the log line a failed claim writes. Answered on loopback only (`/_interno/canais`) |
 | Which peer servers a channel reaches | Federation must route | Never the membership list |
 | Pairing boxes, ephemeral signals, vault entries | See their sections | Memory only, or no author on disk |
 | Invite records, including short codes in the clear | It manages invites | See "Invites" |
@@ -497,7 +498,8 @@ send, but has no key for the new epoch.
 
 `ENCLAVE_COMMON_ROOM` names a room the server announces. Any account may ask to
 join, a member's client answers automatically with no human asked, and
-registration is open and free. **Anyone at all can be reading the common room
+registration is open and free unless the operator set `ENCLAVE_REGISTO`.
+**Anyone at all can be reading the common room
 within seconds of deciding to.**
 
 - Treat everything said there as public. Encryption protects it from the
@@ -590,10 +592,16 @@ login without the device chain gets no `device`, and an older server sends none.
   account's devices asked. They already see every device key in the group's
   tree; the link between the request and one of them is new. The server learns
   nothing new.
-- **A lying server** can only narrow a repair. A sibling takes out the named
-  leaf only if it has no proof of life in the epoch. Another account takes out
-  the named leaf; the same request without a name took out every leaf of that
-  account, which the server could always cause.
+- **A lying server** can aim a repair at one device, never widen it. Whoever
+  answers takes out only the named leaf and seats it again with a fresh key
+  package, also when that leaf looks alive: the device is trusted to say its
+  own seat stopped working. In the account channel any sibling does that, at
+  most once a minute per named device. In other channels a sibling does it
+  only for a device added in the last day that it never saw in the channel;
+  another account does it for any named leaf. A wrong name therefore costs
+  that device a key package and a rekey, and nothing else. The same request
+  without a name took out every leaf of the account with no proof of life,
+  which the server could always cause.
 
 ## Other known limits
 

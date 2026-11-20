@@ -1,6 +1,6 @@
 /**
  * A mention lights while unread, and the unread bar leaves after reading, live
- * (17/11/2026, the owner: "it is a reply, but it stays marked forever" and "the
+ * (17/11/2026, as reported: "it is a reply, but it stays marked forever" and "the
  * unread badge at the top does not go away after reading").
  *
  *   npm run build && node --dns-result-order=ipv4first scripts/prova-mencao-vista.mjs chromium|webkit [antes|depois]

@@ -1436,7 +1436,7 @@ function TimelineInteira({
     if (inicioRef.current > 0 && el.scrollTop < el.clientHeight) requestAnimationFrame(() => alargarRef.current())
   }, [inicio])
   /*
-    Where the reader is when the older lines come in (1.3.25, the owner: like
+    Where the reader is when the older lines come in (1.3.25, as in
     Discord). They go in ABOVE, and the conversation stays on the line the reader
     was looking at. At `scrollTop` 0 the browser does not anchor, and the reader
     was thrown up to the oldest line that came in. The anchor is the first line in
@@ -1469,7 +1469,7 @@ function TimelineInteira({
   const itemCount = messages.length + pending.length
 
   /**
-   * Which lines are lit as a mention of me (17/11/2026, the owner: "it is a
+   * Which lines are lit as a mention of me (17/11/2026, as reported: "it is a
    * reply, but it stays marked forever"). A mention lights while it is unread:
    * newer than this conversation's read mark AS IT WAS on entry. The room's mark
    * (`marcaDeEntradaNaConversa`, the one the unread mention count uses) or, in a

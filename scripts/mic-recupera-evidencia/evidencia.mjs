@@ -13,7 +13,7 @@
  *  - the audio energy arriving at the far end (`inbound-rtp.totalAudioEnergy`);
  *  - the events someone could have heard (`ended`, `mute`, `statechange`, `processorerror`).
  *
- * The question from the owner: "it stopped picking up my mic", with no error at all.
+ * The question: "it stopped picking up my mic", with no error at all.
  */
 import { createServer } from "node:http"
 import { chromium } from "playwright"

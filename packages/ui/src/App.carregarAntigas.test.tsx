@@ -11,7 +11,7 @@ const MURAL_EU = moradaDeTeste("mural eu", "casa.pt")
 /**
  * "Load older" loads the conversation, not the state book (carregar-antigas, 18/11/2026).
  *
- * The owner: "when I press load older in the chat, it does not load". The vault read
+ * The report: "when I press load older in the chat, it does not load". The vault read
  * is the conversation and the state book of every room together, and a click took the
  * newest 100 ENTRIES memory did not hold. In a channel with a busy polls room those
  * were all votes: eight clicks drew nothing. And what came in by hand was the first

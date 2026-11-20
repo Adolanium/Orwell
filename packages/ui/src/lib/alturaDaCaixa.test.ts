@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { alturaDaCaixa, FRACCAO_DA_AREA } from "./alturaDaCaixa.js"
 
 /**
- * How tall the text box is (20/11/2026, the owner: "Discord parity").
+ * How tall the text box is (20/11/2026, as in Discord).
  *
  * The box grows line by line up to about half of the conversation area, the
  * real area (the conversation plus the composer), not the window. Past that it

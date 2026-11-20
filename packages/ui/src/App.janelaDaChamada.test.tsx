@@ -213,7 +213,7 @@ describe("a janela da chamada na concha", () => {
   })
 
   /*
-    Bug in 0.8.0, from the owner: "when users navigate to settings, the
+    Bug in 0.8.0, as reported: "when users navigate to settings, the
     call disappears". Open Settings with the call live: the call does not
     end, the sound continues with one owner, and the call card is there.
   */

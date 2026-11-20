@@ -7,7 +7,7 @@ import { esquecerMarcasDeEntrada, writeLastRead } from "../../hooks/useUnreads.j
 import { Timeline } from "./Timeline.js"
 
 /**
- * The "N unread messages" bar stays after reading (17/11/2026, the owner:
+ * The "N unread messages" bar stays after reading (17/11/2026, as reported:
  * "it keeps showing the unread badge at the top; it does not go away after
  * reading").
  *

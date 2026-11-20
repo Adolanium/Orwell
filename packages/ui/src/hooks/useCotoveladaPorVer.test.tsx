@@ -16,7 +16,7 @@ vi.mock("../lib/sounds.js", () => ({
 import { useCotoveladaPorVer, type OpcoesDaCotoveladaPorVer } from "./useCotoveladaPorVer.js"
 
 /**
- * A nudge that arrives (20/11/2026, the owner): it plays its own sound and the
+ * A nudge that arrives (20/11/2026): it plays its own sound and the
  * Friends button turns red until the person opens Friends.
  *
  * Before this, the sound played only when the nudged conversation was open on

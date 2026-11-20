@@ -7,8 +7,8 @@
  *
  * C1, the count: `GET /_interno/registo`, how many accounts this server
  * created in the last hour and in the last 24 hours. Numbers only, never an
- * address. The Mac's `infra-alerts` reads it once an hour over SSH, from inside
- * the container, and warns on Telegram on a spike.
+ * address. An operator's monitor can read it from inside the container and
+ * warn on a spike.
  *
  * **Why the count is only for loopback, and outside `/_enclave/`.** Caddy
  * forwards `/_enclave/*` to this process, so anything there is on the

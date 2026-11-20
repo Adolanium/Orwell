@@ -676,7 +676,7 @@ describe("Composer — a cotovelada", () => {
   })
 
   it("o menu + não leva a cotovelada, nem numa conversa que a admite", async () => {
-    // 20/11/2026, the owner: take the nudge out of the "+" menu. The button on
+    // 20/11/2026: the nudge left the "+" menu. The button on
     // the line stays, with its own icon.
     const user = userEvent.setup()
     render(<Harness onBuzz={vi.fn()} buzzCooldown={5} />)

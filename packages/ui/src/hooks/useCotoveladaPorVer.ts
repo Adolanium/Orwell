@@ -5,7 +5,7 @@ import { isDirect } from "../lib/format.js"
 import { playSound } from "../lib/sounds.js"
 
 /**
- * A nudge that arrives, for the whole app (20/11/2026, the owner).
+ * A nudge that arrives, for the whole app (20/11/2026).
  *
  * Two things happen. The nudge sound plays, and the Friends button on the rail
  * shows the nudge (red outline and glyph, `AvisosDoCarril`) until the person

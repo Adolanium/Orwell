@@ -11,7 +11,7 @@ import { BridgeContext } from "../../App.js"
 import { strings } from "../../strings.js"
 
 /**
- * Shift+Enter starts a new line (20/11/2026, the owner).
+ * Shift+Enter starts a new line (20/11/2026).
  *
  * The box is a text area that grows with the text. On a keyboard, Enter
  * sends and Shift+Enter starts a new line. With a finger (the phone's virtual

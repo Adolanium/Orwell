@@ -1233,7 +1233,7 @@ export function Composer({
             // It follows `onVotacao` by the same rule as the nudge: if the caller
             // does not provide it, the input does not appear.
             ...(onVotacao && MOSTRAR_VOTACOES ? [{ label: strings.votacao.criar, onSelect: onVotacao }] : []),
-            // No nudge here (20/11/2026, the owner): it lives on the line only,
+            // No nudge here (20/11/2026): it lives on the line only,
             // with its own button. See `BuzzButton`.
           ]}
         />

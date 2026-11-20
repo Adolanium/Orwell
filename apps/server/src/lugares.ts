@@ -8,7 +8,7 @@
  * no channel and no device: only how many times each thing happened.
  *
  * `GET /_interno/canais` answers them. The same two locks as
- * `GET /_interno/registo` (branch `registo-servidor`), each enough alone:
+ * `GET /_interno/registo`, each enough alone:
  *  - the path is outside `/_enclave/`, which is the only prefix Caddy forwards
  *    to this process; anything else gets Caddy's 404;
  *  - the route checks the SOCKET's address, never `request.ip`: `request.ip`

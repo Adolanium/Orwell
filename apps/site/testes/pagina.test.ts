@@ -275,10 +275,8 @@ describe("todas as páginas", () => {
     expect(semCodigoFonte).not.toMatch(/\bno GitHub\b|\bon GitHub\b/i)
   })
 
+  // The digests stay in the private copy: the public tree does not hold the words.
   const SITIOS = new Set([
-    "7e1acf1d220278f66bc2a6a45e16e0128c0c52a891a41f44101f048343557db3",
-    "ff5ed18d91790407e95c4d691fb1102d2eaf11ff5ffe2d42eacb714c07503452",
-    "51f4b84a8c6bf5768cae685faacee4abb629738e174da4bfa6f4c69c8d87617b",
   ])
 
   it.each(paginas)("%s não identifica quem a faz", (_nome, pagina) => {
@@ -751,7 +749,7 @@ describe("o tributo", () => {
     expect(desenharTributoEmLinha({ nomes: ["Oficina <b>"] }, "en")).toContain(
       '<p class="tributo-frase" id="tributo-frase">Already testing with us:</p>',
     )
-    // All names come from the owner, in his order, in both languages.
+    // All names come from the hand-written list, in its order, in both languages.
     for (const lingua of ["pt", "en"] as const) {
       expect(desenharTributoEmLinha(dados, lingua)).toContain("<li>Lucky 7</li>")
       expect(desenharTributoEmLinha(dados, lingua)).toContain("<li>YFF</li>")
@@ -777,7 +775,7 @@ describe("o tributo", () => {
   })
 
   it("o ficheiro de dados tem os nomes do dono, e vazio a zona diz que o lugar existe", () => {
-    // Names come from the owner (list from November 2, 2026). None are made up.
+    // Names come from the hand-written list (November 2, 2026). None are made up.
     const nomes = lerNomes(dados)
     expect(nomes).toHaveLength(26)
     expect(nomes[0]).toBe("Lucky 7")

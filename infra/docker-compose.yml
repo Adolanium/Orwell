@@ -22,7 +22,7 @@ services:
       target: server
     restart: unless-stopped
     # The container log stays bounded (1.3.25): Docker's json-file grows without end by
-    # default, and what the server prints (accounts, errors) should not live on the disk
+    # default, and what the server prints (errors, and requests with ENCLAVE_LOG=debug) should not live on the disk
     # for months. Three files of 10 MB at most, the oldest dropped first.
     logging:
       driver: json-file

@@ -22,7 +22,7 @@ import {
  * The language: who chooses it, what happens when text is missing, and the
  * default.
  *
- * The rule of the owner (20/11/2026): English is the default. The app opens in
+ * The rule (20/11/2026): English is the default. The app opens in
  * Portuguese only when the system or browser is in Portuguese (`pt`, `pt-PT`,
  * `pt-BR`...). Any other language opens in English. The explicit choice of the
  * person always wins.

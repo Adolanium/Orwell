@@ -45,8 +45,8 @@ function timeline(overrides: Partial<React.ComponentProps<typeof Timeline>>): Re
 
 describe("Timeline", () => {
   /**
-   * The line that announced the end of stored history was removed by order of
-   * the owner: it explained the model, and at this stage the product does not
+   * The line that announced the end of stored history was removed, because
+   * it explained the model, and at this stage the product does not
    * explain how it works.
    *
    * What is proven here is its absence, so it does not come back by mistake,    * and that what it accompanied was not lost with it: the button to load older

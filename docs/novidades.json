@@ -58,7 +58,7 @@
       },
       {
         "tipo": "melhoria",
-        "texto": "Self-hosting: stored ciphertext for offline members is swept after 90 days by default (ENCLAVE_COFRE_GC_DIAS, 0 turns it off), and the compose file bounds container logs."
+        "texto": "Self-hosting: the encrypted vault of a channel that nobody is subscribed to any more is erased after 90 days by default (ENCLAVE_COFRE_GC_DIAS, 0 turns it off), and the compose file bounds container logs."
       },
       {
         "tipo": "fix",
