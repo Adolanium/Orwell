@@ -31,6 +31,7 @@ export interface AppNotification {
     | "report-copy"
     | "report-decision"
     | "role-given"
+    | "device-new"
   at: number
   /** The person behind it, when there is one. */
   actor?: string | undefined
@@ -38,6 +39,8 @@ export interface AppNotification {
   channel?: string | undefined
   /** Only in `report-decision`. */
   decisao?: "suspensa" | "sem-accao" | undefined
+  /** Only in `device-new` (1.3.26): the device key that joined the account, for "Remove". */
+  aparelho?: string | undefined
   /** Only in `role-given`: the roles just given, with name and colour as they were then (12/11/2026). */
   cargos?: { nome: string; cor?: string | undefined }[] | undefined
   read: boolean
@@ -673,6 +676,8 @@ export function notificationTextOf(
         : strings.notifications.reportDecisionVias
     case "role-given":
       return textoDoCargoAtribuido(entry.cargos ?? [], sala ?? "?")
+    case "device-new":
+      return strings.notifCenter.aparelhoNovo
   }
 }
 

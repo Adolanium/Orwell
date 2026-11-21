@@ -3,12 +3,14 @@ import {
   ehPerguntaDePresenca,
   erroDaChamada,
   transmissaoDoAnuncio,
+  type DispositivoRecusado,
   type MediaKeyMaterial,
   type PairEvento,
   type Transmissao,
 } from "@enclave/client-core"
 import type { FonteDeMedia, Payload, UserAddress } from "@enclave/protocol"
 import { registerSystemNoticeHost, type EnclaveBridge, type SystemNotice } from "@enclave/ui"
+import { resolverNumTrabalhador, type TrabalhadorDaProva } from "@enclave/client-core/prova-worker"
 import { Device } from "mediasoup-client"
 import type { FonteDeEcra, PermissaoDeEcra } from "@enclave/ui"
 import { desembrulharAnfitriao } from "./envelope.js"
@@ -91,10 +93,13 @@ interface CanaisDoAnfitriao {
   pedirPerfis?: NonNullable<CanaisDaInterface["pedirPerfis"]>
   buzz?: CanaisDaInterface["buzz"]
   members?: CanaisDaInterface["members"]
+  afastados?: NonNullable<CanaisDaInterface["afastados"]>
   history?: CanaisDaInterface["history"]
   reaccoesGuardadas?: NonNullable<CanaisDaInterface["reaccoesGuardadas"]>
   conversaArquivada?: CanaisDaInterface["conversaArquivada"]
   temConversaArquivada?: CanaisDaInterface["temConversaArquivada"]
+  loadOlderFromMembers?: CanaisDaInterface["loadOlderFromMembers"]
+  hasOlderFromMembers?: CanaisDaInterface["hasOlderFromMembers"]
   forget?: CanaisDaInterface["forget"]
   leave?: NonNullable<CanaisDaInterface["leave"]>
   safetyNumber?: CanaisDaInterface["safetyNumber"]
@@ -168,11 +173,13 @@ interface HostApi {
     lock: () => Promise<{ ok: boolean }>
     memorizar?: (ligar: boolean) => Promise<{ ok: boolean }>
     definirPalavraPasse?: (frase: string) => Promise<{ ok: boolean }>
+    mudarPalavraPasse?: (actual: string, nova: string) => Promise<{ ok: boolean }>
     destroy: () => Promise<{ ok: boolean }>
     export: EnclaveBridge["vault"]["export"]
     import: EnclaveBridge["vault"]["import"]
     escolherFicheiroDeConta?: NonNullable<EnclaveBridge["vault"]["escolherFicheiroDeConta"]>
     createProvisional?: (passphrase: string | null) => Promise<{ ok: boolean }>
+    createProvisionalToSeal?: () => Promise<{ ok: boolean }>
   }
   /** "Switch account". Optional: an old `preload` does not bring it. */
   contas?: NonNullable<EnclaveBridge["contas"]>
@@ -191,8 +198,16 @@ interface HostApi {
     /** The account choice on the common channel. See `bridge.ts` in `@enclave/ui`. */
     escolherSalaComum: (entrar: boolean) => Promise<{ ok: boolean }>
     /** Who may create an account on a server, and the invite code (1.3.25). See `bridge.ts` in `@enclave/ui`. Optional: an old `preload` does not bring them. */
-    sondarRegisto?: (servidor: string) => Promise<"aberto" | "convite" | "fechado" | null>
+    sondarRegisto?: (servidor: string) => Promise<"aberto" | "convite" | "fechado" | "versao-antiga" | null>
     definirConviteDeRegisto?: (codigo: string | null) => Promise<{ ok: boolean }>
+    definirConviteDeComunidade?: (link: string | null) => Promise<{ ok: boolean }>
+    /** The abuse brake, part 2 (1.3.26). See `bridge.ts` in `@enclave/ui`. Optional: an old `preload` does not bring them. */
+    desafioDeRegisto?: () => Promise<{ desafio: string; trabalho: number } | null>
+    definirProvaDeTrabalho?: (prova: { desafio: string; nonce: string } | null) => Promise<{ ok: boolean }>
+    contaNova?: NonNullable<EnclaveBridge["session"]["contaNova"]>
+    criarCanais?: NonNullable<EnclaveBridge["session"]["criarCanais"]>
+    roomQuota?: NonNullable<EnclaveBridge["session"]["roomQuota"]>
+    autorNovo?: NonNullable<EnclaveBridge["session"]["autorNovo"]>
     setVisible: (visible: boolean) => Promise<{ ok: boolean }>
     /** A round trip to the server, in ms. See `bridge.ts` in `@enclave/ui`. */
     latency: () => Promise<number | null>
@@ -304,6 +319,15 @@ interface HostApi {
     som?: () => Promise<{ disponivel: boolean }>
   }
   /**
+   * The macOS microphone and camera permission (1.3.26). Optional: a `preload`
+   * from 1.3.25 or older does not bring it, and the capture then goes as before.
+   * See `main/permissao-de-media.ts`.
+   */
+  permissaoDeMedia?: {
+    pedir: (video: boolean) => Promise<{ recusado: DispositivoRecusado | null }>
+    abrirDefinicoes: (dispositivo: DispositivoRecusado) => Promise<{ ok: boolean }>
+  }
+  /**
    * The new version alert, exposed by `preload`.
    *
    * Optional for the same reason as `ecra`: a `preload` from another version doesn't provide it.
@@ -337,6 +361,8 @@ interface HostApi {
   diagnostico?: NonNullable<EnclaveBridge["diagnostico"]>
   on: Omit<EnclaveBridge["on"], "typing" | "buzz" | "pair"> & {
     voice: (handler: (payload: unknown) => void) => () => void
+    /** The member list changed without an epoch (P7). Optional: an older preload lacks it. Never rekeys a call. */
+    members?: (handler: (payload: unknown) => void) => () => void
     /** Crosses the IPC as a plain object; the shape is restored in the bridge. */
     pair?: (handler: (payload: unknown) => void) => () => void
     /** Crosses the IPC as a plain object; the shape is restored in the bridge. */
@@ -449,11 +475,15 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
     pedirPerfis: pedido("pedirPerfis", canais.pedirPerfis),
     buzz: pedido("buzz", canais.buzz),
     members: pedido("members", canais.members),
+    // A request, like `members`: the list of who is gone changes as people leave.
+    afastados: pedido("afastados", canais.afastados),
     history: pedido("history", canais.history),
     // A request, not a cached read: the reactions change with every message.
     reaccoesGuardadas: pedido("reaccoesGuardadas", canais.reaccoesGuardadas),
     conversaArquivada: pedido("conversaArquivada", canais.conversaArquivada),
     temConversaArquivada: pedido("temConversaArquivada", canais.temConversaArquivada),
+    loadOlderFromMembers: pedido("loadOlderFromMembers", canais.loadOlderFromMembers),
+    hasOlderFromMembers: pedido("hasOlderFromMembers", canais.hasOlderFromMembers),
     forget: pedido("forget", canais.forget),
     leave: pedido("leave", canais.leave),
     safetyNumber: pedido("safetyNumber", canais.safetyNumber),
@@ -802,6 +832,7 @@ export function createDesktopBridge(): EnclaveBridge {
   const { canais, esquecer: esquecerLeituras } = ligarCanais(host)
   host.on.message(esquecerLeituras)
   host.on.epoch(esquecerLeituras)
+  host.on.members?.(esquecerLeituras)
   host.on.channels(esquecerLeituras)
 
   // Cached after login so the call layer can compare addresses synchronously.
@@ -867,6 +898,10 @@ export function createDesktopBridge(): EnclaveBridge {
       main process (`ecra:som`); an old `preload` without the query
       answers "yes", which is the silence from before.
     */
+    // A refusal by macOS gives a silent track, not an error: ask first. See `permissaoDoSistema` in `CallBridge`.
+    ...(host.permissaoDeMedia
+      ? { permissaoDoSistema: async (video: boolean) => (await host.permissaoDeMedia!.pedir(video)).recusado }
+      : {}),
     somDoEcraDisponivel: async () => {
       const perguntar = host.ecra?.som
       if (!perguntar) return true
@@ -1186,6 +1221,9 @@ export function createDesktopBridge(): EnclaveBridge {
     ...(host.contas ? { contas: host.contas } : {}),
     applyMediaPrefs,
     ...(ecra ? { ecra } : {}),
+    ...(host.permissaoDeMedia
+      ? { privacidadeDoSistema: { abrir: (dispositivo: DispositivoRecusado) => host.permissaoDeMedia!.abrirDefinicoes(dispositivo) } }
+      : {}),
     /*
       Passes raw, with no wrapper: the three operations have no form to restore on
       this side, unlike channel reads. What matters is the condition, without a
@@ -1220,7 +1258,28 @@ export function createDesktopBridge(): EnclaveBridge {
     // Raw: without a `preload` to bring it, the interface keeps whatever text the vault still has.
     ...(host.media ? { media: host.media } : {}),
     ...(host.diagnostico ? { diagnostico: host.diagnostico } : {}),
-    session: host.session,
+    session: {
+      ...host.session,
+      /*
+        The proof of work of a new account (1.3.26): the challenge comes from the
+        main process, where the socket lives, and is solved here, in a Web Worker
+        of this window, so no process freezes. See `prova-worker.ts`.
+      */
+      ...(host.session.desafioDeRegisto && host.session.definirProvaDeTrabalho
+        ? {
+            prepararContaNova: async (aoProgresso: (fraccao: number) => void) => {
+              const desafio = await host.session.desafioDeRegisto!()
+              if (!desafio) return false
+              const resolver = resolverNumTrabalhador(
+                () => new Worker(new URL("./prova-worker.ts", import.meta.url), { type: "module" }) as unknown as TrabalhadorDaProva,
+              )
+              const prova = await resolver(desafio, aoProgresso)
+              await host.session.definirProvaDeTrabalho!(prova)
+              return true
+            },
+          }
+        : {}),
+    },
     channels: canais,
     social: host.social,
     votacoes: host.votacoes,
@@ -1229,7 +1288,16 @@ export function createDesktopBridge(): EnclaveBridge {
     profile: host.profile,
     on: {
       message: host.on.message,
-      epoch: host.on.epoch,
+      // `members` too (P7), as on the web: the shown list changed without an epoch, and the
+      // interface reads the members on this event. Only `host.on.epoch` rekeys the call.
+      epoch: (handler) => {
+        const stopEpoch = host.on.epoch(handler)
+        const stopMembers = host.on.members?.(handler) ?? (() => {})
+        return () => {
+          stopEpoch()
+          stopMembers()
+        }
+      },
       status: host.on.status,
       connection: host.on.connection,
       channels: host.on.channels,

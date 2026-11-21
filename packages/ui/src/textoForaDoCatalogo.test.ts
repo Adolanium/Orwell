@@ -61,6 +61,8 @@ const PERMITIDOS: Readonly<Record<string, string>> = {
     "os nomes com que as salas nascem, nas duas línguas, para os reconhecer; o ecrã mostra-os pelo catálogo",
   "apps/client/src/main/actualizacao-windows.ts::*":
     "`textosDaPergunta`, que já escolhe entre as duas línguas",
+  "packages/ui/src/screens/telemovel/inventario.ts::*":
+    "o inventário dos menus do telemóvel, que só o `inventario.test.ts` lê; a app não o importa nem o mostra",
 }
 
 interface Achado {

@@ -33,7 +33,8 @@ async function abrir(criar: boolean) {
     await ponte.vault.create(FRASE)
     await ponte.identity.create("localhost:8448")
   }
-  return { ponte, armazem, vault: (partes as unknown as { vault: Vault }).vault }
+  const { vault, session } = partes as unknown as { vault: Vault; session: Session }
+  return { ponte, armazem, vault, session }
 }
 
 describe("a ponte do browser exporta a conta com as imagens, à escolha", () => {
@@ -55,6 +56,8 @@ describe("a ponte do browser exporta a conta com as imagens, à escolha", () => 
     sessionStorage.clear()
     localStorage.clear()
     const destino = await abrir(false)
+    // No server here: the handover that adds the new device to the manifest (1.3.26) answers as one without manifests.
+    destino.session.passagemDoImportar = async () => ({ versao: null })
     await destino.ponte.vault.import(comImagens.ficheiro, FRASE)
     expect((await destino.armazem.listar()).map((b) => b.sha)).toContain(sha)
     await destino.ponte.vault.unlock(FRASE)

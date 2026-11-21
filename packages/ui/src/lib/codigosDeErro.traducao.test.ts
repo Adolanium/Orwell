@@ -191,10 +191,10 @@ describe("um emparelhamento que não terminou (M1 da revisão da 1.3.20)", () =>
   it("o device-revoked sem o aparelho no manifesto diz que o emparelhamento não terminou, e a remoção continua igual", () => {
     const base = { detail: "", level: "error" as const, code: "device-revoked", route: "toast" as const }
     expect(fraseDoStatus({ ...base, emparelhamentoPorAcabar: true }, (canal) => canal)).toBe(
-      "Erro 719\nO emparelhamento não terminou. Volta a emparelhar este aparelho.",
+      "Erro 719\nEste aparelho não acabou de se juntar à conta. Entra outra vez.",
     )
-    expect(fraseDoStatus(base, (canal) => canal)).toBe("Erro 748\nEste aparelho foi tirado da conta noutro aparelho.")
+    expect(fraseDoStatus(base, (canal) => canal)).toBe("Erro 748\nEste aparelho saiu da conta.")
     definirLingua("en")
-    expect(fraseDoStatus({ ...base, emparelhamentoPorAcabar: true }, (canal) => canal)).toBe("Error 719\nThe pairing did not finish. Pair this device again.")
+    expect(fraseDoStatus({ ...base, emparelhamentoPorAcabar: true }, (canal) => canal)).toBe("Error 719\nThis device did not finish joining the account. Sign in again.")
   })
 })

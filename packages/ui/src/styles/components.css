@@ -142,6 +142,9 @@
   outline-offset: 2px;
 }
 
+/* The glyph, not the box, ends on the header's padding edge: the margin takes
+   back the button's own padding, so this `+` lines up with the category `+`
+   and with the unread counts below it. */
 .header-add {
   border: none;
   background: transparent;
@@ -150,8 +153,20 @@
   display: grid;
   place-items: center;
   padding: var(--space-1);
+  margin-right: calc(-1 * var(--space-1));
   border-radius: var(--radius-sm);
   transition: background-color var(--dur-fast) var(--ease);
+}
+
+/* 44 px for a finger, the glyph still on the same edge. The glyph is 17 px
+   (`PlusIcon size={17}`) and centered, so the box overhangs by half of the
+   difference. Width and margin only: the Aurora skin restates the rest. */
+@media (pointer: coarse) {
+  .header-add {
+    width: 44px;
+    height: 44px;
+    margin-right: calc((17px - 44px) / 2);
+  }
 }
 
 .header-add:hover {
@@ -1211,6 +1226,119 @@ button.tag-pill:active,
   cursor: not-allowed;
 }
 
+/*
+  A "+" at a cap (1.3.26, `BlockedButton`): grey, no hover background, and a
+  target of 44 px on any pointer. The box grows around the glyph with negative
+  margins, so nothing else on the line moves.
+*/
+.no-tecto {
+  cursor: not-allowed;
+}
+
+/* Grey on the content only: an opacity on the button would fade its tooltip too.
+   One selector per kind of content (the "+" glyph, the room row), not `> *`:
+   see `baldes.test.ts`. */
+.no-tecto > svg,
+.no-tecto > .room-glyph,
+.no-tecto > .room-name {
+  opacity: 0.45;
+}
+
+.no-tecto:hover {
+  background: transparent;
+}
+
+/* The rail "+" on a phone keeps its round resting look: no hover colour, no pill. */
+.rail-btn.no-tecto:hover {
+  border-radius: 50%;
+  background: var(--bg-main);
+  color: inherit;
+}
+
+.rail-btn.no-tecto:hover::before {
+  height: 0;
+}
+
+.header-add.no-tecto {
+  width: 44px;
+  height: 44px;
+  margin: calc((25px - 44px) / 2) calc((17px - 44px) / 2) calc((25px - 44px) / 2) 0;
+}
+
+.category-criar.no-tecto {
+  width: 44px;
+  min-height: 44px;
+  margin-block: calc((18px - 44px) / 2);
+}
+
+.room-new.no-tecto {
+  min-height: 44px;
+  /* The row's own 0.75 would fade the tip too; the content is already grey. */
+  opacity: 1;
+}
+
+/* The column clips what overflows it: the tips of the column wrap inside it. */
+.room-new.no-tecto::after {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.header-add.no-tecto::after {
+  max-width: 13rem;
+}
+
+/*
+  The bubble a tap opens (`BlockedButton`), for a phone, which has no hover.
+  Fixed to the window, under the button: the rail and the column would clip a
+  pseudo-element. Same look as the tooltip.
+*/
+.dica-tocada {
+  position: fixed;
+  z-index: var(--z-toast);
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-sm);
+  text-align: center;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 0.45);
+  pointer-events: none;
+  animation: dica-tocada-entra var(--dur-fast) var(--ease);
+}
+
+/* With the bubble open, the hover tooltip of the same button stays out of the way. */
+.no-tecto.dica-tocada-aberta::after,
+.no-tecto.dica-tocada-aberta::before {
+  display: none;
+}
+
+@keyframes dica-tocada-entra {
+  from {
+    opacity: 0;
+  }
+}
+
+/*
+  Below the button, grown inward from its right edge: for a "+" at the top of
+  a column (the header), where a bubble above would leave the window.
+*/
+[data-tip][data-tip-side="below-end"]::after {
+  bottom: auto;
+  top: calc(100% + 9px);
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+[data-tip][data-tip-side="below-end"]::before {
+  bottom: auto;
+  top: calc(100% + 6px);
+  left: auto;
+  right: 18px;
+  transform: rotate(225deg);
+}
+
 [data-tip][data-tip-side="end"]::after {
   left: auto;
   right: 0;
@@ -1392,11 +1520,14 @@ button.tag-pill:active,
 
 /* The "⋯" menu for the person on the call card (phase 3): in the corner, on
    top of everything, visible only on hover or focus, like message "⋯". On a
-   touch screen it is always visible: there is no hover. */
+   touch screen it is always visible: there is no hover.
+
+   The corner is its own: a 44 px target, the touch minimum, and nothing else
+   of the card is placed there (the voice wave sits next to the name). */
 .call-chip-mais {
   position: absolute;
-  top: var(--space-2);
-  right: var(--space-2);
+  top: var(--space-1);
+  right: var(--space-1);
   z-index: 2;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease);
@@ -1411,6 +1542,13 @@ button.tag-pill:active,
   .call-chip-mais {
     opacity: 1;
   }
+}
+
+/* The size, with the card in the selector: `.botao-mais` (28 px, further down
+   this sheet) would otherwise win by coming later. */
+.call-chip .call-chip-mais {
+  width: 44px;
+  height: 44px;
 }
 
 /* ------------------------------------------------------- presence dots */
@@ -2131,23 +2269,30 @@ span.mention {
 }
 
 /**
- * Reduced motion: the level stays, the movement goes.
+ * Reduced motion: the wave keeps moving, only slower.
  *
- * Bars change size sixty times per second when someone speaks, and that is
- * exactly what this preference exists to turn off. Removing the wave outright
- * would take information away from someone who asked only for stillness-so bars
- * stay at full height and LIGHT UP in the same order always, from center
- * outward, each at its `--degrau`. Nothing moves, nothing changes size, and
- * you still see who is talking and how much.
+ * Windows with animation effects off reports reduced motion, and for whoever
+ * runs it a wave that stops reads as a broken meter (the house rule: nothing
+ * stops, it moves slower). So the bars keep their `scaleY()` and follow the
+ * level through a slow transition: each new value of `--voz` restarts it from
+ * where the bar is, so the bar glides towards the voice instead of jumping
+ * sixty times a second. Only `transform` transitions; the colour changes at once.
  *
- * The `* 8` is step sharpness: with a multiplier of 1 each bar would go from
- * off to on across the whole scale and the group would read as haze. `clamp`
- * because a percentage outside [0,100] in `color-mix` is territory where engines
+ * On top of the height, the bars also light up from center outward, each at
+ * its `--degrau`, like a segment meter: the level reads by colour too.
+ *
+ * `!important` against the universal rule in `base.css` (transitions at 0 s
+ * with reduced motion); this selector weighs more than `*`. The `* 8` is step
+ * sharpness: with a multiplier of 1 each bar would go from off to on across
+ * the whole scale and the group would read as haze. `clamp` because a
+ * percentage outside [0,100] in `color-mix` is territory where engines
  * disagree.
  */
 @media (prefers-reduced-motion: reduce) {
   .onda-barra {
-    transform: none;
+    transition-property: transform !important;
+    transition-duration: 450ms !important;
+    transition-timing-function: linear !important;
     background: color-mix(
       in srgb,
       var(--accent) calc(clamp(0, (var(--voz, 0) - var(--degrau, 0)) * 8, 1) * 100%),

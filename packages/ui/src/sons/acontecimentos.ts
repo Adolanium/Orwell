@@ -63,6 +63,9 @@ export function somDaNotificacao(kind: AppNotification["kind"]): TipoDeSom | nul
     // A role given to me (12/11/2026): the channel calling for me, the mention family.
     case "role-given":
       return "mencao"
+    // A device joined the account (1.3.26): the bell and the notice say it; no sound, like the reports.
+    case "device-new":
+      return null
   }
 }
 

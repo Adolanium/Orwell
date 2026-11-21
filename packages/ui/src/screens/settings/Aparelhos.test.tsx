@@ -54,9 +54,10 @@ const ESTE = { deviceKey: "dVWtbPLSETyzAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", addedAt
 const OUTRO = { deviceKey: "outroApar3lhoDeTeste_AAAAAAAAAAAAAAAAAAAAAA", addedAt: 1_758_600_000, esteAparelho: false }
 
 describe("a secção Aparelhos", () => {
-  it("com a chave de conta e um servidor que emparelha, lista o manifesto com este aparelho marcado e mostra o botão", async () => {
+  it("com a chave de conta e um servidor que emparelha, lista o manifesto com este aparelho marcado", async () => {
+    // "Juntar um aparelho" lives in the list of Account and security (21/11/2026), not here.
     montar(ponte({ temChaveDeConta: true, servidorSuporta: true }, [OUTRO, ESTE]))
-    await waitFor(() => expect(screen.getByRole("button", { name: strings.settings.addDevice })).toBeTruthy())
+    await waitFor(() => expect(document.querySelectorAll(".aparelhos-lista li")).toHaveLength(2))
     const linhas = document.querySelectorAll(".aparelhos-lista li")
     expect(linhas).toHaveLength(2)
     // Ordered by the date they entered, and this is the first.
@@ -71,13 +72,13 @@ describe("a secção Aparelhos", () => {
   it("num aparelho emparelhado não há botão: diz-se onde se acrescentam aparelhos", async () => {
     montar(ponte({ temChaveDeConta: false, servidorSuporta: true }, [OUTRO, { ...ESTE, esteAparelho: true }]))
     await waitFor(() => expect(screen.getByText(strings.pairing.noAccountKey)).toBeTruthy())
-    expect(screen.queryByRole("button", { name: strings.settings.addDevice })).toBeNull()
+    expect(screen.queryByRole("button", { name: strings.contaESeguranca.juntar })).toBeNull()
   })
 
   it("contra um servidor sem emparelhamento não há botão, e diz-se porquê", async () => {
     montar(ponte({ temChaveDeConta: true, servidorSuporta: false }, [ESTE]))
     await waitFor(() => expect(screen.getByText(strings.pairing.serverUnsupported)).toBeTruthy())
-    expect(screen.queryByRole("button", { name: strings.settings.addDevice })).toBeNull()
+    expect(screen.queryByRole("button", { name: strings.contaESeguranca.juntar })).toBeNull()
   })
 
   it("sem manifesto diz que o servidor não diz, em vez de inventar uma lista", async () => {
@@ -165,32 +166,17 @@ describe("a secção Aparelhos", () => {
     expect(screen.queryByRole("button", { name: /^Revogar/ })).toBeNull()
   })
 
-  it("o aviso da importação nomeia os dois botões pelo nome que eles têm", () => {
-    // "Add device" is the main device button (Settings, Devices); "Yes, pair this
-    // device" is the one on the gate in the new device, as long as Setup opens with
-    // the question from the other device (phase 8.1).
-    expect(strings.settings.importReplacesDevice).toContain(`"${strings.settings.addDevice}"`)
-    expect(strings.settings.importReplacesDevice).toContain(`"${strings.gate.outroAparelhoSim}"`)
-    expect(strings.pairing.hostLead).toContain(`"${strings.gate.outroAparelhoSim}"`)
-  })
-
-  it("abre a dizer que uma conta chega para todos os aparelhos (fase 8.1)", async () => {
-    montar(ponte({ temChaveDeConta: true, servidorSuporta: true }, [ESTE]))
-    expect(await screen.findByText(strings.comoFunciona.umaContaChega)).toBeTruthy()
-    expect(strings.comoFunciona.umaContaChega).toBe("Uma conta chega para todos os teus aparelhos.")
-  })
-
   it("as frases de contrato existem nas duas línguas e sem travessões", () => {
     for (const frase of [
-      strings.pairing.doneBody,
-      strings.pairing.doneGuestNote,
-      strings.settings.importReplacesDevice,
+      strings.juntarAparelho.contaLead,
+      strings.juntarAparelho.novoLead,
       strings.settings.revokeBody,
       strings.settings.revokeHonest,
     ]) {
       expect(frase).not.toMatch(/[—–]/)
     }
-    expect(strings.pairing.doneBody).toBe("Este aparelho já recebe as mensagens novas. As conversas antigas chegam do outro aparelho enquanto os dois estiverem ligados.")
-    expect(strings.pairing.doneGuestNote).toBe("Podes gerir os aparelhos a partir de qualquer um dos teus aparelhos.")
+    // No "main device": any device of the account adds and removes (21/11/2026).
+    expect(strings.juntarAparelho.novoLead).not.toContain("principal")
+    expect(strings.pairing.noAccountKey).not.toContain("principal")
   })
 })

@@ -2,11 +2,13 @@ export * from "./actosEmTexto.js"
 export * from "./anexos.js"
 export * from "./apelidos.js"
 export * from "./nomeDeApresentacao.js"
+export * from "./biografia.js"
 export * from "./audio/index.js"
 export * from "./bootstrap.js"
 export * from "./cabecalhoDoCofre.js"
 export * from "./contasDoAparelho.js"
 export * from "./call.js"
+export * from "./recusa-do-sistema.js"
 export * from "./call-sfu.js"
 export * from "./musica.js"
 export * from "./somDoDj.js"
@@ -20,6 +22,9 @@ export * from "./egresso.js"
 export * from "./emitter.js"
 export * from "./emparelhar.js"
 export * from "./mensagemAEnviar.js"
+export * from "./passagem.js"
+export * from "./pendingImportKeys.js"
+export * from "./palavraPasseDaConta.js"
 export * from "./push.js"
 export * from "./marcasDeArranque.js"
 export * from "./erros-do-browser.js"
@@ -45,6 +50,14 @@ export { TECTOS_DA_SINCRONIA } from "./sincronia/eleicao.js"
 export * from "./sincronia/instantaneo.js"
 export { HistoricoEntreAparelhos, TECTOS_DO_FIO_DO_HISTORICO, type EventoDoHistorico } from "./historico/historico.js"
 export { TECTOS_DO_HISTORICO, resumoDoHistorico } from "./historico/conteudo.js"
+export {
+  HISTORY_PAGE_LINES,
+  HistoricoDosMembros,
+  TECTOS_DOS_MEMBROS,
+  _paraTestes as _membrosParaTestes,
+  type EstatisticasDosMembros,
+  type LoadOlderResult,
+} from "./historico/membros.js"
 export * from "./armazem/dimensoes.js"
 export * from "./armazem/blob.js"
 export * from "./armazem/tipos.js"

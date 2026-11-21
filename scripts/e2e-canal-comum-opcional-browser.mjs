@@ -204,18 +204,17 @@ async function deFora(page, endereco, quando) {
 // --------------------------------------------- 0. the language without ?lingua=
 console.log("\n0. A língua do registo sem ?lingua=")
 for (const [locale, espera, rotulo] of [
-  ["en-US", "How you want to appear", "inglês num sistema em inglês"],
-  ["de-DE", "How you want to appear", "inglês num sistema noutra língua"],
+  ["en-US", "Welcome to Orwell", "inglês num sistema em inglês"],
+  ["de-DE", "Welcome to Orwell", "inglês num sistema noutra língua"],
   // Since 1.3.9 the browser language does not count: English until someone chooses.
-  ["pt-PT", "How you want to appear", "inglês num sistema em português (1.3.9)"],
+  ["pt-PT", "Welcome to Orwell", "inglês num sistema em português (1.3.9)"],
 ]) {
   const ctx = await browser.newContext({ locale })
   const page = await ctx.newPage()
   await page.goto(`http://${NOME}/app/`)
-  const viu = await page.getByPlaceholder(espera).or(page.getByRole("button", { name: /^(No, create an account|Não, criar conta)$/ })).first().waitFor({ timeout: 30_000 }).then(() => true, () => false)
-  const naoCriar = page.getByRole("button", { name: /^(No, create an account|Não, criar conta)$/ })
-  if (await naoCriar.count()) await naoCriar.click()
-  const ok = await page.getByPlaceholder(espera).waitFor({ timeout: 15_000 }).then(() => true, () => false)
+  // The first screen (21/11/2026): "Welcome to Orwell" and the three ways in.
+  const viu = await page.getByRole("heading", { name: espera }).waitFor({ timeout: 30_000 }).then(() => true, () => false)
+  const ok = viu && (await page.locator(".entrada-caminhos button.primary").count()) === 1
   verificar(viu && ok, `o registo abre em ${rotulo} (${locale})`)
   await ctx.close()
 }

@@ -1,285 +1,189 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { TextoDeErro } from "../../components/TextoDeErro.js"
-import { parsePairLink, PRAZO_DO_ESTADO_MS } from "@enclave/client-core"
+import { ERRO_NAO_E_A_PALAVRA_PASSE_DA_CONTA, parsePairLink } from "@enclave/client-core"
 import { useBridge } from "../../App.js"
 import type { PairEvento } from "../../bridge.js"
 import { Button } from "../../components/Button.js"
-import { ApagarConta } from "../../components/ConfirmarDestruicao.js"
 import { Field } from "../../components/Field.js"
-import { CampoDeIdentidade } from "./CampoDeIdentidade.js"
-import { CaixaMemorizar, useMemorizarDepoisDeAbrir } from "./MemorizarSessao.js"
-import { fraseDoCampo } from "./fraseDoCampo.js"
-import { OrwellWordmark } from "../../components/Logo.js"
-import { PalavrasDoSas } from "../../components/PalavrasDoSas.js"
-import { strings, translateError, translatePairingError, traduzirErro } from "../../strings.js"
 import { LeitorQr } from "../../components/LeitorQr.js"
+import { PalavrasDoSas } from "../../components/PalavrasDoSas.js"
+import { TextoDeErro } from "../../components/TextoDeErro.js"
+import { strings, translateError, translatePairingError, traduzirErro } from "../../strings.js"
+import { CampoDeIdentidade } from "./CampoDeIdentidade.js"
+import { CartaoDoPortao } from "./Entrada.js"
+import { fraseDoCampo } from "./fraseDoCampo.js"
+import { NewDeviceCode } from "./NewDeviceCode.js"
+import { defaultServer, MINIMO_DA_PALAVRA_PASSE } from "./Setup.js"
 
 /**
- * The mobile gate: join THIS device to an account that lives on the computer.
+ * "Entrar com outro aparelho", on the new device (mock-up `Emparelhar`, 21/11/2026).
  *
- * Three pages, one question each, like `Setup`:
+ *  1. **The code.** "No aparelho onde tens a conta, abre Configurações › Juntar
+ *     um aparelho." That device shows a QR code: this one reads it with the
+ *     camera, or the person pastes the code.
+ *  2. **The words.** Both screens show the same three words, and the person
+ *     says "Sim, juntar o aparelho" on both. Only then does the certificate
+ *     come.
+ *  3. **"Estás dentro"**, with the account password, and "Abrir o Orwell".
  *
- *  1. **The link.** Read by the camera (`LeitorQr`) or pasted. The QR just saves
- *     typing; what authenticates comes next.
- *  2. **This device's key.** A password (or the system keychain) for the vault that
- *     will store the conversations here. It's the same question as `Setup`, because
- *     it's the same vault.
- *  3. **The pairing.** Connect to the box, swap keys, and six words appear in large
- *     letters. The person confirms here AND on the computer. Only then does the
- *     certificate arrive; this device loads the identity, connects, and tells the
- *     computer it's ready.
- *  4. **The status** (phase 5), between certificate and entry: "getting your status",
- *     with the deadline in sight. If it doesn't arrive by deadline, you enter anyway
- *     and the end says so. A 0.5.7 computer doesn't send it, and the step doesn't
- *     appear.
+ * The protocol is the one from before (`emparelhar.ts`): the device with the
+ * account makes the secret and shows it as a QR code.
  *
- * At the end, once, the two contract phrases: what this device sees from now on, and
- * that it doesn't have the account key. See `strings.pairing`.
+ * **Or this device shows a short code** (1.3.26, `pairing-pake`). "Show a code
+ * on this device" opens a box on this device's server and shows "K7P · 4QM"
+ * with its QR (`NewDeviceCode`). The person types it, or reads it, on the
+ * device with the account (`TypeCode`), and CPace makes the box key from the
+ * code. From the words on, both paths are the same.
  *
- * What this screen NEVER gets: the account's private key. What stays in the vault is
- * the public key, the certificate and this device's key, written by the core before
- * the `certificado` event reaches here.
+ * **The account password after pairing** (1.3.26, one password on all devices).
+ * The vault of this attempt is provisional, in memory and with no password
+ * (`vault.createProvisionalToSeal`). After the certificate, "Estás dentro" asks
+ * for the account password and `pairing.seal` checks it against the record the
+ * other device sent: a wrong one is Erro 140, and the step stays. When the other
+ * device sent no record (an older version, or a vault with no password), the
+ * person chooses the account password here, typed twice. Only then does the vault
+ * reach the disk (`pairing.done`) and the app open.
  *
- * **With an account replacing** (`substituirConta`), the vault for this attempt is
- * PROVISIONAL (`vault.createProvisional`): it lives in memory, and the disk holds
- * the account here until the end. Only at `pairing.done`, after the new account has
- * loaded and connected, does the provisional go to disk over the old one. A pairing
- * that fails before then (expired link, network, "They're not" from the other side)
- * didn't delete anything: `pairing.cancel` drops the provisional, and the gate opens
- * the account here again.
+ * No path here deletes an account: the gate only opens this screen on a device
+ * with no vault (`outraEntrada.ts`), and the provisional vault leaves with
+ * `pairing.cancel`.
  */
-type Passo = "link" | "chave" | "emparelhar"
-
 type Fase =
+  | { que: "codigo" }
   | { que: "a-ligar" }
-  | { que: "a-espera" }
+  /** Short code (1.3.26): this device shows the code and waits for the other to type it. */
+  | { que: "code"; code: string; link: string }
   | { que: "sas"; palavras: string; confirmado: boolean }
-  | { que: "estado"; ate: number }
-  | { que: "a-entrar" }
-  | { que: "concluido"; address: string; semEstado: boolean }
+  | { que: "a-receber" }
+  | { que: "dentro"; tipo: "conta" | "nova"; semEstado: boolean }
   | { que: "falhou"; razao: string }
 
 export function Emparelhar({
   linkInicial,
-  substituirConta = false,
   onDone,
   onBack,
 }: {
-  /** The link the page opened with, if it opened with one. */
+  /** The code the page opened with, if it opened with one. */
   linkInicial?: string | null
-  /**
-   * There's an account on this device, and this pairing puts another in its place
-   * ("Sign in with another account", in the gate). The "delete" prompt is asked at
-   * the key's "Continue", but the account here only leaves the disk when the new one
-   * is in: until then, the vault for this attempt is provisional. See the header and
-   * `EntrarComOutraConta`.
-   */
-  substituirConta?: boolean
   onDone: (address: string) => void
   onBack: () => void
 }): React.JSX.Element {
   const bridge = useBridge()
-  const [passo, setPasso] = useState<Passo>(linkInicial ? "chave" : "link")
+  const [fase, setFase] = useState<Fase>({ que: "codigo" })
   const [link, setLink] = useState(linkInicial ?? "")
   const [aLer, setALer] = useState(false)
   const [erroDoLink, setErroDoLink] = useState<string | null>(null)
-  const [passphrase, setPassphrase] = useState("")
-  const [confirm, setConfirm] = useState("")
-  // F3 of session memory: a new account is ALWAYS born with a password.
-  // The vault from keychain only (`os`) stopped being offered: with it,
-  // "Sign out" didn't sign anyone out. The ones that already exist convert to
-  // Account > Session > "Set password".
-  const useOs = false
-  /** The platform has a place to memorize the session (F1). See `MemorizarSessao.tsx`. */
-  const [memoriaDisponivel, setMemoriaDisponivel] = useState(false)
-  /** "Memorize the session", on by default. */
-  const [memorizar, setMemorizar] = useState(true)
-  const memorizarDepoisDeAbrir = useMemorizarDepoisDeAbrir(bridge)
-  // Read when the certificate arrives, inside an effect with other dependencies.
-  const memorizarNoFim = useRef(false)
-  memorizarNoFim.current = !useOs && memoriaDisponivel && memorizar
-  const [erroDaChave, setErroDaChave] = useState<string | null>(null)
-  const [fase, setFase] = useState<Fase>({ que: "a-ligar" })
-  /** The vault was already created in this attempt: if it fails, delete before retry. */
-  const cofreCriado = useRef(false)
-  /**
-   * The user already typed "delete" on this screen (`substituirConta`). A second
-   * attempt does not ask again; the account on this device stays on disk as is,
-   * until an attempt completes.
-   */
-  const apagarAceite = useRef(false)
-  /** The new key passphrase, waiting for "delete" to be typed to proceed. */
-  const [aApagar, setAApagar] = useState<string | null>(null)
+  const [frase, setFrase] = useState("")
+  const [outraVez, setOutraVez] = useState("")
+  const [erroDaFrase, setErroDaFrase] = useState<string | null>(null)
+  const [aAbrir, setAAbrir] = useState(false)
+  /** The typed password was not the account's (Erro 140): show the way out. */
+  const [notAccountPassword, setNotAccountPassword] = useState(false)
+  /** The account is on disk (`pairing.done`): leaving no longer cancels anything. */
+  const concluido = useRef(false)
 
+  /** Listens to the core while pairing. */
   useEffect(() => {
-    void bridge.vault
-      .status()
-      .then(({ memoriaDisponivel: memoria }) => {
-        setMemoriaDisponivel(Boolean(memoria && bridge.vault.memorizar))
-      })
-      .catch(() => {})
-  }, [bridge])
-
-  const aceitarLink = (texto: string): void => {
-    const lido = parsePairLink(texto)
-    if (!lido) {
-      setErroDoLink(strings.pairing.linkInvalid)
-      return
-    }
-    setErroDoLink(null)
-    setLink(texto.trim())
-    setALer(false)
-    setPasso("chave")
-  }
-
-  /**
-   * Validates what is in the FIELDS, not what React thinks is there.
-   *
-   * The system manager also writes here (the `new-password` is for them), and
-   * can do so without firing any event. If someone creates a vault with the
-   * passphrase that React knew about, rather than what ended up in the field,    * they have no way to open it. See `fraseDoCampo`.
-   */
-  const validarChave = (frase: string, confirmacao: string): boolean => {
-    if (useOs) return true
-    if (frase.length < 8) {
-      setErroDaChave(strings.gate.passphraseShort)
-      return false
-    }
-    if (frase !== confirmacao) {
-      setErroDaChave(strings.gate.passphraseMismatch)
-      return false
-    }
-    setErroDaChave(null)
-    return true
-  }
-
-  /** Listens to the core while on the third page. */
-  useEffect(() => {
-    if (passo !== "emparelhar" || !bridge.on.pair) return
+    if (fase.que === "codigo" || fase.que === "falhou" || !bridge.on.pair) return
     const desligar = bridge.on.pair((evento: PairEvento) => {
       switch (evento.fase) {
+        case "code":
+          setFase({ que: "code", code: evento.code, link: evento.link })
+          return
         case "ligado":
-          setFase({ que: "a-espera" })
+          // The other device found the code: the words come next.
+          setFase((agora) => (agora.que === "code" ? { que: "a-ligar" } : agora))
           return
         case "sas":
           setFase({ que: "sas", palavras: evento.palavras, confirmado: false })
           return
         case "estado":
-          setFase({ que: "estado", ate: Date.now() + PRAZO_DO_ESTADO_MS })
+          setFase({ que: "a-receber" })
           return
-        case "certificado": {
-          const semEstado = evento.estado === "em-falta"
-          setFase({ que: "a-entrar" })
-          void (async () => {
-            const identity = await bridge.identity.load()
-            await bridge.session.connect()
-            await bridge.pairing?.done()
-            // From here on the vault has an account: it stops being the empty vault
-            // from this attempt and no one can destroy it on exit.
-            cofreCriado.current = false
-            // Only now is it stored: with a provisional vault, the vault key for this
-            // device only becomes this one at `done`.
-            await memorizarDepoisDeAbrir(memorizarNoFim.current)
-            setFase({ que: "concluido", address: identity.address, semEstado })
-          })().catch((erro: Error) => setFase({ que: "falhou", razao: traduzirErro(erro) }))
+        case "certificado":
+          setErroDaFrase(null)
+          setFase({ que: "dentro", tipo: evento.palavraPasse ?? "nova", semEstado: evento.estado === "em-falta" })
           return
-        }
         case "falhou":
           setFase({ que: "falhou", razao: translatePairingError(evento.razao) })
           return
-        case "aguarda":
-        case "concluido":
+        default:
           return
       }
     })
     return desligar
-  }, [passo, bridge])
+    // Subscribed once per pairing, not once per phase.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fase.que === "codigo" || fase.que === "falhou", bridge])
 
-  /** The seconds remaining until the state deadline, to the second. */
-  const [agora, setAgora] = useState(() => Date.now())
-  useEffect(() => {
-    if (fase.que !== "estado") return
-    const relogio = setInterval(() => setAgora(Date.now()), 1000)
-    return () => clearInterval(relogio)
-  }, [fase.que])
-
-  const comecar = (formulario: HTMLFormElement | null): void => {
-    const frase = fraseDoCampo(formulario, "new-password", passphrase)
-    const confirmacao = fraseDoCampo(formulario, "confirm-password", confirm)
-    if (!validarChave(frase, confirmacao)) return
-    if (frase !== passphrase) setPassphrase(frase)
-    // With an account being replaced, the "delete" confirmation happens NOW, before
-    // pairing starts. Actual deletion only at the end (`pairing.done`).
-    // Closing the sheet leaves the user on this page, with the account on this device intact.
-    if (substituirConta && !apagarAceite.current) {
-      setAApagar(frase)
+  const comecar = (codigo: string): void => {
+    if (!parsePairLink(codigo)) {
+      setErroDoLink(strings.juntarAparelho.codigoInvalido)
       return
     }
-    iniciar(frase)
-  }
-
-  const iniciar = (frase: string): void => {
-    setPasso("emparelhar")
-    setFase({ que: "a-ligar" })
-    if (!bridge.pairing) {
-      setFase({ que: "falhou", razao: translateError("this version of the app cannot do that") })
-      return
-    }
+    setErroDoLink(null)
+    setLink(codigo.trim())
+    setALer(false)
     const pairing = bridge.pairing
-    const criarProvisorio = bridge.vault.createProvisional
-    if (substituirConta && !criarProvisorio) {
-      // Without a provisional vault, the only path was to delete the account on this device before the
-      // link. We do not do this: better not to pair than to end up without an account.
+    const criarPorSelar = bridge.vault.createProvisionalToSeal
+    if (!pairing || !criarPorSelar) {
+      // An older host: better not to pair than to end up without an account.
       setFase({ que: "falhou", razao: translateError("this version of the app cannot do that") })
       return
     }
+    setFase({ que: "a-ligar" })
     void (async () => {
-      // `frase` not `passphrase`: the state from this round is still the old one.
-      if (substituirConta && criarProvisorio) {
-        await criarProvisorio(useOs ? null : frase)
-      } else {
-        const { exists } = await bridge.vault.status()
-        if (!exists) {
-          await bridge.vault.create(useOs ? null : frase)
-          cofreCriado.current = true
-        }
-      }
-      await pairing.join(link)
+      const { exists } = await bridge.vault.status()
+      if (exists) throw new Error("this vault already holds an account")
+      // Provisional, in memory: the disk changes only at `pairing.done`.
+      await criarPorSelar()
+      await pairing.join(codigo.trim())
     })().catch((erro: Error) => setFase({ que: "falhou", razao: translatePairingError(erro.message, erro.cause) }))
   }
 
   /**
-   * Abandon this attempt without a trace.
-   *
-   * The vault is created BEFORE pairing starts (a password is needed to write
-   * what comes), and a pairing that does not complete leaves it empty: with no
-   * identity inside. Tomorrow's gate finds it, asks for the password, and
-   * `loadIdentity` throws. So cancel and destroy on all exit paths, not just on
-   * "try again".
-   *
-   * After the certificate the vault already has an account and `cofreCriado` is
-   * false: exiting here does not touch it.
-   *
-   * With an account being replaced there is nothing to destroy: the attempt's
-   * vault is provisional, and it is `pairing.cancel` that abandons it without
-   * touching disk.
+   * "Show a code on this device" (1.3.26): the same provisional vault as with a
+   * QR, then a short code on this device's server instead of the other's QR.
    */
-  const abandonar = useCallback(async (): Promise<void> => {
-    await bridge.pairing?.cancel().catch(() => {})
-    if (cofreCriado.current) {
-      await bridge.vault.destroy().catch(() => {})
-      cofreCriado.current = false
+  const mostrarCodigo = (): void => {
+    const pairing = bridge.pairing
+    const criarPorSelar = bridge.vault.createProvisionalToSeal
+    if (!pairing?.showCode || !criarPorSelar) {
+      setFase({ que: "falhou", razao: translateError("this version of the app cannot do that") })
+      return
     }
+    const showCode = pairing.showCode
+    setErroDoLink(null)
+    setALer(false)
+    setFase({ que: "a-ligar" })
+    void (async () => {
+      const { exists } = await bridge.vault.status()
+      if (exists) throw new Error("this vault already holds an account")
+      await criarPorSelar()
+      await showCode(defaultServer())
+    })().catch((erro: Error) => setFase({ que: "falhou", razao: translatePairingError(erro.message, erro.cause) }))
+  }
+
+  // A page opened with the code goes straight on.
+  const comecou = useRef(false)
+  useEffect(() => {
+    if (comecou.current || !linkInicial) return
+    comecou.current = true
+    comecar(linkInicial)
+    // Once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /** Leave this attempt without a trace: the provisional vault leaves with the pairing. */
+  const abandonar = useCallback(async (): Promise<void> => {
+    if (concluido.current) return
+    await bridge.pairing?.cancel().catch(() => {})
   }, [bridge])
 
-  /** The "Back" button, on any page: abandons the attempt and then exits. */
   const sair = (): void => {
     void abandonar().then(onBack, onBack)
   }
 
-  // And the same on unmount, which is how to exit from outside: close the tab,
-  // reload, the shell switching screens. By ref so the effect does not run again
-  // when the function rebuilds.
+  // And on unmount: closing the tab, reloading, the shell switching screens.
   const abandonarRef = useRef(abandonar)
   abandonarRef.current = abandonar
   useEffect(() => {
@@ -289,14 +193,10 @@ export function Emparelhar({
   }, [])
 
   const tentarDeNovo = (): void => {
-    void (async () => {
-      await abandonar()
-      setFase({ que: "a-ligar" })
-      setPasso("link")
-    })()
+    void abandonar().then(() => setFase({ que: "codigo" }))
   }
 
-  const responderSas = (iguais: boolean): void => {
+  const responder = (iguais: boolean): void => {
     if (fase.que !== "sas") return
     if (iguais) {
       setFase({ ...fase, confirmado: true })
@@ -307,235 +207,243 @@ export function Emparelhar({
     }
   }
 
-  return (
-    <div className="gate">
-      <div className="gate-card gate-setup emparelhar">
-        <header className="setup-head">
-          <OrwellWordmark size={22} />
-        </header>
+  /**
+   * "Abrir o Orwell": seal the vault with the account password, then save it and
+   * open. Reads the FIELDS: a password manager can fill them without an event.
+   */
+  const abrir = (formulario: HTMLFormElement | null): void => {
+    if (fase.que !== "dentro" || aAbrir) return
+    const { tipo } = fase
+    const escrita = fraseDoCampo(formulario, tipo === "conta" ? "current-password" : "new-password", frase)
+    if (tipo === "nova") {
+      if (escrita.length < MINIMO_DA_PALAVRA_PASSE) {
+        setErroDaFrase(strings.entrada.curta)
+        return
+      }
+      if (escrita !== fraseDoCampo(formulario, "confirm-password", outraVez)) {
+        setErroDaFrase(strings.entrada.diferentes)
+        return
+      }
+    } else if (escrita.length === 0) {
+      return
+    }
+    const selar = bridge.pairing?.seal
+    if (!selar) {
+      setFase({ que: "falhou", razao: translateError("this version of the app cannot do that") })
+      return
+    }
+    setErroDaFrase(null)
+    setAAbrir(true)
+    void (async () => {
+      try {
+        await selar(escrita)
+      } catch (erro) {
+        // Not the account password (Erro 140): the same step, with the reason by the field.
+        if ((erro as Error).message === ERRO_NAO_E_A_PALAVRA_PASSE_DA_CONTA) setNotAccountPassword(true)
+        setErroDaFrase(traduzirErro(erro as Error))
+        setAAbrir(false)
+        return
+      }
+      try {
+        const identity = await bridge.identity.load()
+        await bridge.session.connect()
+        await bridge.pairing?.done()
+        concluido.current = true
+        onDone(identity.address)
+      } catch (erro) {
+        setFase({ que: "falhou", razao: traduzirErro(erro as Error) })
+        setAAbrir(false)
+      }
+    })()
+  }
 
-        {passo === "link" && (
-          <div className="setup-pane">
-            <h1>{strings.pairing.joinTitle}</h1>
-            <p className="gate-lead">{strings.pairing.joinLead}</p>
-            {aLer ? (
-              <LeitorQr onLido={aceitarLink} onCancelar={() => setALer(false)} />
-            ) : (
-              <Button variant="primary" type="button" onClick={() => setALer(true)}>
-                {strings.pairing.scan}
-              </Button>
+  if (fase.que === "codigo") {
+    return (
+      <div className="gate">
+        <CartaoDoPortao titulo={strings.entrada.comOutroAparelho} onVoltar={sair} className="emparelhar">
+          <p className="gate-lead">{strings.juntarAparelho.novoLead}</p>
+          {aLer ? (
+            <LeitorQr onLido={comecar} onCancelar={() => setALer(false)} />
+          ) : (
+            <Button variant="primary" type="button" className="entrada-botao" onClick={() => setALer(true)}>
+              {strings.juntarAparelho.lerCamara}
+            </Button>
+          )}
+          <form
+            className="entrada-formulario"
+            onSubmit={(event) => {
+              event.preventDefault()
+              comecar(link)
+            }}
+          >
+            <Field label={strings.juntarAparelho.colarCodigo}>
+              <input
+                name="codigo-do-aparelho"
+                value={link}
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={erroDoLink ? true : undefined}
+                onChange={(event) => {
+                  setLink(event.target.value)
+                  setErroDoLink(null)
+                }}
+              />
+            </Field>
+            {erroDoLink && (
+              <p className="error" role="alert">
+                {erroDoLink}
+              </p>
             )}
-            <form
-              className="emparelhar-colar"
-              onSubmit={(event) => {
-                event.preventDefault()
-                aceitarLink(link)
-              }}
-            >
-              <Field label={strings.pairing.pasteLabel}>
+            <Button variant="ghost" type="submit" className="entrada-botao" disabled={link.trim().length === 0}>
+              {strings.juntarAparelho.continuar}
+            </Button>
+          </form>
+          {bridge.pairing?.showCode && (
+            <Button variant="ghost" type="button" className="entrada-botao" onClick={mostrarCodigo}>
+              {strings.shortCode.showCode}
+            </Button>
+          )}
+        </CartaoDoPortao>
+      </div>
+    )
+  }
+
+  if (fase.que === "code") {
+    return (
+      <div className="gate">
+        {/* Back leaves the code (its box closes) and goes back to the QR path. */}
+        <CartaoDoPortao titulo={strings.shortCode.newTitle} onVoltar={tentarDeNovo} className="emparelhar">
+          <NewDeviceCode code={fase.code} link={fase.link} />
+        </CartaoDoPortao>
+      </div>
+    )
+  }
+
+  if (fase.que === "sas") {
+    return (
+      <div className="gate">
+        <CartaoDoPortao titulo={strings.juntarAparelho.palavrasTitulo} className="emparelhar">
+          <p className="gate-lead">{strings.juntarAparelho.palavrasNoNovo}</p>
+          <PalavrasDoSas palavras={fase.palavras} />
+          <div className="entrada-caminhos entrada-fundo">
+            {fase.confirmado ? (
+              <p className="field-note" role="status">
+                {strings.juntarAparelho.confirmadoAqui}
+              </p>
+            ) : (
+              <>
+                <Button variant="primary" type="button" className="entrada-botao" onClick={() => responder(true)}>
+                  {strings.juntarAparelho.sim}
+                </Button>
+                <Button variant="ghost" type="button" className="entrada-botao" onClick={() => responder(false)}>
+                  {strings.juntarAparelho.nao}
+                </Button>
+              </>
+            )}
+          </div>
+        </CartaoDoPortao>
+      </div>
+    )
+  }
+
+  if (fase.que === "dentro") {
+    const nova = fase.tipo === "nova"
+    return (
+      <div className="gate">
+        <CartaoDoPortao titulo={strings.juntarAparelho.estasDentro} className="emparelhar">
+          <form
+            className="entrada-formulario"
+            onSubmit={(event) => {
+              event.preventDefault()
+              abrir(event.currentTarget)
+            }}
+          >
+            {/* The same name that `Unlock` asks the manager to fill. See `CampoDeIdentidade`. */}
+            <CampoDeIdentidade />
+            <Field label={strings.juntarAparelho.palavraPasseDaConta}>
+              <input
+                type="password"
+                // The account's password is one the manager already knows; a new one it should save.
+                name={nova ? "new-password" : "current-password"}
+                autoComplete={nova ? "new-password" : "current-password"}
+                autoFocus
+                value={frase}
+                disabled={aAbrir}
+                aria-invalid={erroDaFrase ? true : undefined}
+                onChange={(event) => {
+                  setFrase(event.target.value)
+                  setErroDaFrase(null)
+                }}
+              />
+            </Field>
+            {nova && (
+              <Field label={strings.entrada.palavraPasseOutraVez}>
                 <input
-                  value={link}
-                  inputMode="url"
-                  autoComplete="off"
-                  spellCheck={false}
-                  aria-invalid={erroDoLink ? true : undefined}
+                  type="password"
+                  name="confirm-password"
+                  autoComplete="new-password"
+                  value={outraVez}
+                  disabled={aAbrir}
                   onChange={(event) => {
-                    setLink(event.target.value)
-                    setErroDoLink(null)
+                    setOutraVez(event.target.value)
+                    setErroDaFrase(null)
                   }}
                 />
               </Field>
-              {erroDoLink && (
-                <p className="error" role="alert">
-                  {erroDoLink}
-                </p>
-              )}
-              <div className="setup-actions">
-                <Button variant="ghost" type="button" onClick={sair}>
-                  {strings.gate.back}
-                </Button>
-                <Button variant="primary" type="submit" disabled={link.trim().length === 0}>
-                  {strings.pairing.pasteAction}
-                </Button>
-              </div>
-            </form>
-          </div>
-        )}
-
-        {passo === "chave" && (
-          <form
-            className="setup-pane"
-            onSubmit={(event) => {
-              event.preventDefault()
-              comecar(event.currentTarget)
-            }}
-          >
-            <h1>{strings.pairing.keyTitle}</h1>
-            <p className="gate-lead">{strings.pairing.keyLead}</p>
-            {!useOs && (
-              <>
-                {/* The same name that `Unlock` will ask the manager to fill in, and it is
-                    because they are the same that the manager recognizes an entry instead
-                    of creating a new one. See `CampoDeIdentidade`. */}
-                <CampoDeIdentidade />
-                <Field label={strings.gate.devicePassphrase}>
-                  <input
-                    type="password"
-                    name="new-password"
-                    value={passphrase}
-                    autoFocus
-                    autoComplete="new-password"
-                    placeholder={strings.gate.passphrasePlaceholder}
-                    onChange={(event) => {
-                      setPassphrase(event.target.value)
-                      setErroDaChave(null)
-                    }}
-                  />
-                </Field>
-                <Field label={strings.gate.confirmPassphrase}>
-                  <input
-                    type="password"
-                    name="confirm-password"
-                    value={confirm}
-                    autoComplete="new-password"
-                    onChange={(event) => {
-                      setConfirm(event.target.value)
-                      setErroDaChave(null)
-                    }}
-                  />
-                </Field>
-                {memoriaDisponivel && <CaixaMemorizar ligada={memorizar} onMudar={setMemorizar} />}
-              </>
             )}
-            {erroDaChave && (
+            {erroDaFrase ? (
               <p className="error" role="alert">
-                {erroDaChave}
+                <TextoDeErro texto={erroDaFrase} />
+              </p>
+            ) : (
+              nova && <p className="field-note">{strings.entrada.minimo}</p>
+            )}
+            {fase.semEstado && (
+              <p className="field-note" role="status">
+                {strings.pairing.stateMissing}
               </p>
             )}
-            <p className="gate-warning">{useOs ? strings.gate.warning : strings.gate.passphraseNote}</p>
-            {substituirConta && !apagarAceite.current && (
-              <p className="field-note warn">{strings.outraConta.pairKeyNote}</p>
+            <Button variant="primary" type="submit" className="entrada-botao" disabled={aAbrir}>
+              {aAbrir ? strings.entrada.aAbrir : strings.juntarAparelho.abrir}
+            </Button>
+            {!nova && notAccountPassword && (
+              <>
+                <p className="field-note">{strings.juntarAparelho.forgotAccountPassword}</p>
+                <Button variant="ghost" type="button" className="entrada-botao" disabled={aAbrir} onClick={sair}>
+                  {strings.common.cancel}
+                </Button>
+              </>
             )}
-            <div className="setup-actions">
-              <Button variant="ghost" type="button" onClick={() => setPasso("link")}>
-                {strings.gate.back}
-              </Button>
-              {/* No lock from the state: the field may have been filled by the
-                  manager without firing any event, and a dead button next to
-                  a full field makes no sense to anyone. The validator is
-                  `validarChave`, which reads the field. See `fraseDoCampo`. */}
-              <Button variant="primary" type="submit">
-                {strings.gate.next}
-              </Button>
-            </div>
           </form>
-        )}
-
-        {passo === "emparelhar" && (
-          <div className="setup-pane" aria-live="polite">
-            {fase.que === "a-ligar" && (
-              <>
-                <h1>{strings.pairing.joinTitle}</h1>
-                <p className="gate-lead">{strings.pairing.connecting}</p>
-              </>
-            )}
-            {fase.que === "a-espera" && (
-              <>
-                <h1>{strings.pairing.joinTitle}</h1>
-                <p className="gate-lead">{strings.pairing.waitingHost}</p>
-              </>
-            )}
-            {fase.que === "sas" && (
-              <>
-                <h1>{strings.pairing.sasTitle}</h1>
-                <p className="gate-lead">{strings.pairing.sasLead}</p>
-                <PalavrasDoSas palavras={fase.palavras} />
-                <p className="field-note">{strings.pairing.sasHistoricoAqui}</p>
-                {fase.confirmado ? (
-                  <p className="field-note" role="status">
-                    {strings.pairing.sasConfirmedHere}
-                  </p>
-                ) : (
-                  <div className="setup-actions sas-actions">
-                    <Button variant="ghost" type="button" onClick={() => responderSas(false)}>
-                      {strings.pairing.sasDifferent}
-                    </Button>
-                    <Button variant="primary" type="button" onClick={() => responderSas(true)}>
-                      {strings.pairing.sasSame}
-                    </Button>
-                  </div>
-                )}
-              </>
-            )}
-            {fase.que === "estado" && (
-              <>
-                <h1>{strings.pairing.joinTitle}</h1>
-                <p className="gate-lead">{strings.pairing.receivingState}</p>
-                <p className="field-note">{strings.pairing.receivingStateLead}</p>
-                <p className="field-note" role="timer">
-                  {/* `agora` may be from before the step started: the deadline never goes past the integer. */}
-                  {strings.pairing.stateDeadline(
-                    Math.min(PRAZO_DO_ESTADO_MS / 1000, Math.max(0, Math.ceil((fase.ate - agora) / 1000))),
-                  )}
-                </p>
-              </>
-            )}
-            {fase.que === "a-entrar" && (
-              <>
-                <h1>{strings.pairing.joinTitle}</h1>
-                <p className="gate-lead">{strings.pairing.joining}</p>
-              </>
-            )}
-            {fase.que === "concluido" && (
-              <>
-                <h1>{strings.pairing.doneTitle}</h1>
-                <p className="gate-lead">{strings.pairing.doneBody}</p>
-                {fase.semEstado && (
-                  <p className="field-note warn" role="status">
-                    {strings.pairing.stateMissing}
-                  </p>
-                )}
-                <p className="gate-warning">{strings.pairing.doneGuestNote}</p>
-                <div className="setup-actions">
-                  <Button variant="primary" type="button" onClick={() => onDone(fase.address)}>
-                    {strings.pairing.doneAction}
-                  </Button>
-                </div>
-              </>
-            )}
-            {fase.que === "falhou" && (
-              <>
-                <h1>{strings.pairing.failedTitle}</h1>
-                <p className="error" role="alert">
-                  <TextoDeErro texto={fase.razao} />
-                </p>
-                <div className="setup-actions">
-                  <Button variant="ghost" type="button" onClick={sair}>
-                    {strings.gate.back}
-                  </Button>
-                  <Button variant="primary" type="button" onClick={tentarDeNovo}>
-                    {strings.common.retry}
-                  </Button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
+        </CartaoDoPortao>
       </div>
-      {aApagar !== null && (
-        <ApagarConta
-          porta="emparelhar"
-          onClose={() => setAApagar(null)}
-          fazer={async () => {
-            // Nothing is deleted here: the "delete" is the authorization, and the action is
-            // `pairing.done`, with the new account already inside. See the header.
-            apagarAceite.current = true
-            const frase = aApagar
-            setAApagar(null)
-            iniciar(frase)
-          }}
-        />
-      )}
+    )
+  }
+
+  if (fase.que === "falhou") {
+    return (
+      <div className="gate">
+        <CartaoDoPortao titulo={strings.juntarAparelho.falhou} onVoltar={sair} className="emparelhar">
+          <p className="error" role="alert">
+            <TextoDeErro texto={fase.razao} />
+          </p>
+          <Button variant="primary" type="button" className="entrada-botao" onClick={tentarDeNovo}>
+            {strings.common.retry}
+          </Button>
+        </CartaoDoPortao>
+      </div>
+    )
+  }
+
+  return (
+    <div className="gate">
+      <CartaoDoPortao titulo={strings.entrada.comOutroAparelho} onVoltar={sair} className="emparelhar">
+        <p className="gate-lead" role="status">
+          {fase.que === "a-receber" ? strings.juntarAparelho.aReceber : strings.juntarAparelho.aLigar}
+        </p>
+        <span className="anel-ocupado entrada-anel" aria-hidden="true" />
+      </CartaoDoPortao>
     </div>
   )
 }

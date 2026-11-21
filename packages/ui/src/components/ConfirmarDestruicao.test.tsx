@@ -81,11 +81,10 @@ describe("ConfirmarDestruicao", () => {
   })
 })
 
-describe("ApagarConta: um ritual nas três portas", () => {
+describe("ApagarConta: um ritual nas duas portas que apagam (o portão já não apaga)", () => {
   it.each([
     ["configuracoes", () => strings.settings.destroySteps],
-    ["portao", () => strings.settings.destroyStepsGate],
-    ["importar", () => strings.settings.destroyStepsImport],
+    ["juntar", () => strings.settings.destroyStepsJoin],
   ] as const)("na porta %s, só a frase dos canais muda", (porta, frase) => {
     render(<ApagarConta porta={porta} fazer={vi.fn()} onClose={vi.fn()} />)
     const folha = screen.getByRole("alertdialog", { name: strings.settings.destroyTitle })

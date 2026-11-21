@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import { useBridge } from "../App.js"
 import { marcarFicheiroTratado } from "../lib/ficheiroDaConta.js"
 import { fraseDoCampo } from "../screens/gate/fraseDoCampo.js"
+import { IconeFicheiro } from "../screens/gate/Entrada.js"
 import { strings, traduzirErro } from "../strings.js"
 import { Button } from "./Button.js"
 import { Field } from "./Field.js"
@@ -9,26 +10,30 @@ import { Modal } from "./Modal.js"
 import { useToast } from "./Toast.js"
 
 /**
- * The account file (.enclave): the only way back into an account (16/11/2026).
+ * The account file (.enclave): with it and the password, the account opens on
+ * any device, and no device leaves (21/11/2026, mock-up `Main`).
  *
- * There is no email and no phone number, so nothing can reset an account. A
- * new account gets a step right after it is created (`PassoDoFicheiroDaConta`),
- * and an account that already existed gets one notice, once
- * (`AvisoDoFicheiroDaConta`).
+ * Two places, one sentence: the step right after the account is created
+ * (`GuardarFicheiroDaConta`), which can be left for later, and the sheet that
+ * the banner inside the app opens (`FolhaDoFicheiroDaConta`). The banner stays
+ * until a file is saved or the account has a second device. See `App.tsx`.
  *
  * The file is `exportVault`: the vault as it is on disk, locked with the
  * account's password. A vault the system keychain guards (`protection: "os"`,
- * the old desktop accounts) has no password to travel with, so the person
- * chooses one for the file first.
+ * old desktop accounts) has no password to travel with, so the person chooses
+ * one for the file first.
  *
- * Where the browser can share files (the iPhone), "Share" opens the share
- * sheet, which has "Save to Files". The file is made ready before the tap: a
- * share must start inside the tap, and making the file can take a second.
+ * One button. Where the browser can share files (the iPhone), it opens the
+ * share sheet, which has "Save to Files"; elsewhere it downloads. The file is
+ * made ready before the tap: a share must start inside the tap, and making the
+ * file can take a second.
  */
 
 const PRECISA_DE_FRASE = "an export passphrase is required"
 const FRASE_MINIMA = 8
 const CAMPO = "frase-do-ficheiro"
+/** Read when used, not at load: the language can change after the module loads. */
+const nomeDoFicheiro = (): string => strings.ficheiroDaConta.nomeDoFicheiro
 
 interface Ficheiro {
   /** The system keychain guards this vault: a password for the file comes first. */
@@ -36,17 +41,19 @@ interface Ficheiro {
   /** The file, ready. Null until made (or while the password is missing). */
   pronto: string | null
   aPreparar: boolean
-  podePartilhar: boolean
-  /** Make the file with this password (only when `pedeFrase`). */
-  preparar: (frase?: string) => Promise<string | null>
-  descarregar: (frase?: string) => Promise<boolean>
-  partilhar: () => Promise<boolean>
+  guardar: (frase?: string) => Promise<boolean>
 }
 
 function podePartilharFicheiros(): boolean {
   if (typeof navigator === "undefined" || typeof navigator.share !== "function" || typeof navigator.canShare !== "function") return false
+  // Only on a touch device: Safari on a computer can share too, and there the person expects a download.
   try {
-    return navigator.canShare({ files: [new File([""], strings.ficheiroDaConta.nomeDoFicheiro)] })
+    if (typeof window !== "undefined" && window.matchMedia && !window.matchMedia("(pointer: coarse)").matches) return false
+  } catch {
+    // No media queries: go on.
+  }
+  try {
+    return navigator.canShare({ files: [new File([""], nomeDoFicheiro())] })
   } catch {
     return false
   }
@@ -101,28 +108,14 @@ function useFicheiro(address: string, onGuardado: () => void): Ficheiro {
 
   const guardado = (): void => {
     void marcarFicheiroTratado(address)
-    toast(strings.ficheiroDaConta.guardado)
+    toast(strings.entrada.guardado)
     onGuardado()
   }
 
-  const descarregar = async (frase?: string): Promise<boolean> => {
-    const data = pronto ?? (await preparar(frase))
-    if (data === null) return false
-    const url = URL.createObjectURL(new Blob([data], { type: "application/json" }))
-    const ancora = document.createElement("a")
-    ancora.href = url
-    ancora.download = strings.ficheiroDaConta.nomeDoFicheiro
-    ancora.click()
-    URL.revokeObjectURL(url)
-    guardado()
-    return true
-  }
-
-  const partilhar = async (): Promise<boolean> => {
-    if (pronto === null) return false
-    const ficheiro = new File([pronto], strings.ficheiroDaConta.nomeDoFicheiro, { type: "application/json" })
+  const partilhar = async (data: string): Promise<boolean> => {
+    const ficheiro = new File([data], nomeDoFicheiro(), { type: "application/json" })
     try {
-      await navigator.share({ files: [ficheiro], title: strings.ficheiroDaConta.titulo })
+      await navigator.share({ files: [ficheiro], title: strings.entrada.guardarTitulo })
     } catch (erro) {
       // The person closed the sheet: nothing was saved, and that is not a fault.
       if ((erro as Error)?.name !== "AbortError") toast(traduzirErro(erro), "error")
@@ -132,30 +125,42 @@ function useFicheiro(address: string, onGuardado: () => void): Ficheiro {
     return true
   }
 
-  return { pedeFrase, pronto, aPreparar, podePartilhar, preparar, descarregar, partilhar }
+  const guardar = async (frase?: string): Promise<boolean> => {
+    if (podePartilhar && pronto !== null) return partilhar(pronto)
+    const data = pronto ?? (await preparar(frase))
+    if (data === null) return false
+    const url = URL.createObjectURL(new Blob([data], { type: "application/json" }))
+    const ancora = document.createElement("a")
+    ancora.href = url
+    ancora.download = nomeDoFicheiro()
+    ancora.click()
+    URL.revokeObjectURL(url)
+    guardado()
+    return true
+  }
+
+  return { pedeFrase, pronto, aPreparar, guardar }
 }
 
-/** The password for the file, the buttons, and nothing else: the same in the step and in the notice. */
-function Botoes({ ficheiro }: { ficheiro: Ficheiro }): React.JSX.Element {
+/** The password for the file (old keychain vaults only) and the one button. The same in the step and in the sheet. */
+function Guardar({ ficheiro }: { ficheiro: Ficheiro }): React.JSX.Element {
   const [frase, setFrase] = useState("")
-  const formulario = useRef<HTMLFormElement>(null)
   const nota = useId()
   const semFrase = ficheiro.pedeFrase && ficheiro.pronto === null
   return (
     <form
-      ref={formulario}
       className="ficheiro-da-conta-botoes"
       onSubmit={(event) => {
         event.preventDefault()
         // From the FIELD: a password manager may fill it without events. See `fraseDoCampo`.
         const escrita = fraseDoCampo(event.currentTarget, CAMPO, frase)
         if (semFrase && escrita.length < FRASE_MINIMA) return
-        void ficheiro.descarregar(semFrase ? escrita : undefined)
+        void ficheiro.guardar(semFrase ? escrita : undefined)
       }}
     >
       {semFrase && (
         <>
-          <Field label={strings.ficheiroDaConta.fraseLabel}>
+          <Field label={strings.entrada.palavraPasse}>
             <input
               type="password"
               name={CAMPO}
@@ -166,70 +171,74 @@ function Botoes({ ficheiro }: { ficheiro: Ficheiro }): React.JSX.Element {
             />
           </Field>
           <p id={nota} className="field-note">
-            {strings.ficheiroDaConta.fraseNota}
+            {strings.entrada.minimo}
           </p>
         </>
       )}
-      <Button variant="primary" type="submit" disabled={ficheiro.aPreparar || (semFrase && frase.length < FRASE_MINIMA)}>
-        {ficheiro.aPreparar ? strings.ficheiroDaConta.aDescarregar : strings.ficheiroDaConta.descarregar}
+      <Button
+        variant="primary"
+        type="submit"
+        className="entrada-botao"
+        disabled={ficheiro.aPreparar || (semFrase && frase.length < FRASE_MINIMA)}
+      >
+        {ficheiro.aPreparar ? strings.entrada.aPrepararFicheiro : strings.entrada.guardarFicheiro}
       </Button>
-      {ficheiro.podePartilhar && ficheiro.pronto !== null && (
-        <Button variant="ghost" type="button" onClick={() => void ficheiro.partilhar()}>
-          {strings.ficheiroDaConta.partilhar}
-        </Button>
-      )}
     </form>
   )
 }
 
 /**
- * The step right after the account is created. "Continue" stays off until the
- * file went out (downloaded or shared) AND the box is ticked.
+ * The step right after the account is created. Saving goes on into the app;
+ * "Fazer mais tarde" goes too, and the banner inside the app stays until there
+ * is a file.
  */
-export function PassoDoFicheiroDaConta({ address, onContinuar }: { address: string; onContinuar: () => void }): React.JSX.Element {
+export function GuardarFicheiroDaConta({ address, onContinuar }: { address: string; onContinuar: () => void }): React.JSX.Element {
   const titulo = useId()
-  const [saiu, setSaiu] = useState(false)
-  const [guardei, setGuardei] = useState(false)
-  const ficheiro = useFicheiro(address, () => setSaiu(true))
+  const ficheiro = useFicheiro(address, onContinuar)
   return (
     <div className="gate">
-      <section className="gate-card ficheiro-da-conta" aria-labelledby={titulo}>
-        <h1 id={titulo}>{strings.ficheiroDaConta.titulo}</h1>
-        <p className="gate-lead">{strings.ficheiroDaConta.texto}</p>
-        <Botoes ficheiro={ficheiro} />
-        <label className="checkbox">
-          <input type="checkbox" name="guardei-o-ficheiro" checked={guardei} onChange={(event) => setGuardei(event.target.checked)} />
-          {strings.ficheiroDaConta.guardei}
-        </label>
-        <Button variant="primary" type="button" disabled={!saiu || !guardei} onClick={onContinuar}>
-          {strings.ficheiroDaConta.continuar}
-        </Button>
-        <p className="field-note">{strings.ficheiroDaConta.nota}</p>
+      <section className="gate-card gate-entrada ficheiro-da-conta" aria-labelledby={titulo}>
+        <span className="entrada-icone" aria-hidden="true">
+          <IconeFicheiro tamanho={32} />
+        </span>
+        <h1 id={titulo} className="entrada-titulo">
+          {strings.entrada.guardarTitulo}
+        </h1>
+        <p className="gate-lead">{strings.entrada.guardarTexto}</p>
+        <div className="entrada-fundo">
+          <Guardar ficheiro={ficheiro} />
+          <button type="button" className="gate-link entrada-link" onClick={onContinuar}>
+            {strings.entrada.maisTarde}
+          </button>
+        </div>
       </section>
     </div>
   )
 }
 
-/** The one-time notice for an account that already existed. Closing it counts as seen. */
-export function AvisoDoFicheiroDaConta({ address, onFechar }: { address: string; onFechar: () => void }): React.JSX.Element {
+/** The sheet the banner opens. Closing it does not count as saved: the banner stays. */
+export function FolhaDoFicheiroDaConta({
+  address,
+  onGuardado,
+  onFechar,
+}: {
+  address: string
+  onGuardado: () => void
+  onFechar: () => void
+}): React.JSX.Element {
   const titulo = useId()
-  const fechar = (): void => {
-    void marcarFicheiroTratado(address)
-    onFechar()
-  }
-  const ficheiro = useFicheiro(address, onFechar)
+  const ficheiro = useFicheiro(address, onGuardado)
   return (
-    <Modal className="sheet ficheiro-da-conta-aviso" labelledBy={titulo} onClose={fechar}>
+    <Modal className="sheet narrow ficheiro-da-conta-aviso" labelledBy={titulo} onClose={onFechar}>
       <header className="sheet-header">
-        <h2 id={titulo}>{strings.ficheiroDaConta.aviso}</h2>
-        <Button variant="ghost" type="button" onClick={fechar}>
-          {strings.ficheiroDaConta.fechar}
+        <h2 id={titulo}>{strings.entrada.guardarTitulo}</h2>
+        <Button variant="ghost" type="button" onClick={onFechar}>
+          {strings.common.close}
         </Button>
       </header>
       <div className="sheet-body">
-        <p>{strings.ficheiroDaConta.texto}</p>
-        <Botoes ficheiro={ficheiro} />
-        <p className="field-note">{strings.ficheiroDaConta.nota}</p>
+        <p>{strings.entrada.guardarTexto}</p>
+        <Guardar ficheiro={ficheiro} />
       </div>
     </Modal>
   )

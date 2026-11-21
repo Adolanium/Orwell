@@ -14,7 +14,7 @@ describe("translateError", () => {
     expect(translateError("no vault to open")).toBe("Erro 102\nNão há cofre neste aparelho.")
     expect(translateError("vault holds no identity")).toBe("Erro 103\nO cofre não tem identidade.")
     expect(translateError("wrong passphrase, or the vault is damaged")).toBe(
-      "Erro 104\nPalavra-passe errada. Se tens a certeza dela, os dados deste aparelho podem estar danificados.",
+      "Erro 104\nPalavra-passe errada.",
     )
     expect(translateError("could not reach the homeserver")).toBe("Erro 201\nNão foi possível contactar o servidor.")
     expect(translateError("this platform cannot protect a vault without a passphrase")).toBe(

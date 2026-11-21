@@ -1,104 +1,54 @@
 import { useEffect, useRef, useState } from "react"
-import { TextoDeErro } from "../../components/TextoDeErro.js"
 import { parseServerName } from "@enclave/protocol"
-import { nomeValido } from "@enclave/client-core"
+import { nomeValido, parseInviteLink, parseShortInviteLink } from "@enclave/client-core"
 import { useBridge } from "../../App.js"
 import { Button } from "../../components/Button.js"
 import { CampoDeNome } from "../../components/CampoDeNome.js"
+import { GuardarFicheiroDaConta } from "../../components/FicheiroDaConta.js"
 import { Field } from "../../components/Field.js"
-import { CampoDeIdentidade } from "./CampoDeIdentidade.js"
-import { CaixaMemorizar, useMemorizarDepoisDeAbrir } from "./MemorizarSessao.js"
-import { LigacaoMudarDeConta } from "./MudarDeConta.js"
-import { fraseDoCampo } from "./fraseDoCampo.js"
-import { OrwellWordmark } from "../../components/Logo.js"
-import { useToast } from "../../components/Toast.js"
+import { TextoDeErro } from "../../components/TextoDeErro.js"
 import { strings, traduzirErro } from "../../strings.js"
-import { ImportAccount } from "./ImportAccount.js"
-import { PassoDoFicheiroDaConta } from "../../components/FicheiroDaConta.js"
-import { FolhaComoFunciona } from "../settings/ComoFunciona.js"
-import { FraseDoMomento } from "../../components/FraseDoMomento.js"
-import { Enquadrar } from "../../components/Enquadrar.js"
-import { LigacoesLegais } from "../../components/LigacoesLegais.js"
-import { podeEnquadrar } from "../../lib/enquadrar.js"
-import { avisoDeAnimacaoPerdida, compressImage, IMAGE_BUDGETS, type CompressedImage } from "../../lib/images.js"
-import { EMPTY_SETUP_PROGRESS, ecraInicial, firstIncomplete, markDone, SETUP_STEPS, type SetupStep } from "./setupSteps.js"
+import { CampoDeIdentidade } from "./CampoDeIdentidade.js"
+import { CartaoDoPortao, Entrada, RodapeDaEntrada } from "./Entrada.js"
+import { EntrarComFicheiro } from "./EntrarComFicheiro.js"
+import { fraseDoCampo } from "./fraseDoCampo.js"
+import { lerIntencao } from "./outraEntrada.js"
+import { activeAccountId, rememberAccountName } from "../../lib/accountNames.js"
+import { EMPTY_SETUP_PROGRESS, firstIncomplete, markDone, type SetupStep } from "./setupSteps.js"
 
-/** Sentinel for the one failure that must swap the whole screen, not toast. */
+/** Sentinel for the one failure that must swap the whole screen. */
 const VAULT_EXISTS = "__vault_exists__"
 
-/**
- * The questions, one at a time.
- *
- * The signup screen was a form with everything in view: name, server, two
- * passwords, a checkbox and two warnings, all at once. It now asks one question
- * per page. It's not just tidying: the password is the only thing in this app
- * that doesn't recover, and someone looking at six fields won't read the
- * paragraph that explains it.
- *
- * `confirm` drops when the vault is protected by the system, there's no password
- * to confirm. That's why the list is calculated, not written.
- */
-type Passo = "nome" | "convite" | "fotografia" | "chave" | "confirmar"
-
-/*
-  No color question. It was here between the name and password, and it was
-  one step too many for someone who just wants to reach someone: color doesn't
-  change what the person can do, and it stays in Settings, where it always was.
-  The first screen after the account is the one that now says how to reach
-  someone (see `PrimeirosPassos`).
-*/
-/*
-  The photo, right after the name. The other pages keep the interview
-  tone (the proposal to swap them for direct titles was dropped). It's the only page
-  you can skip: the button that advances says "Skip" until there's a photo,
-  with the same weight as "Choose photo". Unlike color, the face changes what
-  others see of who talks to them; but it's not a condition for anything, so it
-  never blocks the path.
-*/
-const PASSOS_COM_FRASE: readonly Passo[] = ["nome", "fotografia", "chave", "confirmar"]
-const PASSOS_COM_SISTEMA: readonly Passo[] = ["nome", "fotografia", "chave"]
-
-/**
- * The pages, with the invite code page right after the name on a server that
- * takes new accounts only with an invite (1.3.25, `ENCLAVE_REGISTO=convite`).
- */
-export function passosDoSetup(base: readonly Passo[], registo: "aberto" | "convite" | "fechado" | null): readonly Passo[] {
-  return registo === "convite" ? [base[0]!, "convite", ...base.slice(1)] : base
+/** A community invite link (long or short), pasted where the code goes (1.3.26). */
+export function eLigacaoDeConvite(texto: string): boolean {
+  return parseInviteLink(texto) !== null || parseShortInviteLink(texto) !== null
 }
 
-/** The errors of a refused new account that a code can fix: the gate then shows the code field. See `Session.connect`. */
-const ERROS_QUE_PEDEM_CONVITE = new Set(["this server needs a registration invite", "the registration invite is not valid"])
+/** The errors of a refused new account that a code can fix: the code field then opens, with the error under it. See `Session.connect`. */
+const ERROS_QUE_PEDEM_CONVITE = new Set([
+  "this server needs a registration invite",
+  "the registration invite is not valid",
+  // 1.3.26: over the network limit, a registration code or an invite link gets in.
+  "this network created many accounts today",
+])
 
-/**
- * Account creation, as an atomic-feeling sequence of five steps.
- *
- * Each completed step is flagged and a retry resumes from the first incomplete
- * one — `vault.create` and `identity.create` are never re-run once they have
- * succeeded, because re-running them would destroy the identity just minted.
- */
-/**
- * The server the account will live on, prefilled from where the app itself
- * was served: someone opening enclave from orwell.pt almost certainly wants
- * an account on orwell.pt. Local development keeps the dev server default.
- *
- * It's no longer in the signup path. Everyone who opens this page wants an
- * account where they opened it from, and a field that comes prefilled and no one
- * should touch only makes it seem like there's a decision to make. Anyone who
- * really needs another server has two ways, and neither goes through the path for
- * everyone: the advanced options button, or `?servidor=` in the address, which is
- * how scripts pass it without clicking.
- */
 /**
  * The server for the packaged desktop app.
  *
  * It opens the interface from a file (`file://`), which has no host. Until
  * 29 October 2026 that fell into the development branch, `localhost:8448`,
  * and creating an account in the installed app gave Error 201 ("could not reach
- * the server"). On desktop the account is created on
- * the public server.
+ * the server"). On desktop the account is created on the public server.
  */
 export const SERVIDOR_DA_APP_DE_SECRETARIA = "orwell.pt"
 
+/**
+ * The server the account will live on, prefilled from where the app itself was
+ * served: someone opening Orwell from orwell.pt wants an account on orwell.pt.
+ * Local development keeps the dev server default. Anyone who needs another
+ * server has the advanced options, or `?servidor=` in the address, which is how
+ * scripts pass it without clicking.
+ */
 export function defaultServer(
   local: Pick<Location, "search" | "hostname" | "port" | "protocol"> | null = typeof window !== "undefined"
     ? window.location
@@ -114,9 +64,8 @@ export function defaultServer(
 
 /**
  * The Privacy and Terms links and the age sentence of the gate are orwell.pt's:
- * they show only while the account is being made on orwell.pt (1.3.25). Another server, chosen in the advanced options or by `?servidor=`,
- * has its own rules, and the gate does not hand them orwell.pt's. The port 443
- * and the case are the same server.
+ * they show only while the account is being made on orwell.pt (1.3.25). The port
+ * 443 and the case are the same server.
  */
 export function eOServidorDeOmissao(servidor: string): boolean {
   const nome = servidor.trim().toLowerCase().replace(/:443$/, "")
@@ -124,79 +73,85 @@ export function eOServidorDeOmissao(servidor: string): boolean {
 }
 
 /**
- * The "Join the official Orwell channel" checkbox on the last step comes unchecked.
+ * The "Join the official Orwell channel" checkbox comes unchecked.
  *
- * Since 12 November 2026, joining is opt-in. Whoever does nothing
- * stays out; whoever wants it ticks the box, or joins later from "Join with a
- * link". (It came checked from 3 November.) Change it in this line.
+ * Since 12 November 2026, joining is opt-in. Whoever does nothing stays out;
+ * whoever wants it ticks the box, or joins later from "Join with a link".
  */
 export const ENTRAR_NO_CANAL_OFICIAL_POR_OMISSAO = false
 
+export const MINIMO_DA_PALAVRA_PASSE = 8
+
+type ModoDoServidor = "aberto" | "convite" | "fechado" | "versao-antiga" | null
+
+/** The screens before there is an account. */
+export type TelaDoSetup = "entrada" | "criar" | "ficheiro" | "versao-antiga"
+
+/**
+ * The gate of a device with no vault (mock-ups `Main` and `Desktop`, 21/11/2026).
+ *
+ * "Bem-vindo ao Orwell" and three ways in: create an account, the account
+ * file, another device. Creating asks for the name and the password in one
+ * screen; the profile picture is in the profile, later. Then "Guarda o ficheiro
+ * da conta", which can wait: the banner inside the app stays until there is a
+ * file or a second device.
+ *
+ * Before the vault exists, the server is asked who may create an account
+ * (1.3.25) and whether it takes this version: a closed server says so in words,
+ * a server that wants a code opens the code field, and an old app is told to
+ * update. Nothing is written until the server could say yes.
+ */
 export function Setup({
   onDone,
   onUnlockInstead,
   onJoinInstead,
+  telaInicial = "entrada",
+  conviteInicial = "",
 }: {
   onDone: (address: string) => void
   onUnlockInstead: () => void
-  /** The third way through the gate: add this device to an account that lives elsewhere. Missing where it doesn't make sense (legacy tests). */
+  /** "Entrar com outro aparelho". Missing on a host that cannot pair. */
   onJoinInstead?: () => void
+  telaInicial?: TelaDoSetup
+  /** The invite link the page opened with (a community invite): the code field opens with it. */
+  conviteInicial?: string
 }): React.JSX.Element {
   const bridge = useBridge()
-  const toast = useToast()
+
+  /*
+    "Usar outra conta" and "Esqueci-me" reload into an empty account with the
+    screen the person chose (`outraEntrada.ts`). Read once, at the first render.
+  */
+  const [intencao] = useState(lerIntencao)
+  const [tela, setTela] = useState<TelaDoSetup>(() => (intencao === "ficheiro" ? "ficheiro" : telaInicial))
+  useEffect(() => {
+    if (intencao === "outro-aparelho" && onJoinInstead) onJoinInstead()
+    // Once, on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const [server, setServer] = useState(() => defaultServer())
   const termosDoOrwell = eOServidorDeOmissao(server)
   const [name, setName] = useState("")
-  /** The initial profile photo, already compressed. `null` = no photo: stays initial. */
-  const [avatar, setAvatar] = useState<string | null>(null)
-  const [avisoDoGif, setAvisoDoGif] = useState<string | null>(null)
-  /** The chosen photo, waiting to be framed. See `escolherFotografia`. */
-  const [aEnquadrar, setAEnquadrar] = useState<File | null>(null)
-  const [photoError, setPhotoError] = useState<string | null>(null)
   const [passphrase, setPassphrase] = useState("")
   const [confirm, setConfirm] = useState("")
-  const [reveal, setReveal] = useState(false)
-  // F3 of session memory: a new account is ALWAYS born with a password.
-  // The vault from keychain only (`os`) stopped being offered: with it,
-  // "Sign out" didn't sign anyone out. The ones that already exist convert to
-  // Account > Session > "Set password".
-  const useOs = false
-  /** The platform has a place to memorize the session (F1). See `MemorizarSessao.tsx`. */
-  const [memoriaDisponivel, setMemoriaDisponivel] = useState(false)
-  /** "Memorize the session", on by default. */
-  const [memorizar, setMemorizar] = useState(true)
-  const memorizarDepoisDeAbrir = useMemorizarDepoisDeAbrir(bridge)
-  /** "Join the Orwell channel", on the last step. See `ENTRAR_NO_CANAL_OFICIAL_POR_OMISSAO`. */
   const [entrarNoCanalOficial, setEntrarNoCanalOficial] = useState(ENTRAR_NO_CANAL_OFICIAL_POR_OMISSAO)
   const [vaultExists, setVaultExists] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [serverError, setServerError] = useState<string | null>(null)
   const [passError, setPassError] = useState<string | null>(null)
-  const [confirmError, setConfirmError] = useState<string | null>(null)
   const [busyStep, setBusyStep] = useState<SetupStep | null>(null)
-  const [indice, setIndice] = useState(0)
   const [avancadas, setAvancadas] = useState(false)
-  /**
-   * Who may create an account on the chosen server (1.3.25), asked at the name
-   * page, before the vault. `null`: not asked yet, or the server could not be asked.
-   */
-  const [registo, setRegisto] = useState<"aberto" | "convite" | "fechado" | null>(null)
-  /** Asking the server, between the name page and the next one. */
+  /** What the chosen server said: who may create an account, or that this version is old. `null`: not known. */
+  const [registo, setRegisto] = useState<ModoDoServidor>(null)
   const [aSondar, setASondar] = useState(false)
-  /** The registration invite code, as typed. Sent at the first connection only. */
-  const [convite, setConvite] = useState("")
-  /** The first connection was refused for want of a valid code: the field shows on the creation screen. */
-  const [conviteRecusado, setConviteRecusado] = useState(false)
-  /** From here on the answers are set and the screen shows creation. */
-  const [aCriar, setACriar] = useState(false)
-  /**
-   * The question "Do you use Orwell on another device?" was already answered with "No".
-   * See `ecraInicial`. Without a pairing path, we don't ask.
-   */
-  const [aCriarConta, setACriarConta] = useState(() => ecraInicial({ podeEmparelhar: onJoinInstead !== undefined }) === "criar")
-  /** The "How it works" page, open on top of the gate. */
-  const [comoFunciona, setComoFunciona] = useState(false)
+  /** The registration invite code, or an invite link (1.3.26). Sent at the first connection only. */
+  const [convite, setConvite] = useState(conviteInicial)
+  /** The code field, open: the server wants a code, the person asked for it, or the page came with an invite. */
+  const [comConvite, setComConvite] = useState(conviteInicial.trim() !== "")
+  const [erroDoConvite, setErroDoConvite] = useState<string | null>(null)
+  /** The proof of work of the new account, 0 to 1, while it runs (1.3.26). `null` otherwise. */
+  const [aPreparar, setAPreparar] = useState<number | null>(null)
   /** The address of the account just created: the account-file step shows. */
   const [criada, setCriada] = useState<string | null>(null)
 
@@ -205,37 +160,23 @@ export function Setup({
   const progress = useRef(EMPTY_SETUP_PROGRESS)
   const addressRef = useRef<string | null>(null)
   const serverRef = useRef<string>(defaultServer())
-  const probed = useRef(false)
+  /** The answer of the probe for the server in the field. See `sondar`. */
+  const sondagem = useRef<{ servidor: string; resposta: Promise<ModoDoServidor> } | null>(null)
   /**
-   * The phrase that counts: the one in the FIELD when it was submitted.
-   *
-   * **Today this is deliberate overkill.** The `submeter` already syncs state
-   * from the field, and since creation only happens in the NEXT step (confirmation),
-   * the `passphrase` for that turn is already right, changing the `create` line
-   * to read state breaks no test.
-   *
-   * It stays because the equivalence depends on something no one wrote down: that
-   * between syncing and creating there's a render. The day the passphrase becomes
-   * the LAST step, `run()` starts in the same turn it's submitted, state for that
-   * turn is still old, and the vault is born with what React knew before, the
-   * 30 September bug again, and again with nothing to explain it. The value that
-   * creates the vault now comes from somewhere explicit. See `fraseDoCampo`.
+   * The password that counts: the one in the FIELD when the form was sent. A
+   * password manager can fill the field without an event, and the vault must be
+   * born with what is on screen. See `fraseDoCampo`.
    */
   const fraseEscrita = useRef("")
-  /** The field for the question on screen, to give it focus. */
-  const campo = useRef<HTMLInputElement | null>(null)
-  /** And the page itself, for questions that have no field. */
-  const painel = useRef<HTMLDivElement | null>(null)
+  const campoDoConvite = useRef<HTMLInputElement | null>(null)
+  /** "Criar conta" was pressed and waits for the probe: a second press does nothing. */
+  const aEnviar = useRef(false)
 
   useEffect(() => {
-    if (probed.current) return
-    probed.current = true
     void bridge.vault
       .status()
-      .then(({ exists, memoriaDisponivel: memoria }) => {
-        setMemoriaDisponivel(Boolean(memoria && bridge.vault.memorizar))
-        // A vault already on disk means this screen must never create another
-        // over it: surface the fact and point at unlock instead.
+      .then(({ exists }) => {
+        // A vault already on disk means this screen must never create another over it.
         if (exists) setVaultExists(true)
       })
       .catch(() => {
@@ -243,25 +184,39 @@ export function Setup({
       })
   }, [])
 
-  const passos = passosDoSetup(useOs ? PASSOS_COM_SISTEMA : PASSOS_COM_FRASE, registo)
-  const posicao = Math.min(indice, passos.length - 1)
-  const passo = passos[posicao] as Passo
-  const ultimo = posicao === passos.length - 1
-
-  /*
-   * Focus follows the question: someone on a new page writes there without
-   * having to point first.
-   *
-   * A page with no field (the key page, when the system guards it, just has the
-   * checkbox) would drop focus on the `body`: Enter would do nothing and the
-   * keyboard would get stuck there. The page itself receives it, and the
-   * form's `onKeyDown` handles the rest.
+  /**
+   * Ask the server, once per server name, before the vault exists. Not asked
+   * (an older host, a server that did not answer): the gate goes on as before,
+   * and the first connection says the same.
    */
+  const sondar = (servidor: string): Promise<ModoDoServidor> => {
+    if (sondagem.current?.servidor === servidor) return sondagem.current.resposta
+    const pedir = bridge.session.sondarRegisto
+    const resposta: Promise<ModoDoServidor> = pedir ? pedir(servidor).catch(() => null) : Promise.resolve(null)
+    sondagem.current = { servidor, resposta }
+    setASondar(true)
+    void resposta.then((modo) => {
+      if (sondagem.current?.servidor !== servidor) return
+      setASondar(false)
+      setRegisto(modo)
+      if (modo === "convite") setComConvite(true)
+      // Said as soon as it is known, before anything is typed for nothing.
+      if (modo === "versao-antiga") setTela("versao-antiga")
+    })
+    return resposta
+  }
+
+  // The probe starts with the create screen, so the code field and a closed server show at once.
   useEffect(() => {
-    if (aCriar) return
-    if (campo.current) campo.current.focus()
-    else painel.current?.focus()
-  }, [passo, aCriar, useOs])
+    if (tela !== "criar") return
+    try {
+      void sondar(parseServerName(server.trim()))
+    } catch {
+      // An address that does not parse is said at "Criar conta".
+    }
+    // The server field asks again when it loses focus.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tela])
 
   const performStep = async (step: SetupStep): Promise<void> => {
     switch (step) {
@@ -270,13 +225,7 @@ export function Setup({
         // an existing vault is the one thing this screen must never do.
         const { exists } = await bridge.vault.status()
         if (exists) throw new Error(VAULT_EXISTS)
-        // `fraseEscrita` not `passphrase`: the vault is born with what was in the
-        // FIELD when it was submitted, which might have been the system manager
-        // putting it there. See `fraseDoCampo`.
-        await bridge.vault.create(useOs ? null : fraseEscrita.current)
-        // The vault exists and is open: save now, if the checkbox was on.
-        // A failure is reported and the account keeps being created.
-        await memorizarDepoisDeAbrir(!useOs && memoriaDisponivel && memorizar)
+        await bridge.vault.create(fraseEscrita.current)
         return
       }
       case "identidade": {
@@ -284,33 +233,51 @@ export function Setup({
         addressRef.current = identity.address
         return
       }
-      case "ligacao":
+      case "ligacao": {
         /*
-          The choice BEFORE the connection, both ways: the account joins the
-          common channel at the end of the handshake only with "yes" written
-          (opt-in since 12/11/2026), and anyone who left it unchecked cannot
-          enter, not even for a moment. Written in the account, so it reaches
-          its other devices. Retrying doesn't change anything.
+          The choice BEFORE the connection: the account joins the common
+          channel at the end of the handshake only with "yes" written (opt-in
+          since 12/11/2026). Written in the account, so it reaches its other
+          devices.
         */
-        await bridge.session.escolherSalaComum?.(entrarNoCanalOficial)
-        // The invite code, when there is one: the server reads it only for a new account. See `Session.definirConviteDeRegisto`.
-        if (convite.trim() !== "") await bridge.session.definirConviteDeRegisto?.(convite)
+        /*
+          On a retry the server is already known and joining reaches for the
+          common room before the handshake: that one fails with 202, and the
+          handshake end joins it anyway. The choice itself is written.
+        */
+        await bridge.session.escolherSalaComum?.(entrarNoCanalOficial).catch((erro: Error) => {
+          if (erro.message !== "no connection to the server") throw erro
+        })
+        /*
+          The invite code, when there is one: the server reads it only for a new
+          account. A pasted invite LINK is a community invite (1.3.26): over the
+          network limit it gets the account in too.
+        */
+        const codigo = comConvite ? convite.trim() : ""
+        if (eLigacaoDeConvite(codigo)) await bridge.session.definirConviteDeComunidade?.(codigo)
+        else await bridge.session.definirConviteDeRegisto?.(codigo === "" ? null : codigo)
+        // The proof of work of a new account (1.3.26), off the main thread, with the progress on the button.
+        if (bridge.session.prepararContaNova) {
+          setAPreparar(0)
+          try {
+            await bridge.session.prepararContaNova((fraccao) => setAPreparar(fraccao))
+          } finally {
+            setAPreparar(null)
+          }
+        }
         await bridge.session.connect()
         return
+      }
       case "perfil":
-        // No photo, the key won't go: with exactOptionalPropertyTypes,
-        // missing and `undefined` aren't the same.
-        await bridge.profile.set({
-          displayName: name.trim(),
-          donations: [],
-          ...(avatar ? { avatarDataUrl: avatar } : {}),
-        })
+        // The picture is in the profile, after the account: here only the name.
+        await bridge.profile.set({ displayName: name.trim(), donations: [] })
         return
     }
   }
 
   const run = async (): Promise<void> => {
     setError(null)
+    setErroDoConvite(null)
     let step = firstIncomplete(progress.current)
     while (step) {
       setBusyStep(step)
@@ -322,95 +289,48 @@ export function Setup({
           setVaultExists(true)
           return
         }
-        // A server that wants a code (or a better one): show the field, and retry resumes at the connection.
+        const detalhe = traduzirErro(caught)
+        // A server that wants a code (or a better one): the field opens with the error under it,
+        // and the next "Criar conta" resumes at the connection. One place, no toast.
         if (ERROS_QUE_PEDEM_CONVITE.has((caught as Error).message) && bridge.session.definirConviteDeRegisto) {
-          setConviteRecusado(true)
+          setComConvite(true)
+          setErroDoConvite(detalhe)
+          setTimeout(() => campoDoConvite.current?.focus(), 0)
+        } else {
+          setError(detalhe)
         }
-        const detail = traduzirErro(caught)
-        setError(detail)
-        toast(detail, "error")
         return
       }
       progress.current = markDone(progress.current, step)
       step = firstIncomplete(progress.current)
     }
     setBusyStep(null)
-    // The account exists: the file comes next, and only then the app. See `PassoDoFicheiroDaConta`.
+    // The name for "Olá, <name>" at the next sign-in, at once (`lib/accountNames.ts`).
+    rememberAccountName(await activeAccountId(bridge), name.trim())
     if (addressRef.current) setCriada(addressRef.current)
   }
 
-  /**
-   * The photo goes through the same compressor as the profile editor, with the same
-   * budget: the initial profile is republished on the same channels as the later one,
-   * and costs the same. A light animated GIF keeps moving; a heavy one stops, and
-   * the page says why. See `ProfileEditor.pickAvatar`.
-   *
-   * Before compressing, the framing sheet, with the same circle as the profile editor.
-   * Without it (a device that can't crop), the old path.
-   */
-  const escolherFotografia = (file: File | undefined): void => {
-    if (!file) return
-    setPhotoError(null)
-    setAvisoDoGif(null)
-    if (podeEnquadrar()) {
-      setAEnquadrar(file)
-      return
-    }
-    void compressImage(file, IMAGE_BUDGETS.avatar)
-      .then((imagem) => aplicarFotografia(file, imagem))
-      .catch((erro: Error) => setPhotoError(traduzirErro(erro)))
-  }
-
-  const aplicarFotografia = (file: File, imagem: CompressedImage): void => {
-    setAvatar(imagem.dataUrl)
-    setAvisoDoGif(avisoDeAnimacaoPerdida(file, imagem, IMAGE_BUDGETS.avatar))
-  }
-
-  /**
-   * What's missing for this page's button to stop being disabled.
-   *
-   * One question at a time also means one condition at a time: the button only
-   * knows about the field in front of the person.
-   */
-  const pronto =
-    passo === "convite"
-      ? convite.trim() !== ""
-      : passo === "nome"
-      ? /* The display-name rule (12 graphemes, `nomeValido`): the field cuts
-           what is typed, but not while a keyboard composes, and Android's
-           composes every word. */
-        nomeValido(name)
-      : /*
-             The password pages don't lock by state.
-
-             The field might have been filled by the system manager without
-             firing any event: state stays empty, and locking the button by it
-             is putting the person in front of a full field and a dead button,
-             with nothing to explain it. What validates is `submeter`, which reads
-             the FIELD, and which already said "at least 8 characters" and
-             "don't match" when needed. See `fraseDoCampo`.
-          */
-          true
-
-  /**
-   * Move to the next page, or create the account if this is the last one.
-   *
-   * Takes the form because that's where the truth about the fields comes from.
-   * The two places that call this, the `onSubmit` and the Enter `onKeyDown`,    * have it in `event.currentTarget`.
-   */
   const submeter = (formulario: HTMLFormElement | null): void => {
-    if (busyStep) return
+    if (busyStep || aEnviar.current) return
+    setServerError(null)
 
-    // We're already creating: the button is retry, and `run` resumes at the
-    // first step that failed, never redoes the vault or identity.
-    if (aCriar) {
-      void run()
-      return
-    }
-
-    if (passo === "nome") {
+    // Once the vault exists, the password and the server are set: "Criar conta" resumes.
+    if (!progress.current.cofre) {
       if (!nomeValido(name)) return
-      setServerError(null)
+      const frase = fraseDoCampo(formulario, "new-password", passphrase)
+      const confirmacao = fraseDoCampo(formulario, "confirm-password", confirm)
+      if (frase !== passphrase) setPassphrase(frase)
+      if (confirmacao !== confirm) setConfirm(confirmacao)
+      if (frase.length < MINIMO_DA_PALAVRA_PASSE) {
+        setPassError(strings.entrada.curta)
+        return
+      }
+      if (frase !== confirmacao) {
+        setPassError(strings.entrada.diferentes)
+        return
+      }
+      setPassError(null)
+      fraseEscrita.current = frase
       try {
         serverRef.current = parseServerName(server.trim())
       } catch {
@@ -418,457 +338,234 @@ export function Setup({
         setAvancadas(true)
         return
       }
-      /*
-        Who may create an account there (1.3.25), before anything is written.
-        `fechado` stops here, on the name page, with the vault still unmade; the
-        person can pick another server below, or go back and pair. `convite` adds
-        the code page next. Not asked (an older host, a server that did not answer):
-        the gate goes on as before, and the first connection says the same.
-      */
-      const sondar = bridge.session.sondarRegisto
-      if (sondar) {
-        setASondar(true)
-        void sondar(serverRef.current)
-          .catch(() => null)
-          .then((modo) => {
-            setASondar(false)
-            setRegisto(modo)
-            if (modo === "fechado") return
-            setIndice(1)
-          })
+    }
+
+    aEnviar.current = true
+    void sondar(serverRef.current).then((modo) => {
+      aEnviar.current = false
+      if (modo === "fechado") return
+      if (modo === "versao-antiga") {
+        setTela("versao-antiga")
         return
       }
-    }
-
-    /*
-      What the FIELDS have, now that the system manager writes in them too.
-
-      One step has only that step's field, and the other falls into state, which
-      by now has been synced by the previous step. See `fraseDoCampo`.
-    */
-    const frase = fraseDoCampo(formulario, "new-password", passphrase)
-    const confirmacao = fraseDoCampo(formulario, "confirm-password", confirm)
-    fraseEscrita.current = frase
-    // State follows the field, so the screen and the next step agree
-    // with what's actually there.
-    if (frase !== passphrase) setPassphrase(frase)
-    if (confirmacao !== confirm) setConfirm(confirmacao)
-
-    if (passo === "chave" && !useOs) {
-      if (frase.length < 8) {
-        setPassError(strings.gate.passphraseShort)
-        return
-      }
-      setPassError(null)
-    }
-
-    if (passo === "confirmar") {
-      if (frase !== confirmacao) {
-        setConfirmError(strings.gate.passphraseMismatch)
-        return
-      }
-      setConfirmError(null)
-    }
-
-    if (!ultimo) {
-      setIndice(posicao + 1)
-      return
-    }
-
-    setACriar(true)
-    void run()
+      void run()
+    })
   }
 
-  if (criada) return <PassoDoFicheiroDaConta address={criada} onContinuar={() => onDone(criada)} />
+  /**
+   * "Voltar" from the create screen. An account that stopped before the server
+   * saw it (version, network, a refused code) is only on this device and opens
+   * nothing: it goes, so the next gate is not "Olá" for an account that does
+   * not exist. After the connection it stays: the account is real.
+   */
+  const voltar = (): void => {
+    const aMeio = progress.current.cofre && !progress.current.ligacao
+    const ir = (): void => {
+      progress.current = EMPTY_SETUP_PROGRESS
+      addressRef.current = null
+      setError(null)
+      setErroDoConvite(null)
+      setTela("entrada")
+    }
+    if (!aMeio) {
+      ir()
+      return
+    }
+    void bridge.vault.destroy().catch(() => {}).then(ir)
+  }
+
+  if (criada) return <GuardarFicheiroDaConta address={criada} onContinuar={() => onDone(criada)} />
 
   if (vaultExists) {
     return (
       <div className="gate">
-        <div className="gate-card">
-          <h1>{strings.gate.setupTitle}</h1>
+        <CartaoDoPortao titulo={strings.entrada.criarConta}>
           <p className="gate-lead">{strings.gate.vaultExists}</p>
-          <p className="gate-warning">{strings.gate.vaultExistsBody}</p>
-          <Button variant="primary" onClick={onUnlockInstead}>
+          <Button variant="primary" type="button" className="entrada-botao" onClick={onUnlockInstead}>
             {strings.gate.goToUnlock}
           </Button>
-          <p className="gate-lead">{strings.gate.importLead}</p>
-          <ImportAccount replacing onDone={onDone} />
-        </div>
+        </CartaoDoPortao>
       </div>
     )
   }
 
-  /*
-    The first question, before the account (phase 8.1).
+  if (tela === "entrada") {
+    return (
+      <Entrada
+        termosDoOrwell={termosDoOrwell}
+        onCriar={() => setTela("criar")}
+        onFicheiro={() => setTela("ficheiro")}
+        onOutroAparelho={onJoinInstead}
+      />
+    )
+  }
 
-    This replaces earlier choices about the
-    gate order: creating an account is no longer the default path, and pairing
-    is no longer the "third option" in a button below the name. Both answers
-    carry equal weight, because neither is wrong; the wrong choice was to create
-    a second account without knowing the other option existed.
-  */
-  if (!aCriarConta && onJoinInstead) {
+  if (tela === "ficheiro") return <EntrarComFicheiro onDone={onDone} onVoltar={() => setTela("entrada")} />
+
+  if (tela === "versao-antiga") {
     return (
       <div className="gate">
-        <div className="gate-card gate-setup">
-          <header className="setup-head">
-            <OrwellWordmark size={22} />
-          </header>
-          <div className="setup-pane">
-            <h1>{strings.gate.outroAparelhoPergunta}</h1>
-            <p className="gate-lead">{strings.gate.outroAparelhoLead}</p>
-          </div>
-          <div className="setup-escolha">
-            <Button variant="primary" type="button" className="wide" onClick={onJoinInstead}>
-              {strings.gate.outroAparelhoSim}
+        <CartaoDoPortao titulo={strings.entrada.criarConta} onVoltar={voltar}>
+          <p className="gate-lead" role="alert">
+            {strings.entrada.versaoAntiga}
+          </p>
+          <div className="entrada-fundo">
+            <Button
+              variant="primary"
+              type="button"
+              className="entrada-botao"
+              onClick={() => {
+                // The installed app opens the downloads page; the web has the new version one reload away.
+                const abrir = bridge.actualizacao?.abrir
+                if (abrir) void abrir().catch(() => {})
+                else window.location.reload()
+              }}
+            >
+              {strings.entrada.actualizar}
             </Button>
-            <Button variant="primary" type="button" className="wide" onClick={() => setACriarConta(true)}>
-              {strings.gate.outroAparelhoNao}
-            </Button>
           </div>
-          <div className="gate-rodape">
-            <p>
-              <button type="button" className="gate-link" onClick={() => setComoFunciona(true)}>
-                {strings.comoFunciona.link}
-              </button>
-            </p>
-            {termosDoOrwell && (
-              <p>
-                <LigacoesLegais className="gate-link" />
-              </p>
-            )}
-            {/* An account added, still empty: go back to the existing ones. */}
-            <LigacaoMudarDeConta rotulo={strings.contas.voltar} podeAcrescentar={false} />
-          </div>
-        </div>
-        {comoFunciona && <FolhaComoFunciona onClose={() => setComoFunciona(false)} />}
+        </CartaoDoPortao>
       </div>
     )
   }
 
-  const pergunta = aCriar
-    ? strings.gate.creatingTitle
-    : passo === "nome"
-      ? strings.gate.askName
-      : passo === "convite"
-        ? strings.gate.askInvite
-        : passo === "fotografia"
-        ? strings.gate.askPhoto
-        : passo === "chave"
-        ? useOs
-          ? strings.gate.askPassKeychain
-          : strings.gate.askPass
-        : strings.gate.askConfirm
-
-  const explicacao = aCriar
-    ? strings.gate.creatingLead
-    : passo === "nome"
-      ? strings.gate.askNameLead
-      : passo === "convite"
-        ? strings.gate.askInviteLead
-        : passo === "fotografia"
-        ? strings.gate.askPhotoLead
-        : passo === "chave"
-        ? useOs
-          ? strings.gate.askPassKeychainLead
-          : strings.gate.askPassLead
-        : strings.gate.askConfirmLead
+  const aCriar = busyStep !== null
+  const fixos = progress.current.cofre
+  const fechado = registo === "fechado"
 
   return (
     <div className="gate">
-      <div className="gate-card gate-setup">
-        <header className="setup-head">
-          <OrwellWordmark size={22} />
-          {!aCriar && (
-            <>
-              <ol className="setup-dots" aria-hidden="true">
-                {passos.map((cada, i) => (
-                  <li key={cada} className={i === posicao ? "current" : i < posicao ? "done" : undefined} />
-                ))}
-              </ol>
-              <p className="sr-only" aria-live="polite">
-                {strings.gate.stepOf(posicao + 1, passos.length)}
-              </p>
-            </>
-          )}
-        </header>
-
+      <CartaoDoPortao titulo={strings.entrada.criarConta} onVoltar={voltar} voltarDesligado={aCriar}>
         <form
-          className="setup-form"
-          aria-labelledby="setup-pergunta"
+          className="entrada-formulario"
+          aria-label={strings.entrada.criarConta}
           onSubmit={(event) => {
             event.preventDefault()
             submeter(event.currentTarget)
           }}
-          onKeyDown={(event) => {
-            // Enter advances from anywhere. A single field submitted the form on its own;
-            // a page with no text field does not, and without this Enter did nothing. The
-            // buttons handle their own Enter and do not pass through here, or it would
-            // advance two pages.
-            if (event.key !== "Enter") return
-            if ((event.target as HTMLElement).tagName === "BUTTON") return
-            event.preventDefault()
-            submeter(event.currentTarget)
-          }}
         >
-          {/* `key` per step: each question enters as a new screen, and the field there
-              is a fresh field, not the previous one reused. */}
-          <div className="setup-pane" key={aCriar ? "a-criar" : passo} ref={painel} tabIndex={-1}>
-            <h1 id="setup-pergunta">{pergunta}</h1>
-            <p className="gate-lead">{explicacao}</p>
+          <CampoDeNome
+            rotulo={<span className="field-label">{strings.entrada.nome}</span>}
+            value={name}
+            autoFocus
+            autoComplete="nickname"
+            disabled={aCriar}
+            onChange={setName}
+          />
+          {/* The same name that `Unlock` asks the manager to fill. See `CampoDeIdentidade`. */}
+          <CampoDeIdentidade />
+          <Field label={strings.entrada.palavraPasse}>
+            <input
+              type="password"
+              name="new-password"
+              value={passphrase}
+              autoComplete="new-password"
+              disabled={aCriar}
+              readOnly={fixos}
+              aria-invalid={passError ? true : undefined}
+              aria-describedby="setup-minimo"
+              onChange={(event) => {
+                setPassphrase(event.target.value)
+                setPassError(null)
+              }}
+            />
+          </Field>
+          <Field label={strings.entrada.palavraPasseOutraVez}>
+            <input
+              type="password"
+              name="confirm-password"
+              value={confirm}
+              autoComplete="new-password"
+              disabled={aCriar}
+              readOnly={fixos}
+              aria-invalid={passError ? true : undefined}
+              onChange={(event) => {
+                setConfirm(event.target.value)
+                setPassError(null)
+              }}
+            />
+          </Field>
+          {passError ? (
+            <p className="error" role="alert">
+              {passError}
+            </p>
+          ) : (
+            <p id="setup-minimo" className="field-note">
+              {strings.entrada.minimo}
+            </p>
+          )}
 
-            {!aCriar && passo === "nome" && (
-              <>
-                <CampoDeNome
-                  rotulo={<span className="sr-only">{strings.gate.name}</span>}
-                  campoRef={campo}
-                  value={name}
-                  autoFocus
-                  placeholder={strings.gate.namePlaceholder}
-                  onChange={setName}
-                />
-                <p className="gate-lead setup-promise">{strings.gate.setupLead}</p>
-              </>
-            )}
+          {comConvite ? (
+            <Field label={strings.entrada.codigoDeConvite}>
+              <input
+                ref={campoDoConvite}
+                name="convite-de-registo"
+                value={convite}
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                disabled={aCriar}
+                // Room for an invite link as well as a code (1.3.26).
+                maxLength={2048}
+                aria-invalid={erroDoConvite ? true : undefined}
+                onChange={(event) => {
+                  setConvite(event.target.value)
+                  setErroDoConvite(null)
+                }}
+              />
+            </Field>
+          ) : (
+            <button type="button" className="gate-link entrada-link entrada-link-inicio" onClick={() => setComConvite(true)}>
+              {strings.entrada.tenhoConvite}
+            </button>
+          )}
+          {erroDoConvite && (
+            <p className="error" role="alert">
+              <TextoDeErro texto={erroDoConvite} />
+            </p>
+          )}
 
-            {((!aCriar && passo === "convite") || (aCriar && conviteRecusado)) && (
-              <Field label={aCriar ? strings.gate.inviteCode : <span className="sr-only">{strings.gate.inviteCode}</span>}>
-                <input
-                  ref={aCriar ? undefined : campo}
-                  name="convite-de-registo"
-                  value={convite}
-                  autoComplete="off"
-                  autoCapitalize="characters"
-                  spellCheck={false}
-                  maxLength={64}
-                  placeholder={strings.gate.invitePlaceholder}
-                  onChange={(event) => setConvite(event.target.value)}
-                />
-              </Field>
-            )}
+          {/* The common channel, as an explicit choice. Before 12/11/2026 every new account entered there. */}
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              name="canal-oficial"
+              checked={entrarNoCanalOficial}
+              disabled={aCriar}
+              onChange={(event) => setEntrarNoCanalOficial(event.target.checked)}
+            />
+            {strings.gate.canalOficial}
+          </label>
 
-            {!aCriar && passo === "nome" && registo === "fechado" && (
-              <p className="error" role="alert">
-                {strings.gate.registoFechado}
-              </p>
-            )}
-
-            {!aCriar && passo === "fotografia" && (
-              <>
-                {/* The same rounded preview as the profile editor.
-                    No photo: the first letter of the name, which is what stays in the account. */}
-                <div className="setup-foto">
-                  <div className="avatar-preview">
-                    {avatar ? (
-                      <img src={avatar} alt="" />
-                    ) : (
-                      <span>{(name.trim()[0] ?? "?").toUpperCase()}</span>
-                    )}
-                  </div>
-                  {/* "Choose photo" with the look of the advance button
-                      ("Skip"): both answers weigh the same. */}
-                  <label className="primary wide file">
-                    {strings.gate.choosePhoto}
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      onChange={(event) => {
-                        escolherFotografia(event.target.files?.[0])
-                        // After "Cancel", the same file reopens the sheet.
-                        event.target.value = ""
-                      }}
-                    />
-                  </label>
-                  {avatar && (
-                    <Button
-                      variant="ghost"
-                      type="button"
-                      onClick={() => {
-                        setAvatar(null)
-                        setAvisoDoGif(null)
-                      }}
-                    >
-                      {strings.gate.removePhoto}
-                    </Button>
-                  )}
-                </div>
-                {avisoDoGif && (
-                  <p className="hint" role="status">
-                    {avisoDoGif}
-                  </p>
-                )}
-                {photoError && (
-                  <p className="error">
-                    <TextoDeErro texto={photoError} />
-                  </p>
-                )}
-                {aEnquadrar && (
-                  <Enquadrar
-                    ficheiro={aEnquadrar}
-                    forma="circulo"
-                    budget={IMAGE_BUDGETS.avatar}
-                    onGuardar={(imagem) => {
-                      aplicarFotografia(aEnquadrar, imagem)
-                      setAEnquadrar(null)
-                    }}
-                    onCancelar={() => setAEnquadrar(null)}
-                  />
-                )}
-              </>
-            )}
-
-            {!aCriar && passo === "chave" && (
-              <>
-                {!useOs && (
-                  <>
-                    {/* The same name that `Unlock` will ask to fill in:
-                        because they are the same, the manager recognizes the entry
-                        saved here. See `CampoDeIdentidade`. */}
-                    <CampoDeIdentidade />
-                    <Field label={<span className="sr-only">{strings.gate.devicePassphrase}</span>}>
-                      <span className="pass-row">
-                        <input
-                          ref={campo}
-                          type={reveal ? "text" : "password"}
-                          name="new-password"
-                          value={passphrase}
-                          autoComplete="new-password"
-                          aria-invalid={passError ? true : undefined}
-                          placeholder={strings.gate.passphrasePlaceholder}
-                          onChange={(event) => {
-                            setPassphrase(event.target.value)
-                            setPassError(null)
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="reveal-toggle"
-                          aria-pressed={reveal}
-                          onClick={() => setReveal((current) => !current)}
-                        >
-                          {reveal ? strings.gate.conceal : strings.gate.reveal}
-                        </button>
-                      </span>
-                    </Field>
-                    {memoriaDisponivel && <CaixaMemorizar ligada={memorizar} onMudar={setMemorizar} />}
-                  </>
-                )}
-                {passError && <p className="error">{passError}</p>}
-                <p className="gate-warning">{useOs ? strings.gate.warning : strings.gate.passphraseNote}</p>
-              </>
-            )}
-
-            {!aCriar && passo === "confirmar" && (
-              <>
-                <Field label={<span className="sr-only">{strings.gate.confirmPassphrase}</span>}>
-                  <span className="pass-row">
-                    <input
-                      ref={campo}
-                      type={reveal ? "text" : "password"}
-                      name="confirm-password"
-                      value={confirm}
-                      autoComplete="new-password"
-                      aria-invalid={confirmError ? true : undefined}
-                      onChange={(event) => {
-                        setConfirm(event.target.value)
-                        setConfirmError(null)
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="reveal-toggle"
-                      aria-pressed={reveal}
-                      onClick={() => setReveal((current) => !current)}
-                    >
-                      {reveal ? strings.gate.conceal : strings.gate.reveal}
-                    </button>
-                  </span>
-                </Field>
-                {confirmError && <p className="error">{confirmError}</p>}
-                <p className="gate-warning">{strings.gate.warning}</p>
-              </>
-            )}
-
-            {/* The common channel, on the last screen, as an explicit choice.
-                Before this, every new account entered there without asking. */}
-            {!aCriar && ultimo && (
-              <div className="canal-oficial-escolha">
-                <label className="checkbox">
-                  <input
-                    type="checkbox"
-                    name="canal-oficial"
-                    checked={entrarNoCanalOficial}
-                    onChange={(event) => setEntrarNoCanalOficial(event.target.checked)}
-                  />
-                  {strings.gate.canalOficial}
-                </label>
-              </div>
-            )}
-
-            {/* Phase 6, layer 1: the account sentence, on the last screen before
-                "Create". This is the last moment the password can still be
-                chosen thinking there is no going back. */}
-            {!aCriar && ultimo && <FraseDoMomento id="conta" />}
-
-            {aCriar && (
-              <ol className="setup-steps">
-                {SETUP_STEPS.map((step) => (
-                  <li
-                    key={step}
-                    className={progress.current[step] ? "done" : step === busyStep ? "current" : undefined}
-                  >
-                    {strings.gate.stepNames[step]}
-                  </li>
-                ))}
-              </ol>
-            )}
-
-            {error && (
-            <p className="error">
+          {fechado && (
+            <p className="error" role="alert">
+              <TextoDeErro texto={traduzirErro(new Error("this server does not accept new accounts"))} />
+            </p>
+          )}
+          {error && (
+            <p className="error" role="alert">
               <TextoDeErro texto={error} />
             </p>
           )}
-          </div>
 
-          {/* Before "Create": the age the Terms ask for, and that creating the
-              account accepts them. No checkbox: the Terms say that using the
-              service is the acceptance. orwell.pt's Terms, so only on orwell.pt. */}
-          {!aCriar && ultimo && termosDoOrwell && <p className="field-note setup-termos">{strings.legal.idadeEAceitacao}</p>}
+          {/* The age the Terms ask for, and that creating the account accepts them. orwell.pt's Terms, so only on orwell.pt. */}
+          {termosDoOrwell && <p className="field-note setup-termos">{strings.legal.idadeEAceitacao}</p>}
 
-          <div className="setup-actions">
-            {/* On the first screen, "Back" goes to the other device question:
-                that is how you reach pairing after saying "No". */}
-            {!aCriar && (posicao > 0 || onJoinInstead) && (
-              <Button
-                variant="ghost"
-                type="button"
-                onClick={() => (posicao > 0 ? setIndice(posicao - 1) : setACriarConta(false))}
-              >
-                {strings.gate.back}
-              </Button>
-            )}
-            <Button
-              variant="primary"
-              type="submit"
-              className="setup-go"
-              disabled={busyStep !== null || aSondar || (!aCriar && !pronto) || (aCriar && conviteRecusado && convite.trim() === "")}
-            >
-              {busyStep
-                ? strings.gate.stepLabels[busyStep]
-                : error
-                  ? strings.common.retry
-                  : ultimo
-                    ? strings.gate.create
-                    : passo === "fotografia" && !avatar
-                      ? strings.gate.skipPhoto
-                      : strings.gate.next}
-            </Button>
-          </div>
+          <Button
+            variant="primary"
+            type="submit"
+            className="entrada-botao"
+            disabled={aCriar || aSondar || fechado || !nomeValido(name) || (comConvite && registo === "convite" && convite.trim() === "")}
+          >
+            {aPreparar !== null
+              ? strings.gate.aPrepararConta(Math.round(aPreparar * 100))
+              : aCriar
+                ? strings.entrada.aCriar
+                : strings.entrada.criarConta}
+          </Button>
 
-          {/* The server, off everyone's path but within reach for those who
-              look for it. Only on the first screen: the account does not yet exist
-              there and the choice still means something. */}
-          {!aCriar && passo === "nome" && (
+          {/* The server, off everyone's path but in reach. Only until the account exists. */}
+          {!progress.current.identidade && (
             <div className="setup-advanced">
               <button
                 type="button"
@@ -883,53 +580,31 @@ export function Setup({
                   <Field label={strings.gate.server}>
                     <input
                       value={server}
+                      disabled={aCriar}
                       aria-invalid={serverError ? true : undefined}
                       onChange={(event) => {
                         setServer(event.target.value)
                         setServerError(null)
-                        // Another server: what the last one said about new accounts no longer holds.
+                        // Another server: what the last one said no longer holds.
                         setRegisto(null)
+                      }}
+                      onBlur={() => {
+                        try {
+                          void sondar(parseServerName(server.trim()))
+                        } catch {
+                          // Said at "Criar conta".
+                        }
                       }}
                     />
                   </Field>
-                  <p className="field-note">{strings.gate.advancedNote}</p>
                   {serverError && <p className="error">{serverError}</p>}
                 </>
               )}
             </div>
           )}
         </form>
-
-        {!aCriar && passo === "nome" && (
-          <div className="setup-import">
-            {/* The "Pair" button that was here (the "third option") moved up
-                to the first Setup question: phase 8.1.
-                Import remains, for those with the file. */}
-            <p className="gate-lead">{strings.gate.importLead}</p>
-            <ImportAccount replacing={false} onDone={onDone} />
-          </div>
-        )}
-
-        {/* Phase 6: "How it works" before there is an account, as in `Unlock`.
-            On every screen: the doubt ("why is there no email?") can arise
-            on any of them. */}
-        <div className="gate-rodape">
-          <p>
-            <button type="button" className="gate-link" onClick={() => setComoFunciona(true)}>
-              {strings.comoFunciona.link}
-            </button>
-          </p>
-          {/* GDPR art. 13: the policy is at hand on every screen that asks for data.
-              orwell.pt's policy, so only for an account on orwell.pt. */}
-          {termosDoOrwell && (
-            <p>
-              <LigacoesLegais className="gate-link" />
-            </p>
-          )}
-          {!aCriar && <LigacaoMudarDeConta rotulo={strings.contas.voltar} podeAcrescentar={false} />}
-        </div>
-      </div>
-      {comoFunciona && <FolhaComoFunciona onClose={() => setComoFunciona(false)} />}
+        <RodapeDaEntrada termosDoOrwell={termosDoOrwell} />
+      </CartaoDoPortao>
     </div>
   )
 }

@@ -21,12 +21,38 @@ describe("BarraDoHistorico", () => {
     expect(screen.getByRole("status").querySelector("progress")).not.toBeNull()
   })
 
-  it("o aparelho principal calou-se: uma linha com o que falta e porquê, sem barra de progresso, e fecha", () => {
-    render(<BarraDoHistorico estado={{ ...base, aTrazer: false, perdidas: 18, razao: "irmao-calado" }} />)
+  it("parou a meio: uma linha com o que falta NESTE aparelho e que vai retomar, sem barra de progresso, e fecha", () => {
+    render(<BarraDoHistorico estado={{ ...base, aTrazer: false, faltam: 298, razao: "irmao-calado" }} />)
     const linha = screen.getByRole("status")
-    expect(linha.textContent).toContain(strings.sincronia.historicoParado(18))
+    expect(linha.textContent).toContain(strings.sincronia.historicoEmFalta(298))
     expect(linha.querySelector("progress")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: strings.sincronia.historicoFechar }))
+    expect(screen.queryByRole("status")).toBeNull()
+  })
+
+  it("o texto aprovado, no singular e no plural", () => {
+    expect(strings.sincronia.historicoEmFalta(1)).toMatch(/^(1 message is missing on this device|Falta 1 mensagem neste aparelho)\./)
+    expect(strings.sincronia.historicoEmFalta(298)).toMatch(/^(298 messages are missing on this device|Faltam 298 mensagens neste aparelho)\./)
+  })
+
+  it("parou, mas nada falta neste aparelho (só o registo de estado, ou repetidas): nada", () => {
+    render(<BarraDoHistorico estado={{ ...base, aTrazer: false, faltam: 0, razao: "irmao-calado" }} />)
+    expect(screen.queryByRole("status")).toBeNull()
+  })
+
+  it("parou sem número exacto (irmão antigo): a linha sem número, nunca um número inventado", () => {
+    render(<BarraDoHistorico estado={{ ...base, aTrazer: false, razao: "irmao-calado" }} />)
+    expect(screen.getByRole("status").textContent).toContain(strings.sincronia.historicoEmFaltaSemNumero)
+    expect(screen.getByRole("status").textContent).not.toMatch(/\d/)
+  })
+
+  it("sem número e sem fonte (o núcleo largou o plano): nada", () => {
+    render(<BarraDoHistorico estado={{ ...base, aTrazer: false, feitas: 0, total: 0, inicial: false }} />)
+    expect(screen.queryByRole("status")).toBeNull()
+  })
+
+  it("entre aparelhos já emparelhados, uma sincronia pequena que parou não mostra aviso", () => {
+    render(<BarraDoHistorico estado={{ ...base, inicial: false, aTrazer: false, feitas: 3, total: 12, faltam: 9, razao: "sem-irmao" }} />)
     expect(screen.queryByRole("status")).toBeNull()
   })
 
@@ -59,7 +85,7 @@ describe("BarraDoHistorico", () => {
   })
 
   it("no topo, o aviso de que parou também fica no topo", () => {
-    const { container } = render(<BarraDoHistorico estado={{ ...base, aTrazer: false, perdidas: 18, razao: "irmao-calado" }} noTopo />)
+    const { container } = render(<BarraDoHistorico estado={{ ...base, aTrazer: false, faltam: 18, razao: "irmao-calado" }} noTopo />)
     expect(container.querySelector(".barra-historico-no-topo.barra-historico-aviso")).not.toBeNull()
     expect(container.querySelector(".barra-sincronia")).toBeNull()
   })

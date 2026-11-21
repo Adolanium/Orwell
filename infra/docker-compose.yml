@@ -65,6 +65,29 @@ services:
       # accounts and their new devices always get in. Any other value stops the server at start.
       # Listed because of the trap above: in .env only, it would silently stay aberto.
       ENCLAVE_REGISTO: ${ENCLAVE_REGISTO:-aberto}
+      # The abuse brake, part 2 (1.3.26): proof of work for new accounts, new accounts per
+      # network, new-account limits in the common room, and the common room's join ceiling.
+      # Empty is the default (all on); see infra/.env.example for each number. Listed because
+      # of the trap above.
+      ENCLAVE_PROVA_TRABALHO: ${ENCLAVE_PROVA_TRABALHO:-}
+      ENCLAVE_PROVA_TRABALHO_NO_PICO: ${ENCLAVE_PROVA_TRABALHO_NO_PICO:-}
+      ENCLAVE_PROVA_PICO_POR_HORA: ${ENCLAVE_PROVA_PICO_POR_HORA:-}
+      ENCLAVE_CONTAS_POR_REDE_HORA: ${ENCLAVE_CONTAS_POR_REDE_HORA:-}
+      ENCLAVE_CONTAS_POR_REDE_DIA: ${ENCLAVE_CONTAS_POR_REDE_DIA:-}
+      ENCLAVE_CONTA_NOVA: ${ENCLAVE_CONTA_NOVA:-}
+      ENCLAVE_CONTA_NOVA_INTERVALO_24H_S: ${ENCLAVE_CONTA_NOVA_INTERVALO_24H_S:-}
+      ENCLAVE_CONTA_NOVA_INTERVALO_72H_S: ${ENCLAVE_CONTA_NOVA_INTERVALO_72H_S:-}
+      ENCLAVE_CONTA_NOVA_MAX_BYTES_24H: ${ENCLAVE_CONTA_NOVA_MAX_BYTES_24H:-}
+      ENCLAVE_CONTA_NOVA_PESSOAS_24H: ${ENCLAVE_CONTA_NOVA_PESSOAS_24H:-}
+      ENCLAVE_CONTA_NOVA_PESSOAS_72H: ${ENCLAVE_CONTA_NOVA_PESSOAS_72H:-}
+      ENCLAVE_CONTA_NOVA_COMUNIDADES: ${ENCLAVE_CONTA_NOVA_COMUNIDADES:-}
+      ENCLAVE_COMUNIDADES_POR_CONTA: ${ENCLAVE_COMUNIDADES_POR_CONTA:-}
+      ENCLAVE_ROOMS_PER_ACCOUNT: ${ENCLAVE_ROOMS_PER_ACCOUNT:-}
+      ENCLAVE_NEW_ACCOUNT_ROOMS: ${ENCLAVE_NEW_ACCOUNT_ROOMS:-}
+      # The old names of the two above, read for one version (the new name wins).
+      ENCLAVE_CHANNELS_PER_ACCOUNT: ${ENCLAVE_CHANNELS_PER_ACCOUNT:-}
+      ENCLAVE_NEW_ACCOUNT_CHANNELS: ${ENCLAVE_NEW_ACCOUNT_CHANNELS:-}
+      ENCLAVE_SALA_COMUM_ENTRADAS_POR_HORA: ${ENCLAVE_SALA_COMUM_ENTRADAS_POR_HORA:-}
       # ---------------------------------------------------------------- SFU
       # The media engine. Listed here because of the same trap as the two above, which has already
       # bitten twice: compose only passes to the container what is listed, and a variable only in
@@ -122,6 +145,19 @@ services:
       #   ENCLAVE_LOG:     `debug` turns on Fastify request logging, which is a history
       #                       of activity per account and per minute. Turn it on by hand,
       #                       in a diagnostics session, never through a file left on by accident.
+    # Readiness (1.3.26). The server opens its port only after every startup phase is
+    # done (apps/server/src/main.ts prints one `enclave: arranque:` line per phase), so
+    # /_enclave/health answering 200 means ready, not just alive. `docker ps` shows
+    # `healthy`, and the deploy waits for it before recreating the web container (see
+    # docs/DEPLOY-WEB.md). The image has no curl: Node's own fetch does the request.
+    # Checked every second while starting, every 30 s after.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8448/_enclave/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+      start_interval: 1s
     volumes:
       - server-data:/data
       # The month's output, written by the host cron (infra/quota-vnstat.sh).

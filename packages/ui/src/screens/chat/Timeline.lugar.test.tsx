@@ -7,8 +7,9 @@ import { ToastProvider } from "../../components/Toast.js"
 import { Timeline } from "./Timeline.js"
 
 /**
- * The marker of the place (S5, §2.5): "You joined here. What was said before
- * does not reach this device.", at the point where this device entered the channel.
+ * The marker of the place (S5, §2.5; D2, 21/11/2026): "Chat history is
+ * syncing.", at the point where this device entered the channel, only while
+ * the past is arriving.
  */
 
 const render = (ui: React.ReactElement): ReturnType<typeof baseRender> => baseRender(ui, { wrapper: ToastProvider })
@@ -32,6 +33,7 @@ function timeline(overrides: Partial<React.ComponentProps<typeof Timeline>>): Re
       me={null}
       nameFor={(sender) => sender}
       directory={new Map<string, Profile>()}
+      aSincronizar
       {...overrides}
     />
   )
@@ -127,19 +129,14 @@ describe("o marcador do lugar", () => {
     expect(screen.queryByRole("note")).toBeNull()
   })
 
-  it("num canal novo com lugar, o vazio diz uma vez a frase do lugar (fase 6)", () => {
+  it("sem passado a vir, não há frase nenhuma: nem o marcador nem a frase do lugar", () => {
     localStorage.clear()
-    render(timeline({ messages: [], lugar: { seq: 9, em: EM }, fraseDoLugar: true }))
-    expect(screen.getByText(strings.frasesDoMomento.canal)).toBeTruthy()
-  })
-
-  it("e não a diz numa directa, nem a quem fundou o canal", () => {
-    localStorage.clear()
-    render(timeline({ messages: [], lugar: { seq: 9, em: EM }, fraseDoLugar: false }))
-    expect(screen.queryByText(strings.frasesDoMomento.canal)).toBeNull()
+    render(timeline({ messages: [mensagem(10, "a")], lugar: { seq: 5, em: EM }, aSincronizar: false }))
+    expect(screen.queryByRole("note")).toBeNull()
     cleanup()
-    render(timeline({ messages: [], lugar: null, fraseDoLugar: true }))
-    expect(screen.queryByText(strings.frasesDoMomento.canal)).toBeNull()
+    render(timeline({ messages: [], lugar: { seq: 9, em: EM }, aSincronizar: false }))
+    expect(screen.queryByRole("note")).toBeNull()
+    expect(document.querySelector(".frase-do-momento")).toBeNull()
   })
 
   it("a frase não usa jargão", () => {

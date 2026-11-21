@@ -1,6 +1,6 @@
 {
   "name": "@enclave/client-core",
-  "version": "1.3.25",
+  "version": "1.3.26",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -17,6 +17,10 @@
     "./contas": {
       "types": "./dist/contasDoAparelho.d.ts",
       "default": "./dist/contasDoAparelho.js"
+    },
+    "./prova-worker": {
+      "types": "./dist/prova-worker.d.ts",
+      "default": "./dist/prova-worker.js"
     },
     "./selo-worker": {
       "types": "./dist/selo-worker.d.ts",

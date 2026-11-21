@@ -338,4 +338,32 @@ describe("canal surdo: o pedido de lugar repete-se até haver lugar (P3)", () =>
     expect(socket.sent.filter((frame) => frame.t === "keypackage.publish").length).toBeGreaterThan(1)
     expect(pedidos(socket)).toBe(3)
   }, 120_000)
+
+  it("a Ana aparece: o canal surdo onde ela está pede já, e não daqui a dez minutos (1.3.26)", async () => {
+    Session.REGRAS_DOS_PEDIDOS = { atrasos: [150, 600_000], rajada: 3, intervaloMs: 10, adiantamentoMs: 20 }
+    const { socket, ana } = await bentoSurdoComAna()
+    await esperar(400)
+    expect(pedidos(socket)).toBe(2)
+    // Somebody who is not in the channel comes online: nothing changes.
+    socket.empurrar({ t: "presence", address: generateIdentity(CASA).address, online: true })
+    await esperar(200)
+    expect(pedidos(socket)).toBe(2)
+    // Ana, who sits in the channel, comes online: she can answer now.
+    socket.empurrar({ t: "presence", address: ana.address, online: true })
+    await esperar(200)
+    expect(pedidos(socket)).toBe(3)
+  }, 120_000)
 })
+
+/** `bentoSurdo`, with Ana's identity, for the presence test. */
+async function bentoSurdoComAna(): Promise<{ socket: FakeSocket; ana: Identity }> {
+  const { socket, grupo, ana } = await bentoSentado()
+  let depois = await canalSegueSemEle(socket, grupo, 6)
+  vi.useFakeTimers({ toFake: ["Date"] })
+  vi.setSystemTime(Date.now() + 61_000)
+  const dito = await encryptPayload(depois, texto("e mais uma"))
+  depois = dito.session
+  empurrarEvento(socket, "application", dito.ciphertext)
+  await assentar(200)
+  return { socket, ana }
+}

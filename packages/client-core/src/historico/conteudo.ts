@@ -1,5 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2.js"
-import { toBase64 } from "@enclave/protocol"
+import { fromBase64, toBase64 } from "@enclave/protocol"
 import { registarApelido, type RegistoDeApelido } from "../apelidos.js"
 import { chavesDeOrdem, chaveDoEvento, venceCarimbo } from "../dobras.js"
 import { soInlineOuEvicted } from "../armazem/referencias.js"
@@ -13,8 +13,11 @@ import {
   entradasDoCanal,
   entryMediaBytes,
   faltaMediaDaEntrada,
+  HISTORY_MAX_PER_CHANNEL,
+  tipoDoEstado,
   videoNoCofre,
   type EvictedMedia,
+  type ConversaNoIrmao,
   type ItemDeMediaDoIrmao,
   type Presente,
   type StoredChatMessage,
@@ -47,7 +50,16 @@ export interface CanalNoInventario {
   a?: number
   /** The account's first position in this channel (the marker "You joined here"). `null`: from the start. */
   l?: { seq: number; em: number } | null
+  /**
+   * Which conversation entries the sibling holds (20/11/2026), so the requester
+   * can count EXACTLY what is missing on its side ("298 messages are missing on
+   * this device"). Absent from a sibling before 1.3.26, or for a channel whose
+   * span does not fit (`TECTOS_DO_HISTORICO.conversaMaxSeqs`): then the count
+   * is not known, and the notice does not give a number.
+   */
+  q?: ConversaNoIrmao
 }
+
 
 export interface Inventario {
   v: 1
@@ -104,10 +116,17 @@ export const TECTOS_DO_HISTORICO = {
   bytesPorPagina: 96 * 1024,
   /** And never more than this many entries. */
   entradasPorPagina: 400,
-  /** The JSON of a media response stays below this, except the first item (which always goes). */
-  bytesPorRespostaDeMedia: 2 * 1024 * 1024,
+  /**
+   * The JSON of a media response stays below this, except the first item (which always goes).
+   * 384 KiB since 21/11/2026 (layer C), from 2 MiB: a response is kept only when it is whole,
+   * and a reload (iOS kills the page in the background) loses what was half way in. A smaller
+   * unit is about one window of parts, a minute at the signal budget, instead of five.
+   */
+  bytesPorRespostaDeMedia: 384 * 1024,
   /** Items per media request. */
   itensPorPedidoDeMedia: 8,
+  /** The widest `seq` span a channel's `q` covers in the inventory (8 KiB of bitset). Wider: no `q`. */
+  conversaMaxSeqs: 64 * 1024,
 }
 
 /**
@@ -126,6 +145,8 @@ export interface InflarParaOIrmao {
   /** The bytes of a media item in the store (a video), or null. */
   bytes(sha: string): Promise<Uint8Array | null>
 }
+
+export type { ConversaNoIrmao }
 
 // ------------------------------------------------------------------ o resumo
 
@@ -159,8 +180,92 @@ export interface ContextoDoIrmao {
   lugar: (canal: string) => { seq: number; em: number } | null | undefined
 }
 
+/** The conversation of a channel, for the inventory (`CanalNoInventario.q`). `undefined` when the span is too wide. */
+export function conversaDe(contents: VaultContents, canal: string): ConversaNoIrmao | undefined {
+  const seqs: number[] = []
+  const k: string[] = []
+  for (const entrada of contents.history[canal] ?? []) {
+    if (tipoDoEstado(entrada) !== null) continue
+    if (entrada.seq >= 0) seqs.push(entrada.seq)
+    else {
+      const chave = chaveDoEvento(entrada)
+      if (chave !== null) k.push(chave)
+    }
+  }
+  if (k.length > HISTORY_MAX_PER_CHANNEL) return undefined
+  if (seqs.length === 0) return { s: 0, b: "", ...(k.length > 0 ? { k } : {}) }
+  let s = seqs[0] as number
+  let fim = s
+  for (const seq of seqs) {
+    if (seq < s) s = seq
+    if (seq > fim) fim = seq
+  }
+  if (fim - s + 1 > TECTOS_DO_HISTORICO.conversaMaxSeqs) return undefined
+  const bits = new Uint8Array(Math.ceil((fim - s + 1) / 8))
+  for (const seq of seqs) bits[(seq - s) >> 3]! |= 1 << ((seq - s) & 7)
+  return { s, b: toBase64(bits), ...(k.length > 0 ? { k } : {}) }
+}
+
+/**
+ * How many conversation entries the sibling holds (`q`) that this device does
+ * not, and would keep: the vault keeps the newest `HISTORY_MAX_PER_CHANNEL`
+ * conversation entries of the union, so an older one the cap would drop at
+ * once is not counted. "Here" follows the `fundirEntradasDoIrmao` rules: the
+ * same `seq` in either list, or the same identity key. `null` when `q` does
+ * not read.
+ *
+ * Exact but for one rare corner: a pinned message or an open poll, which the
+ * cap keeps out of order (`apararConversa`), can move the cap's line by one.
+ */
+export function faltamDaConversa(contents: VaultContents, canal: string, q: ConversaNoIrmao): number | null {
+  if (typeof q !== "object" || q === null || !Number.isSafeInteger(q.s) || q.s < 0 || typeof q.b !== "string") return null
+  if (q.k !== undefined && (!Array.isArray(q.k) || q.k.some((chave) => typeof chave !== "string"))) return null
+  let bits: Uint8Array
+  try {
+    bits = q.b === "" ? new Uint8Array(0) : fromBase64(q.b)
+  } catch {
+    return null
+  }
+  if (bits.length * 8 > TECTOS_DO_HISTORICO.conversaMaxSeqs) return null
+  const aqui = [...(contents.history[canal] ?? []), ...(contents.estadoDoCanal?.[canal] ?? [])]
+  const seqsAqui = new Set(aqui.filter((e) => e.seq >= 0).map((e) => e.seq))
+  const chavesAqui = new Set(aqui.map(chaveDoEvento).filter((chave): chave is string => chave !== null))
+  // This device's conversation, by `seq` (the sends without echo take the newest places).
+  const minhas: number[] = []
+  let minhasSemEco = 0
+  for (const entrada of contents.history[canal] ?? []) {
+    if (tipoDoEstado(entrada) !== null) continue
+    if (entrada.seq >= 0) minhas.push(entrada.seq)
+    else minhasSemEco += 1
+  }
+  minhas.sort((a, b) => b - a)
+  // The sibling's sends without echo that are not here: missing, and newest.
+  const semEco = (q.k ?? []).filter((chave) => !chavesAqui.has(chave)).length
+  let lugares = HISTORY_MAX_PER_CHANNEL - minhasSemEco - semEco
+  let faltam = semEco
+  // Walk the union of both conversations from the newest `seq` down, while the cap has room.
+  let i = 0
+  for (let bit = bits.length * 8 - 1; bit >= 0 && lugares > 0; bit--) {
+    if (!(((bits[bit >> 3] as number) >> (bit & 7)) & 1)) continue
+    const seq = q.s + bit
+    while (i < minhas.length && (minhas[i] as number) > seq && lugares > 0) {
+      i += 1
+      lugares -= 1
+    }
+    if (lugares <= 0) break
+    if (seqsAqui.has(seq)) {
+      if (i < minhas.length && minhas[i] === seq) i += 1
+      lugares -= 1
+      continue
+    }
+    faltam += 1
+    lugares -= 1
+  }
+  return faltam
+}
+
 /** The inventory of this vault: channels with entries, newest conversation first. */
-export function inventarioDe(contents: VaultContents, contexto: ContextoDoIrmao): Inventario {
+export function inventarioDe(contents: VaultContents, contexto: ContextoDoIrmao, opcoes: { semConversa?: boolean } = {}): Inventario {
   const canais: CanalNoInventario[] = []
   for (const c of canaisComEntradas(contents)) {
     if (c === contexto.canalDaConta) continue
@@ -170,6 +275,7 @@ export function inventarioDe(contents: VaultContents, contexto: ContextoDoIrmao)
     const ficha = contents.fichasDosCanais?.[c]
     const arquivado = contents.canaisArquivados?.[c]
     const lugar = contexto.lugar(c)
+    const q = opcoes.semConversa ? undefined : conversaDe(contents, c)
     canais.push({
       c,
       n: entradas.length,
@@ -178,6 +284,7 @@ export function inventarioDe(contents: VaultContents, contexto: ContextoDoIrmao)
       ...(ficha ? { f: ficha } : {}),
       ...(arquivado !== undefined && !contexto.temGrupo(c) ? { a: arquivado } : {}),
       ...(lugar !== undefined ? { l: lugar } : {}),
+      ...(q ? { q } : {}),
     })
   }
   canais.sort((a, b) => b.u - a.u)
@@ -197,7 +304,10 @@ export async function paginaDe(
   canal: string,
   desde: number | null,
   inflar: InflarParaOIrmao,
+  /** Fewer entries than the cap: a page that did not fit the wire is cut again smaller (`historico.ts`). */
+  opcoes: { maxEntradas?: number } = {},
 ): Promise<PaginaDoHistorico> {
+  const maxEntradas = Math.max(1, Math.min(TECTOS_DO_HISTORICO.entradasPorPagina, opcoes.maxEntradas ?? Number.POSITIVE_INFINITY))
   const todas = entradasDoCanal(contents, canal)
   const chaves = chavesDeOrdem(todas)
   /*
@@ -220,7 +330,7 @@ export async function paginaDe(
   let perdidas = 0
   for (; corte < ordenadas.length; corte++) {
     const { entrada, chave } = ordenadas[corte] as (typeof ordenadas)[number]
-    const cheia = bytes >= TECTOS_DO_HISTORICO.bytesPorPagina || e.length >= TECTOS_DO_HISTORICO.entradasPorPagina
+    const cheia = bytes >= TECTOS_DO_HISTORICO.bytesPorPagina || e.length >= maxEntradas
     if (cheia && chave !== ate) break
     /*
       Inflated, then cut by the 1.3.2 rule (Ruling R11): an older sibling gets

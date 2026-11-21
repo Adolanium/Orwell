@@ -1,4 +1,4 @@
-import { decodeDeviceCredential, EXTENSAO_PERMISSOES, EXTENSAO_RETRATO, verifyDeviceChain } from "@enclave/protocol"
+import { decodeDeviceCredential, EXTENSAO_PERFIS_A_PEDIDO, EXTENSAO_PERMISSOES, EXTENSAO_RETRATO, verifyDeviceChain } from "@enclave/protocol"
 import {
   defaultCapabilities,
   defaultKeyPackageEqualityConfig,
@@ -60,10 +60,14 @@ export function enclaveCapabilities(): Capabilities {
     ...base,
     ciphersuites: [DEFAULT_CIPHERSUITE, FALLBACK_CIPHERSUITE],
     // `EXTENSAO_PERMISSOES` since 1.2: reads the permissions model (see `permissoes.ts`).
+    // `EXTENSAO_PERFIS_A_PEDIDO` since 1.3.26: pulls the profiles it lacks in any channel (see `retrato.ts`).
     extensions: [
-      ...base.extensions.filter((tipo) => tipo !== EXTENSAO_RETRATO && tipo !== EXTENSAO_PERMISSOES),
+      ...base.extensions.filter(
+        (tipo) => tipo !== EXTENSAO_RETRATO && tipo !== EXTENSAO_PERMISSOES && tipo !== EXTENSAO_PERFIS_A_PEDIDO,
+      ),
       EXTENSAO_RETRATO,
       EXTENSAO_PERMISSOES,
+      EXTENSAO_PERFIS_A_PEDIDO,
     ],
   }
 }

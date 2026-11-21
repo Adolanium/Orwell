@@ -7,11 +7,12 @@ import {
   toBase64,
   verify,
   type Payload,
-  type ItemRelatado,
+  ItemRelatado,
   type RelatosNoFio,
   verificarAutoria,
 } from "@enclave/protocol"
-import { cederAVez, type StoredPayload, type VaultContents } from "../vault.js"
+import { cederAVez, entradasDoCanal, type StoredPayload, type VaultContents } from "../vault.js"
+import { MAGIA_DOS_MEMBROS, salaDoItem, salasPorId } from "../historico/membros.js"
 import {
   anexoComBytes,
   anexoConfere,
@@ -37,6 +38,7 @@ import {
   type Folha,
 } from "./eleicao.js"
 import {
+  anexosConferidos,
   lerQ,
   normalizar,
   partirRelatos,
@@ -65,6 +67,7 @@ import {
   resumoNivel2,
   TIPOS_COM_JANELA,
   TIPOS_DO_RESUMO,
+  type FonteDoItem,
   type ItemDoResumo,
   type Nivel0NoFio,
   type ParDoResumo,
@@ -104,6 +107,11 @@ import {
  * **This module doesn't touch the session.** It talks to it via `PortaDaAntiEntropia`,
  * so `session.ts` only has hooks.
  */
+
+/** A poll item: a vote, or the poll message itself. These follow the room's permissions (21/11/2026). */
+function eDaVotacao(tipo: TipoDoResumo, payload: StoredPayload | undefined): boolean {
+  return tipo === "voto" || (tipo === "mensagem" && (payload as Record<string, unknown> | undefined)?.["poll"] != null)
+}
 
 /** The capacity that a device announces in the device signal: it knows anti-entropy. */
 export const CAPACIDADE_SINCRONIA = "sincronia-v1"
@@ -192,19 +200,50 @@ export interface PortaDaAntiEntropia {
   aoMudar?(canal: string): void
   /**
    * Profiles to third parties (3/11/2026): the channel where profiles
-   * of other people are requested and provided. Today only the common room: no Welcome
-   * with portrait for those entering by card, and those who were offline never tell their name.
+   * of other people are requested and provided. Until 1.3.25 only the common room: no
+   * Welcome with portrait for those entering by card, and those who were offline never
+   * tell their name. Since 1.3.26 every channel but the account channel: a newcomer
+   * pulls the latest signed profile of each person instead of every member resending
+   * theirs whole (`EXTENSAO_PERFIS_A_PEDIDO`).
    */
   perfisATerceiros?(canal: string): boolean
   /** Profiles of these accounts that this device can report, signed by the authors. */
   perfisParaRelatar?(canal: string, contas: readonly string[]): ItemRelatado[]
+  /**
+   * Whether a profile request may ask an owner for its portrait here (`r`, 1.3.26).
+   * Never in the common room: a request with `r` naming a hundred accounts would make
+   * a hundred owners publish whole profiles there at once. Absent: never.
+   */
+  retratosAPedido?(canal: string): boolean
+  /** The `updatedAt` of our own profile now, to tell a relay of an older version from ours. */
+  versaoDoMeuPerfil?(): number
+  /** Whether this leaf declares `EXTENSAO_PERFIS_A_PEDIDO`: it answers `pp` in any channel. Absent: assume it does. */
+  folhaPedeOsPerfis?(canal: string, folha: Folha): boolean
   /** This device is on the list of a profile request: publish ours (the session locks repetition). */
-  /** `quem`: the device that asked. The session caps this once per requester and channel. */
-  republicarPerfil?(canal: string, quem: string): void
+  /**
+   * `quem`: the device that asked. The session caps this once per requester and channel,
+   * and, `porRetrato` (asked by `r`), once per channel and version whoever asks.
+   */
+  republicarPerfil?(canal: string, quem: string, porRetrato?: boolean): void
   /** Reported profiles stored (`light`: without portrait bytes), for the session to notify the interface. */
   aoPerfisRelatados?(canal: string, perfis: { autor: string; versao: unknown; leve: boolean }[]): void
   /** Someone is typing in this channel (`ty`), with the room and the deadline they sent. */
   aoEscrever?(canal: string, de: string, sala: string, ate: number): void
+  /**
+   * Whether the account `quem` may read this room, by the roles and categories
+   * THIS device knows: the D2 rule (`leSala`). For poll items (see
+   * `#paraQuemPede`). Without it, every poll item goes, as before.
+   */
+  podeLerSala?(canal: string, quem: string, sala: string): boolean
+  /** The channel has a category restricted to roles: a poll item whose room is not known here does not go. */
+  salasRestritas?(canal: string): boolean
+  /**
+   * A channel signal of the channel's past served by members (D2,
+   * `historico/membros.ts`): the opened bytes, first byte `MAGIA_DOS_MEMBROS`.
+   * Not awaited: that module has its own queue, and applying a page comes back
+   * here (`aplicarDoPassado`), behind this channel's queue.
+   */
+  sinalDosMembros?(canal: string, from: string, aberto: Uint8Array, epoca: bigint): void
 }
 
 // ------------------------------------------------------------ what travels
@@ -319,10 +358,24 @@ interface PA {
  * the requester sees without a name. One leaf responds only, by turn (`#aoPedidoDePerfis`),
  * with the profiles signed by the authors. And those on the list and online publish theirs.
  */
+/** What a relay answering a profile request carried of one account: whole or light, and which version. */
+interface PerfilRelatado {
+  completo: boolean
+  versao: number
+}
+
 interface PP {
   k: "pp"
   id: string
   c: string[]
+  /**
+   * Of `c`, the accounts whose profile the requester has without the portrait
+   * (`parcial`), 1.3.26. A relay cannot heal those (it carries no portrait bytes), so
+   * relayers leave them out and the named account publishes its whole profile unless
+   * a relay carried it complete. Never sent in the common room. A 1.3.25 client reads
+   * the request without it, as before.
+   */
+  r?: string[]
 }
 /**
  * "Is typing" (12/11/2026): `r` the room, `u` the deadline. It was an expired
@@ -368,6 +421,8 @@ interface Envelope {
 const BYTES_POR_PARTE = 7 * 1024
 /** Keys per item request. A thousand keys are 15 KB; 400 fit in one signal. */
 const CHAVES_POR_PEDIDO = 400
+/** D2: distinct authors outside the channel's tree in one page of the past. */
+const AUTORES_FORA_DA_ARVORE_POR_PAGINA = 8
 /** Authors of items that could not be provided, in an `ri`. */
 const AUTORES_POR_RI = 16
 /**
@@ -432,7 +487,9 @@ function lerCorpo(bruto: unknown): Corpo | null {
       return textoCurto(id) &&
         Array.isArray(c["c"]) &&
         c["c"].length <= PERFIS_POR_PEDIDO &&
-        c["c"].every((conta) => textoCurto(conta, 300))
+        c["c"].every((conta) => textoCurto(conta, 300)) &&
+        (c["r"] === undefined ||
+          (Array.isArray(c["r"]) && c["r"].length <= PERFIS_POR_PEDIDO && c["r"].every((conta) => textoCurto(conta, 300))))
         ? (c as unknown as PP)
         : null
     case "pa":
@@ -692,13 +749,13 @@ export class AntiEntropia {
   /** From the responder: the answer scheduled by turn, by `canal|id`. */
   readonly #respostasDePerfis = new Map<string, ReturnType<typeof setTimeout>>()
   /** Profile requests that someone has already answered (`canal|id`), so others stay silent. */
-  readonly #perfisRespondidos = new Set<string>()
+  readonly #perfisRespondidos = new Map<string, Set<string>>()
   /**
    * Per profile request (`canal|id`), the accounts whose profile a relay already
    * carried, and whether with the picture. Read by a named account before it
    * publishes its own (`#aoPedidoDePerfis`). Bounded like `#perfisRespondidos`.
    */
-  readonly #perfisRelatadosPorPedido = new Map<string, Map<string, "completo" | "leve">>()
+  readonly #perfisRelatadosPorPedido = new Map<string, Map<string, PerfilRelatado>>()
 
   /**
    * Channels with the snapshot to request (S5): who joined via Welcome and
@@ -824,6 +881,24 @@ export class AntiEntropia {
     for (const canal of [...this.#progressoEm.keys()]) this.#mudou(canal)
   }
 
+  /**
+   * What this account's profile requests left in memory (second security review,
+   * N-N4): channel ids and accounts of the account being locked. The session calls it
+   * on `reset`; the timers already went with `aoDesligar`.
+   */
+  esquecerPedidosDePerfis(): void {
+    for (const temporizador of this.#respostasDePerfis.values()) this.#cancelar(temporizador)
+    this.#respostasDePerfis.clear()
+    this.#perfisPedidos.clear()
+    this.#perfisRespondidos.clear()
+    this.#perfisRelatadosPorPedido.clear()
+  }
+
+  /** How many profile-request entries this module holds in memory. For tests (N-N4). */
+  get pedidosDePerfisEmMemoria(): number {
+    return this.#respostasDePerfis.size + this.#perfisPedidos.size + this.#perfisRespondidos.size + this.#perfisRelatadosPorPedido.size
+  }
+
   aoDesligar(): void {
     for (const temporizador of this.#temporizadores) clearTimeout(temporizador)
     this.#temporizadores.clear()
@@ -888,6 +963,11 @@ export class AntiEntropia {
       this.#capazes.set(canal, capazes)
     }
     capazes.add(aparelho)
+  }
+
+  /** The leaf is alive (§4.4): a signal in the last 120 s, or the account connected. For D2. */
+  folhaViva(folha: Folha): boolean {
+    return this.#viva(folha)
   }
 
   #viva(folha: Folha): boolean {
@@ -1387,6 +1467,11 @@ export class AntiEntropia {
       this.estatisticas.sinaisIlegiveis += 1
       return
     }
+    // The channel's past served by members (D2): another wire, after the same channel key.
+    if (aberto[0] === MAGIA_DOS_MEMBROS) {
+      this.#porta.sinalDosMembros?.(canal, frame.from, aberto, chave.epoca)
+      return
+    }
     let envelope: Envelope
     try {
       envelope = JSON.parse(new TextDecoder().decode(aberto)) as Envelope
@@ -1421,16 +1506,16 @@ export class AntiEntropia {
       case "r0":
         return this.#aoR0(canal, folha, corpo)
       case "p1":
-        if (corpo.para === this.#meuAparelho) await this.#responderN1(canal, corpo)
+        if (corpo.para === this.#meuAparelho) await this.#responderN1(canal, corpo, folha.address)
         return
       case "p2":
-        if (corpo.para === this.#meuAparelho) await this.#responderN2(canal, corpo)
+        if (corpo.para === this.#meuAparelho) await this.#responderN2(canal, corpo, folha.address)
         return
       case "pi":
-        if (corpo.para === this.#meuAparelho) await this.#responderItens(canal, corpo)
+        if (corpo.para === this.#meuAparelho) await this.#responderItens(canal, corpo, folha.address)
         return
       case "pt":
-        if (corpo.para === this.#meuAparelho) await this.#responderTipos(canal, corpo)
+        if (corpo.para === this.#meuAparelho) await this.#responderTipos(canal, corpo, folha.address)
         return
       case "pa":
         if (corpo.para === this.#meuAparelho) await this.#responderAnexo(canal, corpo, folha)
@@ -1940,6 +2025,50 @@ export class AntiEntropia {
   // ------------------------------------------------------------ responder
 
   /**
+   * The items the account `quem` may receive, of those this device holds
+   * (21/11/2026): poll items in a room `quem` may not read stay out.
+   *
+   * A vote has no window, so S4 serves it to whoever joined late, and it served
+   * every vote, also those of a poll in a closed room. The rule is D2's
+   * (`historico/membros.ts`): THIS device computes the requester's permissions
+   * from its own vault, and the requester is never asked. A poll item whose room
+   * is not known here does not go when the channel has a restricted category.
+   *
+   * Applied to the summaries too (`n1`, `n2`), not only to the items: a bucket
+   * the requester can never fill would send it back for the same keys on every
+   * round. Only poll items: the vote and the poll message itself.
+   */
+  #paraQuemPede(canal: string, quem: string, itens: ItemDoResumo[]): ItemDoResumo[] {
+    if (!itens.some((item) => eDaVotacao(item.tipo, item.fonte?.payload))) return itens
+    const legivel = this.#leitorDeVotacoes(canal, quem)
+    return itens.filter((item) => legivel(item.tipo, item.fonte?.payload))
+  }
+
+  /**
+   * Whether `quem` may hold this item, for poll items; any other item is `true`.
+   *
+   * Built once per answer: the rooms by message id and the restricted flag are
+   * read from the vault once, and each room's verdict is kept.
+   */
+  #leitorDeVotacoes(canal: string, quem: string): (tipo: TipoDoResumo, payload: StoredPayload | undefined) => boolean {
+    const podeLer = this.#porta.podeLerSala
+    if (!podeLer) return () => true
+    let salas: Map<string, string> | null = null
+    const restritas = this.#porta.salasRestritas?.(canal) ?? false
+    const lidas = new Map<string, boolean>()
+    return (tipo, payload) => {
+      if (!eDaVotacao(tipo, payload)) return true
+      salas ??= salasPorId(this.#porta.conteudo(), canal)
+      const sala = salaDoItem({ tipo, balde: "", chave: "", ...(payload ? { fonte: { autor: "", seq: -1, payload } } : {}) }, salas)
+      if (sala === null) return !restritas
+      let pode = lidas.get(sala)
+      if (pode === undefined) lidas.set(sala, (pode = podeLer(canal, quem, sala)))
+      return pode
+    }
+  }
+
+
+  /**
    * The window of whoever replies: that of whoever asked, never below the floor. Below
    * the floor, conversation is not sent, so it also does not show in the summary: it
    * would set the caller to ask for what never comes.
@@ -1958,10 +2087,10 @@ export class AntiEntropia {
     return false
   }
 
-  async #responderN1(canal: string, pedido: P1): Promise<void> {
+  async #responderN1(canal: string, pedido: P1, quem: string): Promise<void> {
     if (this.#jaRespondido(`p1|${pedido.id}`)) return
     const d = this.#janelaDaResposta(canal, pedido.d)
-    const itens = this.#itens(canal, d)
+    const itens = this.#paraQuemPede(canal, quem, this.#itens(canal, d))
     const entradas: N1["e"] = []
     for (const bruto of pedido.tipos.slice(0, TIPOS_DO_RESUMO.length)) {
       if (!(TIPOS_DO_RESUMO as readonly string[]).includes(bruto)) continue
@@ -1975,10 +2104,10 @@ export class AntiEntropia {
     }
   }
 
-  async #responderN2(canal: string, pedido: P2): Promise<void> {
+  async #responderN2(canal: string, pedido: P2, quem: string): Promise<void> {
     if (this.#jaRespondido(`p2|${pedido.id}`)) return
     const d = this.#janelaDaResposta(canal, pedido.d)
-    const itens = this.#itens(canal, d)
+    const itens = this.#paraQuemPede(canal, quem, this.#itens(canal, d))
     const entradas: [string, string, string[]][] = []
     for (const par of pedido.e.slice(0, 256)) {
       if (!Array.isArray(par) || typeof par[0] !== "string" || typeof par[1] !== "string") continue
@@ -2000,12 +2129,12 @@ export class AntiEntropia {
    * and from the window onward (the position of the caller, never below the group floor);
    * nothing without a reportable source; byte caps.
    */
-  async #responderItens(canal: string, pedido: PI): Promise<void> {
+  async #responderItens(canal: string, pedido: PI, quem: string): Promise<void> {
     if (this.#jaRespondido(`pi|${pedido.id}`)) return
     const d = this.#janelaDaResposta(canal, Math.max(pedido.d, pedido.l))
     // An item with a tombstone is not sent (§4.3): `itensDoCanal` already leaves it out.
     const porChave = new Map<string, ItemDoResumo>()
-    for (const item of this.#itens(canal, d)) porChave.set(chaveCurta(item.chave), item)
+    for (const item of this.#paraQuemPede(canal, quem, this.#itens(canal, d))) porChave.set(chaveCurta(item.chave), item)
     const escolhidos: ItemDoResumo[] = []
     // What cannot be given, for the caller to try another leaf (see `RI`).
     const naoDadas: string[] = []
@@ -2027,13 +2156,13 @@ export class AntiEntropia {
    * only from the window onward (the position of the caller, never below the floor),
    * nothing with a tombstone, nothing without a reportable source, byte caps.
    */
-  async #responderTipos(canal: string, pedido: PT): Promise<void> {
+  async #responderTipos(canal: string, pedido: PT, quem: string): Promise<void> {
     if (this.#jaRespondido(`pt|${pedido.id}`)) return
     const d = this.#janelaDaResposta(canal, Math.max(pedido.d, pedido.l))
     const pedidos = new Set(pedido.tipos.filter((tipo): tipo is TipoDoResumo => TIPOS_RELATAVEIS.has(tipo as TipoDoResumo)))
     const escolhidos: ItemDoResumo[] = []
     const autores = new Set<string>()
-    for (const item of this.#itens(canal, d)) {
+    for (const item of this.#paraQuemPede(canal, quem, this.#itens(canal, d))) {
       if (!pedidos.has(item.tipo) || !item.fonte) continue
       if (comJanela(item) && (item.fonte.seq < 0 || item.fonte.seq < d)) continue
       escolhidos.push(item)
@@ -2052,10 +2181,7 @@ export class AntiEntropia {
     const fontes = await Promise.all(escolhidos.map((item) => this.#fonteInflada(item.fonte!, false)))
     const relatados = escolhidos.flatMap((item, indice) => {
       const fonte = fontes[indice]!
-      const autoria = (fonte.payload as Record<string, unknown>)["autoria"] as { ap?: string } | undefined
-      const aparelho = autoria?.ap ?? (fonte.autor === this.#porta.eu.address ? this.#meuAparelho : undefined)
-      const cadeia = aparelho ? this.#porta.cadeiaDe(canal, fonte.autor, aparelho) : null
-      const pronto = prepararItem(canal, fonte, this.#porta.eu, cadeia)
+      const pronto = this.#prepararFonte(canal, fonte)
       if (pronto) return [pronto]
       // From someone else and without authorship (before S4): only the author can state it.
       naoDadas.push(chaveCurta(item.chave))
@@ -2098,6 +2224,142 @@ export class AntiEntropia {
       ...(naoDadas.length > 0 ? { f: naoDadas.slice(0, CHAVES_POR_PEDIDO), au: [...autores].slice(0, AUTORES_POR_RI) } : {}),
       ...(voltar !== undefined ? { r: Math.min(voltar, 10 * 60_000) } : {}),
     })
+  }
+
+  /** A source ready to report, with the author's chain; `null` if it cannot be (someone else's, unsigned). */
+  #prepararFonte(canal: string, fonte: FonteDoItem): ItemRelatado | null {
+    const autoria = (fonte.payload as Record<string, unknown>)["autoria"] as { ap?: string } | undefined
+    const aparelho = autoria?.ap ?? (fonte.autor === this.#porta.eu.address ? this.#meuAparelho : undefined)
+    const cadeia = aparelho ? this.#porta.cadeiaDe(canal, fonte.autor, aparelho) : null
+    return prepararItem(canal, fonte, this.#porta.eu, cadeia)
+  }
+
+  // ------------------------------------ the channel's past, served by members (D2)
+  //
+  // The rules are in `historico/membros.ts`. Here only what that module shares
+  // with anti-entropy: the signal budget, the items, and the receive rules.
+
+  /**
+   * Spend one D2 signal from the SAME budget as anti-entropy, behind it: only
+   * while anti-entropy uses less than two thirds of the signals per minute and
+   * the channel less than half of its bytes (counted in copies, as the server
+   * counts them). A refusal from the server already backs off this channel for
+   * both (`aoRecusa`).
+   */
+  gastarSinalDosMembros(canal: string, caracteres: number, umaCopia = false): boolean {
+    if (!this.#porta.podeSinalizar()) return false
+    const agora = this.#porta.agora()
+    if (this.#recuo.bloqueado(canal, agora)) return false
+    if (this.#tectos.usado("sinais", agora) >= Math.floor((TECTOS_DA_SINCRONIA.sinaisPorMinuto * 2) / 3)) return false
+    // With a server that delivers by `para` (`CAPACIDADE_SINAL_PARA`), the signal goes out once.
+    const custo = caracteres * (umaCopia ? 1 : this.#copias(canal))
+    if (!this.#tectos.gastar(`bytes|${canal}`, custo, TECTOS_DA_SINCRONIA.bytesDeSinalPorCanalPorMinuto / 2, agora)) return false
+    this.#tectos.gastar("sinais", 1, Number.MAX_SAFE_INTEGER, agora)
+    return true
+  }
+
+  /** This device's items in the channel, deleted ones left out: what a member serves from. */
+  itensDoPassado(canal: string): ItemDoResumo[] {
+    return this.#itens(canal)
+  }
+
+  /** The items ready to send with authorship, in the same order; `null` for one that cannot go. */
+  async relatarDoPassado(canal: string, itens: readonly ItemDoResumo[]): Promise<(ItemRelatado | null)[]> {
+    const fontes = await Promise.all(itens.map((item) => (item.fonte ? this.#fonteInflada(item.fonte, false) : null)))
+    return fontes.map((fonte) => (fonte ? this.#prepararFonte(canal, fonte) : null))
+  }
+
+  /**
+   * Items of the channel's past, from a member (D2): checked and stored. The
+   * rules of `receberItem`, with the place rule turned around: an item must
+   * have a known `seq` BELOW our place (`lugar`); from the place on it is the
+   * server's and the anti-entropy's (`servidor-serve`). Only windowed types:
+   * the rest of the channel state has its own path (the snapshot, S5).
+   */
+  aplicarDoPassado(canal: string, itens: readonly unknown[], lugar: number): Promise<{ aplicados: number; recusados: Record<string, number>; rooms: Record<string, number> }> {
+    const anterior = this.#filas.get(canal) ?? Promise.resolve()
+    let resultado = { aplicados: 0, recusados: {} as Record<string, number>, rooms: {} as Record<string, number> }
+    const proxima = anterior
+      .then(async () => {
+        resultado = await this.#aplicarDoPassado(canal, itens, lugar)
+      })
+      .catch(() => {})
+    this.#filas.set(canal, proxima)
+    return proxima.then(() => resultado)
+  }
+
+  async #aplicarDoPassado(canal: string, itens: readonly unknown[], lugar: number): Promise<{ aplicados: number; recusados: Record<string, number>; rooms: Record<string, number> }> {
+    const recusados: Record<string, number> = {}
+    const recusar = (razao: string): void => {
+      recusados[razao] = (recusados[razao] ?? 0) + 1
+    }
+    // The lines stored, per room (history-last-100): "Load older" counts those of the room on screen.
+    const rooms: Record<string, number> = {}
+    if (!this.#porta.elegivel(canal) || lugar <= 0) return { aplicados: 0, recusados, rooms }
+    const temos = new Set(this.#itens(canal, undefined, true).map((item) => item.chave))
+    const conteudo = this.#porta.conteudo()
+    const lapides = lapidesDoCanal(conteudo, canal)
+    /*
+      The author must be a member, or a known ex-member (LOW-01): someone this
+      vault saw write here, or whose profile it holds. A member cannot bring
+      into the channel's past an account that was never in it. Our own account
+      is a member, so our own old messages (a previous membership, signed by a
+      device of ours) come back too, placed by the unsigned `seq`.
+    */
+    const membros = new Set(this.#porta.membros(canal))
+    const exMembros = new Set(entradasDoCanal(conteudo, canal).map((entrada) => entrada.sender))
+    // Authors outside the tree cost a chain and a manifest read each: at most this many per page (LOW-04).
+    const foraDaArvore = new Set<string>()
+    let aplicados = 0
+    for (const bruto of itens) {
+      const lido = ItemRelatado.safeParse(bruto)
+      if (!lido.success) {
+        recusar("esquema")
+        continue
+      }
+      const autor = lido.data.a
+      if (!membros.has(autor)) {
+        if (!exMembros.has(autor) && conteudo.directory[autor] === undefined) {
+          recusar("autor")
+          continue
+        }
+        if (!foraDaArvore.has(autor)) {
+          if (foraDaArvore.size >= AUTORES_FORA_DA_ARVORE_POR_PAGINA) {
+            recusar("autores")
+            continue
+          }
+          foraDaArvore.add(autor)
+        }
+      }
+      const veredicto = await receberItem(lido.data, {
+        canal,
+        seqDaTrama: lugar,
+        lugar: 0,
+        jaTemos: (chave) => temos.has(chave),
+        apagado: (doResumo, autor, payload) => itemApagado(lapides, doResumo.tipo, autor, payload),
+        itemDe: (autor, payload) => {
+          const item = itemDoPayload(autor, payload, canal)
+          return item && TIPOS_COM_JANELA.has(item.tipo) ? item : null
+        },
+        aparelhoConfiavel: (autor, aparelho, cadeia) => this.#porta.aparelhoConfiavel(canal, autor, aparelho, cadeia),
+        bloqueado: (autor) => this.#porta.bloqueado(canal, autor),
+      })
+      if (!veredicto.ok) {
+        recusar(veredicto.razao)
+        continue
+      }
+      this.#porta.gravarRelatado(canal, veredicto.seq, veredicto.autor, veredicto.payload as unknown as Payload)
+      temos.add(veredicto.item.chave)
+      notarLapide(lapides, veredicto.autor, veredicto.payload as StoredPayload)
+      aplicados += 1
+      const p = veredicto.payload as unknown as Record<string, unknown>
+      if (p["t"] === "message") {
+        const room = typeof p["room"] === "string" ? p["room"] : ""
+        rooms[room] = (rooms[room] ?? 0) + 1
+      }
+    }
+    if (aplicados > 0) await this.#porta.escoar()
+    return { aplicados, recusados, rooms }
   }
 
   /**
@@ -2817,24 +3079,57 @@ export class AntiEntropia {
    * an account that nobody can say (no profile, or with a profile without
    * authorship) is not requested in cycle.
    */
-  async pedirPerfis(canal: string, semNome: readonly string[]): Promise<boolean> {
+  /**
+   * @param semRetrato of `semNome`, the accounts we have only without the portrait
+   *   (`parcial`, 1.3.26): see `r` in `PP`.
+   */
+  async pedirPerfis(canal: string, semNome: readonly string[], semRetrato: readonly string[] = []): Promise<boolean> {
     if (!this.#porta.elegivel(canal) || this.#porta.perfisATerceiros?.(canal) !== true) return false
     const agora = this.#porta.agora()
     const antes = this.#perfisPedidos.get(canal)
-    if (antes && agora - antes.em < INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS) return false
+    if (antes && agora - antes.em < AntiEntropia.INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS) return false
     const contas = this.contasPorPedir(canal, semNome).sort().slice(0, PERFIS_POR_PEDIDO)
     if (contas.length === 0) return false
     const eu = this.#porta.eu.address
     // No one alive from another account, nobody to respond: the request is not spent.
     if (!this.#porta.folhas(canal).some((folha) => folha.address !== eu && this.#viva(folha))) return false
     const id = novoId()
-    const saiu = await this.#enviar(canal, { k: "pp", id, c: contas })
+    const retratos = new Set(semRetrato)
+    const r = contas.filter((conta) => retratos.has(conta))
+    const saiu = await this.#enviar(canal, { k: "pp", id, c: contas, ...(r.length > 0 ? { r } : {}) })
     if (!saiu) return false
     const lembradas = new Map([...(antes?.contas ?? [])].filter(([, ate]) => agora < ate))
     for (const conta of contas) lembradas.set(conta, agora + LEMBRAR_PERFIS_SEM_RESPOSTA_MS)
     this.#perfisPedidos.set(canal, { em: agora, id, contas: lembradas })
     this.estatisticas.pedidosDePerfis += 1
     return true
+  }
+
+  /**
+   * Whether anyone could answer a profile request here now (1.3.26): a live leaf of
+   * another account. Without one, `pp` (an ephemeral signal) reaches nobody, and the
+   * session asks by F10 at once: a stored request, read by whoever comes later.
+   */
+  haQuemResponda(canal: string): boolean {
+    const eu = this.#porta.eu.address
+    /*
+      Only leaves that answer `pp` here (second security review, N-S2): a live
+      1.3.25 leaf ignores it outside the common room, and counting it held F10
+      back for a newcomer whose session ends before the two-minute grace.
+    */
+    return this.#porta
+      .folhas(canal)
+      .some((folha) => folha.address !== eu && this.#viva(folha) && this.#porta.folhaPedeOsPerfis?.(canal, folha) !== false)
+  }
+
+  /**
+   * A profile of these accounts arrived (1.3.26): what was remembered of asking for
+   * them goes. The memory exists so an account nobody can say is not asked for in a
+   * loop; once one is said, asking again is only for what is missing now (the
+   * portrait of a relayed profile, which only its owner can send).
+   */
+  esquecerPedidos(contas: readonly string[]): void {
+    for (const pedido of this.#perfisPedidos.values()) for (const conta of contas) pedido.contas.delete(conta)
   }
 
   /** Of these nameless accounts, the ones that may be asked for again (`LEMBRAR_PERFIS_*`). Not us. */
@@ -2849,8 +3144,12 @@ export class AntiEntropia {
     })
   }
 
-  /** Between two profile requests in the same channel. The session re-arms its own request on this. */
-  static readonly INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS = INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS
+  /**
+   * Between two profile requests in the same channel. The session re-arms its own
+   * request on this. Static for tests that wait for the second request (with
+   * `Session.REPETIR_PEDIDO_DE_PERFIS_MS`, which must stay above it).
+   */
+  static INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS = INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS
 
   /**
    * A profile request. The people on the list publish theirs (the session caps it to
@@ -2864,6 +3163,14 @@ export class AntiEntropia {
     if (this.#porta.perfisATerceiros?.(canal) !== true) return
     const eu = this.#porta.eu.address
     const contas = new Set(corpo.c)
+    /*
+      Accounts the requester has without the portrait (1.3.26): a light relay does not
+      heal them. Read only where the session allows it (`retratosAPedido`): the
+      receiver enforces "never in the common room", not just the honest sender.
+    */
+    const semRetrato = new Set(
+      this.#porta.retratosAPedido?.(canal) === true ? (corpo.r ?? []).filter((conta) => contas.has(conta)) : [],
+    )
     const chave = `${canal}|${corpo.id}`
     /*
       Named in the request: publish our own profile, but only if no relay
@@ -2875,9 +3182,10 @@ export class AntiEntropia {
       the picture comes the next time we publish.
     */
     if (contas.has(eu)) {
-      // Nobody alive but the requester and us: no relay can come, so say it now.
       const relatores = this.#porta.folhas(canal).filter((folha) => folha.address !== eu && folha.address !== de.address && this.#viva(folha))
-      const espera = relatores.length === 0 ? 0 : TURNOS_A_ESPERAR_PELO_RELATO * TECTOS_DA_SINCRONIA.passoDaSupressaoMs + ESPERA_DO_PROPRIO_PERFIL_MS
+      // Nobody alive but the requester and us, or our portrait asked for (no relayer carries it): say it now.
+      const espera =
+        relatores.length === 0 || semRetrato.has(eu) ? 0 : TURNOS_A_ESPERAR_PELO_RELATO * TECTOS_DA_SINCRONIA.passoDaSupressaoMs + ESPERA_DO_PROPRIO_PERFIL_MS
       this.#mais(espera, () => {
         const relatado = this.#perfisRelatadosPorPedido.get(chave)?.get(eu)
         this.#perfisRelatadosPorPedido.delete(chave)
@@ -2886,17 +3194,33 @@ export class AntiEntropia {
           name, and that is what was asked. Without the picture the profile is
           `parcial` there, and the picture comes the next time we publish. Not
           carried (the relayer cannot relay itself, or had nothing of ours): say it.
+
+          And only our CURRENT version (1.3.26): a relay of an older one, by a
+          member who missed our edit or by one replaying an old signed version,
+          would otherwise keep the newcomer on it until we edit again.
         */
-        if (relatado !== undefined) return
-        this.#porta.republicarPerfil?.(canal, de.aparelho)
+        const minha = this.#porta.versaoDoMeuPerfil?.()
+        const atual = relatado !== undefined && (minha === undefined || relatado.versao >= minha)
+        if (atual && (relatado.completo || !semRetrato.has(eu))) return
+        this.#porta.republicarPerfil?.(canal, de.aparelho, semRetrato.has(eu))
       })
     }
     contas.delete(eu)
     contas.delete(de.address)
+    // Relayers carry no portrait bytes: an account asked for its portrait is the account's to answer.
+    for (const conta of semRetrato) contas.delete(conta)
     const membros = new Set(this.#porta.membros(canal))
     const pedidas = [...contas].filter((conta) => membros.has(conta))
     if (pedidas.length === 0) return
-    if (this.#perfisRespondidos.has(chave) || this.#respostasDePerfis.has(chave)) return
+    /*
+      Only the accounts nobody carried yet (third security review, N3-S1): a frame
+      that carried some accounts stands us down for those, not for the request. A
+      member who answers first with only its own signed profile no longer silences
+      the honest relay of everyone else.
+    */
+    const levadas = this.#perfisRespondidos.get(chave)
+    if (levadas && pedidas.every((conta) => levadas.has(conta))) return
+    if (this.#respostasDePerfis.has(chave)) return
     const meu = this.#meuAparelho
     const fila = this.#porta
       .folhas(canal)
@@ -2913,9 +3237,12 @@ export class AntiEntropia {
     this.#respostasDePerfis.set(chave, temporizador)
   }
 
-  async #relatarPerfis(canal: string, id: string, pedidas: readonly string[], aparelhoDeQuemPede: string): Promise<void> {
+  async #relatarPerfis(canal: string, id: string, todas: readonly string[], aparelhoDeQuemPede: string): Promise<void> {
     const chave = `${canal}|${id}`
-    if (this.#perfisRespondidos.has(chave)) return
+    // What another relay carried meanwhile is not ours to say again (N3-S1).
+    const levadas = this.#perfisRespondidos.get(chave)
+    const pedidas = levadas ? todas.filter((conta) => !levadas.has(conta)) : todas
+    if (pedidas.length === 0) return
     const agora = this.#porta.agora()
     // One request per device per minute, and six per channel: a repeated request does not start anyone reporting in a loop.
     if (!this.#tectos.gastar(`perfis|${canal}|${aparelhoDeQuemPede}`, 1, 1, agora)) return
@@ -2934,7 +3261,7 @@ export class AntiEntropia {
       if (!this.#gastarDoDia(canal, dia, bytes)) break
       tramas.push(trama)
     }
-    this.#notarPerfisRespondidos(chave)
+    this.#notarPerfisRespondidos(chave, tramas.flatMap((trama) => trama.itens.map((item) => item.a)))
     for (const [indice, trama] of tramas.entries()) {
       const comQ: RelatosNoFio = { ...trama, q: `${Q_DOS_PERFIS}${id}:${indice + 1}/${tramas.length}` }
       try {
@@ -2947,16 +3274,15 @@ export class AntiEntropia {
     }
   }
 
-  #perfisRespondidosPor(canal: string, q: string): void {
+  /**
+   * A relay carried these accounts (verified): ours to relay no more. A scheduled
+   * relay still goes for the accounts left, and is cancelled only when none is (N3-S1).
+   */
+  #perfisRespondidosPor(canal: string, q: string, levadas: Iterable<string>): void {
     const id = lerQ(q)?.id.slice(Q_DOS_PERFIS.length)
     if (!id) return
     const chave = `${canal}|${id}`
-    this.#notarPerfisRespondidos(chave)
-    const agendada = this.#respostasDePerfis.get(chave)
-    if (agendada) {
-      this.#cancelar(agendada)
-      this.#respostasDePerfis.delete(chave)
-    }
+    this.#notarPerfisRespondidos(chave, levadas)
   }
 
   /** A relay answering OUR last request showed these accounts without a name: 24 h before asking again. */
@@ -2968,17 +3294,41 @@ export class AntiEntropia {
     for (const conta of contas) if (pedido.contas.has(conta)) pedido.contas.set(conta, ate)
   }
 
-  /** The accounts a profile relay carried, for the named accounts to stay quiet. See `#aoPedidoDePerfis`. */
-  #notarPerfisRelatados(canal: string, relatos: RelatosNoFio): void {
-    const id = lerQ(relatos.q)?.id.slice(Q_DOS_PERFIS.length)
-    if (!id) return
-    const chave = `${canal}|${id}`
-    const vistos = this.#perfisRelatadosPorPedido.get(chave) ?? new Map<string, "completo" | "leve">()
+  /**
+   * The profiles in a relay whose authorship verifies for this channel, signed by a
+   * device the author owns (the same two checks as `receberItem`), ours included:
+   * the receiver skips its own items when applying, so the owner checks them here.
+   * By author, the newest version carried; at the same version, whole over light.
+   */
+  async #perfisVerificados(canal: string, relatos: RelatosNoFio): Promise<Map<string, PerfilRelatado>> {
+    const vistos = new Map<string, PerfilRelatado>()
     for (const item of relatos.itens) {
       const p = item.p as Record<string, unknown> | undefined
       if (!p || p["t"] !== "profile" || typeof item.a !== "string") continue
-      const retrato = p["avatar"] as { evicted?: unknown } | undefined
-      if (vistos.get(item.a) !== "completo") vistos.set(item.a, retrato?.evicted === true ? "leve" : "completo")
+      const normal = normalizar(p)
+      if (!normal) continue
+      const autoria = verificarAutoria(canal, item.a, normal)
+      if (!autoria.ok) continue
+      const cadeia = { ...(typeof item.k === "string" ? { k: item.k } : {}), ...(typeof item.x === "string" ? { x: item.x } : {}) }
+      if (!(await this.#porta.aparelhoConfiavel(canal, item.a, autoria.aparelho, cadeia))) continue
+      // Whole only if the portrait bytes match the signed digest (third review, N3-N3): the signature does not cover them.
+      const retrato = anexosConferidos(normal)["avatar"] as { evicted?: unknown } | undefined
+      const novo: PerfilRelatado = { completo: retrato?.evicted !== true, versao: numeroOuZero(normal["updatedAt"]) }
+      const antes = vistos.get(item.a)
+      if (!antes || novo.versao > antes.versao || (novo.versao === antes.versao && novo.completo)) vistos.set(item.a, novo)
+    }
+    return vistos
+  }
+
+  /** The verified profiles a relay carried, for the named accounts to stay quiet. See `#aoPedidoDePerfis`. */
+  #notarPerfisRelatados(canal: string, q: string, verificados: ReadonlyMap<string, PerfilRelatado>): void {
+    const id = lerQ(q)?.id.slice(Q_DOS_PERFIS.length)
+    if (!id) return
+    const chave = `${canal}|${id}`
+    const vistos = this.#perfisRelatadosPorPedido.get(chave) ?? new Map<string, PerfilRelatado>()
+    for (const [autor, novo] of verificados) {
+      const antes = vistos.get(autor)
+      if (!antes || novo.versao > antes.versao || (novo.versao === antes.versao && novo.completo)) vistos.set(autor, novo)
     }
     this.#perfisRelatadosPorPedido.set(chave, vistos)
     if (this.#perfisRelatadosPorPedido.size > 256) {
@@ -2987,11 +3337,13 @@ export class AntiEntropia {
     }
   }
 
-  #notarPerfisRespondidos(chave: string): void {
-    this.#perfisRespondidos.add(chave)
+  #notarPerfisRespondidos(chave: string, levadas: Iterable<string>): void {
+    const conjunto = this.#perfisRespondidos.get(chave) ?? new Set<string>()
+    for (const conta of levadas) conjunto.add(conta)
+    this.#perfisRespondidos.set(chave, conjunto)
     // The oldest ones leave: only requests from the last few seconds matter.
     if (this.#perfisRespondidos.size > 256) {
-      const [primeiro] = this.#perfisRespondidos
+      const [primeiro] = this.#perfisRespondidos.keys()
       if (primeiro !== undefined) this.#perfisRespondidos.delete(primeiro)
     }
   }
@@ -3018,8 +3370,20 @@ export class AntiEntropia {
     if (!this.#porta.elegivel(canal)) return
     // Bytes of an attachment (S5): only for those with an active request for the same attachment.
     if (relatos.q?.startsWith(Q_DO_ANEXO)) return this.#aoAnexo(canal, relatos, deAparelho)
-    // Someone answered a profile request: whoever was still waiting their turn stays silent.
-    if (relatos.q?.startsWith(Q_DOS_PERFIS)) this.#perfisRespondidosPor(canal, relatos.q)
+    /*
+      Someone answered a profile request: whoever was still waiting their turn stays
+      silent, and the named owners learn what was carried of them. Only by profiles
+      whose authorship verifies for this channel (second security review, N-S1 and
+      N-S3): a frame with a copied `q` and nothing authentic in it, or a forged
+      `updatedAt`, no longer stands the honest relayers down or keeps an owner quiet.
+    */
+    if (relatos.q?.startsWith(Q_DOS_PERFIS)) {
+      const verificados = await this.#perfisVerificados(canal, relatos)
+      if (verificados.size > 0) {
+        this.#perfisRespondidosPor(canal, relatos.q, verificados.keys())
+        this.#notarPerfisRelatados(canal, relatos.q, verificados)
+      }
+    }
     // The entire set, with deleted items included: a deleted item means "we have it", never "missing".
     const temos = new Set(this.#itens(canal, undefined, true).map((item) => item.chave))
     const lapides = lapidesDoCanal(this.#porta.conteudo(), canal)
@@ -3055,6 +3419,7 @@ export class AntiEntropia {
       if (!guardado || guardado.parcial) return false
       return numeroOuZero(guardado.payload["updatedAt"]) >= versao
     }
+    let votacaoLegivel: ((tipo: TipoDoResumo, payload: StoredPayload | undefined) => boolean) | null = null
     for (const item of relatos.itens) {
       const veredicto = await receberItem(item, {
         canal,
@@ -3076,6 +3441,19 @@ export class AntiEntropia {
         this.estatisticas.relatosRecusados[veredicto.razao] = (this.estatisticas.relatosRecusados[veredicto.razao] ?? 0) + 1
         continue
       }
+      /*
+        A report travels in MLS to every member, not only to whoever asked: a
+        poll item another member was given reaches this device too (21/11/2026).
+        An answer to OUR request was already filtered for this account by the
+        responder (`#paraQuemPede`), which may know the poll's room when we do not
+        yet. An answer to someone else gets the same rule here, with this
+        account's own permissions.
+      */
+      votacaoLegivel ??= this.#leitorDeVotacoes(canal, eu)
+      if (!respondeANos && !votacaoLegivel(veredicto.item.tipo, veredicto.payload as StoredPayload)) {
+        this.estatisticas.relatosRecusados["sala"] = (this.estatisticas.relatosRecusados["sala"] ?? 0) + 1
+        continue
+      }
       if (veredicto.item.tipo === "perfil") {
         const retrato = veredicto.payload["avatar"] as { evicted?: unknown } | undefined
         perfis.push({ autor: veredicto.autor, versao: veredicto.payload["updatedAt"], leve: retrato?.evicted === true })
@@ -3093,10 +3471,7 @@ export class AntiEntropia {
       }
     }
     if (aplicados > 0) await this.#porta.escoar()
-    if (relatos.q?.startsWith(Q_DOS_PERFIS)) {
-      this.#notarPerfisRelatados(canal, relatos)
-      this.#lembrarSemNome(canal, relatos.q, semNomeConfirmado)
-    }
+    if (relatos.q?.startsWith(Q_DOS_PERFIS)) this.#lembrarSemNome(canal, relatos.q, semNomeConfirmado)
     if (perfis.length > 0) {
       this.estatisticas.perfisAplicados += perfis.length
       this.#porta.aoPerfisRelatados?.(canal, perfis)

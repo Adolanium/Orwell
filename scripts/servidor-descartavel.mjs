@@ -60,7 +60,7 @@ export function contasDeTesteAntigas(base) {
   }
 }
 
-export async function levantarServidor({ frente: PORTA_DA_FRENTE, servidor: PORTA_DO_SERVIDOR, sfu = 0, dist = DIST_WEB, distAntiga = null, servidorJs = SERVIDOR_JS, etiqueta = "fase7", contasAntigas = true }) {
+export async function levantarServidor({ frente: PORTA_DA_FRENTE, servidor: PORTA_DO_SERVIDOR, sfu = 0, dist = DIST_WEB, distAntiga = null, servidorJs = SERVIDOR_JS, etiqueta = "fase7", contasAntigas = true, env = {} }) {
   for (const [o_que, caminho] of [["a web construída", join(dist, "index.html")], ["o servidor construído", servidorJs], ...(distAntiga ? [["a web antiga", join(distAntiga, "index.html")]] : [])]) {
     if (!existsSync(caminho)) throw new Error(`Falta ${o_que}: ${caminho}. Corre \`npm run build\` primeiro.`)
   }
@@ -79,6 +79,8 @@ export async function levantarServidor({ frente: PORTA_DA_FRENTE, servidor: PORT
       ENCLAVE_COMMUNITY_MODE: "true",
       ENCLAVE_COMMON_ROOM: `!orwell:${NOME}`,
       ...(sfu ? { ENCLAVE_SFU_PORT: String(sfu), ENCLAVE_SFU_ANNOUNCED_IP: "127.0.0.1" } : {}),
+      // Extra server settings for one script (`ENCLAVE_REGISTO`, `ENCLAVE_VERSAO_MINIMA_DO_CLIENTE`…).
+      ...env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   })

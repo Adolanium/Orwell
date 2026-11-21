@@ -208,6 +208,18 @@ describe("PedidosDeLugar", () => {
     expect(enviados).toHaveLength(6)
   })
 
+  it("adiantar(so) (alguém do canal apareceu) traz só esses canais (1.3.26)", () => {
+    const { pedidos, enviados, avancar } = bancada()
+    pedidos.comecar("!a")
+    pedidos.comecar("!b")
+    avancar(31_000 + MINUTO + 2 * MINUTO)
+    const antes = enviados.length
+    avancar(MINUTO)
+    pedidos.adiantar(["!b"])
+    avancar(REGRAS_DOS_PEDIDOS.adiantamentoMs * 1.2 + 1)
+    expect(enviados.slice(antes).map((e) => e.canal)).toEqual(["!b"])
+  })
+
   it("limpar() não deixa nada a sair", () => {
     const { pedidos, enviados, avancar } = bancada()
     pedidos.comecar("!a")

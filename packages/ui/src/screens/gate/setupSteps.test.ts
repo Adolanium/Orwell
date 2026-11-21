@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { EMPTY_SETUP_PROGRESS, SETUP_STEPS, ecraInicial, firstIncomplete, markDone } from "./setupSteps.js"
+import { EMPTY_SETUP_PROGRESS, SETUP_STEPS, firstIncomplete, markDone } from "./setupSteps.js"
 
 describe("setup steps", () => {
   it("a ordem é cofre → identidade → ligação → perfil", () => {
@@ -28,15 +28,5 @@ describe("setup steps", () => {
     const next = markDone(EMPTY_SETUP_PROGRESS, "cofre")
     expect(EMPTY_SETUP_PROGRESS.cofre).toBe(false)
     expect(next.cofre).toBe(true)
-  })
-})
-
-describe("o primeiro ecrã do Setup (fase 8.1)", () => {
-  it("pergunta primeiro se já há conta noutro aparelho, quando há para onde emparelhar", () => {
-    expect(ecraInicial({ podeEmparelhar: true })).toBe("outro-aparelho")
-  })
-
-  it("sem caminho para emparelhar, segue direito para a criação", () => {
-    expect(ecraInicial({ podeEmparelhar: false })).toBe("criar")
   })
 })

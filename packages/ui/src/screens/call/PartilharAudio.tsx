@@ -14,6 +14,7 @@ import {
   PausarIcon,
   RepetirIcon,
   SaltarIcon,
+  SetaCimaIcon,
   TocarIcon,
 } from "../../icons.js"
 import type { FonteDeAudio, FonteOferecida } from "../../lib/fontesDeAudio.js"
@@ -358,6 +359,18 @@ export function PartilharAudio({
                         {faixa.duracao !== undefined ? formatarTempo(faixa.duracao) : ""}
                       </span>
                     </button>
+                    {/* The phone's way to reorder (option B): a finger cannot drag.
+                        Only the phone layout shows it (`styles/telemovel.css`). */}
+                    {indice > 0 && (
+                      <button
+                        type="button"
+                        className="audio-faixa-subir"
+                        aria-label={strings.musica.subir(faixa.nome)}
+                        onClick={() => musica.mover(faixa.id, indice - 1)}
+                      >
+                        <SetaCimaIcon size={12} />
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="audio-faixa-tirar"

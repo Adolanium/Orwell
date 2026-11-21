@@ -188,22 +188,6 @@ export const pt = {
    * email and no phone number: this file is the only way back in.
    */
   ficheiroDaConta: {
-    titulo: "Guarda o ficheiro da conta",
-    texto:
-      "O Orwell não tem email nem número de telefone. Por isso, não te podemos enviar um link para repor a conta. A tua conta está neste aparelho. Se perderes o aparelho, ou se apagares os dados do browser, só voltas a entrar com este ficheiro. O ficheiro tem a chave da tua conta, fechada com a tua palavra-passe. Sem a tua palavra-passe, ninguém pode usar o ficheiro, nem nós. Guarda o ficheiro fora deste aparelho: numa pen USB, num gestor de palavras-passe ou noutro computador em que confias.",
-    descarregar: "Descarregar o ficheiro da conta",
-    /** The share sheet (iPhone: "Guardar em Ficheiros"). */
-    partilhar: "Partilhar",
-    aDescarregar: "A preparar o ficheiro…",
-    guardei: "Guardei o ficheiro num sítio seguro.",
-    continuar: "Continuar",
-    nota: 'Perdeste o aparelho? No ecrã de entrada, escolhe "Importar conta". Escolhe este ficheiro e escreve a tua palavra-passe.',
-    /** Only for a vault the system keychain guards: the keychain does not travel. */
-    fraseLabel: "Palavra-passe para o ficheiro",
-    fraseNota: "Esta conta não tem palavra-passe. Escolhe uma só para o ficheiro, com 8 caracteres ou mais.",
-    aviso: "Ainda não guardaste o ficheiro da conta",
-    fechar: "Fechar",
-    guardado: "Ficheiro da conta descarregado.",
     /** The file name. Only letters a browser accepts everywhere. */
     nomeDoFicheiro: "conta.enclave",
   },
@@ -288,143 +272,20 @@ export const pt = {
   gate: {
     splashTitle: "Orwell",
     splashBody: "A abrir…",
-    setupTitle: "Criar conta",
-    setupLead: "Não pedimos email nem telefone. A conta fica neste aparelho.",
-    name: "Nome",
-    namePlaceholder: "Como queres aparecer",
     server: "Servidor",
-    osKeychain: "Usar o bloqueio deste aparelho",
-    devicePassphrase: "Palavra-passe deste aparelho",
-    passphrasePlaceholder: "Pelo menos 8 caracteres",
-    passphraseNote: "Se a esqueceres, não a podes recuperar.",
-    confirmPassphrase: "Confirmar a palavra-passe",
-    passphraseMismatch: "As duas palavras-passe são diferentes.",
-    passphraseShort: "Escreve pelo menos 8 caracteres.",
-    reveal: "Mostrar",
-    conceal: "Ocultar",
     serverInvalid: "Este endereço de servidor não é válido.",
 
-    /*
-     * Account creation is one question at a time.
-     *
-     * Each step has a QUESTION (the heading, which is what the person reads
-     * first) and an EXPLANATION underneath. The field labels still exist
-     * (`name`, `devicePassphrase`, `confirmPassphrase` above) but are only for
-     * screen reader users: repeating "Nome" under "Como queres mostrar o teu
-     * nome?" is noise for whoever sees it.
-     *
-     * The interview tone is on purpose: it was kept when a swap of the
-     * questions for plain titles was proposed.
-     *
-     * Informal TU address, like the rest of the application. The request came
-     * written in the formal você ("Como quer mostrar o seu nome?"), but this
-     * screen is the first of an application that addresses everyone as tu from
-     * the next screen on (the unlock screen already says "Introduz a
-     * palavra-passe"). Switching register halfway through the front door would
-     * show more than the formality was worth.
-     */
-    /*
-      The registration invite (1.3.25): a server with `ENCLAVE_REGISTO=convite`
-      lets a new account in only with a code from its operator. The page comes
-      right after the name, only on such a server. `registoFechado` is said on
-      the name page, before the vault exists, on a server that takes no new accounts.
-    */
-    askInvite: "Qual é o código de convite?",
-    askInviteLead: "Este servidor só aceita contas novas com um código de convite. Quem gere o servidor dá-te o código.",
-    invitePlaceholder: "XXXX-XXXX-XXXX-XXXX",
-    inviteCode: "Código de convite",
-    registoFechado: "Este servidor não aceita contas novas.",
-    askName: "Como queres mostrar o teu nome?",
-    askNameLead: "É assim que apareces a quem fala contigo. Podes mudar o nome mais tarde.",
-    /*
-      The profile image, right after the name, in the same question tone as the other pages. «Saltar» has the
-      same weight as going forward: the account does not need a face, and
-      without an image the name's initial stays. «Imagem de perfil» and not
-      «fotografia», because it can be a drawing or a GIF, and
-      «fotografia» promised a face.
-    */
-    askPhoto: "Queres pôr uma imagem de perfil?",
-    askPhotoLead: "É a imagem que os outros vêem ao lado do teu nome. Podes mudar depois.",
-    choosePhoto: "Escolher imagem",
-    removePhoto: "Remover",
-    skipPhoto: "Saltar",
-    askPass: "Qual vai ser a palavra-passe?",
-    askPassLead: "Escolhe uma palavra-passe nova. Não uses uma de outro sítio.",
-    /** The same step, when the system offers to keep the key. */
-    askPassKeychain: "Como queres proteger a conta?",
-    askPassKeychainLead: "Podes usar o bloqueio do aparelho. Para usar uma palavra-passe, tira o visto.",
-    askConfirm: "Confirma a palavra-passe",
-    askConfirmLead: "Escreve-a outra vez.",
-    stepOf: (passo: number, total: number) => `Passo ${passo} de ${total}`,
-    next: "Continuar",
-    back: "Voltar",
+    /** The proof of work of a new account, before its first connection (1.3.26). */
+    aPrepararConta: (percentagem: number) => `A preparar a conta… ${percentagem} %`,
     /** The server gets out of the way of whoever creates the account, but does not disappear. */
     advanced: "Opções avançadas",
-    advancedNote: "O servidor da tua conta. Se não sabes o que é, não mudes.",
-    creatingTitle: "A criar a tua conta",
-    creatingLead: "Não feches esta janela.",
     vaultExists: "Já existe uma conta neste aparelho.",
-    vaultExistsBody:
-      "Uma conta nova apaga a conta deste aparelho. Para começar de novo, apaga os dados deste site no browser.",
     goToUnlock: "Entrar na conta deste aparelho",
-    warning: "Se perderes este aparelho ou a palavra-passe, perdes a conta.",
-    creating: "a criar…",
-    create: "Criar conta",
-    stepLabels: {
-      cofre: "A preparar o aparelho…",
-      identidade: "A criar a conta…",
-      ligacao: "A ligar ao servidor…",
-      perfil: "A guardar o perfil…",
-    } as Record<"cofre" | "identidade" | "ligacao" | "perfil", string>,
-    stepNames: {
-      cofre: "Aparelho",
-      identidade: "Conta",
-      ligacao: "Ligação",
-      perfil: "Perfil",
-    } as Record<"cofre" | "identidade" | "ligacao" | "perfil", string>,
-    importLead: "Tens o ficheiro da conta (.enclave)? Importa-o aqui.",
     /* Fix 11b: the account got in, but not all the images in the file stayed on this device (disk full, a file that stopped being readable). */
     importImagensEmFalta: (n: number): string =>
       n === 1
         ? "A conta entrou. 1 imagem não ficou neste aparelho. Pode trazê-la de outro aparelho."
         : `A conta entrou. ${n} imagens não ficaram neste aparelho. Pode trazê-las de outro aparelho.`,
-    importPick: "Importar conta",
-    importPassLabel: "Palavra-passe do ficheiro",
-    importing: "A importar…",
-    importAction: "Importar",
-    unlockTitle: "Bem-vindo de volta",
-    unlockLead: "Escreve a palavra-passe deste aparelho.",
-    /*
-     * The way out for whoever lost the passphrase, which did not exist until now.
-     *
-     * An account in this application cannot be recovered: the key is the
-     * passphrase, there is no copy on the server, and nobody on the other side
-     * can reset it. Whoever forgets it is stuck on this screen forever, without
-     * even a path to start over. That is why the only possible remedy is to
-     * delete this device's vault and create another account.
-     *
-     * The confirmation is the same Settings sheet, with the typed word: see
-     * `settings.destroyStepsGate`, which is the only sentence that changes.
-     */
-    lostAccount: "Esqueceste a palavra-passe?",
-    lostAccountAction: "Criar conta nova.",
-    /*
-      The second line of the gate's footer: sign in with ANOTHER account on
-      this device, by file or by pairing. Both paths delete the account that
-      is here, and the sheet says so before asking. See
-      `EntrarComOutraConta`.
-    */
-    otherAccount: "Entrar com outra conta",
-    otherAccountTitle: "Entrar com outra conta",
-    otherAccountLead: "Este aparelho guarda uma conta só. Os dois caminhos apagam primeiro a conta deste aparelho.",
-    otherAccountImport: "Importar um ficheiro de conta",
-    otherAccountPair: "Emparelhar com o aparelho principal",
-    passphrase: "Palavra-passe",
-    opening: "A abrir…",
-    openingNote: "Pode demorar alguns segundos.",
-    memorizar: "Memorizar a sessão",
-    memorizarNota: "Da próxima vez, o Orwell abre sem pedir a palavra-passe. Quem usar este aparelho desbloqueado entra na tua conta.",
-    memorizarNotaIos: "No iPhone, sete dias sem abrir o Orwell podem apagar a sessão e a conta deste aparelho.",
     memorizarFalhou: "Entraste, mas não foi possível memorizar a sessão neste aparelho.",
     /*
       The box on the last registration step. The
@@ -433,26 +294,123 @@ export const pt = {
       not about the encrypted group. See `terminologia.test.ts`.
     */
     canalOficial: "Entrar no canal oficial do Orwell.",
-    revogadoSemFrase: "Esta conta não tem palavra-passe neste aparelho. Para usar o Orwell aqui outra vez, começa de novo.",
-    comecarDeNovo: "Começar de novo",
-    open: "Entrar",
+  },
+
+  /**
+   * The way in (21/11/2026): the approved mock-ups (`Main`, `Ficheiro`,
+   * `Voltar`, `Emparelhar`, `Desktop`), word for word. One screen, three paths:
+   * create an account, the account file, another device. Short sentences that
+   * any app uses, and no explanation under the fields. None of these paths
+   * deletes an account: deleting is only in Settings, with its own confirmation.
+   */
+  entrada: {
+    bemVindo: "Bem-vindo ao Orwell",
+    criarConta: "Criar conta",
+    comFicheiro: "Entrar com o ficheiro da conta",
+    comOutroAparelho: "Entrar com outro aparelho",
+    voltar: "Voltar",
+    nome: "Nome",
+    palavraPasse: "Palavra-passe",
+    palavraPasseOutraVez: "Escreve outra vez a palavra-passe",
+    minimo: "Mínimo 8 caracteres.",
+    curta: "A palavra-passe tem menos de 8 caracteres.",
+    diferentes: "As palavras-passe não são iguais.",
+    tenhoConvite: "Tenho um código de convite",
+    codigoDeConvite: "Código de convite",
+    aCriar: "A criar a conta…",
+    /** Asked of the server before the vault exists, so the account never stays made halfway. */
+    versaoAntiga: "Esta versão do Orwell é antiga. Actualiza para criar conta.",
+    actualizar: "Actualizar",
+    guardarTitulo: "Guarda o ficheiro da conta",
+    guardarTexto: "Precisas dele para entrar na tua conta noutro aparelho.",
+    guardarFicheiro: "Guardar o ficheiro",
+    aPrepararFicheiro: "A preparar o ficheiro…",
+    maisTarde: "Fazer mais tarde",
+    /** Inside the app, until a file is saved or the account has a second device. */
+    faixa: "Ainda não guardaste o ficheiro da conta.",
+    faixaGuardar: "Guardar",
+    guardado: "Ficheiro da conta guardado.",
+    escolherFicheiro: "Escolher ficheiro",
+    /** On a computer the file can also be dragged into the box: "Arrasta o ficheiro para aqui ou escolhe-o". */
+    arrastarOu: "Arrasta o ficheiro para aqui ou",
+    escolheO: "escolhe-o",
+    trocar: "Trocar",
+    entrar: "Entrar",
+    aEntrar: "A entrar…",
+    ola: (nome: string): string => `Olá, ${nome}`,
+    olaSemNome: "Olá",
     /**
-     * The gate's old third path, under the name. It left the screen in phase
-     * 8.1 (the question about the other device moved to the start). The two
-     * keys stay while `scripts/e2e-emparelhar.mjs` and `e2e-cliente-antigo.mjs`
-     * look for «Emparelhar»: they go when the scripts are updated. See
-     * `strings.guioes.test.ts`.
+     * Off by default (21/11/2026): with it on, the app stops asking for the
+     * password, and the person forgets the one thing that opens the account
+     * file and joins a new device. Who wants it ticks the box.
      */
-    joinLead: "Já tens conta noutro aparelho? Emparelha este aparelho com ele.",
-    joinAction: "Emparelhar",
-    /*
-      Phase 8.1: the first question of Setup, before the account. Two buttons
-      with the same weight. See `ecraInicial`.
-    */
-    outroAparelhoPergunta: "Já usas o Orwell noutro aparelho?",
-    outroAparelhoLead: "Uma conta chega para todos os teus aparelhos. Se já tens conta, emparelha este aparelho com ela.",
-    outroAparelhoSim: "Sim, emparelhar este aparelho",
-    outroAparelhoNao: "Não, criar conta",
+    manterSessao: "Manter sessão iniciada",
+    aAbrir: "A abrir…",
+    esqueci: "Esqueci-me da palavra-passe",
+    outraConta: "Usar outra conta",
+    esquecesteTitulo: "Esqueceste-te da palavra-passe?",
+    esquecesteTexto: "Entra de outra forma e escolhe uma palavra-passe nova.",
+    removido: "Este aparelho saiu da conta.",
+    voltarAConta: "Voltar a uma conta deste aparelho",
+  },
+
+  /**
+   * "Entrar com outro aparelho", on the two devices (21/11/2026). The new device
+   * and the one with the account show the same three words, and the person says
+   * yes on both. The pairing protocol is the one from before: only the words on
+   * screen changed.
+   */
+  juntarAparelho: {
+    novoLead: "No aparelho onde tens a conta, abre Configurações › Juntar um aparelho.",
+    lerCamara: "Ler o código com a câmara",
+    colarCodigo: "Ou cola o código",
+    continuar: "Continuar",
+    codigoInvalido: "Isto não é um código para juntar um aparelho.",
+    aLigar: "A ligar ao outro aparelho…",
+    palavrasTitulo: "As palavras são iguais?",
+    palavrasNoNovo: "Compara com o ecrã do outro aparelho.",
+    palavrasNaConta: "Compara com o ecrã do aparelho novo.",
+    sim: "Sim, juntar o aparelho",
+    nao: "Não são iguais",
+    confirmadoAqui: "Agora confirma no outro aparelho.",
+    aReceber: "A receber as tuas conversas…",
+    estasDentro: "Estás dentro",
+    palavraPasseDaConta: "Palavra-passe da conta",
+    /* After Erro 140 (S4, 21/11/2026): the way out for a person who forgot the account password. */
+    forgotAccountPassword:
+      "Esqueceste a palavra-passe da conta? Toca em Cancelar. No outro aparelho, abre Configurações › Conta e segurança › Mudar a palavra-passe e escolhe Esqueci-me da palavra-passe actual. Depois junta este aparelho outra vez.",
+    abrir: "Abrir o Orwell",
+    falhou: "O aparelho não se juntou.",
+    titulo: "Juntar um aparelho",
+    contaLead: "No aparelho novo, escolhe Entrar com outro aparelho. Depois lê este código com a câmara dele.",
+    copiarCodigo: "Copiar o código",
+    codigoCopiado: "Código copiado.",
+    aEspera: "À espera do aparelho novo…",
+    concluido: "O aparelho novo já está na conta.",
+    qrAlt: "Código para ler com a câmara do aparelho novo",
+    /** The card in the corner when a device this one did not add joined the account (mock-up `Ficheiro`). */
+    novoNaConta: "Novo aparelho na tua conta",
+    fuiEu: "Fui eu",
+    remover: "Remover",
+  },
+
+  /** Configurações › Conta e segurança (21/11/2026): everything about the account in one place. */
+  contaESeguranca: {
+    titulo: "Conta e segurança",
+    mudar: "Mudar a palavra-passe",
+    guardarFicheiro: "Guardar o ficheiro da conta",
+    aparelhos: "Aparelhos",
+    juntar: "Juntar um aparelho",
+    actual: "Palavra-passe actual",
+    /* S4 (21/11/2026): a change proven by the open vault. */
+    forgotCurrent: "Esqueci-me da palavra-passe actual",
+    forgotCurrentNote:
+      "Este aparelho está aberto, por isso pode mudar a palavra-passe sem a actual. Os teus outros aparelhos recebem a nova quando se ligarem.",
+    nova: "Palavra-passe nova",
+    novaOutraVez: "Escreve outra vez a palavra-passe nova",
+    nota: "A conta tem uma só palavra-passe em todos os aparelhos. A nova substitui-a em todos: os aparelhos desligados mudam quando ligarem. Os ficheiros da conta que guardaste antes continuam a abrir com a palavra-passe antiga.",
+    mudada: "Palavra-passe mudada. Os teus outros aparelhos recebem-na quando se ligarem. Guarda já um ficheiro novo.",
+    guardarNovo: "Guardar um ficheiro novo da conta",
   },
 
   /**
@@ -466,49 +424,27 @@ export const pt = {
    * and removed.
    */
   pairing: {
-    joinTitle: "Emparelhar este aparelho",
     joinLead:
-      "No aparelho principal, abre Configurações, Aparelhos, Acrescentar aparelho. Depois lê o código com a câmara, ou cola aqui o link.",
+      "No aparelho da outra conta, abre Configurações › Juntar um aparelho. Depois lê o código com a câmara, ou cola aqui o código.",
     scan: "Ler o código com a câmara",
-    scanning: "Aponta a câmara ao código do aparelho principal.",
+    scanning: "Aponta a câmara ao código do outro aparelho.",
     stopScan: "Parar a câmara",
-    cameraDenied: "O browser não deu acesso à câmara. Cola o link.",
-    cameraUnavailable: "Este aparelho não tem câmara disponível. Cola o link.",
-    pasteLabel: "Ou cola o link",
+    cameraDenied: "O browser não deu acesso à câmara. Cola o código.",
+    cameraUnavailable: "Este aparelho não tem câmara. Cola o código.",
+    pasteLabel: "Ou cola o código",
     pasteAction: "Continuar",
-    linkInvalid: "Isto não é um link de emparelhamento.",
-    keyTitle: "Palavra-passe deste aparelho",
+    linkInvalid: "Isto não é um código para juntar um aparelho.",
     keyLead: "Escolhe uma palavra-passe para este aparelho.",
-    connecting: "A ligar ao aparelho principal…",
-    waitingHost: "À espera do aparelho principal…",
-    waitingGuest: "À espera do outro aparelho. Lê este código com a câmara dele, ou cola lá o link.",
-    sasTitle: "São as mesmas palavras?",
-    sasLead: 'Compara as seis palavras nos dois ecrãs. Se forem diferentes, carrega em "Não são".',
-    /**
-     * What happens to history, on the six-word screen (1.0 «Arca»). There is no checkbox and no question:
-     * just the sentence, so whoever pairs knows.
-     */
-    sasHistoricoAqui: "Depois de emparelhar, este aparelho recebe as conversas antigas e os ficheiros do outro aparelho.",
-    sasHistoricoNoNovo: "Depois de emparelhar, o aparelho novo recebe as conversas antigas e os ficheiros deste aparelho.",
-    sasSame: "São as mesmas",
-    sasDifferent: "Não são",
-    sasConfirmedHere: "Confirmado aqui. Falta confirmar no outro aparelho.",
-    joining: "A entrar na conta…",
+    connecting: "A ligar ao outro aparelho…",
+    waitingHost: "À espera do outro aparelho…",
+    sasLead: "Compara as palavras nos dois ecrãs.",
+    sasSame: "Sim, são iguais",
+    sasDifferent: "Não são iguais",
+    sasConfirmedHere: "Agora confirma no outro aparelho.",
     /* The snapshot of the account state (phase 5), between the certificate and the entry. */
     receivingState: "A receber os teus dados…",
-    receivingStateLead:
-      "O outro aparelho envia o que já leste, as conversas arquivadas, os bloqueados e as preferências.",
-    stateDeadline: (segundos: number): string => `Este aparelho entra daqui a ${segundos} s, com ou sem os dados.`,
     stateMissing: "Os teus dados não chegaram a tempo. Chegam quando os dois aparelhos estiverem ligados.",
     profileMissing: "O teu perfil ainda não chegou do aparelho principal. Chega quando os dois estiverem ligados.",
-    doneTitle: "Este aparelho já é da conta",
-    /*
-      Up to 1.0.5 it said «As anteriores ficam nos outros aparelhos». Since
-      history between devices (29/10/2026) old conversations pass from device
-      to device when both are connected.
-    */
-    doneBody: "Este aparelho já recebe as mensagens novas. As conversas antigas chegam do outro aparelho enquanto os dois estiverem ligados.",
-    doneGuestNote: "Podes gerir os aparelhos a partir de qualquer um dos teus aparelhos.",
     /*
       Until 12/11/2026 it said the earlier messages stay on the other devices,
       which stopped being true with history between devices (29/10/2026). The
@@ -516,14 +452,7 @@ export const pt = {
       this one is on: the host is told to keep it on.
     */
     doneHostBody: "O aparelho novo já recebe as mensagens. As conversas antigas passam daqui para ele. Deixa este aparelho ligado até o histórico chegar.",
-    doneAction: "Entrar",
-    hostTitle: "Acrescentar aparelho",
-    hostLead:
-      'No outro aparelho, escolhe "Sim, emparelhar este aparelho". Depois lê este código com a câmara dele, ou cola lá o link.',
-    copyLink: "Copiar link",
-    linkCopied: "link copiado",
-    qrAlt: "Código para ler com a câmara do outro aparelho",
-    noAccountKey: "Acrescenta ou tira aparelhos no aparelho principal da conta.",
+    noAccountKey: "Junta ou tira aparelhos noutro aparelho da conta.",
     serverUnsupported: "Este servidor ainda não sabe emparelhar aparelhos.",
     /** The pairing link opened on a device that already has an account. One line on the gate, like the invite's. */
     gateHasAccount: "Este aparelho já tem uma conta. Para emparelhar, usa um aparelho sem conta.",
@@ -531,7 +460,6 @@ export const pt = {
     gateInvalid: "Este link de emparelhamento não se lê.",
     /* A pairing link clicked in a message (1.3.25): it never opens, here or outside. */
     fromChat: "Este link serve para juntar um aparelho teu. Abre-o só no aparelho novo, nunca a partir de uma conversa.",
-    failedTitle: "O emparelhamento falhou",
     /* The reason for not pairing no longer lives here: it is an error like the
        others, with a code (7xx), and goes through `translatePairingError` in `strings.ts`. */
   },
@@ -594,6 +522,25 @@ export const pt = {
    * and that is where the boundary shows live: the section is called
    * Comunidades, the thing it makes is called canal.
    */
+  /**
+   * The short pairing code (1.3.26, mock-up `Emparelhar`): the NEW device
+   * shows "K7P · 4QM" and its QR; the device with the account reads the QR or
+   * types the code.
+   */
+  shortCode: {
+    newTitle: "Entrar com outro aparelho",
+    newLead: "No aparelho onde tens a conta, abre Configurações › Juntar um aparelho.",
+    orType: "ou escreve o código",
+    lasts: "O código funciona uma vez, durante 5 minutos.",
+    newCode: "Código novo",
+    showCode: "Mostrar um código neste aparelho",
+    qrAlt: "Código para ler com a câmara do aparelho onde tens a conta",
+    hostTitle: "Juntar um aparelho",
+    camera: "Câmara",
+    typeLabel: "Ou escreve o código",
+    continue: "Continuar",
+    invalid: "Escreve os 6 caracteres do código.",
+  },
   rail: {
     profile: "Eu",
     chat: "Comunidades",
@@ -631,6 +578,37 @@ export const pt = {
     porLer: "Mensagens por ler",
     chamada: "Chamada a decorrer",
     semLigacao: "Sem ligação",
+  },
+
+  /**
+   * The phone layout (option B, 20/11/2026).
+   *
+   * Four tabs at the bottom, like a phone messenger: Communities (the rail of
+   * communities and the channels of the chosen one), Messages (the direct
+   * conversations), Friends, and You (the account, the profile, the feed and
+   * the settings). A conversation opens over its list, and "Voltar" takes you
+   * back to the list. STE100: short words, one word for each thing.
+   */
+  telemovel: {
+    /** The name of the bar with the four tabs, for screen readers. */
+    separadores: "Secções principais",
+    comunidades: "Comunidades",
+    mensagens: "Mensagens",
+    amigos: "Amigos",
+    tu: "Tu",
+    /** The arrow at the left of a pushed screen, and the label of its button. */
+    voltar: "Voltar",
+    /** The name of the 72 px rail of communities, for screen readers. */
+    carril: "Os teus canais",
+    /** The "+" at the end of the rail. It opens the same sheet as the "+" on a computer, with the same name (1.3.26). */
+    novaComunidade: "Criar canal",
+    /** The entries of the "Tu" tab. */
+    perfil: "O teu perfil",
+    mural: "Feed",
+    definicoes: "Configurações",
+    /** The number on the Messages tab, in words. */
+    mensagensPorLer: (quantas: number): string =>
+      quantas === 1 ? "1 conversa por ler" : `${quantas} conversas por ler`,
   },
 
   sidebar: {
@@ -674,6 +652,21 @@ export const pt = {
     aEntrarNoCanalOficial: "A entrar no canal oficial do Orwell…",
     noRoomsBefore: "Ainda não tens canais. Cria um com o ",
     noRoomsAfter: " ao lado.",
+    /**
+     * Why the "+" is grey when the account cannot create more channels
+     * (1.3.26): the server caps them (1 in the first 3 days, 5 for every
+     * account). The tooltip of the blocked button, on hover, focus and tap
+     * (`BlockedButton`).
+     */
+    channelLimit: (quota: { maximo: number; contaNova: boolean }): string =>
+      quota.contaNova
+        ? "A tua conta é nova. Nos primeiros 3 dias podes criar 1 canal. Podes entrar noutros canais com um link."
+        : `Criaste ${quota.maximo} canais. Uma conta não pode criar mais. Podes entrar noutros canais com um link.`,
+    /** Why "Nova sala" is grey when the account cannot create more rooms (30 per account). Same tooltip. */
+    roomLimit: (quota: { max: number; newAccount?: boolean | undefined }): string =>
+      quota.newAccount
+        ? `A tua conta é nova. Nos primeiros 3 dias podes criar ${quota.max} salas.`
+        : `Criaste ${quota.max} salas. Uma conta não pode criar mais.`,
     addFriend: "Adicionar amigo",
     /**
      * What the voices symbol says in words (`components/Vozes.tsx`).
@@ -1092,20 +1085,6 @@ export const pt = {
   },
 
   /**
-   * The card on the first screen after creating the account. See `PrimeirosPassos`.
-   * Says what there is to do, and does not explain the product.
-   */
-  primeirosPassos: {
-    titulo: "Como chegar a alguém",
-    corpo: "Para falar com alguém, dá o teu endereço, pede amizade ou entra com um link de convite.",
-    copiar: "Copiar o teu endereço",
-    copiado: "Endereço copiado. Dá-o a quem te quiser adicionar.",
-    amigo: "Adicionar amigo",
-    link: "Entrar com um link",
-    fechar: "Fechar",
-  },
-
-  /**
    * The server's common channel, and how it introduces itself.
    *
    * The writing rule here is the same as in the rest of the file, and it is
@@ -1231,7 +1210,15 @@ export const pt = {
       knowing where you are depends on nothing.
     */
     openChannel: "Canal comum. Qualquer conta deste servidor entra sem convite e lê.",
+    afastados: (n: number): string =>
+      n === 1
+        ? "Mais 1 conta ainda tem as chaves deste canal. O servidor diz que saiu."
+        : `Mais ${n} contas ainda têm as chaves deste canal. O servidor diz que saíram.`,
     verifyHint: (name: string): string => `Verificar a segurança com ${name}`,
+    /* The column while a channel's history syncs (21/11/2026). Approved text. */
+    syncingTitle: "A sincronizar",
+    /** Calendar days since this device was last online with this account. Never said for 0. */
+    syncingAway: (days: number): string => (days === 1 ? "Não entras há 1 dia" : `Não entras há ${days} dias`),
   },
 
   /**
@@ -1882,6 +1869,12 @@ export const pt = {
     soPalco: "Ver só o palco",
     conversaDaSala: "Conversa da sala",
     focoAria: (nome: string): string => `${nome}, em foco`,
+    /**
+     * The action on the notice of an incoming call in a direct conversation
+     * (21/11/2026). It stops the ring on this device; the call goes on, and the
+     * person can still join it from the conversation.
+     */
+    declineRing: "Recusar",
   },
 
   /**
@@ -2388,7 +2381,7 @@ export const pt = {
    */
   sincronia: {
     /** The marker in the conversation, where the seat is. It does not appear in the feed. */
-    lugar: "Entraste aqui. O que foi dito antes não chega a este aparelho.",
+    lugar: "O histórico está a sincronizar.",
     lugarData: (data: string): string => `Entraste a ${data}.`,
     /** The thin bar while the channel reaches whoever joined late. It goes away by itself. */
     aReceber: "A receber o canal…",
@@ -2404,8 +2397,13 @@ export const pt = {
      * reason, and what the app does next. The progress bar closes.
      */
     historicoSemIrmao: "O aparelho principal não responde. As mensagens antigas chegam quando ele ligar.",
-    historicoParado: (faltam: number): string =>
-      `O aparelho principal parou de responder. ${faltam === 1 ? "Falta 1 mensagem antiga" : `Faltam ${faltam} mensagens antigas`}. Chegam quando ele ligar.`,
+    /* A stopped transfer that will resume (20/11/2026). Approved text. */
+    historicoEmFalta: (faltam: number): string =>
+      faltam === 1
+        ? "Falta 1 mensagem neste aparelho. A sincronização vai retomar dentro de momentos."
+        : `Faltam ${faltam} mensagens neste aparelho. A sincronização vai retomar dentro de momentos.`,
+    /* The same, when the exact number is not known (a sibling before 1.3.26). Approved text. */
+    historicoEmFaltaSemNumero: "Faltam mensagens neste aparelho. A sincronização vai retomar dentro de momentos.",
     historicoPerdidas: (perdidas: number): string =>
       perdidas === 1
         ? "1 mensagem antiga não chegou: o aparelho principal não a conseguiu enviar."
@@ -2475,6 +2473,17 @@ export const pt = {
     channelsReset: "Salas e feeds recomeçados. A tua conta e o teu perfil mantêm-se. Pede para te convidarem de novo.",
     serverRestarted:
       "O servidor foi reiniciado, e as salas e feeds antigos deixaram de existir. A tua conta e o teu perfil mantêm-se. Pede para te convidarem de novo.",
+  },
+
+  /** A new account in its first days (1.3.26). See `anti-abuso.ts` in the protocol. */
+  contaNova: {
+    aviso: "A tua conta é nova. Algumas funções abrem daqui a 24 h.",
+    avisoNaSala:
+      "A tua conta é nova. Algumas funções abrem daqui a 24 h. Na sala comum, as ligações aparecem como texto e não podes enviar imagens, ficheiros nem GIFs.",
+    ritmo: (segundos: number) =>
+      `A tua conta é nova. Na sala comum, podes enviar 3 mensagens e depois 1 mensagem a cada ${segundos} segundos. A app envia a tua mensagem daqui a pouco.`,
+    naFila: "A entrar na sala comum… Entraram muitas pessoas na última hora. A app entra quando houver lugar.",
+    anexosEscondidos: "As imagens, os ficheiros e os cartões de ligações estão escondidos. A conta de quem escreveu é nova.",
   },
 
   notifCenter: {
@@ -2547,6 +2556,9 @@ export const pt = {
      * removes it from the other" need no programming.
      */
     friendRequestClosed: (name: string): string => `Pedido de ${name}: respondido`,
+    aparelhoNovo: "Novo aparelho entrou na conta.",
+    removerAparelho: "Remover",
+    aparelhoRemovido: "O aparelho saiu da conta.",
   },
 
   userMenu: {
@@ -2845,6 +2857,10 @@ export const pt = {
     */
     bio: "Biografia",
     bioNote: "Quem és, em poucas linhas. O estado é o que estás a fazer agora.",
+    // The bio stops at 300 characters (1.3.26). An older bio can be longer.
+    bioMaximo: (max: number): string => `Máximo ${max} caracteres.`,
+    bioAntigaCortada: (max: number): string =>
+      `A tua biografia tem mais de ${max} caracteres. Só aparecem os primeiros ${max}. Grava para ficar com este texto.`,
     email: "Email",
     optional: "opcional",
     emailPlaceholder: "Para te contactarem fora do Orwell",
@@ -3065,12 +3081,8 @@ export const pt = {
     sounds: "Sons",
     soundVolume: "Volume dos sons",
     soundSample: "Ouvir",
-    device: "Este aparelho",
     /* The end of the Devices section, with the gesture nobody undoes. */
     zonaDePerigo: "Zona de perigo",
-    exportAction: "Exportar conta",
-    exportPassLabel: "Palavra-passe para o ficheiro",
-    exported: "conta exportada. O ficheiro é a conta, guarda-o bem",
     /* Design §13 (C): by default the file carries only the vault; this checkbox also carries the store images. */
     exportImagens: "Incluir as imagens",
     exportImagensNota: (tamanho: string): string => `O ficheiro fica com mais ${tamanho}.`,
@@ -3083,25 +3095,12 @@ export const pt = {
      * that promises "o ficheiro é a conta" and delivers something else is worse
      * than no button.
      */
-    exportNeedsAccountKey: "Faz a cópia de segurança no aparelho principal da conta.",
-    /**
-     * The import warning, which replaced the "one device at a time" one.
-     *
-     * That one stopped being true the day an account could have up to four
-     * devices. What is still true, and harsher: importing the vault does not add
-     * a device, it MOVES the account to another device, because the vault
-     * carries the group keys and two identical vaults in two places break the
-     * channels' encryption. The way to two devices is the other one.
-     */
-    importReplacesDevice:
-      'Importar passa a conta para este aparelho. O aparelho antigo deixa de a poder usar. Para usar a conta em dois aparelhos, no aparelho principal escolhe "Acrescentar aparelho" e no novo escolhe "Sim, emparelhar este aparelho".',
-    devices: "Aparelhos",
+    exportNeedsAccountKey: "Guarda o ficheiro da conta noutro aparelho da conta.",
     devicesLead:
       "Os aparelhos com esta conta. Cada aparelho tem só as mensagens que recebeu depois de entrar.",
     deviceAddedAt: (data: string): string => `aparelho acrescentado a ${data}`,
     thisDevice: "este aparelho",
     devicesUnknown: "Não foi possível obter a lista de aparelhos.",
-    addDevice: "Acrescentar aparelho",
     /* Revoking a device (phase 5). The honest sentence comes from the plan: say what is cut and what is not. */
     revoke: "Revogar",
     revokeTitle: "Revogar este aparelho?",
@@ -3165,14 +3164,16 @@ export const pt = {
     */
     lockNow: "Terminar sessão",
     lockNote: "Fecha o cofre e esquece a sessão neste aparelho. A conta fica, e volta com a palavra-passe.",
-    memorizarSessao: "Memorizar a sessão neste aparelho",
+    memorizarSessao: "Manter sessão iniciada neste aparelho",
     memorizarSessaoNota: "Com isto ligado, o Orwell abre sem pedir a palavra-passe. Para voltar a pedir, desliga ou termina a sessão.",
     memorizarSessaoIndisponivel: "Este aparelho não tem onde guardar a sessão com segurança.",
-    sessaoNaoExpira: 'Com a sessão memorizada, a sessão não expira. Para expirar, desliga "Memorizar a sessão".',
+    sessaoNaoExpira: 'Com a sessão iniciada mantida, a sessão não expira. Para expirar, desliga "Manter sessão iniciada".',
     semPalavraPasse: "Esta conta não tem palavra-passe neste aparelho. Para poderes terminar a sessão, define uma.",
     definirPalavraPasse: "Definir palavra-passe",
     definirPalavraPasseNota: "A partir daqui, a conta abre com esta palavra-passe neste aparelho. Com ela, podes terminar a sessão. A conta fica, e volta com a palavra-passe.",
     palavraPasseDefinida: "A conta tem agora palavra-passe neste aparelho.",
+    palavraPasseMudouNoutro:
+      "A palavra-passe da conta mudou noutro aparelho. Da próxima vez, abre a conta com a palavra-passe nova. Os ficheiros guardados antes continuam a abrir com a antiga.",
     destroyAction: "Apagar a conta deste aparelho",
     destroyTitle: "Apagar a conta?",
     destroyBody: "Não há cópia no servidor. A conta desaparece para sempre.",
@@ -3191,18 +3192,6 @@ export const pt = {
      * appeared out of nowhere.
      */
     destroySteps: "Antes de apagar, a conta sai de todos os canais.",
-    /*
-      The same sheet at the other two doors, and only this sentence changes.
-
-      On the gate («Perdeu a sua conta?») and in Setup with an existing vault,
-      the vault is closed. Without the keys there is no way to request leaving
-      the channels, and this account's leaf stays in each one's MLS tree.
-      Whoever deletes like this has to know it before and not after.
-    */
-    destroyStepsGate:
-      "Com a conta trancada, não é possível sair dos canais. O teu nome pode ficar nas listas de membros.",
-    destroyStepsImport:
-      "Importar apaga a conta deste aparelho e põe a do ficheiro no lugar dela. Com o cofre fechado, a conta apagada não sai dos canais. O nome dela pode ficar visível lá.",
     /* The same sentence, for pairing from the gate. Pairing runs in a
        provisional vault and the account here is only deleted when the new one
        enters (core 1j): if it fails, nothing was deleted. */
@@ -3210,8 +3199,6 @@ export const pt = {
        and leaves everything before it is deleted. */
     destroyStepsJoin:
       "Juntar apaga esta conta deste aparelho. Antes, a conta avisa os contactos e os canais, desfaz as amizades e sai de todos os canais. Se o emparelhamento falhar, nada é apagado.",
-    destroyStepsPair:
-      "Emparelhar põe a outra conta no lugar desta. A app só apaga a conta deste aparelho quando a outra conta entrar. Se o emparelhamento falhar, esta conta fica. Com o cofre fechado, a conta apagada não sai dos canais. O nome dela pode ficar visível lá.",
     /**
      * The button, after a failed attempt.
      *
@@ -3406,6 +3393,14 @@ export const pt = {
     leaveCall: "Sair da chamada",
     properties: "Propriedades",
     renameRoom: "Mudar o nome",
+    /**
+     * "Mover" on the phone (option B, 20/11/2026): a cascade with up, down and
+     * the other categories, because a finger cannot drag a room or a category.
+     */
+    mover: "Mover",
+    moverParaCima: "Para cima",
+    moverParaBaixo: "Para baixo",
+    moverParaCategoria: "Para a categoria",
     renameRoomTitle: "Mudar o nome da sala",
     closeRoom: "Fechar sala",
     /* Leave and delete, side by side at the end of the menu and doing things of
@@ -3769,15 +3764,6 @@ export const pt = {
     modoEndereco: "Por endereço",
     modoLink: "Por link",
     modoMeter: "Adicionar já",
-    /**
-     * What inviting does, said in full.
-     *
-     * Inviting puts nobody in the channel: it sends an invite, and the person
-     * joins if they accept it. Saying it here keeps whoever invites from
-     * waiting for the member list to change by itself.
-     */
-    enderecoHint:
-      "A pessoa recebe o convite numa mensagem privada. Entra se aceitar. Vê as mensagens a partir daí.",
     enderecoAccao: "Enviar convite",
     /*
       Adding, which is the unlicensed sibling of inviting. It exists for the
@@ -4278,10 +4264,8 @@ export const pt = {
     idadeEAceitacao: "Tens de ter 16 anos ou mais para usar o Orwell. Ao criar a conta, aceitas os Termos.",
   },
   comoFunciona: {
-    /* «Como funciona o Orwell»; the registration link stays «Como funciona». */
+    /* «Como funciona o Orwell». */
     titulo: "Como funciona o Orwell",
-    /** The link in the gate's footer. */
-    link: "Como funciona",
     lead: "Seis ideias sobre o que acontece por dentro do Orwell. Cada uma tem um desenho.",
     /** The card in Help and diagnostics. */
     cartaoLead: "Seis ideias curtas, cada uma com um desenho. Mostram o que o servidor sabe de ti, o que fica só no teu aparelho, e porque é que o Orwell funciona assim.",
@@ -4314,7 +4298,7 @@ export const pt = {
       resumo: "Quando crias a conta, o teu aparelho gera uma chave. O teu endereço é um resumo dessa chave, e o servidor só conhece o resumo.",
       mais: [
         "A chave vive no cofre do aparelho. A palavra-passe abre o cofre e nunca sai do aparelho.",
-        'Não há "esqueci a palavra-passe". Ninguém tem a palavra-passe senão tu. Se a perderes, o cofre fica fechado para sempre.',
+        "Ninguém tem a palavra-passe senão tu, nem o servidor. Se a esqueceres, entra outra vez com outro aparelho da conta e escolhe uma nova.",
         "O ficheiro de exportação é a conta. Quem tem o ficheiro e a palavra-passe tem a conta. Guarda-o como guardas um passaporte.",
         "O servidor não te conhece. Não tem nome, email, telefone nem fotografia. O nome e a fotografia viajam dentro dos envelopes, só para os teus amigos.",
       ],
@@ -4375,12 +4359,12 @@ export const pt = {
       resumo: "Cada aparelho tem a sua chave, e a chave da conta assina-a.",
       mais: [
         "Todos os aparelhos activos da conta têm a chave da conta. Qualquer um deles acrescenta e revoga aparelhos. Um aparelho removido não o pode fazer.",
-        "Para acrescentar um aparelho, emparelha-o. O segredo passa de um ecrã para uma câmara, por QR ou link, e nunca pelo servidor. Os dois ecrãs mostram seis palavras. Se forem iguais, ninguém se meteu no meio.",
-        "Importar o ficheiro noutra máquina não acrescenta um aparelho. Muda a conta de sítio. Para ter dois aparelhos, emparelha. Não cries outra conta.",
+        "Para acrescentar um aparelho, emparelha-o. O segredo passa de um ecrã para uma câmara, por QR ou link, e nunca pelo servidor. Os dois ecrãs mostram três palavras. Se forem iguais, ninguém se meteu no meio.",
+        "Importar o ficheiro da conta noutra máquina acrescenta um aparelho com a sua própria chave. Os outros aparelhos continuam a funcionar, e mostram o aparelho novo. Emparelhar também acrescenta um aparelho. Não cries outra conta.",
         "Revogar um aparelho corta a leitura a partir da época seguinte. O aparelho fica com o que já tinha até se voltar a ligar. Nessa altura sai da conta e apaga os dados.",
       ],
-      desenho: "A chave da conta, no aparelho principal, assina as chaves dos outros aparelhos. Emparelhar passa pelo servidor num cofre temporário que o servidor não abre. Os dois aparelhos comparam seis palavras.",
-      principal: "aparelho principal",
+      desenho: "A chave da conta assina as chaves dos outros aparelhos. Emparelhar passa pelo servidor num cofre temporário que o servidor não abre. Os dois aparelhos comparam três palavras.",
+      principal: "aparelho com a conta",
       chaveDaConta: "chave da conta",
       chaveDoAparelho1: "chave do aparelho 1",
       soEste: "só este exporta, acrescenta e revoga",
@@ -4391,7 +4375,7 @@ export const pt = {
       servidor: "servidor",
       cofreTemporario: "cofre temporário, fechado",
       segredo: "o segredo vai por QR ou link, de ecrã para câmara, nunca pelo servidor",
-      seisPalavras: "os dois ecrãs mostram seis palavras: se forem iguais, ninguém se meteu no meio",
+      seisPalavras: "os dois ecrãs mostram três palavras: se forem iguais, ninguém se meteu no meio",
     },
     servidor: {
       titulo: "O que o servidor vê",
@@ -4409,16 +4393,7 @@ export const pt = {
     },
   },
 
-  /**
-   * The sentences at the right moment (phase 6, layer 1): once each, with a tap
-   * to close. Whoever closed one does not see it again on this device
-   * (`Prefs.frasesVistas`). See `FraseDoMomento`.
-   */
-  frasesDoMomento: {
-    conta: "A tua conta é uma chave neste aparelho. Ninguém a pode repor. Guarda a palavra-passe.",
-    canal: "Vês a conversa a partir de agora. O que foi dito antes fica com quem lá estava.",
-    entendi: "Entendi",
-  },
+
   /*
     «Partilhar áudio» in the call (phase 9).
 
@@ -4482,6 +4457,8 @@ export const pt = {
     pararAria: "Parar de partilhar áudio",
     tocarEsta: (nome: string): string => `Tocar ${nome}`,
     remover: (nome: string): string => `Tirar ${nome} da lista`,
+    /** The phone's way to reorder the list (option B, 20/11/2026): a finger cannot drag. */
+    subir: (nome: string): string => `Subir ${nome}`,
     /** The sign on the panel and on the person's card. */
     aTocar: (nome: string): string => `A tocar: ${nome}`,
     emPausa: "Música em pausa",
@@ -4708,28 +4685,16 @@ export const pt = {
     /** The label of `MarcaDeChamada`'s `musica` mark, which says who it is about. */
     musicaDe: (nome: string): string => `${nome} está a tocar música`,
   },
-  /**
-   * «Entrar com outra conta», in the safe order: choose first, delete at the
-   * end. See `EntrarComOutraConta`. New keys, and not the `gate` ones, because
-   * the old sentence («os dois caminhos apagam primeiro») stopped being true.
-   */
-  outraConta: {
-    lead: "Importar ou emparelhar põe a outra conta no lugar desta. Primeiro escolhes a outra conta. A app só apaga a conta deste aparelho depois de confirmares.",
-    /** On the key page of `Emparelhar`, when there is an account to replace. */
-    pairKeyNote:
-      "Quando carregares em Continuar, a app pede para confirmares que apaga a conta deste aparelho. A app só a apaga quando a outra conta entrar.",
-  },
   /** «Mudar de conta»: several accounts on the same device, each with its own vault. */
   contas: {
     mudar: "Mudar de conta",
     titulo: "Mudar de conta",
-    lead: "Cada conta tem o seu cofre neste aparelho. A conta que deixas fica aqui, fechada.",
+    lead: "A conta que deixas fica neste aparelho, fechada.",
     semNome: "Conta sem nome",
     abreSozinha: "Abre sem pedir a palavra-passe.",
     pedeFrase: "Pede a palavra-passe.",
     acrescentar: "Acrescentar outra conta",
     acrescentarNota: "Crias, importas ou emparelhas outra conta. Esta conta fica neste aparelho.",
-    voltar: "Voltar a uma conta deste aparelho",
     nenhumaOutra: "Ainda não há outra conta neste aparelho.",
   },
   /**
@@ -4920,7 +4885,7 @@ export const errosPt: Record<string, FraseDeErro> = {
   "vault is locked": "O cofre está bloqueado.",
   "no vault to open": "Não há cofre neste aparelho.",
   "vault holds no identity": "O cofre não tem identidade.",
-  "wrong passphrase, or the vault is damaged": "Palavra-passe errada. Se tens a certeza dela, os dados deste aparelho podem estar danificados.",
+  "wrong passphrase, or the vault is damaged": "Palavra-passe errada.",
   "this vault was written by a newer version of the app":
     "Este cofre foi gravado por uma versão mais recente da app. Actualiza a app antes de o abrir. Abrir o cofre com esta versão apagaria o que ela não sabe ler.",
   "this vault is from the beta": "Este cofre é de uma versão do beta. Não abre nesta versão.",
@@ -4931,6 +4896,12 @@ export const errosPt: Record<string, FraseDeErro> = {
   "this device cannot remember the session": "Este aparelho não tem onde guardar a sessão com segurança.",
   "this vault has no passphrase to remember": "Esta conta não tem palavra-passe neste aparelho. Não há sessão para memorizar.",
   "this vault already has a passphrase": "Esta conta já tem palavra-passe neste aparelho.",
+  "the current passphrase is not right": "A palavra-passe actual não está certa.",
+  "this vault has no passphrase to change": "Esta conta não tem palavra-passe neste aparelho. Define uma primeiro.",
+  "this is not the account password": "Esta não é a palavra-passe da conta. Escreve a palavra-passe que usas nos outros aparelhos.",
+  "the account password is missing": "Escreve a palavra-passe da conta para acabar.",
+  "sync this device before you change the password": "Sincronize o aparelho antes de mudar a password",
+  "the system did not confirm that it is you": "O sistema não confirmou que és tu. Tenta outra vez.",
   "there is no such account on this device": "Esta conta já não está neste aparelho.",
   "could not reach the homeserver": "Não foi possível contactar o servidor.",
   // «Enviar registo» (phase 4): the refusal and the cap of the `/_enclave/relato` route.
@@ -4949,10 +4920,40 @@ export const errosPt: Record<string, FraseDeErro> = {
   "the device clock is off": "O relógio deste aparelho está errado. Acerta a hora e tenta outra vez.",
   "could not read the report inbox": "O servidor mandou uma resposta que não conseguimos ler. Tenta outra vez mais tarde.",
   "this server does not accept new accounts": "Este servidor não aceita contas novas.",
+  "the account check did not pass": "A app não conseguiu preparar a conta. Tenta outra vez.",
+  "this network created many accounts today": "Esta rede criou muitas contas hoje. Escreve um código de convite, ou cola uma ligação de convite.",
+  "this new account opened all the new channels it can today":
+    "A tua conta é nova. Hoje já abriste todos os canais novos que podes. Tenta outra vez amanhã.",
+  "this account created all the channels it can": (detalhe) => {
+    if (detalhe["convite"] === true) {
+      return "Não podes criar um link para este canal. A pessoa que o criou já tem o número máximo de canais."
+    }
+    if (detalhe["contaNova"] === true) return "A tua conta é nova. Nos primeiros 3 dias podes criar 1 canal."
+    const maximo = detalhe["maximo"]
+    return typeof maximo === "number"
+      ? `Criaste ${maximo} canais. Uma conta não pode criar mais.`
+      : "Criaste o número máximo de canais de uma conta."
+  },
+  "this account created all the rooms it can": (detalhe) => {
+    const max = detalhe["max"]
+    if (detalhe["newAccount"] === true && typeof max === "number") {
+      return `A tua conta é nova. Nos primeiros 3 dias podes criar ${max} salas.`
+    }
+    return typeof max === "number"
+      ? `Criaste ${max} salas. Uma conta não pode criar mais. Apaga uma sala para criar outra.`
+      : "Criaste o número máximo de salas de uma conta. Apaga uma sala para criar outra."
+  },
+  "the message could not be sent": "A mensagem não saiu. Envia-a outra vez.",
+  "this new account cannot send images, files or gifs in the common room yet":
+    "A tua conta é nova. Na sala comum, podes enviar imagens, ficheiros e GIFs depois de 24 horas.",
+  "this new account added all the people it can today":
+    "A tua conta é nova. Hoje já adicionaste todas as pessoas que podes. Tenta outra vez amanhã.",
+  "this new account must send a friend request first":
+    "A tua conta é nova. Primeiro envia um pedido de amizade. Quando a pessoa aceitar, podes enviar mensagens.",
   "this server needs a registration invite":
-    "Este servidor só aceita contas novas com um código de convite. Escreve o código que recebeste.",
+    "Este servidor só aceita contas novas com um código de convite.",
   "the registration invite is not valid":
-    "Esse código de convite não é válido, já foi usado ou expirou. Pede outro a quem gere o servidor.",
+    "Este código de convite não é válido, ou já foi usado.",
   // The account suspension (reports, §8): the notice and the review request.
   "account-suspended": "A tua conta está suspensa neste servidor. Lê o motivo e pede revisão.",
   "the server did not take the review request": "O servidor não aceitou o pedido de revisão. Tenta outra vez mais tarde.",
@@ -5061,6 +5062,8 @@ export const errosPt: Record<string, FraseDeErro> = {
   "the app sent a request this version does not read": "A app enviou um pedido que esta versão não lê. Fecha e abre a app.",
   "this device is not receiving this channel":
     "Não recebes mensagens novas desta sala. A app está a pedir o lugar de novo.",
+  "no member online has the older messages":
+    "Nenhum outro membro está ligado agora. As mensagens antigas vêm deles. Tenta outra vez quando um membro estiver ligado.",
   "only a closed ticket can be deleted": "Só se elimina um ticket fechado. Fecha-o primeiro.",
   "you may not moderate in this channel": "O teu cargo não te deixa moderar este canal.",
   "the nickname is too long": (detalhe) => {
@@ -5123,6 +5126,13 @@ export const errosPt: Record<string, FraseDeErro> = {
   "another device already joined this code": "Já se juntou outro aparelho a este código. Gera um novo no aparelho principal.",
   "too many pairing attempts": "Demasiadas tentativas. Espera um minuto.",
   "the other device disconnected": "O outro aparelho desligou-se antes de acabar.",
+  /* The short pairing code (1.3.26). */
+  "the pairing code is not right": "O código não está certo. Nada foi acrescentado. Faz um código novo no aparelho novo e escreve-o outra vez.",
+  "this pairing code is wrong or expired": "Este código está errado, expirou ou já foi usado. Olha outra vez para o código no aparelho novo.",
+  "the short pairing code expired": "O código expirou. Faz um código novo.",
+  "that is not a pairing code": "Escreve os 6 caracteres do código.",
+  "this server cannot pair with a short code": "Este servidor ainda não aceita códigos curtos. No aparelho onde tens a conta, abre Configurações › Acrescentar aparelho, e lê aqui o código dele.",
+  "this pairing code is for another server": "Este código é de outro servidor. Usa um aparelho com uma conta nesse servidor.",
   "the pairing code expired": "O código expirou. Gera um novo.",
   "a third device tried to join":
     "Um terceiro aparelho tentou juntar-se com este código. Nada foi acrescentado. Gera um código novo.",
@@ -5354,8 +5364,15 @@ export const errosPt: Record<string, FraseDeErro> = {
     Array.isArray(detalhe["channels"])
       ? `O aparelho saiu da conta, mas ainda está em ${detalhe["channels"].length} canais. Revoga outra vez para acabar.`
       : "O aparelho saiu da conta, mas ainda está em alguns canais. Revoga outra vez para acabar.",
-  "device-revoked": "Este aparelho foi tirado da conta noutro aparelho.",
-  "pairing-unfinished": "O emparelhamento não terminou. Volta a emparelhar este aparelho.",
+  "device-revoked": "Este aparelho saiu da conta.",
+  "pairing-unfinished": "Este aparelho não acabou de se juntar à conta. Entra outra vez.",
+  "this account file is from a device that left the account":
+    "Este ficheiro já não abre a conta. Usa um mais recente.",
+  "this account is full, so the file cannot add a device":
+    "Esta conta já tem quatro aparelhos. Tira um noutro aparelho e tenta outra vez.",
+  "this account file cannot add a device":
+    "Este ficheiro não pode juntar um aparelho. Guarda um ficheiro novo noutro aparelho da conta.",
+  "the server did not add this device to the account": "O servidor não acrescentou este aparelho à conta. Tenta outra vez.",
   "account-channel-foreign":
     "O canal da conta tinha um aparelho que não é desta conta. Este aparelho saiu desse canal. O estado volta a passar quando o canal for refeito.",
   // Music in the call (phase 9): the call goes on; the person knows what failed.
@@ -5374,6 +5391,10 @@ export const errosPt: Record<string, FraseDeErro> = {
   "this device cannot capture a sound source": "Este browser não deixa capturar o som de uma fonte. Usa ficheiros ou a app de secretária.",
   "the system does not allow recording the sound":
     "O macOS não deixa gravar o som. Abre Definições do Sistema › Privacidade e segurança › Gravação de ecrã e áudio do sistema, liga o Orwell e abre a app outra vez.",
+  "the system does not allow the microphone":
+    "O macOS não deixa o Orwell usar o microfone. Abre Definições do Sistema › Privacidade e segurança › Microfone, liga o Orwell e abre a app outra vez.",
+  "the system does not allow the camera":
+    "O macOS não deixa o Orwell usar a câmara. Abre Definições do Sistema › Privacidade e segurança › Câmara, liga o Orwell e abre a app outra vez.",
 }
 
 /**

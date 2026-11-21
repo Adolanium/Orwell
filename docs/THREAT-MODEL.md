@@ -74,6 +74,8 @@ adds a line here.
 | Registration invite codes, as hashes (`registration_invites`, from 1.3.25, only with `ENCLAVE_REGISTO=convite`): uses allowed and spent, creation and expiry | New accounts get in only with a code (`scripts/convites-de-registo.mjs`), checked and spent at first login | No column links a code to the account that used it. The running server sees the code once, at that login; a single-use code and the minute an account was created let the operator who handed it out guess which account it became. The code is printed once and never stored; 80 random bits. On loopback only, the server also counts accounts created in the last hour and 24 hours (`/_interno/registo`), numbers `accounts.created_minute` already held. If your reverse proxy runs on the same host as the server, do not forward `/_interno/` |
 | Seat repairs as counts (from 1.3.25): requests carried, requests nobody heard, Welcomes that answered one, claims that found no key package, `keypackage.low` sent, commits refused as stale | The operator must see that seats fail | Memory only, per minute for 24 hours, gone at restart. No address, channel or device in the counts or in the log line a failed claim writes. Answered on loopback only (`/_interno/canais`) |
 | Which peer servers a channel reaches | Federation must route | Never the membership list |
+| Short-code pairing boxes (from 1.3.26): the nameplate (the first two of the code's six characters), the box id, which account joined it and when, the size and timing of the CPace messages; per account and per connection, its code attempts in the last ten minutes | The device with the account finds the new device's box by what the person types, and only the server can stop an online guesser | Memory only. The other four characters (19.8 bits) and the CPace key never reach the server, and the box gives nothing to test a code offline. A nameplate joins once, a code lives five minutes, an account may type five codes in ten minutes. No IP and no device identifier. See "Pairing with a short code" |
+| The abuse brake for new accounts (from 1.3.26): proof-of-work challenges given and spent; per network (IPv4 /24, IPv6 /56) the instants of new accounts in 24 hours, under `HMAC(salt of the UTC day, prefix)`; per account in its first 72 hours its common-room bucket, the accounts it claimed key packages for and its new channels; common-room joins of the last hour; who made each invite (at most 50 000) | A new account costs a few seconds of work, one network cannot make many accounts an hour, a new account cannot flood the common room | Memory only, never in a log, gone at restart. The address is used once to compute the network key and is not kept; the salt is random and never leaves memory. On disk: a `comunidade` bit in `channel_claims` for channels made with "Create channel", and `rooms_created` (channel, opaque room id, creator, time) from `room.claim`, so the server learns how many rooms a channel has and who created them, never their names or content. These caps count what an honest app declares: a modified client that does not declare goes past them. During its first 24 hours an account's `account.age.result` tells channel mates when that ends, to the hour (`novaAte`) |
 | Pairing boxes, ephemeral signals, vault entries | See their sections | Memory only, or no author on disk |
 | Invite records, including short codes in the clear | It manages invites | See "Invites" |
 | The app version (`hello.versao`) | Minimum version check | Never written down |
@@ -178,8 +180,26 @@ secret and exchange keys encrypted under a key derived from it.
 - **A stolen phone that has not been removed has full authority**, including
   removing the computer. The defence is to remove it early (Settings ›
   Devices). There is no rotation of the account key.
-- **A new device reads from the commit that seated it.** Importing a vault file
-  into a second device instead of pairing breaks channels for good.
+- **Pairing with a short code (from 1.3.26).** The new device shows a code
+  such as "K7P · 4QM" and a QR; the device with the account types it in
+  Settings › Join a device. A typed code is not used as a key: both devices run
+  CPace (draft-irtf-cfrg-cpace-21, CPACE-RISTR255-SHA512, with key
+  confirmation) with the code as the password, and the box key is HKDF over the
+  CPace output (`pairCode.ts`, `cpace.ts`). Six characters from 31 symbols are
+  29.7 bits, but the first two are the nameplate the server sees, so the secret
+  is **19.8 bits**. Nothing in the box lets anyone test a code offline. A
+  nameplate joins once and the first wrong tag closes the box, so each code gets
+  one guess; an account may type five codes per ten minutes, under one chance in
+  1,280 a day even if every try met an open code. A stranger who guesses is the
+  side with an account, so the new device would join the stranger's account,
+  with words the person's real device never shows. A server in the middle must
+  win CPace against an honest device, one 19.8-bit guess per pairing the person
+  starts, and the six words hash the CPace transcript, so a server that won both
+  runs still shows different words on the two screens. A QR for another server
+  is refused (Error 775).
+- **A new device reads from the commit that seated it**, and from 1.3.26 also
+  the channel's past that other members hand it (see "The channel's past, from
+  other members").
 
 **The session can be remembered.** The person can keep the vault key (the
 Argon2id output, never the passphrase) on the device. The box is on by default.
@@ -200,7 +220,28 @@ terminated after each call (`apps/web/src/kdf.ts`).
 
 **Several accounts on one device keep their names in clear:** a small list with
 an opaque id and display name each (`contas.json`, or `orwell.contas` in
-`localStorage`). The vaults stay sealed. One account, no list.
+`localStorage`). The vaults stay sealed. From 1.3.26 the sign-in screen says
+"Hello, <name>", so the display name of every account on the device is kept
+outside its vault (`enclave.accountNames`), even with a single account. Only the
+display name; it goes when the account leaves the device.
+
+**Whoever holds a device unlocked can change the account password of every
+device (from 1.3.26, accepted risk).** "I forgot the current password" (Settings
+› Account and security) changes it without the current one: the open vault is
+the proof. On the desktop with Touch ID (macOS) the system asks first, and a
+refusal stops the change (Error 143). The web, Windows and Linux have no such
+check, so a person with the device unlocked, for example through a remembered
+session, can change the password on every device. This keeps a person who
+forgot the password able to add a device. Account files saved before keep
+opening with the password of their day.
+
+**An import that did not finish leaves a seed on the device (from 1.3.26).** So
+that a failed try never takes a second seat, the first try stores a random
+32-byte seed per account address outside every vault
+(`enclave.pendingImportKeys`, `pending-import-keys.json` on the desktop). The
+new device key is HKDF-SHA256(account private key, seed): the seed alone gives
+no key. The address is readable there without a password until the import goes
+in; then the entry goes. At most 16 entries.
 
 ## Web Push
 
@@ -245,6 +286,12 @@ What they add is sync rhythm, which follows connects and joins the server
 already sees; one elected member sends the periodic summary. Ceilings are in
 `TECTOS_DO_SINAL` (`apps/server/src/config.ts`). A removed member can still send
 signals, but receivers drop them: it has no key for the current epoch.
+
+**A signal with `para` (from 1.3.26, `sinal-para`)** names the one device it is
+for. The server delivers it only to that device's connections and drops it when
+none is connected. Today only the channel's past served by members (D2) sets
+it. So, for that exchange, the server learns which device talks to which, where
+before it saw one connection send to all.
 
 ## Encrypted vault on the server
 
@@ -296,7 +343,14 @@ are refused with `rate-limited`.
 is delay while one honest holder is online), misplace an item through `seq`
 (no access gained), or replay a signal within an epoch (extra work within
 ceilings). **It cannot** alter an item, give history from before the receiver's
-seat, revive a deleted item, replace what the receiver holds, or bypass a block.
+seat in a report (that past has its own path, below), revive a deleted item,
+replace what the receiver holds, or bypass a block.
+
+**Restricted rooms are an interface rule, not a secret.** A member who answers
+leaves out the items of rooms in a category restricted to roles the asker does
+not hold, by what that member knows. Every MLS member of the channel already
+receives every room's live messages, so a dishonest member can send a
+restricted room's items to anyone. Real separation is a separate channel.
 
 **Revoked devices.** Items signed by a revoked device are refused whatever date
 they claim. **Open edge:** if the author's account was deleted and its manifest
@@ -316,6 +370,44 @@ Bytes come when opened, from one elected member, within 4 MiB per minute and
 16 MiB per channel per day, checked against `m` so they cannot be swapped. A
 relayer can claim to have them and send nothing; the requester tries three
 members. The server sees a larger event, not which file.
+
+## The channel's past, from other members (D2, from 1.3.26)
+
+An account that joins a channel now reads what was said before it joined,
+except rooms in a category restricted to roles it does not hold. The server and
+MLS did not change: the server keeps thirty days, MLS keeps forward secrecy.
+What moved is a promise of the client: a member's device hands the past to the
+newcomer (`packages/client-core/src/historico/membros.ts`).
+
+- **The path.** `channel.sinal` of the channel, not stored, not federated, inside
+  the channel's signal key and a second key only the two devices hold
+  (ephemeral X25519 on both sides). Every signal is signed by the sending device,
+  checked against that account's leaf in the tree, and addressed to one device
+  (`para`), so the other members do not receive it.
+- **How much.** The newest 100 lines per channel on joining
+  (`HISTORY_PAGE_LINES`); older pages of 100 when the person presses "Load
+  older". The rhythm tells the server, by timing, that someone reads back in a
+  channel, never what.
+- **A dishonest member can** withhold or send less (the newcomer asks up to
+  three members per round in a fresh order, and a bucket closes only when its
+  own hash matches; withholding is delay while one honest member with the past
+  is online, loss with none), leave out a tombstone or an edit until an honest
+  member answers, reorder inside the past by the unsigned `seq` (never after the
+  seat, which comes from the server), and learn which buckets of 256 `seq` the
+  newcomer asked for.
+- **It cannot** invent or change an item (each is checked like a report:
+  device signature, chain, manifest, revocation, block filter), bring in an
+  author that was never in the channel (at most eight authors outside the tree
+  per page), bring back a deleted item, or replace what the newcomer holds.
+- **A leaked invite now costs the past too:** whoever is let in reads everything
+  honest members still hold outside restricted categories. The defence is the
+  same: invites that expire, few uses, a member who admits.
+- **Removed members and revoked devices.** Only a leaf in the current tree is
+  answered and believed; an item signed by a revoked device is refused.
+- **Budget.** The same budget as anti-entropy, behind it; a member serves at most
+  four newcomers at once and twelve pages per minute to each.
+- With an older server the client leaves `para` off and the server broadcasts,
+  so the channel's members see which member served which newcomer.
 
 ## Abuse reports
 
@@ -592,16 +684,70 @@ login without the device chain gets no `device`, and an older server sends none.
   account's devices asked. They already see every device key in the group's
   tree; the link between the request and one of them is new. The server learns
   nothing new.
-- **A lying server** can aim a repair at one device, never widen it. Whoever
-  answers takes out only the named leaf and seats it again with a fresh key
-  package, also when that leaf looks alive: the device is trusted to say its
-  own seat stopped working. In the account channel any sibling does that, at
-  most once a minute per named device. In other channels a sibling does it
-  only for a device added in the last day that it never saw in the channel;
-  another account does it for any named leaf. A wrong name therefore costs
-  that device a key package and a rekey, and nothing else. The same request
-  without a name took out every leaf of the account with no proof of life,
-  which the server could always cause.
+- **The device signs the request (from 1.3.26).** It signs the channel, the
+  account, its device key and the time with its device key (`prova`,
+  `pedido-de-lugar.ts`). The server cannot make one. A member checks it against
+  the device key at that account's leaf in its own tree; a proof more than 10
+  minutes off, or not newer than the last one accepted for that device in that
+  channel, does not count. That memory is in memory only: after a reload, a
+  replay inside the 10 minutes can pass once more.
+- **A lying server** can aim a repair at one device, never widen it, and cannot
+  take out a leaf that looks alive. With a valid proof, whoever answers takes
+  out only the named leaf and seats it again with a fresh key package, also when
+  that leaf looks alive: the device itself says its seat stopped working.
+  Without one (an older client, an older server, or a name the server changed),
+  the named leaf leaves only if it has no proof of life in the epoch. In the
+  account channel any sibling answers, at most once a minute per named device;
+  in other channels a sibling answers only for a device added in the last day
+  that it never saw in the channel; another account answers for any named leaf.
+  So a wrong name costs at most a key package and a rekey of a device that
+  already looks dead. The same request without a name keeps the old rule, which
+  the server could always cause.
+
+## Importing the account file (from 1.3.26)
+
+The account file (`.enclave`) with its password is the account. Importing it on
+any device makes a new device of the account and never removes one. Up to
+1.3.25 the import was a copy of the exporting device, and closed it.
+
+- **How it gets in.** The importing device draws a new device key, certifies it
+  with the account key in the file, and opens one short connection with the
+  file's device key that may send five frames only (`hello`, `auth.begin`,
+  `auth.finish`, `manifest.get`, `manifest.publish`) to publish the next manifest
+  with the new key (`client-core/src/passagem.ts`). No subscription, no key
+  packages, nothing in a channel: one channel frame from the old key would spend
+  the exporting device's ratchet. Then the new device logs in with its own key.
+- **There is no quarantine.** Whoever has the file and its password gets a full
+  device of the account, the same power the file always gave. A file from a
+  removed device is refused at login, and a full account refuses the import.
+- **The detection is the notice on the other devices.** A key in the manifest
+  that this device did not pair and had not seen puts "A new device joined the
+  account." in the bell, with a "Remove" button. The server sends the new
+  manifest to the account's live connections that ask for it, so the notice
+  arrives at once. An import and a pairing on another device look the same.
+- **What the server learns.** A login with the old device key, a manifest that
+  adds a key from the same network address, then a login with the new key.
+- A stolen file with a weak password is an Argon2id search away from a full
+  device; the notice is how the account holder sees it.
+
+## One password on every device of the account (from 1.3.26)
+
+The account has one password, and it opens the account on each of its devices.
+
+- **What travels.** A record `{ versao, sal, chave }`, where `chave` is
+  Argon2id(password, `sal`): the vault key, never the password. It travels only
+  inside the account channel (MLS) and inside the pairing box, the paths the
+  account private key already takes. The server keeps the account channel event
+  for its retention (30 days) and cannot open it.
+- **Changing it.** The device re-seals its vault and sends the next version;
+  each sibling re-seals when the record arrives. The higher version wins; at the
+  same version, the lower key. The first change in an account whose devices had
+  different passwords moves them all to the new one.
+- **Checking it.** A new device asks for the account password after the six
+  words; the password must derive the record's key with its salt. There is no
+  separate verifier.
+- **What it costs.** A password learned on one device opens the vault files of
+  the others.
 
 ## Other known limits
 

@@ -1,20 +1,15 @@
 /**
  * The Setup, measured in a real browser (October 27, 2026).
  *
- * The `Setup` tests run in jsdom, which does not apply CSS or decode images:
- * they say the page "Do you want to set a profile image?" exists and that the
- * initial profile gets a photo, they do not say if "Choose image" and "Skip"
- * weigh the same on screen, or if the page fits on a phone. This mounts the
+ * The `Setup` tests run in jsdom, which does not apply CSS. This mounts the
  * real `Setup`, with the real stylesheet and a fake bridge, no server at all,
- * at 1280px and 390px:
+ * at 1280px and 390px, and walks the way in of 21/11/2026:
  *
- * - no errors on the page;
- * - the page does not scroll horizontally at any step;
- * - on the photo page, the preview is round, and "Choose photo" and "Skip" have
- *   the same height and the same background;
- * - once a photo is chosen (by the real compressor), the face appears and the
- *   button changes to "Continue";
- * - the created account saves the profile with the photo.
+ * - "Bem-vindo ao Orwell", then "Criar conta" (name and password in one form,
+ *   no profile picture), then "Guarda o ficheiro da conta" and "Fazer mais tarde";
+ * - no page scrolls horizontally, and every button, link and field is 44 px or more;
+ * - the profile is saved with the name and no picture;
+ * - no errors on the page.
  *
  * Saves a screenshot of each page to `scripts/.saida-setup/`.
  *
@@ -41,13 +36,17 @@ import { createRoot } from "react-dom/client"
 import { BridgeContext } from ${UI("App.js")}
 import { ToastProvider } from ${UI("components/Toast.js")}
 import { Setup } from ${UI("screens/gate/Setup.js")}
+import { definirLingua } from ${UI("strings.js")}
 import ${UI("styles.css")}
 
+// The interface speaks English until someone chooses (1.3.9): this measures the Portuguese.
+definirLingua("pt")
 window.perfisGuardados = []
 const ponte = {
   vault: {
-    status: async () => ({ exists: false, supportsOsProtection: false }),
+    status: async () => ({ exists: false, supportsOsProtection: false, protection: "passphrase" }),
     create: async () => ({ ok: true }),
+    export: async () => ({ data: "{}" }),
   },
   identity: { create: async () => ({ address: "@abc:localhost:8448", accountId: "abc" }) },
   session: { connect: async () => ({ ok: true }) },
@@ -85,22 +84,6 @@ writeFileSync(
   "utf8",
 )
 
-/** A real photo for the compressor: 64×64, drawn by the browser itself. */
-async function fotografia(page) {
-  const base64 = await page.evaluate(() => {
-    const c = document.createElement("canvas")
-    c.width = 64
-    c.height = 64
-    const g = c.getContext("2d")
-    g.fillStyle = "#c0392b"
-    g.fillRect(0, 0, 64, 64)
-    g.fillStyle = "#f1c40f"
-    g.fillRect(16, 16, 32, 32)
-    return c.toDataURL("image/png").split(",")[1]
-  })
-  return { name: "cara.png", mimeType: "image/png", buffer: Buffer.from(base64, "base64") }
-}
-
 const browser = await chromium.launch()
 const resultados = []
 const check = (etiqueta, ok, detalhe = "") => {
@@ -127,77 +110,42 @@ for (const [largura, altura] of [
     await page.screenshot({ path: join(SAIDA, `${passo}-${largura}.png`), fullPage: true })
   }
 
-  await page.getByRole("button", { name: "Não, criar conta" }).click()
-  await page.getByPlaceholder("Como queres aparecer").fill("Vesna")
-  await semRolarDeLado("1-nome")
-  await page.getByRole("button", { name: "Continuar" }).click()
+  /** Every button and link on screen is a 44 px target or more. */
+  const alvos = async (passo) => {
+    const pequenos = await page.evaluate(() =>
+      [...document.querySelectorAll(".gate button, .gate a, .gate input:not([type=checkbox]):not(.sr-only)")]
+        .filter((el) => el.getClientRects().length > 0 && !el.classList.contains("sr-only"))
+        .map((el) => ({ texto: (el.textContent || el.getAttribute("name") || "").trim().slice(0, 30), altura: Math.round(el.getBoundingClientRect().height) }))
+        .filter((a) => a.altura < 44),
+    )
+    check(`${largura} ${passo}: alvos de 44 px ou mais`, pequenos.length === 0, JSON.stringify(pequenos))
+  }
 
-  await page.getByRole("heading", { name: "Queres pôr uma imagem de perfil?" }).waitFor({ timeout: 10_000 })
-  await page.waitForTimeout(400) // the page fades in: capture it stopped
-  await semRolarDeLado("2-fotografia")
-  const medida = await page.evaluate(() => {
-    const caixa = (el) => el.getBoundingClientRect()
-    const escolher = document.querySelector(".setup-foto label.file")
-    const saltar = document.querySelector(".setup-go")
-    const cara = document.querySelector(".setup-foto .avatar-preview")
-    return {
-      escolherAltura: caixa(escolher).height,
-      saltarAltura: caixa(saltar).height,
-      escolherFundo: getComputedStyle(escolher).backgroundImage,
-      escolherTinta: getComputedStyle(escolher).color,
-      saltarTinta: getComputedStyle(saltar).color,
-      saltarFundo: getComputedStyle(saltar).backgroundImage,
-      saltarTexto: saltar.textContent,
-      caraLado: caixa(cara).width,
-      caraAltura: caixa(cara).height,
-      caraRaio: getComputedStyle(cara).borderRadius,
-      inicial: cara.textContent,
-    }
-  })
-  check(`${largura} fotografia: o botão que avança diz "Saltar"`, medida.saltarTexto === "Saltar", medida.saltarTexto)
-  check(
-    `${largura} fotografia: "Escolher imagem" e "Saltar" com a mesma altura`,
-    Math.abs(medida.escolherAltura - medida.saltarAltura) < 1,
-    `${medida.escolherAltura} e ${medida.saltarAltura}`,
-  )
-  check(
-    `${largura} fotografia: e o mesmo fundo`,
-    medida.escolherFundo === medida.saltarFundo && medida.escolherFundo !== "none",
-    medida.escolherFundo,
-  )
-  check(
-    `${largura} fotografia: e a mesma tinta`,
-    medida.escolherTinta === medida.saltarTinta,
-    `${medida.escolherTinta} e ${medida.saltarTinta}`,
-  )
-  check(
-    `${largura} fotografia: a cara é redonda, com a inicial`,
-    medida.caraLado === medida.caraAltura && medida.caraRaio === "50%" && medida.inicial === "V",
-    `${medida.caraLado}×${medida.caraAltura}, ${medida.caraRaio}, "${medida.inicial}"`,
-  )
-
-  await page.locator('.setup-foto input[type="file"]').setInputFiles(await fotografia(page))
-  await page.locator(".setup-foto .avatar-preview img").waitFor({ timeout: 10_000 })
-  const depois = await page.evaluate(() => ({
-    src: document.querySelector(".setup-foto .avatar-preview img")?.getAttribute("src") ?? "",
-    botao: document.querySelector(".setup-go")?.textContent,
-  }))
-  check(`${largura} fotografia: a cara escolhida aparece`, depois.src.startsWith("data:image/"), depois.src.slice(0, 24))
-  check(`${largura} fotografia: e o botão passa a "Continuar"`, depois.botao === "Continuar", depois.botao)
-  await semRolarDeLado("3-fotografia-escolhida")
-
-  await page.getByRole("button", { name: "Continuar" }).click()
+  // 21/11/2026: the first screen has the three ways in, and "Criar conta" is one form.
+  await page.getByRole("heading", { name: "Bem-vindo ao Orwell" }).waitFor({ timeout: 10_000 })
+  await page.waitForTimeout(400) // the card fades in: capture it stopped
+  await semRolarDeLado("1-entrada")
+  await alvos("1-entrada")
+  await page.getByRole("button", { name: "Criar conta", exact: true }).click()
+  await page.locator('.gate input[autocomplete="nickname"]').fill("Vesna")
   await page.locator('input[name="new-password"]').fill("frase-comprida-o-suficiente")
-  await semRolarDeLado("4-palavra-passe")
-  await page.getByRole("button", { name: "Continuar" }).click()
   await page.locator('input[name="confirm-password"]').fill("frase-comprida-o-suficiente")
-  await page.getByRole("button", { name: "Criar conta" }).click()
+  await page.waitForTimeout(400)
+  await semRolarDeLado("2-criar-conta")
+  await alvos("2-criar-conta")
+  check(`${largura} criar conta: sem pergunta de imagem de perfil`, (await page.locator('.gate input[type="file"]').count()) === 0)
+  await page.locator(".gate form").getByRole("button", { name: "Criar conta", exact: true }).click()
+  await page.getByRole("heading", { name: "Guarda o ficheiro da conta" }).waitFor({ timeout: 10_000 })
+  await page.waitForTimeout(400)
+  await semRolarDeLado("3-guardar-o-ficheiro")
+  await alvos("3-guardar-o-ficheiro")
+  await page.getByRole("button", { name: "Fazer mais tarde" }).click()
   await page.waitForFunction(() => window.contaCriada, null, { timeout: 10_000 })
   const perfis = await page.evaluate(() => window.perfisGuardados)
   check(
-    `${largura} conta: o perfil inicial leva o nome e a fotografia`,
-    perfis.length === 1 && perfis[0].displayName === "Vesna" && String(perfis[0].avatarDataUrl).startsWith("data:image/"),
-    JSON.stringify(perfis.map((p) => ({ ...p, avatarDataUrl: p.avatarDataUrl?.slice(0, 16) }))),
+    `${largura} conta: o perfil inicial leva o nome e nenhuma imagem`,
+    perfis.length === 1 && perfis[0].displayName === "Vesna" && perfis[0].avatarDataUrl === undefined,
+    JSON.stringify(perfis),
   )
   check(`${largura}: sem erros na página`, erros.length === 0, erros.join(" | "))
   await ctx.close()

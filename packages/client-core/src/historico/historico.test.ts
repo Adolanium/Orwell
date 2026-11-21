@@ -1,4 +1,5 @@
-import { generateDeviceKey, generateIdentity, parseServerName, signWithDevice, toBase64, VIDEO_BYTES_POR_PARTE, type Identity } from "@enclave/protocol"
+import { abrirSinal } from "@enclave/crypto"
+import { fromBase64, generateDeviceKey, generateIdentity, parseServerName, signWithDevice, toBase64, VIDEO_BYTES_POR_PARTE, type Identity } from "@enclave/protocol"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AntiEntropia, type PortaDaAntiEntropia } from "../sincronia/pedido.js"
 import { chaveDoEvento, dobrarConversa } from "../dobras.js"
@@ -19,7 +20,9 @@ import {
   type VaultContents,
 } from "../vault.js"
 import {
+  conversaDe,
   faltaAqui,
+  faltamDaConversa,
   inventarioDe,
   mediaDe,
   mediaInteiraDe,
@@ -159,6 +162,36 @@ describe("fundirEntradasDoIrmao", () => {
   })
 })
 
+describe("faltamDaConversa (20/11/2026)", () => {
+  const conversa = (seqs: number[]): VaultContents => {
+    const c = newVaultContents()
+    c.history["!c"] = seqs.map((seq) => mensagem(seq, "@b:x", `m${seq}`))
+    return c
+  }
+
+  it("conta só a conversa do irmão que falta aqui: o registo de estado e as repetidas não", () => {
+    const irmao = conversa([1, 2, 3, 4, 5, 6])
+    irmao.estadoDoCanal["!c"] = [{ seq: 7, sender: "@b:x", at: 7, payload: { t: "post", id: "p", caption: "", media: [], links: [], tags: [] } }]
+    const q = conversaDe(irmao, "!c")!
+    expect(faltamDaConversa(conversa([2, 4]), "!c", q)).toBe(4)
+    expect(faltamDaConversa(conversa([1, 2, 3, 4, 5, 6]), "!c", q)).toBe(0)
+    // Through the wire, as JSON.
+    expect(faltamDaConversa(newVaultContents(), "!c", JSON.parse(JSON.stringify(q)))).toBe(6)
+  })
+
+  it("o tecto do cofre: o que sairia logo a seguir não conta como em falta", () => {
+    const q = conversaDe(conversa(Array.from({ length: 500 }, (_, i) => i + 1)), "!c")!
+    expect(faltamDaConversa(newVaultContents(), "!c", q)).toBe(HISTORY_MAX_PER_CHANNEL)
+    // 400 newer here: all of the sibling's are older, and the cap would drop them.
+    expect(faltamDaConversa(conversa(Array.from({ length: 400 }, (_, i) => 1_000 + i)), "!c", q)).toBe(0)
+  })
+
+  it("um `q` que não se lê dá null, nunca um número", () => {
+    expect(faltamDaConversa(newVaultContents(), "!c", { s: -1, b: "" })).toBeNull()
+    expect(faltamDaConversa(newVaultContents(), "!c", { s: 0, b: 7 } as unknown as { s: number; b: string })).toBeNull()
+  })
+})
+
 describe("os media pesados", () => {
   it("semMediaPesada tira só o que passa do limite, e juntarMediaDoIrmao devolve-o", () => {
     const entrada = mensagem(1, "@a:x", "duas", { attachments: [imagem("grande.png", 60_000), imagem("pequena.png", 100)] })
@@ -226,6 +259,10 @@ interface Aparelho {
   aparelho: string
   /** Called after each vault write, at once: lets a test act at an exact state. */
   depoisDeGravar?: () => void
+  /** Called after each signal this device sends, once it is handed to the others. */
+  depoisDeEnviar?: () => void
+  /** The account's leaves as this device sees them. Default: both devices. */
+  folhas?: () => string[]
 }
 
 const CANAL_DA_CONTA = "!conta:localhost"
@@ -233,12 +270,15 @@ const CHAVE = { epoca: 1n, chave: new Uint8Array(32).fill(3) }
 
 /**
  * Two devices of the same account, connected by an in-memory relay. `perder`
- * decides, per signal, whether the relay drops it (a bad connection).
+ * decides, per signal, whether the relay drops it (a bad connection). It also gets
+ * the signal and the device that sends it, for a test that drops by kind of signal.
  */
 function doisAparelhos(
-  perder: (n: number) => boolean = () => false,
+  perder: (n: number, sinal: string, de: Aparelho) => boolean = () => false,
   armazens: { a?: ArmazemDeMedia; b?: ArmazemDeMedia } = {},
-): { a: Aparelho; b: Aparelho } {
+  /** A server whose signal cap is below the client's: above this many characters it refuses `sinal-too-large`, a moment later. */
+  recusarAcima = Number.POSITIVE_INFINITY,
+): { a: Aparelho; b: Aparelho; endereco: string } {
   const conta: Identity = generateIdentity(CASA)
   const chaveDoB = generateDeviceKey()
   const contaB = { ...conta, deviceSigningPrivateKey: chaveDoB.privateKey, deviceSigningPublicKey: chaveDoB.publicKey } as Identity
@@ -252,15 +292,20 @@ function doisAparelhos(
       conteudo: () => contents,
       canalDaConta: () => CANAL_DA_CONTA,
       contaPronta: async () => true,
-      folhasDaConta: () => aparelhos.map((x) => x.aparelho),
+      folhasDaConta: () => eu.folhas?.() ?? aparelhos.map((x) => x.aparelho),
       derivarChave: async () => CHAVE,
       podeSinalizar: () => eu.ligado,
-      enviarSinal: (sinal) => {
+      enviarSinal: (sinal, ref) => {
+        if (sinal.length > recusarAcima) {
+          setTimeout(() => eu.historico.aoRecusa({ channel: CANAL_DA_CONTA, code: "sinal-too-large", ref }), 5)
+          return
+        }
         n += 1
-        if (perder(n)) return
+        if (perder(n, sinal, eu)) return
         for (const outro of aparelhos) {
           if (outro !== eu && outro.ligado) void outro.historico.aoSinal({ channel: CANAL_DA_CONTA, from: conta.address, sinal })
         }
+        eu.depoisDeEnviar?.()
       },
       gravar: (mudar) => {
         const r = mudar(contents)
@@ -279,7 +324,24 @@ function doisAparelhos(
     aparelhos.push(eu)
     return eu
   }
-  return { a: criar(conta, armazens.a), b: criar(contaB, armazens.b) }
+  return { a: criar(conta, armazens.a), b: criar(contaB, armazens.b), endereco: conta.address }
+}
+
+/** The header of a signal of this module, read with the test key: kind, part and response. */
+function cabecalhoDoSinal(sinal: string): { k: string; id?: string; i?: number; n?: number } | null {
+  const aberto = abrirSinal(CHAVE, CANAL_DA_CONTA, fromBase64(sinal))
+  // The wrapper: a magic byte, the header length (uint16), the header in JSON, the body.
+  if (!aberto || aberto.length < 3 || aberto[0] !== 0x48) return null
+  const comprimento = new DataView(aberto.buffer, aberto.byteOffset, aberto.byteLength).getUint16(1, false)
+  return JSON.parse(new TextDecoder().decode(aberto.subarray(3, 3 + comprimento))) as { k: string; id?: string; i?: number; n?: number }
+}
+
+/** An image whose content does not compress: a response that really goes in many parts. */
+function imagemIncompressivel(nome: string, bytes: number): Record<string, unknown> {
+  const aleatorios = new Uint8Array(bytes)
+  crypto.getRandomValues(aleatorios)
+  const base64 = toBase64(aleatorios)
+  return { name: nome, mediaType: "image/png", byteLength: base64.length, inline: `data:image/png;base64,${base64}` }
 }
 
 async function ate(predicado: () => boolean, rotulo: string, prazoMs = 10_000): Promise<void> {
@@ -299,6 +361,7 @@ describe("o fio entre dois aparelhos", () => {
       sinaisPorMinuto: 100_000,
       passoMs: 20,
       esperaDaRespostaMs: 300,
+      esperaEntreJanelasMs: 300,
       esperaDoInventarioMs: 300,
       primeiraReposicaoMs: 50,
       intervaloDaReposicaoMs: 50,
@@ -398,6 +461,42 @@ describe("o fio entre dois aparelhos", () => {
     }
   })
 
+  it("late copies of parts already held do not reset the tries: a part that never comes is asked for again", async () => {
+    // Review note 10 (21/11/2026). The first response in many parts: B gets its first two,
+    // the rest is lost for good, and the relay keeps replaying those two to B.
+    let alvo: string | undefined
+    const guardados: string[] = []
+    const { a, b, endereco } = doisAparelhos((_n, sinal, de) => {
+      if (de !== a) return false
+      const cab = cabecalhoDoSinal(sinal)
+      if (cab?.k !== "hr" || typeof cab.n !== "number" || cab.n < 3) return false
+      alvo ??= cab.id
+      if (cab.id !== alvo) return false
+      if (cab.i === 0 || cab.i === 1) {
+        if (guardados.length < 2) guardados.push(sinal)
+        return false
+      }
+      return true
+    })
+    encher(a.contents)
+    a.contents.history["!dm"]!.push(mensagem(31, "@a:x", "com outra imagem", { attachments: [imagemIncompressivel("grande.png", 15_000)] }))
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    const replay = setInterval(() => {
+      for (const sinal of guardados) void b.historico.aoSinal({ channel: CANAL_DA_CONTA, from: endereco, sinal })
+    }, 50)
+    try {
+      await ate(() => guardados.length === 2, "B gets the first two parts of a long response")
+      const pedidos = b.historico.estatisticas.pedidos
+      await ate(() => b.historico.estatisticas.pedidos > pedidos, "B asks again", 5_000)
+    } finally {
+      clearInterval(replay)
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  }, 20_000)
+
   it("a ligação cai a meio: o plano fica no cofre, e a seguinte acaba-o", async () => {
     const { a, b } = doisAparelhos()
     encher(a.contents)
@@ -434,6 +533,122 @@ describe("o fio entre dois aparelhos", () => {
     // Above its own two deadlines of 10 s (`ate`): if it ever stalls, it fails naming
     // the step, not on vitest's 5 s default with no label.
   }, 30_000)
+
+  it("layer C: the responder sends a response one window at a time, so a device that went away gets at most a window", async () => {
+    Object.assign(TECTOS_DO_FIO_DO_HISTORICO, { partesPorJanela: 4 })
+    const { a, b } = doisAparelhos()
+    encher(a.contents)
+    // An image that does not compress: random bytes, tens of parts of 1 KiB.
+    const aleatoria = `data:image/png;base64,${Buffer.from(crypto.getRandomValues(new Uint8Array(30_000))).toString("base64")}`
+    const comImagem = a.contents.history["!dm"]!.find((e) => e.payload["body"] === "com imagem")!
+    ;(comImagem.payload["attachments"] as Record<string, unknown>[])[0]!["inline"] = aleatoria
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    // B sends the media request and goes away for good, before the response leaves A.
+    let enviadosAoSair = -1
+    b.depoisDeEnviar = () => {
+      if (enviadosAoSair >= 0 || b.contents.historico?.plano?.media === undefined) return
+      b.ligado = false
+      enviadosAoSair = a.historico.estatisticas.enviados
+    }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => enviadosAoSair >= 0, "B asks for the image and goes away", 20_000)
+      b.depoisDeEnviar = undefined
+      await new Promise((resolve) => setTimeout(resolve, 1_500))
+      const depois = a.historico.estatisticas.enviados - enviadosAoSair
+      expect(depois).toBeGreaterThan(0)
+      // One window of the image, and A's own requests as a requester (its `hi` to B): never the 30 parts.
+      expect(depois).toBeLessThanOrEqual(TECTOS_DO_FIO_DO_HISTORICO.partesPorJanela + 2)
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  }, 60_000)
+
+  it("layer C: with windows, the whole history still arrives", async () => {
+    Object.assign(TECTOS_DO_FIO_DO_HISTORICO, { bytesPorParte: 256, partesPorJanela: 4 })
+    const { a, b } = doisAparelhos()
+    encher(a.contents)
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => b.contents.historico?.plano === undefined && b.contents.historico?.inicial === undefined, "the history arrives", 20_000)
+      const foto = entradasDoCanal(b.contents, "!dm").find((e) => e.payload["body"] === "com imagem")
+      expect((foto?.payload["attachments"] as Record<string, unknown>[])[0]?.["inline"]).toBeTypeOf("string")
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  }, 60_000)
+
+  it("layer C: a connection that drops mid-response keeps the session, and the response resumes from the parts that came", async () => {
+    Object.assign(TECTOS_DO_FIO_DO_HISTORICO, { bytesPorParte: 256, partesPorJanela: 4 })
+    const { a, b } = doisAparelhos()
+    encher(a.contents)
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    let caiu = false
+    b.depoisDeGravar = () => {
+      if (caiu || b.contents.historico?.plano?.media === undefined) return
+      caiu = true
+      setTimeout(() => {
+        b.ligado = false
+        b.historico.aoDesligar()
+      }, 300)
+    }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => caiu && !b.ligado, "B drops mid-media", 20_000)
+      b.depoisDeGravar = undefined
+      const sessoes = b.historico.estatisticas.sessoes
+      expect(sessoes).toBeTypeOf("number")
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      b.ligado = true
+      b.historico.aoLigar()
+      await ate(() => b.contents.historico?.plano === undefined && b.contents.historico?.inicial === undefined, "the history finishes", 20_000)
+      // No new session: the same one went on, asking only for what was missing.
+      expect(b.historico.estatisticas.sessoes).toBe(sessoes)
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  }, 60_000)
+
+  it("a new hi from the same device drops what the responder still had queued for the old session (an iPhone locked mid-media)", async () => {
+    // A tight budget: the image response is still queued on A when B goes away.
+    Object.assign(TECTOS_DO_FIO_DO_HISTORICO, { sinaisPorMinuto: 12, bytesPorParte: 256 })
+    const { a, b } = doisAparelhos()
+    encher(a.contents)
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    let caiu = false
+    b.depoisDeGravar = () => {
+      if (caiu || b.contents.historico?.plano?.media === undefined) return
+      caiu = true
+      // A moment for the media request to reach A, whose answer then outgrows the budget.
+      setTimeout(() => {
+        b.ligado = false
+        b.historico.aoDesligar()
+      }, 500)
+    }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => caiu, "the media phase starts", 20_000)
+      b.depoisDeGravar = undefined
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      // B is back (the page resumed): a new session, and room on the wire to finish quickly.
+      Object.assign(TECTOS_DO_FIO_DO_HISTORICO, { sinaisPorMinuto: 100_000 })
+      b.ligado = true
+      b.historico.aoLigar()
+      await ate(() => a.historico.estatisticas.descartados > 0, "A drops the old session's queue", 20_000)
+      await ate(() => b.contents.historico?.plano === undefined && b.contents.historico?.inicial === undefined, "the history finishes", 20_000)
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  }, 60_000)
 
   it("entre irmãos já emparelhados, só os canais que mudaram, e nunca um que este aparelho não tem", async () => {
     const { a, b } = doisAparelhos()
@@ -517,17 +732,26 @@ describe("o aviso nunca fica parado (12/11/2026)", () => {
     const { a, b } = doisAparelhos()
     a.contents.history["!c"] = Array.from({ length: 30 }, (_, i) => mensagem(i + 1, "@b:x", `mensagem ${i + 1}`))
     b.contents.historico = { inicial: { desde: Date.now() } }
+    // The computer goes away mid-transfer, at the first write with a page done: a 20 ms
+    // poll let the pages already on the wire bring everything first (the same cut as
+    // "o número é o que falta").
+    let cortou = false
+    b.depoisDeGravar = () => {
+      if (cortou || (b.contents.historico?.plano?.canais["!c"]?.feitas ?? 0) === 0) return
+      cortou = true
+      a.ligado = false
+      queueMicrotask(() => a.historico.aoDesligar())
+    }
     a.historico.aoLigar()
     b.historico.aoLigar()
     try {
-      await ate(() => (b.contents.historico?.plano?.canais["!c"]?.feitas ?? 0) > 0, "a meio")
-      // The computer goes away mid-transfer.
-      a.ligado = false
-      a.historico.aoDesligar()
-      await ate(() => b.eventos.at(-1)?.razao === "irmao-calado", "o aviso desiste", 5_000)
+      await ate(() => cortou, "a meio")
+      b.depoisDeGravar = undefined
+      // The reason is judged again at each try (20/11/2026): "irmao-calado" until a try finds nobody, then "sem-irmao".
+      await ate(() => ["irmao-calado", "sem-irmao"].includes(b.eventos.at(-1)?.razao ?? ""), "o aviso desiste", 5_000)
       const parado = b.eventos.at(-1)
       expect(parado?.aTrazer).toBe(false)
-      expect(parado?.perdidas).toBeGreaterThan(0)
+      expect(parado?.faltam).toBeGreaterThan(0)
       // The plan stays in the vault, quiet: when the sibling comes back, it finishes.
       expect(b.contents.historico?.plano).toBeDefined()
       a.ligado = true
@@ -550,6 +774,198 @@ describe("o aviso nunca fica parado (12/11/2026)", () => {
       await ate(() => b.eventos.at(-1)?.razao === "sem-irmao", "o aviso desiste", 5_000)
       expect(b.historico.estado().aTrazer).toBe(false)
     } finally {
+      b.historico.aoDesligar()
+    }
+  })
+
+  /*
+    20/11/2026: "298 messages are missing" stood on a device for good. The
+    stopped plan kept "irmao-calado" in the vault forever, the reason was
+    never judged again, a device with no sibling left still promised a resume,
+    and the number was the sibling's count of all its entries (the state log
+    too) less the entries that came, repeated ones included.
+  */
+  const planoParado = (razao: "irmao-calado" | "sem-irmao") => ({
+    inicial: { desde: Date.now() },
+    plano: {
+      comecou: Date.now(),
+      canais: { "!c": { total: 30, feitas: 5, cursor: 5, resumo: "x" } },
+      parado: { em: Date.now(), razao },
+    },
+  })
+
+  it("parado sem nenhum outro aparelho na conta: o plano e o inicial saem, e o aviso também", async () => {
+    const { b } = doisAparelhos()
+    b.folhas = () => [b.aparelho]
+    b.contents.historico = planoParado("irmao-calado")
+    b.historico.aoLigar()
+    try {
+      await ate(() => b.contents.historico?.plano === undefined && b.contents.historico?.inicial === undefined, "o plano sai")
+      expect(b.historico.estado().razao).toBeUndefined()
+      expect(b.eventos.at(-1)?.razao).toBeUndefined()
+    } finally {
+      b.historico.aoDesligar()
+    }
+  })
+
+  it("parado como irmao-calado: a razão volta a julgar-se, e uma tentativa sem resposta passa a sem-irmao", async () => {
+    const { a, b } = doisAparelhos()
+    a.ligado = false
+    b.contents.historico = planoParado("irmao-calado")
+    b.historico.aoLigar()
+    try {
+      await ate(() => b.contents.historico?.plano?.parado?.razao === "sem-irmao", "a razão muda", 5_000)
+      expect(b.historico.estado().razao).toBe("sem-irmao")
+    } finally {
+      b.historico.aoDesligar()
+    }
+  })
+
+  it("o número é o que falta NESTE aparelho: sem o registo de estado, sem as repetidas, e retoma sozinho", async () => {
+    const { a, b } = doisAparelhos()
+    a.contents.history["!c"] = Array.from({ length: 30 }, (_, i) => mensagem(i + 1, "@b:x", `mensagem ${i + 1}`))
+    // Twenty state entries interleaved (posts, the state log): never "messages missing".
+    a.contents.estadoDoCanal["!c"] = Array.from({ length: 20 }, (_, i) => ({
+      seq: 100 + i,
+      sender: "@b:x",
+      at: 2_000 + i,
+      payload: { t: "post", id: `p${i}`, caption: "Olá", media: [], links: [], tags: [] },
+    }))
+    // This device already has twelve of them: they come again in the pages, and are not missing.
+    b.contents.history["!c"] = a.contents.history["!c"]!.slice(0, 12).map((e) => structuredClone(e))
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    /*
+      A goes away at the first write that has ten done, not when a 20 ms poll sees it:
+      in memory the copy runs faster than the poll, and the pages already on the wire
+      brought everything before A left (nothing missing, the test failed every time).
+      The same cut as "a ligação cai a meio".
+    */
+    let cortou = false
+    b.depoisDeGravar = () => {
+      if (cortou || (b.contents.historico?.plano?.canais["!c"]?.feitas ?? 0) < 10) return
+      cortou = true
+      a.ligado = false
+      queueMicrotask(() => a.historico.aoDesligar())
+    }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => cortou, "a meio")
+      b.depoisDeGravar = undefined
+      await ate(() => b.eventos.at(-1)?.razao !== undefined, "o aviso desiste", 5_000)
+      const aqui = new Set(entradasDoCanal(b.contents, "!c").map((e) => e.seq))
+      const faltamDeVerdade = a.contents.history["!c"]!.filter((e) => !aqui.has(e.seq)).length
+      expect(faltamDeVerdade).toBeGreaterThan(0)
+      expect(b.eventos.at(-1)?.faltam).toBe(faltamDeVerdade)
+      // The old count: the sibling's 50 entries less the ones that came, repeated ones included.
+      expect(b.eventos.at(-1)?.perdidas).toBeUndefined()
+      a.ligado = true
+      a.historico.aoLigar()
+      await ate(() => b.contents.historico?.plano === undefined, "retoma e acaba", 10_000)
+      expect(b.contents.history["!c"]).toHaveLength(30)
+      expect(b.eventos.at(-1)?.razao).toBeUndefined()
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  })
+
+  it("um irmão antigo, sem `q` no inventário: parado sem número, nunca um inventado", async () => {
+    const { b } = doisAparelhos()
+    b.contents.history["!c"] = [mensagem(1, "@b:x", "um")]
+    b.contents.historico = planoParado("sem-irmao")
+    expect(b.historico.estado().faltam).toBeUndefined()
+    b.contents.historico.plano!.canais["!c"]!.conversa = { s: 1, b: "Hw" } // seqs 1 to 5
+    expect(b.historico.estado().faltam).toBe(4)
+  })
+})
+
+describe("quem responde nunca se cala (20/11/2026)", () => {
+  /*
+    A live sibling could go silent with no word: a response over `partesMax`
+    parts, a signal over the cap, a part the server refused as too large. The
+    requester asked the same thing again, forever. Now the responder splits
+    again smaller, or says what could not go.
+  */
+  const fio = { ...TECTOS_DO_FIO_DO_HISTORICO }
+  const conteudo = { ...TECTOS_DO_HISTORICO }
+  beforeEach(() => {
+    Object.assign(TECTOS_DO_FIO_DO_HISTORICO, {
+      sinaisPorMinuto: 100_000,
+      passoMs: 20,
+      esperaDaRespostaMs: 300,
+      esperaDoInventarioMs: 300,
+      primeiraReposicaoMs: 50,
+      intervaloDaReposicaoMs: 50,
+      bytesPorParte: 1_024,
+    })
+    Object.assign(TECTOS_DO_HISTORICO, { entradasPorPagina: 5, mediaComOTexto: 1_000 })
+  })
+  afterEach(() => {
+    Object.assign(TECTOS_DO_FIO_DO_HISTORICO, fio)
+    Object.assign(TECTOS_DO_HISTORICO, conteudo)
+  })
+
+  function aleatorio(caracteres: number): string {
+    const bytes = crypto.getRandomValues(new Uint8Array(Math.ceil((caracteres * 3) / 4)))
+    return toBase64(bytes).slice(0, caracteres)
+  }
+
+  function comFotoGrande(contents: VaultContents): void {
+    contents.history["!dm"] = Array.from({ length: 8 }, (_, i) => mensagem(i + 1, "@a:x", `mensagem ${i + 1}`))
+    contents.history["!dm"]!.push(
+      mensagem(9, "@a:x", "com imagem", {
+        attachments: [{ name: "foto.png", mediaType: "image/png", byteLength: 20_000, inline: `data:image/png;base64,${aleatorio(20_000)}` }],
+      }),
+    )
+  }
+
+  it("uma fotografia que não cabe em `partesMax` partes: responde sem ela, e o plano acaba", async () => {
+    TECTOS_DO_FIO_DO_HISTORICO.partesMax = 4
+    const { a, b } = doisAparelhos()
+    comFotoGrande(a.contents)
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => b.contents.historico?.plano === undefined && b.contents.historico?.inicial === undefined, "o plano acaba", 8_000)
+      expect(entradasDoCanal(b.contents, "!dm")).toHaveLength(9)
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  })
+
+  it("um sinal acima do tecto do cliente: a resposta parte-se mais pequena, e chega tudo", async () => {
+    TECTOS_DO_FIO_DO_HISTORICO.sinalMaxCaracteres = 1_500
+    const { a, b } = doisAparelhos()
+    comFotoGrande(a.contents)
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => b.contents.historico?.plano === undefined && b.contents.historico?.inicial === undefined, "o plano acaba", 8_000)
+      const foto = entradasDoCanal(b.contents, "!dm").find((e) => e.payload["body"] === "com imagem")
+      expect((foto?.payload["attachments"] as Record<string, unknown>[])[0]?.["inline"]).toBeTypeOf("string")
+    } finally {
+      a.historico.aoDesligar()
+      b.historico.aoDesligar()
+    }
+  })
+
+  it("o servidor recusa uma parte por grande: quem responde parte-a de novo, e quem pede recomeça com o `n` maior", async () => {
+    const { a, b } = doisAparelhos(undefined, {}, 1_500)
+    comFotoGrande(a.contents)
+    b.contents.historico = { inicial: { desde: Date.now() } }
+    a.historico.aoLigar()
+    b.historico.aoLigar()
+    try {
+      await ate(() => b.contents.historico?.plano === undefined && b.contents.historico?.inicial === undefined, "o plano acaba", 8_000)
+      const foto = entradasDoCanal(b.contents, "!dm").find((e) => e.payload["body"] === "com imagem")
+      expect((foto?.payload["attachments"] as Record<string, unknown>[])[0]?.["inline"]).toBeTypeOf("string")
+      expect(a.historico.estatisticas.recusados).toBeGreaterThan(0)
+    } finally {
+      a.historico.aoDesligar()
       b.historico.aoDesligar()
     }
   })
@@ -962,5 +1378,19 @@ describe("um marcador evicted com um ref alheio (Ruling R14, ronda 2)", () => {
     contents.history["!c"] = [{ seq: 1, sender: "@a:x", at: 1, payload: forjado }]
     expect(await recolher(contents, armazem)).toContain(alheio)
     expect(armazem.tem(alheio)).toBe(false)
+  })
+})
+
+describe("layer C: small confirmed media units (21/11/2026)", () => {
+  it("a media response carries at most 384 KiB, except its first item: a reload loses one small unit, not 2 MiB", async () => {
+    const contents = newVaultContents()
+    contents.history["!c"] = Array.from({ length: 6 }, (_, i) =>
+      mensagem(i + 1, "@b:x", `foto ${i + 1}`, { attachments: [imagem(`f${i}.png`, 150_000)] }),
+    )
+    const pedidos = contents.history["!c"]!.map((e) => ({ c: "!c", e: chaveDoEvento(e)! }))
+    const { itens, resto } = await mediaInteiraDe(contents, "@a:x", pedidos, portaAntiga.inflar)
+    expect(itens.length).toBeGreaterThanOrEqual(1)
+    expect(itens.length).toBeLessThanOrEqual(2)
+    expect(resto).toBe(pedidos.length - itens.length)
   })
 })

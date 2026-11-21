@@ -618,6 +618,14 @@ describe("S1, F10: pedir os perfis de quem aparece sem nome", () => {
     }
     const intervalo = Session.PEDIDO_DE_PERFIS_MS
     Session.PEDIDO_DE_PERFIS_MS = 0
+    /*
+      Since 1.3.26 the `pp` request goes first and F10 only covers what it did not
+      heal (`PP_ANTES_DO_F10_MS`). This test is about F10's own guards: Carla
+      without anti-entropy (no `pp`), and F10 at once, as a 1.3.25 channel sees it.
+    */
+    const antesDoF10 = Session.PP_ANTES_DO_F10_MS
+    Session.PP_ANTES_DO_F10_MS = 0
+    carla!.session.antiEntropiaLigada = false
     try {
       await pedir()
       await ate(() => carla!.vault.contents.directory[bruno!.address] !== undefined, "o perfil do Bruno volta", 20_000)
@@ -629,7 +637,14 @@ describe("S1, F10: pedir os perfis de quem aparece sem nome", () => {
       // Daily cap forgotten, but no new members: nothing.
       delete bruno!.vault.contents.perfisDadosEm?.[canal]
       await pedir()
-      // New member, but already responded today: nothing.
+      await esperar(1_500)
+      expect(publicados).toBe(1)
+      /*
+        A newcomer our profile never reached here is answered past the daily cap
+        (1.3.26, security review S1; proved in `session.profile-no-overlap.rede.test.ts`),
+        but at most once per channel and epoch (second review, N-B1): Bruno already
+        answered in this epoch, and that publish reached Carla. Nothing more.
+      */
       bruno!.vault.contents.perfisDadosEm = { [canal]: Date.now() }
       bruno!.vault.contents.perfilPublicadoPara = { [canal]: [ana!.address, bruno!.address] }
       await pedir()
@@ -637,6 +652,7 @@ describe("S1, F10: pedir os perfis de quem aparece sem nome", () => {
       expect(publicados).toBe(1)
     } finally {
       Session.PEDIDO_DE_PERFIS_MS = intervalo
+      Session.PP_ANTES_DO_F10_MS = antesDoF10
     }
   }, 120_000)
 })

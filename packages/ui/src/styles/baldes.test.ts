@@ -42,6 +42,14 @@ const FICAM = new Set([
   "screens.css .call-chip.ao-vivo-convida > :not(.ao-vivo-convite, .ao-vivo-cimo, .chip-volume, .call-chip-mais, .call-chip-musica, .call-chip-labels)",
   "screens.css .call-chip.ao-vivo-convida:is(:hover, :focus-within) > :not(.ao-vivo-convite, .ao-vivo-cimo, .chip-volume, .call-chip-mais, .call-chip-musica, .call-chip-labels)",
   "pele.css .main.com-sala > :not(.connection-banner, .call, .chat-pedido, .statusbar)",
+  // The phone layout (option B): every list and pushed screen in the one grid cell.
+  "telemovel.css :root .app.telemovel > *",
+  "telemovel.css :root .app.telemovel > .vista-guardada > *",
+  "telemovel.css :root .app.telemovel .people-destination > *",
+  "telemovel.css :root .app.telemovel .ecra-empurrado > :last-child",
+  "telemovel.css :root .app.telemovel .ecra-empurrado > .barra-do-telemovel ~ :last-child",
+  "telemovel.css :root .app.telemovel .topbar-empurrada > *",
+  "telemovel.css :root .app.telemovel .topbar-empurrada > .topbar-contexto > *",
   // The opening's veil: a class on <html> the ancestor filter rejects at once.
   "pele.css .abertura-a-segurar body > :not(.abertura-veu)",
   "pele.css .abertura-a-sair body > :not(.abertura-veu)",

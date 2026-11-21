@@ -37,6 +37,7 @@ import { fileURLToPath } from "node:url"
 import { chromium, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { aceitarConvite, convidar, etiquetaDe } from "./convite.mjs"
+import { mostrarLista } from "./separadores.mjs"
 
 const MOTOR = process.argv[2] ?? "chromium"
 const MODO = process.argv[3] ?? "desktop"
@@ -281,7 +282,8 @@ try {
   await ana.page.getByRole("button", { name: "Criar canal" }).first().click()
   await ana.page.locator("form.prompt input").first().fill(CANAL)
   await ana.page.locator("form.prompt button.primary").first().click()
-  await ana.page.getByRole("heading", { name: CANAL }).waitFor({ timeout: 30_000 })
+  // Since 1.3.20 the heading is the room, and the channel's name sits beside it.
+  await ana.page.locator("h1, .topbar-comunidade").filter({ hasText: new RegExp(`^${CANAL}$`) }).first().waitFor({ timeout: 30_000 })
   const etiqueta = etiquetaDe(CANAL)
   const linhaDoCanal = (page) => page.locator(".channel-row", { has: page.locator(".channel-name", { hasText: etiqueta }) }).first()
   // "Polls" lives in the channel menu since 17/11/2026: the fixed sidebar row had no room behind it.
@@ -372,8 +374,8 @@ try {
     await bp.setViewportSize(TELEMOVEL)
     await wait(800)
   }
-  // Bruno left the conversation to read the polls list: back to the default room (through the drawer on a phone).
-  if (movel) await bp.getByRole("button", { name: "Abrir o painel lateral" }).tap().catch(() => {})
+  // Bruno left the conversation to read the polls list: back to the default room (on a phone, from the Communities list).
+  if (movel) await mostrarLista(bp).catch(() => {})
   await bp.locator(".room-tree .room-name").first().click()
   await bp.locator(".message img").first().waitFor({ timeout: 60_000 })
   check("Bruno recebeu a imagem e o ficheiro", (await bp.locator(".file-attachment").count()) >= 1)
@@ -510,7 +512,8 @@ try {
   }
 
   // ------------------------------------------------------------------ The polls room, as Bruno
-  if (movel) await bp.getByRole("button", { name: "Abrir o painel lateral" }).tap().catch(() => {})
+  // On a phone the room tree is the Communities list, under the pushed conversation.
+  if (movel) await mostrarLista(bp).catch(() => {})
   await retratar(bp, "barra-com-sala-de-votacoes")
   const salaDeVotos = bp.locator(".room-row", { hasText: "votacoes" }).first()
   // Rooms drag only for whoever may edit the channel (`onReorderRoom` is set only
@@ -533,7 +536,8 @@ try {
   const perguntasAbertas = await bp.locator(".votacoes-pagina-cartao .votacao-pergunta").allInnerTexts()
   check("as Abertas têm as que têm prazo por chegar", perguntasAbertas.includes("Jantar na sexta?") && perguntasAbertas.includes("Fecha sozinha?") && !perguntasAbertas.includes("Que cor tinha o muro?"), perguntasAbertas.join(" | "))
   check("cada votação diz quando fecha", (await bp.locator(".votacoes-pagina-cartao .votacao-prazo").allInnerTexts()).some((t) => /^Fecha a /.test(t)))
-  check("Bruno pode criar votações (escreve na sala) e não pode fechar as da Ana", (await bp.getByRole("button", { name: "Nova votação" }).count()) === 1 && (await bp.getByRole("button", { name: "Fechar votação" }).count()) === 0)
+  // Since 1.3.21 creating polls is a role power (`votacoes`), which no role but admin has by default.
+  check("Bruno, sem o poder de criar votações, não vê «Nova votação» e não pode fechar as da Ana", (await bp.getByRole("button", { name: "Nova votação" }).count()) === 0 && (await bp.getByRole("button", { name: "Fechar votação" }).count()) === 0)
   await retratar(bp, "sala-de-votacoes-abertas")
   const larguraDaPagina = await bp.evaluate(() => ({ cx: document.documentElement.clientWidth, sx: document.documentElement.scrollWidth }))
   check("sem scroll lateral", larguraDaPagina.sx <= larguraDaPagina.cx, JSON.stringify(larguraDaPagina))
@@ -589,17 +593,6 @@ try {
   const abertasDepois = await bp.locator(".votacoes-pagina-cartao .votacao-pergunta").allInnerTexts()
   check("e sai das Abertas", !abertasDepois.includes("Fecha sozinha?"), abertasDepois.join(" | "))
 
-  // "New poll" from Bruno: he can write in the room.
-  await bp.getByRole("button", { name: "Nova votação" }).click()
-  await bp.locator('.sheet input[placeholder="O que queres perguntar?"]').fill("Dos três, qual?")
-  const camposB = bp.locator('.sheet input[placeholder="Resposta"]')
-  await camposB.nth(0).fill("A")
-  await camposB.nth(1).fill("B")
-  await bp.locator(".sheet-actions button.primary").first().click()
-  await bp.locator(".votacoes-pagina-cartao", { hasText: "Dos três, qual?" }).waitFor({ timeout: 15_000 }).catch(() => {})
-  check("Bruno cria uma votação na sala, e fica como cartão", (await bp.locator(".votacoes-pagina-cartao", { hasText: "Dos três, qual?" }).count()) === 1)
-  check("e é dele fechá-la", (await bp.locator(".votacoes-pagina-cartao", { hasText: "Dos três, qual?" }).getByRole("button", { name: "Fechar votação" }).count()) === 1)
-
   // ---- The old client: the same server and the same rooms, a web build from before the polls room.
   if (existsSync(join(DIST_ANTIGO, "index.html"))) {
     DIST = DIST_ANTIGO
@@ -612,6 +605,7 @@ try {
       await bp.keyboard.press("Enter")
     }
     await bp.getByRole("button", { name: "Configurações", exact: true }).first().waitFor({ timeout: 90_000 })
+    // The old build has the drawer still: its button, not the tabs.
     if (movel) await bp.getByRole("button", { name: "Abrir o painel lateral" }).tap().catch(() => {})
     await wait(4000)
     // The old build asks to save the account file when it opens: close that sheet, like a person would.

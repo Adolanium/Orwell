@@ -13,6 +13,7 @@ import { useEcraLargo } from "../../hooks/useEcraLargo.js"
 import type { Etiquetas } from "../../components/RichText.js"
 import type { MentionCandidate } from "../../lib/mentions.js"
 import { useBridge } from "../../App.js"
+import { useAutoresNovos, useContaNova } from "../../hooks/useContaNova.js"
 import type { ConnectionState, PinnedMessage, Profile } from "../../bridge.js"
 import type { ChatMessage, MessageExtras } from "../../types.js"
 import { SALA_SURDA, type OutboxEntry } from "../../hooks/useOutbox.js"
@@ -23,9 +24,9 @@ import { Button } from "../../components/Button.js"
 import { ConnectionBanner } from "../../components/ConnectionBanner.js"
 import { EmptyState } from "../../components/EmptyState.js"
 import { useToast } from "../../components/Toast.js"
-import { CameraIcon, MicIcon, PeopleIcon, PinIcon, SearchIcon, SmileyIcon } from "../../icons.js"
+import { CameraIcon, MicIcon, PeopleIcon, PinIcon, SearchIcon, SetaParaTrasIcon, SmileyIcon } from "../../icons.js"
 import type { CargoDoMembro } from "../../lib/agruparMembros.js"
-import { isDirect, serverOf } from "../../lib/format.js"
+import { diasDeCalendario, isDirect, serverOf } from "../../lib/format.js"
 import { strings, translateError, traduzirErro } from "../../strings.js"
 import { RoomIcon } from "../../components/RoomIcon.js"
 import { RoomGlyph } from "../../components/SidebarIcons.js"
@@ -38,6 +39,7 @@ import { NotasDeVersao } from "./NotasDeVersao.js"
 import { ContextMenu } from "../overlays/ContextMenu.js"
 import { DenunciarSheet } from "./DenunciarSheet.js"
 import { PedidoCard } from "./PedidoCard.js"
+import { AvisoAPorEmDia } from "./AvisoAPorEmDia.js"
 import { CaixaComQuemEscreve } from "./QuemEscreve.js"
 import { EditarMensagem } from "./EditarMensagem.js"
 import { MemberPanel } from "./MemberPanel.js"
@@ -117,6 +119,7 @@ export function ChatScreen({
   onDraftChange,
   activeRoom = "",
   members,
+  membrosAfastados,
   membersState,
   onRetryMembers,
   directory,
@@ -124,6 +127,7 @@ export function ChatScreen({
   connection,
   connectionDetail,
   onPrompt,
+  canCreateChannel = true,
   onConvidar,
   hasStoredHistory,
   canLoadOlder,
@@ -133,7 +137,6 @@ export function ChatScreen({
   iconFor,
   oficial = false,
   notasDeVersao = false,
-  primeirosPassos,
   salaDaChamada = null,
   roleFor,
   apelidoDe,
@@ -164,6 +167,9 @@ export function ChatScreen({
   procura,
   procuraAberta = false,
   onProcuraAberta,
+  onVoltar,
+  membrosAbertos,
+  onMembrosAbertos,
   onSaltarPara,
   onAbrirFixada,
   nomeDaSala,
@@ -293,6 +299,8 @@ export function ChatScreen({
    */
   activeRoom?: string
   members: string[]
+  /** Accounts with keys that the server says are gone (P7). See `MemberPanel`. */
+  membrosAfastados?: number
   membersState: "loading" | "error" | "ready"
   onRetryMembers: () => void
   directory: Map<string, Profile>
@@ -300,6 +308,8 @@ export function ChatScreen({
   connection: ConnectionState
   connectionDetail: string | null
   onPrompt: (prompt: "channel") => void
+  /** `false`: the account created all the channels it may (1.3.26); the empty screen has no "Create channel". */
+  canCreateChannel?: boolean | undefined
   /**
    * Open the single invite sheet for THIS conversation.
    *
@@ -331,11 +341,6 @@ export function ChatScreen({
    * name. See `ehSalaDeAnuncios` in `lib/oficial.ts`.
    */
   notasDeVersao?: boolean
-  /**
-   * The card for someone who just created an account, already built by the shell,
-   * which knows how to copy the address and open sheets. See `PrimeirosPassos`.
-   */
-  primeirosPassos?: React.ReactNode
   /** The bug report room for this channel, if it exists. See `ApresentacaoOficial`. */
   /**
    * The voice ROOM where this channel's call is happening, or `null`.
@@ -496,8 +501,26 @@ export function ChatScreen({
   nomeDaSala?: ((room: string) => string) | undefined
   /** The message we just jumped to, so the conversation can highlight it. */
   destacada?: string | null | undefined
+  /**
+   * The phone layout (option B, 20/11/2026): the conversation is pushed over
+   * its list, and the header starts with a back arrow. Absent on a computer.
+   */
+  onVoltar?: (() => void) | undefined
+  /**
+   * The members panel, held by the shell on a phone: it is a pushed screen
+   * there, with its own history entry. Absent: this screen holds it.
+   */
+  membrosAbertos?: boolean | undefined
+  onMembrosAbertos?: ((abertos: boolean) => void) | undefined
 }): React.JSX.Element {
   const bridge = useBridge()
+  /*
+    A new account in its first days (1.3.26): the notice above the box in the
+    common room, and the links and attachments of new authors there. Only the
+    common room: elsewhere a new account works as any other.
+  */
+  const { fase: faseDaContaNova } = useContaNova(bridge.session.contaNova, connection)
+  const autoresNovos = useAutoresNovos(bridge.session.autorNovo, oficial, messages)
   /*
     The member list is memoized and holds 400 people in a big channel: its
     handlers keep one identity, so a live message does not draw it again.
@@ -510,6 +533,13 @@ export function ChatScreen({
   /* The sync state of the open channel (S5): the "Receiving the channel…" bar
      and the marker of the place in the conversation. */
   const sincronia = useSincronia(active)
+  /* The past of this channel is arriving (D2), with a known seat: one condition,
+     from `useSincronia`, for the conversation marker and the members column. */
+  const historicoASincronizar = sincronia.aSincronizar
+  /* Calendar days since this device was last online with this account, only
+     while syncing. `null` for a device that never was: nothing to say. */
+  const diasSemEntrar =
+    historicoASincronizar && sincronia.previousOnlineAt !== null ? diasDeCalendario(sincronia.previousOnlineAt, Date.now()) : null
   // The history coming from a sibling device (1.0 "Arca"): the bar above the conversation.
   const historicoDosIrmaos = useHistoricoDosIrmaos()
   /** The same breakpoint the layout uses for the sidebar column. */
@@ -519,7 +549,15 @@ export function ChatScreen({
   /** On narrow screens the member column becomes a slide-in panel; this is it,
    * open. Wide screens ignore it — the panel is a plain grid column there and
    * the toggle button is CSS-hidden. Hidden by default when narrow. */
-  const [membersOpen, setMembersOpen] = useState(false)
+  const [membersOpenAqui, setMembersOpenAqui] = useState(false)
+  const membersOpen = membrosAbertos ?? membersOpenAqui
+  const membrosRef = useRef(membersOpen)
+  membrosRef.current = membersOpen
+  const setMembersOpen = useEstavel((seguinte: boolean | ((actual: boolean) => boolean)): void => {
+    const valor = typeof seguinte === "function" ? seguinte(membrosRef.current) : seguinte
+    if (onMembrosAbertos) onMembrosAbertos(valor)
+    else setMembersOpenAqui(valor)
+  })
   /**
    * The menu for a message of our own, and the message it belongs to.
    *
@@ -846,7 +884,13 @@ export function ChatScreen({
       <ConnectionBanner state={connection} detail={connectionDetail} />
       {/* `topbar-conversa`: on the phone the header stays on one line, with
           icon-only buttons (1.3.6). See `.topbar.topbar-conversa`. */}
-      <header className="topbar topbar-conversa">
+      <header className={onVoltar ? "topbar topbar-conversa topbar-empurrada" : "topbar topbar-conversa"}>
+        {/* The phone: the arrow that takes the conversation off, back to its list. */}
+        {onVoltar && (
+          <button type="button" className="topbar-voltar" aria-label={strings.telemovel.voltar} onClick={onVoltar}>
+            <SetaParaTrasIcon size={22} />
+          </button>
+        )}
         {active ? (
           <>
             {/* A direct conversation is people, and the form says so: a round marker
@@ -1139,11 +1183,7 @@ export function ChatScreen({
       {/* The introduction to the common channel, once and only to those who have not yet read it.
           After the call banner and before the conversation: where a person
           looks first without anything blocking what they came here to do. */}
-      {/* Onboarding wins over the introduction: someone who just created an
-          account needs to know how to reach someone more than where they are.
-          The introduction is not marked as read and appears later. */}
-      {primeirosPassos}
-      {active && !primeirosPassos && apresentacao.visivel && (
+      {active && apresentacao.visivel && (
         <ApresentacaoOficial onFechar={apresentacao.dispensar} />
       )}
 
@@ -1186,7 +1226,7 @@ export function ChatScreen({
             /* The same truth in both places: without an input bar, emptiness cannot
                ask to find it below. See `escritaTrancada`. */
             semCaixaDeEscrita={escritaTrancada !== null && escritaTrancada !== undefined}
-            fraseDoLugar={!ehDirecta}
+            aSincronizar={historicoASincronizar}
             presenceFor={presenceFor}
             emChamada={emChamada}
             messages={messages}
@@ -1229,6 +1269,7 @@ export function ChatScreen({
             {...(responderAqui ? { onResponder: responderAqui } : {})}
             citacaoDe={citacaoDe}
             onIrParaOriginal={onIrParaOriginal}
+            autoresNovos={oficial ? autoresNovos : undefined}
           />
           </div>
           )}
@@ -1251,7 +1292,9 @@ export function ChatScreen({
             channel={active}
             open={membersOpen}
             onClose={fecharMembros}
+            onVoltar={onVoltar ? fecharMembros : undefined}
             members={members}
+            afastados={membrosAfastados}
             state={membersState}
             onRetry={onRetryMembers}
             me={address}
@@ -1275,6 +1318,8 @@ export function ChatScreen({
             roleFor={roleFor}
             apelidoDe={apelidoDe}
             pedirPerfis={active && pedirPerfis ? (contas) => void pedirPerfis(active, contas).catch(() => undefined) : undefined}
+            syncing={historicoASincronizar}
+            daysAway={diasSemEntrar}
           />
           {notasDeVersao ? (
             /* Read-only, with the reason in place of the box. See `novidades`
@@ -1304,16 +1349,11 @@ export function ChatScreen({
             </div>
           ) : (
           <>
-          {/* The channel is catching up: what is written now waits for it, and goes out when it is done. The notice says only the first part. */}
-          {aRecuperar && (
-            <p className="field-note chat-a-recuperar" role="status">
-              {strings.chat.aPorEmDia}
-            </p>
-          )}
           <CaixaComQuemEscreve
             bridge={bridge}
             sala={activeRoom}
             salaGrande={oficial}
+            avisoDeContaNova={oficial && faseDaContaNova === "24h" ? strings.contaNova.avisoNaSala : undefined}
             nomeDe={nameFor}
             canal={active ?? ""}
             rascunho={draft}
@@ -1342,6 +1382,9 @@ export function ChatScreen({
                where nobody can vote was offering half a feature. */
             {...(onVotacao && bridge.votacoes ? { onVotacao } : {})}
             onSend={(body, extras) => onSend(active, body, extras)}
+            /* The channel is catching up: what is written now waits for it, and goes
+               out when it is done. The notice says only the first part, under the box. */
+            rodape={<AvisoAPorEmDia ativo={aRecuperar} />}
           />
           </>
           )}
@@ -1350,7 +1393,7 @@ export function ChatScreen({
         <EmptyState
           title={strings.chat.emptyTitle}
           body={strings.chat.emptyBody}
-          action={{ label: strings.chat.emptyAction, onClick: () => onPrompt("channel") }}
+          action={canCreateChannel ? { label: strings.chat.emptyAction, onClick: () => onPrompt("channel") } : undefined}
         />
       )}
 

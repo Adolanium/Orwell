@@ -33,7 +33,7 @@ describe('o ecrã "O Orwell saiu de beta"', () => {
     expect(container.querySelector("input")).toBeNull()
     expect(container.querySelector("form")).toBeNull()
     expect(document.body.textContent).not.toMatch(/export|palavra-passe/i)
-    expect(document.body.textContent).not.toContain(strings.comoFunciona.link)
+    expect(document.body.textContent).not.toContain("Como funciona")
   })
 
   it("o clique chama `onCriarContaNova`, uma vez", () => {

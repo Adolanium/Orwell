@@ -1,0 +1,449 @@
+/*
+  The way in (21/11/2026, mock-ups `Main`, `Ficheiro`, `Voltar`, `Emparelhar`,
+  `Desktop`). One card in the middle on a computer; on a phone the card is the
+  screen, with the main button at the bottom, where the thumb is. Every target
+  is 44 px or more. Colours come from the tokens, so the dark, light and Aurora
+  themes draw it with no rule of their own.
+*/
+
+.gate-entrada {
+  width: min(440px, calc(100vw - 2 * var(--space-5)));
+  padding: var(--space-7);
+  gap: var(--space-5);
+  animation: entrada-entra var(--dur) var(--ease);
+}
+
+.entrada-titulo {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.gate-entrada .gate-lead {
+  margin: 0;
+}
+
+.entrada-caminhos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* The main actions: 52 px, the whole width. */
+.entrada-botao {
+  width: 100%;
+  min-height: 52px;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+
+/* The two other ways in: an icon and the words, from the left. */
+.entrada-caminho {
+  justify-content: flex-start;
+  gap: var(--space-4);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--line);
+  background: var(--bg-raised);
+  color: var(--text);
+  text-align: left;
+}
+
+.entrada-caminho svg {
+  flex: none;
+  color: var(--text-dim);
+}
+
+/* "‹ Voltar": text, but a 44 px target. */
+.gate-voltar {
+  align-self: flex-start;
+  min-height: 44px;
+  margin: calc(-1 * var(--space-3)) 0 0 calc(-1 * var(--space-2));
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-base);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.gate-voltar:hover,
+.gate-voltar:focus-visible {
+  color: var(--text);
+}
+
+.gate-voltar:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The links of the card ("Tenho um código de convite", "Fazer mais tarde", "Trocar"): 44 px tall. */
+.entrada-link {
+  min-height: 44px;
+  color: var(--accent);
+}
+
+.entrada-link-inicio {
+  align-self: flex-start;
+}
+
+.entrada-fundo {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.entrada-icone {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  color: var(--accent);
+}
+
+/* "Olá, Duarte": the initial, until the vault opens and the picture can be read. */
+.entrada-avatar {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-full);
+  background: var(--accent-deep);
+  color: var(--on-accent);
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.entrada-formulario {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.entrada-formulario input:not([type="checkbox"]) {
+  min-height: 48px;
+}
+
+.entrada-formulario .field-note,
+.entrada-formulario .error {
+  margin: calc(-1 * var(--space-2)) 0 0;
+}
+
+/* The box for the account file: tap it, or drop the file on it. */
+.entrada-largar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: 160px;
+  border: 2px dashed var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-main);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-base);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+}
+
+.entrada-largar svg {
+  color: var(--accent);
+}
+
+.entrada-largar:hover,
+.entrada-largar:focus-visible,
+.entrada-largar.por-cima {
+  border-color: var(--accent);
+}
+
+.entrada-largar.por-cima {
+  background: var(--accent-soft);
+}
+
+.entrada-largar-escolher {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.entrada-ficheiro-escolhido {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 64px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+}
+
+.entrada-ficheiro-escolhido svg {
+  flex: none;
+  color: var(--accent);
+}
+
+.entrada-ficheiro-nome {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.entrada-anel {
+  align-self: center;
+  width: 28px;
+  height: 28px;
+}
+
+/* "Ainda não guardaste o ficheiro da conta.", at the top of each screen of the app. */
+.faixa-do-ficheiro {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-3) var(--space-3) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--warning) 16%, var(--bg-main));
+  color: var(--text);
+}
+
+.faixa-do-ficheiro svg {
+  flex: none;
+  color: var(--warning);
+}
+
+.faixa-do-ficheiro-texto {
+  flex: 1;
+  font-size: var(--font-base);
+  line-height: 1.4;
+}
+
+.faixa-do-ficheiro-guardar {
+  flex: none;
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--warning);
+  color: var(--bg-deep);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Settings › Account and security: one list, a row per thing. */
+.conta-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.conta-lista li + li {
+  border-top: 1px solid var(--line);
+}
+
+.conta-linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  width: 100%;
+  min-height: 52px;
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.conta-linha:hover,
+.conta-linha:focus-visible {
+  background: var(--bg-hover);
+}
+
+.conta-seta {
+  color: var(--text-faint);
+}
+
+.conta-contagem {
+  color: var(--text-dim);
+}
+
+.conta-voltar {
+  margin: 0 0 var(--space-3);
+}
+
+/* The phone: the card is the screen, the actions at the bottom. */
+@media (max-width: 520px) {
+  .gate:has(> .gate-entrada) {
+    place-items: stretch;
+  }
+
+  .gate > .gate-entrada {
+    width: 100%;
+    min-height: 100%;
+    box-sizing: border-box;
+    border: 0;
+    border-radius: 0;
+    padding: calc(56px + env(safe-area-inset-top, 0px)) var(--space-5) calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .gate > .gate-entrada > .entrada-titulo:first-child,
+  .gate > .gate-entrada > .setup-head + .entrada-titulo {
+    margin-top: auto;
+  }
+
+  .gate > .gate-entrada .entrada-caminhos,
+  .gate > .gate-entrada .entrada-fundo {
+    margin-top: auto;
+  }
+}
+
+@keyframes entrada-entra {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/*
+  Reduced motion: nothing stops, it moves slower and less.
+  `!important` against the universal rule in `base.css`.
+*/
+@media (prefers-reduced-motion: reduce) {
+  .gate-entrada {
+    animation: entrada-entra-calma 600ms ease-out !important;
+  }
+
+  /* The hover and drag states fade in, slower, instead of jumping. */
+  .gate-voltar,
+  .entrada-largar {
+    transition-duration: 360ms !important;
+  }
+}
+
+/* The calm entry still moves: less distance, more time. */
+@keyframes entrada-entra-calma {
+  from {
+    opacity: 0.4;
+    transform: translateY(3px);
+  }
+}
+
+/* In the column of lists only on the phone: on a computer the main column already shows it. */
+.app:not(.telemovel) .sidebar .faixa-do-ficheiro {
+  display: none;
+}
+
+/* The links under the cards and "Opções avançadas": 44 px targets, the text stays small. */
+.gate-rodape .gate-link,
+.gate-entrada .gate-link,
+.gate-entrada .setup-advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+}
+
+.gate-rodape {
+  gap: 0;
+}
+
+/* "Olá": the form in the middle of the phone, the links under it. */
+@media (max-width: 520px) {
+  .gate > .gate-entrada.entrada-ola {
+    justify-content: center;
+  }
+
+  .gate > .gate-entrada.entrada-ola > .entrada-titulo,
+  .gate > .gate-entrada.entrada-ola > .setup-head + .entrada-titulo {
+    margin-top: 0;
+  }
+}
+
+/* "Novo aparelho na tua conta": a card in the corner, over nothing important. */
+.cartao-aparelho-novo {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: var(--z-toast);
+  width: min(360px, calc(100vw - 2 * var(--space-4)));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--sombra-3);
+  color: var(--text);
+}
+
+.cartao-aparelho-novo-cabeca {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.cartao-aparelho-novo-icone {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: var(--radius-md);
+  background: var(--bg-main);
+  color: var(--accent);
+}
+
+.cartao-aparelho-novo-titulo {
+  margin: 0;
+  font-weight: 600;
+}
+
+.cartao-aparelho-novo .field-note {
+  margin: 0;
+}
+
+.cartao-aparelho-novo-botoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.cartao-aparelho-novo-botoes button {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+}
+
+.cartao-aparelho-novo-remover {
+  color: var(--danger);
+}
+
+/* On the phone, above the bar of tabs. */
+.app.telemovel ~ .cartao-aparelho-novo,
+.app.telemovel .cartao-aparelho-novo {
+  left: var(--space-3);
+  right: var(--space-3);
+  width: auto;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+}

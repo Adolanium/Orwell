@@ -69,8 +69,14 @@ class Rele {
    * 1.3.25 (the key of the chain login). `false` is an older server.
    */
   rejoinComAparelho = true
+  /** Whether `channel.rejoin` carries the device's proof, as the gateway does from 1.3.26. */
+  rejoinComProva = true
+  /** A lying server (1.3.26, I2): rewrites each `channel.rejoin` before it goes out. */
+  reescreverRejoin: ((frame: Frame) => Frame) | null = null
   /** Who claimed a key package of which device, in order. */
   readonly reclamacoes: { quem: string; aparelho: string }[] = []
+  /** Every `keypackage.claim` frame, also the empty ones and each retry (1.3.26). */
+  readonly tentativasDeReclamar: { quem: string; address: string; devices: string[] | undefined }[] = []
   /** Accounts the backfill serves nothing to: a member stuck in an old epoch. */
   readonly semRecuperacao = new Set<string>()
 
@@ -116,6 +122,11 @@ class Rele {
         return
       }
       case "keypackage.claim": {
+        this.tentativasDeReclamar.push({
+          quem: socket.address ?? "",
+          address: frame.address as string,
+          devices: frame.devices as string[] | undefined,
+        })
         const resposta = this.#reclamar(frame.address as string, frame.bundle === true, frame.devices as string[] | undefined)
         for (const { deviceKey } of (resposta["keyPackages"] as { deviceKey: string }[] | undefined) ?? []) {
           this.reclamacoes.push({ quem: socket.address ?? "", aparelho: deviceKey })
@@ -191,12 +202,16 @@ class Rele {
         for (const ligacao of this.ligacoes) {
           if (!ligacao.address || !ligacao.canais.has(canal)) continue
           ouviram += 1
-          ligacao.entregar({
+          const rejoin: Frame = {
             t: "channel.rejoin",
             channel: canal,
             address: socket.address,
             ...(this.rejoinComAparelho && socket.deviceKey !== null ? { device: socket.deviceKey } : {}),
-          })
+            ...(this.rejoinComAparelho && this.rejoinComProva && socket.deviceKey !== null && frame.prova !== undefined
+              ? { prova: frame.prova }
+              : {}),
+          }
+          ligacao.entregar(this.reescreverRejoin ? this.reescreverRejoin(rejoin) : rejoin)
         }
         socket.entregar({ t: "channel.rejoin.sent", channel: canal, ouviram })
         return
@@ -1433,5 +1448,174 @@ describe("quem responde a um pedido de lugar (revisão da 1.3.25)", () => {
     await esperar(4 * 3_000 + 2_000)
     await settle(100)
     expect(reclamadosPor(bruno, telemovel)).toBe(antes)
+  }, 120_000)
+})
+
+/**
+ * A lying server names a healthy device (1.3.26, I2 of the 1.3.25 public review).
+ *
+ * Since 1.3.25 the server names the device that asks in `channel.rejoin`, and the
+ * answer takes out only that device's leaf, also when the leaf looks alive. The name
+ * came from the server only: naming the healthy tablet made its siblings (and other
+ * accounts) take it out and seat it again, one key package and one commit a minute.
+ * Now the device signs its request, and a named leaf that looks alive leaves only with
+ * that proof. Here the relay rewrites each `channel.rejoin` of the phone to name the
+ * tablet, keeping the phone's proof, or drops the proof (an older client).
+ */
+describe("um servidor mentiroso nomeia um aparelho saudável (I2, 1.3.26)", () => {
+  async function contaComTres(): Promise<{ ana: Conta; tablet: Conta; telemovel: Conta }> {
+    const ana = await conta("Ana")
+    const tablet = await emparelhar(ana)
+    const telemovel = await emparelhar(ana)
+    await ate(async () => (await folhasDe(ana, canalDaConta(ana), ana.address)).length === 3, "as três folhas no canal da conta", 30_000)
+    /*
+      Three leaves in Ana's tree is Ana's view: the tablet and the phone may not
+      have opened their Welcome yet. Under load the tests below then sent from
+      the phone before it was a member ("not a member of this channel"). Wait on
+      each device's own tree: `session.channels` leaves the account channel out.
+    */
+    const proprio = canalDaConta(ana)
+    await ate(
+      async () =>
+        (await folhasDe(tablet, proprio, ana.address)).length === 3 && (await folhasDe(telemovel, proprio, ana.address)).length === 3,
+      "the tablet and the phone in the account channel, with the three leaves",
+      30_000,
+    )
+    return { ana, tablet, telemovel }
+  }
+  /** The device speaks in the channel's current epoch: proof of life for whoever reads it. */
+  async function vivo(aparelho: Conta, canal: string): Promise<void> {
+    await aparelho.session.send(canal, { t: "typing", until: 0 } as never)
+    await settle(300)
+  }
+  const nomearOTablet = (tablet: Conta) => (frame: Frame): Frame => ({ ...frame, device: tablet.deviceKey })
+  const pacotesDe = (quem: Conta, aparelho: Conta): number => rele.pool(quem.address, aparelho.deviceKey).length
+  const reassentos = (quem: Conta): number => quem.avisos.filter((aviso) => aviso === "channel-readopted").length
+
+  it("no canal da conta: o PC não tira a folha viva do tablet", async () => {
+    const { ana, tablet, telemovel } = await contaComTres()
+    const proprio = canalDaConta(ana)
+    await vivo(tablet, proprio)
+    const antes = await indicesDe(ana, proprio, ana.address)
+    const pacotesAntes = pacotesDe(ana, tablet)
+    rele.reescreverRejoin = nomearOTablet(tablet)
+    telemovel.session.requestRejoin(proprio)
+    await esperar(Session.PROVA_DE_VIDA_MS + 4 * 3_000)
+    await settle(100)
+    expect(pacotesDe(ana, tablet)).toBe(pacotesAntes)
+    expect((await indicesDe(ana, proprio, ana.address)).get(tablet.deviceKey)).toBe(antes.get(tablet.deviceKey))
+  }, 120_000)
+
+  it("numa sala só da conta: os irmãos não tiram a folha viva do tablet", async () => {
+    const { ana, tablet, telemovel } = await contaComTres()
+    const CANAL = moradaDeTeste("despensa do mentiroso")
+    await ana.session.createSpaceChannel(CANAL)
+    await settle(20)
+    await ate(async () => (await folhasDe(ana, CANAL, ana.address)).length === 3, "as três folhas na sala", 30_000)
+    await ate(() => tablet.session.channels.includes(CANAL) && telemovel.session.channels.includes(CANAL), "os grupos abertos", 30_000)
+    await vivo(tablet, CANAL)
+    // No record of who was seen here (a vault from before 20/10/2026): only proof of life protects the tablet.
+    for (const quem of [ana, telemovel]) {
+      await quem.vault.update((contents) => {
+        delete contents.aparelhoVistoNoCanal?.[CANAL]
+      })
+    }
+    const antes = await indicesDe(ana, CANAL, ana.address)
+    const pacotesAntes = pacotesDe(ana, tablet)
+    rele.reescreverRejoin = nomearOTablet(tablet)
+    telemovel.session.requestRejoin(CANAL)
+    await esperar(Session.PROVA_DE_VIDA_MS + 4 * 3_000 + 1_000)
+    await settle(100)
+    expect(pacotesDe(ana, tablet)).toBe(pacotesAntes)
+    expect((await indicesDe(ana, CANAL, ana.address)).get(tablet.deviceKey)).toBe(antes.get(tablet.deviceKey))
+  }, 120_000)
+
+  it("noutra conta: o Carlos não tira a folha viva do tablet", async () => {
+    const { ana, tablet, telemovel } = await contaComTres()
+    const carlos = await conta("Carlos")
+    const CANAL = moradaDeTeste("adega do mentiroso")
+    await carlos.session.createSpaceChannel(CANAL)
+    await settle(20)
+    await carlos.session.seat(CANAL, ana.address)
+    await ate(() => tablet.session.channels.includes(CANAL) && telemovel.session.channels.includes(CANAL), "os três na adega", 30_000)
+    await ate(async () => (await folhasDe(carlos, CANAL, ana.address)).length === 3, "as três folhas da Ana na adega", 30_000)
+    await vivo(tablet, CANAL)
+    const antes = await indicesDe(carlos, CANAL, ana.address)
+    const pacotesAntes = pacotesDe(ana, tablet)
+    rele.reescreverRejoin = nomearOTablet(tablet)
+    telemovel.session.requestRejoin(CANAL)
+    await esperar(Session.PROVA_DE_VIDA_MS + 4 * 3_000 + 1_000)
+    await settle(100)
+    expect(pacotesDe(ana, tablet)).toBe(pacotesAntes)
+    expect(await indicesDe(carlos, CANAL, ana.address)).toEqual(antes)
+  }, 120_000)
+
+  it("no canal da conta, com a prova: o telemóvel vivo que pede é sentado outra vez; sem a prova (cliente antigo), não", async () => {
+    const { ana, telemovel } = await contaComTres()
+    const proprio = canalDaConta(ana)
+    // Without the proof, the phone looks alive and stays where it is.
+    rele.rejoinComProva = false
+    await vivo(telemovel, proprio)
+    let antes = reassentos(telemovel)
+    telemovel.session.requestRejoin(proprio)
+    await esperar(Session.PROVA_DE_VIDA_MS + 3_000)
+    await settle(100)
+    expect(reassentos(telemovel)).toBe(antes)
+    // With the proof, the device itself says its seat stopped working. Past the minute's brake.
+    rele.rejoinComProva = true
+    await esperar(61_000)
+    await vivo(telemovel, proprio)
+    antes = reassentos(telemovel)
+    telemovel.session.requestRejoin(proprio)
+    await ate(() => reassentos(telemovel) > antes, "o telemóvel sentado outra vez", 30_000)
+  }, 180_000)
+})
+
+/** A device at 0 keys costs one claim, not three per channel (1.3.26, reseat a and d). */
+describe("um aparelho sem chaves: uma reclamação, não três por canal (1.3.26)", () => {
+  const vaziasPara = (ana: Conta, aparelho: Conta): number =>
+    rele.tentativasDeReclamar.filter((t) => t.address === ana.address && (t.devices ?? []).includes(aparelho.deviceKey)).length
+
+  it("no pedido de lugar de um irmão com 0 chaves, o PC reclama uma vez só", async () => {
+    const ana = await conta("Ana")
+    const telemovel = await emparelhar(ana)
+    const proprio = canalDaConta(ana)
+    await ate(async () => (await folhasDe(ana, proprio, ana.address)).length === 2, "as duas folhas no canal da conta", 30_000)
+    rele.pool(ana.address, telemovel.deviceKey).length = 0
+    rele.pool(ana.address, null).length = 0
+    const antes = vaziasPara(ana, telemovel)
+    telemovel.session.requestRejoin(proprio)
+    await esperar(Session.PROVA_DE_VIDA_MS + 6_000)
+    await settle(100)
+    // Before 1.3.26: three, over ~3 s, for the same answer.
+    expect(vaziasPara(ana, telemovel) - antes).toBe(1)
+  }, 120_000)
+
+  it("a passagem que senta os irmãos pára no primeiro canal sem chaves: uma reclamação para três canais", async () => {
+    const ana = await conta("Ana")
+    const telemovel = await emparelhar(ana)
+    await ate(async () => (await folhasDe(ana, canalDaConta(ana), ana.address)).length === 2, "as duas folhas no canal da conta", 30_000)
+    // The phone goes offline at 0 keys. Three rooms are made after, so it is missing in each.
+    telemovel.session.disconnect()
+    rele.pool(ana.address, telemovel.deviceKey).length = 0
+    rele.pool(ana.address, null).length = 0
+    const salas = ["sala sem chaves 1", "sala sem chaves 2", "sala sem chaves 3"].map((nome) => moradaDeTeste(nome))
+    for (const sala of salas) {
+      await ana.session.createSpaceChannel(sala)
+      await settle(40)
+    }
+    await esperar(1_000)
+    // The brakes of the rooms' first tries are past: the next pass tries them all.
+    await ana.vault.update((contents) => {
+      for (const chave of Object.keys(contents.repairAttempts)) if (chave.endsWith("|aparelho")) delete contents.repairAttempts[chave]
+    })
+    const antes = vaziasPara(ana, telemovel)
+    await ana.session.sincronizarAgora()
+    await settle(100)
+    // Before 1.3.26: three claims in each of the three rooms.
+    expect(vaziasPara(ana, telemovel) - antes).toBe(1)
+    // And every room waits `SEM_CHAVES_VOLTA_MS` for the next try, not six hours.
+    const travoes = salas.map((sala) => ana.vault.contents.repairAttempts[`${ana.address}|${sala}|aparelho`])
+    expect(travoes.every((t) => t !== undefined)).toBe(true)
   }, 120_000)
 })

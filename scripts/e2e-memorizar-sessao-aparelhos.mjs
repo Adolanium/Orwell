@@ -24,6 +24,7 @@ import { criarConta } from "./conta.mjs"
 import { ate, contasDoServidor, dentro, irParaEmparelhar, verificador } from "./fase7-comum.mjs"
 import { abrirSecretaria } from "./secretaria.mjs"
 import { levantarServidor } from "./servidor-descartavel.mjs"
+import { juntarComPalavras } from "./juntar-aparelho.mjs"
 
 /** The profile names, which are from the script not the interface (`strings.guioes.test.ts`). */
 const ANA = "Ana"
@@ -32,7 +33,7 @@ const FRASE_ANA = "frase-da-ana-2026"
 const FRASE_BRUNO = "frase-do-bruno-2026"
 const FRASE_BROWSER = "frase-do-browser-2026"
 const SEGUINTE = /^(Continuar|Seguinte)$/
-const AVISO = "Este aparelho foi tirado da conta noutro aparelho"
+const AVISO = "Este aparelho saiu da conta"
 
 const { check, resumo } = verificador()
 const srv = await levantarServidor({ frente: 8498, servidor: 8499, etiqueta: "memorizar-aparelhos" })
@@ -113,8 +114,8 @@ try {
 
   // 3. Browser pairs with Ana, and remembers.
   await configuracoes(sec.page).click()
-  await sec.page.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await sec.page.getByRole("button", { name: "Acrescentar aparelho" }).click()
+  await sec.page.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await sec.page.getByRole("button", { name: "Juntar um aparelho" }).click()
   const folha = sec.page.locator(".sheet").first()
   await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
@@ -123,20 +124,8 @@ try {
   web.on("pageerror", (erro) => erros.push(`web: ${erro.message}`))
   await web.goto(srv.APP, { waitUntil: "domcontentloaded" })
   await irParaEmparelhar(web)
-  await web.getByLabel("Ou cola o link").fill(link)
-  await web.getByRole("button", { name: SEGUINTE }).first().click()
-  await web.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 15_000 })
-  const campos = web.locator('.gate-card input[type="password"]')
-  for (let i = 0; i < (await campos.count()); i++) await campos.nth(i).fill(FRASE_BROWSER)
-  check("o emparelhamento no browser tem a caixa, ligada", await web.locator('input[name="memorizar"]').isChecked())
-  await web.getByRole("button", { name: SEGUINTE }).first().click()
-  await web.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await web.getByRole("button", { name: "São as mesmas" }).click()
-  await folha.getByRole("button", { name: "São as mesmas" }).click()
-  await web.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 })
+  await juntarComPalavras(web, folha, link, FRASE_BROWSER)
   await folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
-  await web.getByRole("button", { name: "Entrar", exact: true }).click()
   check("o browser entra na conta da Ana", (await quemEsta(web)) === "Ana")
   check("o browser memorizou a sessão", await registoDaSessaoNoBrowser(web))
   await web.evaluate(() => sessionStorage.clear())
@@ -185,7 +174,8 @@ try {
 
   // 6. Ana revokes the browser: it forgets the remembered session.
   await configuracoes(sec.page).click()
-  await sec.page.getByRole("button", { name: "Aparelhos", exact: true }).click()
+  await sec.page.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await sec.page.getByRole("button", { name: /^Aparelhos/ }).click()
   const revogar = sec.page.locator(".aparelhos-lista li:not(.este)").getByRole("button", { name: /^Revogar/ }).first()
   await revogar.waitFor({ timeout: 20_000 })
   await revogar.click()

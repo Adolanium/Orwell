@@ -13,10 +13,39 @@ import type { SincroniaDoCanal } from "../bridge.js"
 export function useSincronia(channel: string | null): {
   estado: SincroniaDoCanal | undefined
   lugar: { seq: number; em: number } | null
+  /**
+   * The last time this device was online with this account before this
+   * opening, or `null` (a new device, an older host, or not read yet). It does
+   * not change while the app is open, so it is read once.
+   */
+  previousOnlineAt: number | null
+  /**
+   * The channel's past is arriving, said to the person: `passado` from the core
+   * AND a known seat. The one condition for the conversation marker ("Chat
+   * history is syncing.") and the members column ("Now syncing"), so the two
+   * never say different things. Without a seat there is no marker, and so no
+   * column state either.
+   */
+  aSincronizar: boolean
 } {
   const bridge = useBridge()
   const [estado, setEstado] = useState<SincroniaDoCanal | undefined>(undefined)
   const [lugar, setLugar] = useState<{ seq: number; em: number } | null>(null)
+  const [previousOnlineAt, setPreviousOnlineAt] = useState<number | null>(null)
+
+  useEffect(() => {
+    const ler = bridge.sincronia?.previousOnlineAt
+    if (!ler) return
+    let vivo = true
+    void ler()
+      .then((valor) => {
+        if (vivo) setPreviousOnlineAt(typeof valor === "number" && Number.isFinite(valor) ? valor : null)
+      })
+      .catch(() => {})
+    return () => {
+      vivo = false
+    }
+  }, [bridge])
 
   useEffect(() => {
     setEstado(undefined)
@@ -51,5 +80,5 @@ export function useSincronia(channel: string | null): {
     }
   }, [bridge, channel])
 
-  return { estado, lugar }
+  return { estado, lugar, previousOnlineAt, aSincronizar: estado?.passado === true && lugar !== null }
 }

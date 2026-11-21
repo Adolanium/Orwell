@@ -46,6 +46,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import { chromium } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { medirContraste, medirFps, verificarPaineis } from "./paineis-medidas.mjs"
+import { abrirNoTu, appAberta, irPara, mostrarLista, voltarAConversa } from "./separadores.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
@@ -195,7 +196,8 @@ if (!(await servidorDePe())) {
 }
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-const dentro = (page) => page.getByRole("button", { name: "Configurações", exact: true }).first().waitFor({ timeout: 90_000 })
+// The app is open: the rail on a computer, the tabs on a phone (no rail there).
+const dentro = (page) => appAberta(page)
 const fora = []
 
 async function retratar(page, nome) {
@@ -315,13 +317,8 @@ try {
   // ---------------------------------------------------------------- the gate
   const vesna = await novaPessoa("Vesna")
   await vesna.page.goto(APP, { waitUntil: "domcontentloaded" })
-  // Since phase 8.1, the gate can open with "Already using Orwell on another
-  // device?" before the name (see `conta.mjs`). We wait for what comes next.
-  await vesna.page
-    .getByPlaceholder("Como queres aparecer")
-    .or(vesna.page.getByRole("button", { name: "Não, criar conta" }))
-    .first()
-    .waitFor({ timeout: 60_000 })
+  // The gate opens with "Bem-vindo ao Orwell" and the three ways in (21/11/2026).
+  await vesna.page.getByRole("heading", { name: "Bem-vindo ao Orwell" }).waitFor({ timeout: 60_000 })
   await vesna.page.evaluate(() => document.fonts.ready)
   await wait(300)
   await retratar(vesna.page, "portao")
@@ -571,8 +568,8 @@ try {
   })
   await retratarFolha("aparelho", async () => {
     await vesna.page.getByRole("button", { name: "Configurações", exact: true }).first().click()
-    await vesna.page.getByRole("button", { name: "Aparelhos", exact: true }).first().click()
-    await vesna.page.getByRole("button", { name: "Acrescentar aparelho" }).first().click()
+    await vesna.page.getByRole("button", { name: "Conta e segurança", exact: true }).first().click()
+    await vesna.page.getByRole("button", { name: "Juntar um aparelho" }).first().click()
   })
   await vesna.page.getByRole("button", { name: "Comunidades" }).first().click()
   await sala(vesna.page, "conversa").click()
@@ -1141,16 +1138,19 @@ try {
   // ------------------------------------------------------- the phone
   await vesna.page.getByRole("button", { name: "Configurações", exact: true }).first().click()
   await vesna.page.setViewportSize(TELEMOVEL)
-  await vesna.page.getByRole("button", { name: "Comunidades" }).first().click().catch(() => {})
+  // On a phone the Communities tab shows the list; the conversation is pushed over it again.
+  await irPara(vesna.page, "comunidades").catch(() => {})
+  await voltarAConversa(vesna.page)
   await wait(800)
   check("a 390 px a chamada fica na barra compacta", await vesna.page.locator(".call-dock:not(.lateral)").isVisible())
   check("sem rolagem horizontal a 390 px", await semRolagemHorizontal(vesna.page))
   await retratar(vesna.page, "telemovel")
   await fps(vesna.page, "conversa 390")
-  // The channel rooms, in the drawer, with the live call (the complaint from 0.8.0: "on mobile users don't see the rooms").
-  await vesna.page.getByRole("button", { name: "Abrir o painel lateral" }).click()
+  // The channel rooms, in the Communities list, with the live call (the complaint from 0.8.0: "on mobile users don't see the rooms").
+  // Since option B (20/11/2026) the list is a tab under the pushed conversation, not a drawer.
+  await mostrarLista(vesna.page)
   await wait(500)
-  const salasNaGaveta = await vesna.page.evaluate(() =>
+  const salasNaLista = await vesna.page.evaluate(() =>
     [...document.querySelectorAll(".room-tree .room-row .room-name")].map((n) => {
       const r = n.getBoundingClientRect()
       const topo = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
@@ -1158,19 +1158,18 @@ try {
     }),
   )
   check(
-    "a 390 px as salas do canal vêem-se na gaveta, com a chamada viva",
-    salasNaGaveta.length >= 3 && salasNaGaveta.every((sala) => sala.ok),
-    salasNaGaveta.map((sala) => `${sala.nome}${sala.ok ? "" : "✗"}`).join(", "),
+    "a 390 px as salas do canal vêem-se na lista de Comunidades, com a chamada viva",
+    salasNaLista.length >= 3 && salasNaLista.every((sala) => sala.ok),
+    salasNaLista.map((sala) => `${sala.nome}${sala.ok ? "" : "✗"}`).join(", "),
   )
-  // The cursor leaves the hamburger: this context has a cursor, and its tooltip covered the channel line in the screenshot. On a phone there is no tooltip (`movel.css`).
   await vesna.page.mouse.move(200, 600)
   await wait(300)
   await retratar(vesna.page, "telemovel-salas")
-  // Close the drawer by the overlay, outside it (the drawer goes from 60 to 340 px).
-  await vesna.page.mouse.click(380, 420)
-  await wait(400)
-  const gavetaFechou = await vesna.page.evaluate(() => !document.querySelector(".sidebar")?.classList.contains("open"))
-  check("e o véu fecha a gaveta outra vez", gavetaFechou)
+  // The old drawer closed by its veil; the list is a screen now: the tabs are drawn, nothing pushed over it.
+  const listaNoEcra = await vesna.page.evaluate(
+    () => document.querySelector(".separadores") !== null && document.querySelector(".app.telemovel")?.getAttribute("data-profundidade") === "0",
+  )
+  check("e a lista é o ecrã, com os separadores à vista", listaNoEcra)
   // The compact bar takes you back to the call room.
   await vesna.page.getByRole("button", { name: "Voltar ao canal" }).click()
   await vesna.page.locator("section.call.call-sala").waitFor({ timeout: 15_000 })
@@ -1181,7 +1180,7 @@ try {
   await fps(vesna.page, "chamada 390")
 
   // Same bug at 390 px: from the call to Settings, the compact bar stays and the sound continues.
-  await vesna.page.getByRole("button", { name: "Configurações", exact: true }).first().click()
+  await abrirNoTu(vesna.page, "Configurações")
   await wait(1200)
   const configEstreita = await vesna.page.evaluate(() => {
     const caixas = [...document.querySelectorAll("video, audio")].filter((m) => m.srcObject && m.srcObject.getAudioTracks().length > 0)
@@ -1192,7 +1191,7 @@ try {
   check("e o som continua a chegar", configEstreita.aTocar >= 1, String(configEstreita.aTocar))
   check("e a Kaori continua a ver a Vesna na chamada (390 px)", await kaoriVeDuas())
   await retratar(vesna.page, "telemovel-config-com-chamada")
-  await vesna.page.getByRole("button", { name: "Feed", exact: true }).first().click()
+  await abrirNoTu(vesna.page, "Feed")
   await vesna.page.locator("article.post").first().waitFor({ timeout: 30_000 })
   await wait(800)
   await retratar(vesna.page, "feed-390")
@@ -1203,8 +1202,9 @@ try {
 
   // The sheets at 390 px: no horizontal scrolling, and the keyboard doesn't cover the field.
   aTelemovel = true
+  // The channel line is in the Communities list (a tab, not a drawer, since option B).
   const gaveta = async () => {
-    await vesna.page.getByRole("button", { name: "Abrir o painel lateral" }).click()
+    await mostrarLista(vesna.page)
     await wait(400)
   }
   const menuDoCanal390 = async (item) => {
@@ -1226,7 +1226,7 @@ try {
     () => vesna.page.locator(".overlay").getByRole("button", { name: "Cancelar" }).first().click(),
   )
   await retratarFolha("perfil-editar", async () => {
-    await vesna.page.getByRole("button", { name: "Eu", exact: true }).first().click()
+    await abrirNoTu(vesna.page, "O teu perfil")
     await vesna.page.getByRole("button", { name: "Editar perfil" }).first().click()
   })
   aTelemovel = false

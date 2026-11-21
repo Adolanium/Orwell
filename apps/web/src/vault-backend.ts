@@ -343,6 +343,37 @@ export class BrowserVaultBackend implements VaultBackend {
     return ficha
   }
 
+  /**
+   * Lift the seal of a suspended owner, if nothing changed underneath (21/11/2026).
+   *
+   * A tab going into the back-forward cache seals this backend and releases the
+   * lock (`posse-do-separador.ts`, `suspender`). Back in view, with the lock
+   * again, its in-memory state is still the truth only if no one else owned or
+   * wrote the vault in the meantime: the record still carries this tab's id, and
+   * the vault is the one this tab left (the same summary check every write does).
+   * Then writes pass again. Otherwise it stays sealed and the caller reloads.
+   * Only one tab holds the lock at this point, so nothing can claim the record
+   * between this check and the next write; and that write checks again anyway.
+   */
+  async retomarPosse(id: string): Promise<boolean> {
+    if (this.#minhaFicha !== id || this.#perdida) return false
+    await this.escritasAcabadas()
+    const chaveDoCofre = this.#chaveDoCofre()
+    const nossa = await this.#emTransacao<boolean>("readonly", (store) => {
+      let resultado = false
+      const pedidoDaFicha = store.get(FICHA)
+      const pedidoDoCofre = store.get(chaveDoCofre)
+      pedidoDoCofre.onsuccess = () => {
+        const ficha = pedidoDaFicha.result as unknown
+        resultado = ehFicha(ficha) && ficha.id === id && confereResumo(pedidoDoCofre.result, ficha.ultimo)
+      }
+      return () => resultado
+    })
+    if (!nossa) return false
+    this.#selado = false
+    return true
+  }
+
   async read(): Promise<Uint8Array | null> {
     const chaveDoCofre = this.#chaveDoCofre()
     const stored = await this.#emTransacao<ArrayBuffer | undefined>("readonly", (store) => {

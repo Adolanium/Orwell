@@ -230,4 +230,14 @@ describe("connect() em corrida", () => {
     await expect(session.connect()).rejects.toThrow("this tab no longer writes")
     expect(FakeSocket.todos).toHaveLength(0)
   })
+
+  it("resumed writing (back-forward cache): writes and connects again", async () => {
+    const session = await sessao()
+    session.pararDeEscrever()
+    expect(session.retomarEscrita()).toBe(true)
+    expect(session.escreve()).toBe(true)
+    void session.connect().catch(() => {})
+    await assentar()
+    expect(FakeSocket.todos).toHaveLength(1)
+  })
 })

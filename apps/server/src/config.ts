@@ -7,12 +7,14 @@ import {
   MODOS_DE_REGISTO,
   parseServerName,
   SINAL_MAX_CARACTERES,
+  TRABALHO_MAXIMO,
   toBase64,
   type ModoDeRegisto,
   type ServerName,
 } from "@enclave/protocol"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import type { ConfigDaProva, LimitesDeContaNova } from "./anti-abuso.js"
 import { DENUNCIAS_DIAS } from "./denuncia.js"
 import { ORCAMENTO_DE_VIDEO_MBPS, RESERVA_DA_VOZ_MBPS } from "./orcamento-de-saida.js"
 import { ORCAMENTO_DE_VIDEO_REDUZIDO_MBPS, QUOTA_MENSAL_TB } from "./quota-mensal.js"
@@ -128,6 +130,38 @@ export interface ServerConfig {
    * Optional for the same reason as `versaoMinimaDoCliente`: absent is `aberto`.
    */
   registo?: ModoDeRegisto
+  /**
+   * The proof of work a NEW account solves before it registers (1.3.26,
+   * `ENCLAVE_PROVA_*`). Absent: no proof is asked, as before. Optional for the
+   * same reason as `registo`: tests build the config by hand. See `anti-abuso.ts`.
+   */
+  provaDeTrabalho?: ConfigDaProva | undefined
+  /** New accounts per network, in memory only (1.3.26, `ENCLAVE_CONTAS_POR_REDE_*`). Absent: no limit. */
+  limiteDeRede?: { porHora: number; porDia: number } | undefined
+  /** What an account may do in its first 72 hours (1.3.26, `ENCLAVE_CONTA_NOVA_*`). Absent: no limits. */
+  contaNova?: LimitesDeContaNova | undefined
+  /** Accounts that may join the common room for the first time, per hour (1.3.26). Absent or 0: no ceiling. */
+  entradasNaSalaComumPorHora?: number
+  /**
+   * channels one account may have created, of any age, counted
+   * while they exist (1.3.26, `ENCLAVE_COMUNIDADES_POR_CONTA`). Absent or 0: no
+   * cap. In its first 72 hours an account has the lower `contaNova.comunidades`.
+   * See `Store.comunidadesCriadasPor`.
+   */
+  comunidadesPorConta?: number
+  /**
+   * Rooms (inside a channel) one account may have created,
+   * counted while they exist (1.3.26, `ENCLAVE_ROOMS_PER_ACCOUNT`). Absent
+   * or 0: no cap. Only rooms an app declares with `room.claim`. See
+   * `Store.roomsCreatedBy`.
+   */
+  channelsPerAccount?: number
+  /**
+   * Apply the per-network limit, the new-account limits and the join ceiling to
+   * loopback connections too. Only tests set it: a `Session` in a test talks from
+   * 127.0.0.1 and cannot set X-Forwarded-For. No environment variable reads it.
+   */
+  travaoEmLoopback?: boolean
   /**
    * Caps for the encrypted vault (`cofre.*`, phase 3a). Optional for the same
    * reason as `sinal`: defaults come from `TECTOS_DO_COFRE`.
@@ -265,6 +299,85 @@ function readRegisto(raw: string | undefined): ModoDeRegisto {
   const modo = MODOS_DE_REGISTO.find((cada) => cada === valor)
   if (!modo) throw new Error(`ENCLAVE_REGISTO must be aberto, convite or fechado, got ${JSON.stringify(raw)}`)
   return modo
+}
+
+/**
+ * A whole number of the abuse brake (1.3.26). Empty is the default; zero is
+ * allowed and turns that piece off; garbage, a negative number or one above
+ * `maximo` stops the server at start, with the name of the variable.
+ */
+function readNumeroDoTravao(nome: string, raw: string | undefined, porOmissao: number, maximo = 1_000_000_000): number {
+  const valor = raw?.trim()
+  if (!valor) return porOmissao
+  const numero = Number(valor)
+  if (!Number.isInteger(numero) || numero < 0 || numero > maximo) {
+    throw new Error(`${nome} must be a whole number between 0 and ${maximo}, got ${JSON.stringify(raw)}`)
+  }
+  return numero
+}
+
+/**
+ * A brake number under its current name, or under the name it had before (review
+ * note 11, 1.3.26: the room caps were first named `..._CHANNELS`). The new name
+ * wins when both are set; an empty value counts as unset, because compose passes
+ * every name. The old name is read for one version, then dropped.
+ */
+function readNumeroDoTravaoComAlias(env: NodeJS.ProcessEnv, nome: string, antigo: string, porOmissao: number): number {
+  const usado = env[nome]?.trim() ? nome : env[antigo]?.trim() ? antigo : nome
+  return readNumeroDoTravao(usado, env[usado], porOmissao)
+}
+
+/**
+ * New channels a new account may open per day, beyond its communities and the
+ * people it adds: its wall, its account channel, and room for a repair. The
+ * server cannot tell a community from a direct message or a wall (all are
+ * opaque addresses), so its ceiling on new channels is the sum. See
+ * `VigiaDaContaNova.estrear`. An app that says which claim is a community
+ * (`channel.claim` with `comunidade`) meets the exact cap first
+ * (`ENCLAVE_CONTA_NOVA_COMUNIDADES`); this sum is the ceiling for the rest.
+ */
+export const CANAIS_PROPRIOS_DA_CONTA_NOVA = 4
+
+/** The proof of work. `ENCLAVE_PROVA_TRABALHO=0` turns it off. */
+function readProvaDeTrabalho(env: NodeJS.ProcessEnv): ConfigDaProva | undefined {
+  const trabalho = readNumeroDoTravao("ENCLAVE_PROVA_TRABALHO", env.ENCLAVE_PROVA_TRABALHO, 600_000, TRABALHO_MAXIMO)
+  const trabalhoNoPico = readNumeroDoTravao("ENCLAVE_PROVA_TRABALHO_NO_PICO", env.ENCLAVE_PROVA_TRABALHO_NO_PICO, 3_000_000, TRABALHO_MAXIMO)
+  const picoPorHora = readNumeroDoTravao("ENCLAVE_PROVA_PICO_POR_HORA", env.ENCLAVE_PROVA_PICO_POR_HORA, 50)
+  if (trabalho === 0) return undefined
+  // A spike setting below the normal one would make a spike cheaper: the higher of the two wins.
+  return { trabalho, trabalhoNoPico: Math.max(trabalho, trabalhoNoPico), picoPorHora }
+}
+
+/** New accounts per network. Both `0` turn it off. */
+function readLimiteDeRede(env: NodeJS.ProcessEnv): { porHora: number; porDia: number } | undefined {
+  const porHora = readNumeroDoTravao("ENCLAVE_CONTAS_POR_REDE_HORA", env.ENCLAVE_CONTAS_POR_REDE_HORA, 3)
+  const porDia = readNumeroDoTravao("ENCLAVE_CONTAS_POR_REDE_DIA", env.ENCLAVE_CONTAS_POR_REDE_DIA, 10)
+  return porHora === 0 && porDia === 0 ? undefined : { porHora, porDia }
+}
+
+/** The new-account limits. `ENCLAVE_CONTA_NOVA=desligado` turns them all off; each number at 0 turns its rule off. */
+function readContaNova(env: NodeJS.ProcessEnv): LimitesDeContaNova | undefined {
+  const interruptor = (env.ENCLAVE_CONTA_NOVA ?? "").trim().toLowerCase()
+  if (interruptor !== "" && interruptor !== "ligado" && interruptor !== "desligado") {
+    throw new Error(`ENCLAVE_CONTA_NOVA must be ligado or desligado, got ${JSON.stringify(env.ENCLAVE_CONTA_NOVA)}`)
+  }
+  if (interruptor === "desligado") return undefined
+  const ler = (nome: string, omissao: number): number => readNumeroDoTravao(nome, env[nome], omissao)
+  const pessoasAte24h = ler("ENCLAVE_CONTA_NOVA_PESSOAS_24H", 5)
+  const pessoasAte72h = ler("ENCLAVE_CONTA_NOVA_PESSOAS_72H", 15)
+  // channels in the whole first 72 hours: one, then `ENCLAVE_COMUNIDADES_POR_CONTA`.
+  const comunidades = ler("ENCLAVE_CONTA_NOVA_COMUNIDADES", 1)
+  return {
+    intervaloAte24hS: ler("ENCLAVE_CONTA_NOVA_INTERVALO_24H_S", 30),
+    intervaloAte72hS: ler("ENCLAVE_CONTA_NOVA_INTERVALO_72H_S", 10),
+    maxBytesAte24h: ler("ENCLAVE_CONTA_NOVA_MAX_BYTES_24H", 262_144),
+    pessoasAte24h,
+    pessoasAte72h,
+    comunidades,
+    rooms: readNumeroDoTravaoComAlias(env, "ENCLAVE_NEW_ACCOUNT_ROOMS", "ENCLAVE_NEW_ACCOUNT_CHANNELS", 12),
+    canaisAte24h: comunidades + pessoasAte24h + CANAIS_PROPRIOS_DA_CONTA_NOVA,
+    canaisAte72h: comunidades + pessoasAte72h + CANAIS_PROPRIOS_DA_CONTA_NOVA,
+  }
 }
 
 /**
@@ -598,6 +711,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     sinal: readTectosDoSinal(env),
     versaoMinimaDoCliente: readVersaoMinima(env.ENCLAVE_VERSAO_MINIMA_DO_CLIENTE),
     registo: readRegisto(env.ENCLAVE_REGISTO),
+    provaDeTrabalho: readProvaDeTrabalho(env),
+    limiteDeRede: readLimiteDeRede(env),
+    contaNova: readContaNova(env),
+    comunidadesPorConta: readNumeroDoTravao("ENCLAVE_COMUNIDADES_POR_CONTA", env.ENCLAVE_COMUNIDADES_POR_CONTA, 5),
+    channelsPerAccount: readNumeroDoTravaoComAlias(env, "ENCLAVE_ROOMS_PER_ACCOUNT", "ENCLAVE_CHANNELS_PER_ACCOUNT", 30),
+    entradasNaSalaComumPorHora: readNumeroDoTravao("ENCLAVE_SALA_COMUM_ENTRADAS_POR_HORA", env.ENCLAVE_SALA_COMUM_ENTRADAS_POR_HORA, 30),
     cofre: readTectosDoCofre(env),
     cofreGcDias: readCofreGcDias(env.ENCLAVE_COFRE_GC_DIAS),
     orcamentoDeSaida: {

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { rememberAccountName, SINGLE_ACCOUNT_ID, storedAccountName } from "./lib/accountNames.js"
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { AvisoDeSuspensao } from "@enclave/protocol"
@@ -171,11 +172,9 @@ describe("um aparelho revogado volta ao portão", () => {
       })
     })
     await waitFor(() => expect(lock).toHaveBeenCalled())
-    const frase = "Este aparelho foi tirado da conta noutro aparelho."
-    await waitFor(() => expect(document.querySelector(".gate-convite")?.textContent).toContain(frase))
-    expect(document.querySelector(".gate-convite")?.textContent).toContain("748")
-    // The toast too, with the code.
-    expect(screen.getAllByText(/748/).length).toBeGreaterThanOrEqual(1)
+    // Its own screen since 21/11/2026, with the two ways back, and no toast repeating it.
+    expect(await screen.findByRole("heading", { name: strings.entrada.removido })).toBeTruthy()
+    expect(screen.queryAllByText(/748/)).toHaveLength(0)
     // Stopped: no silent attempt, which would enter again and be rejected.
     expect(vi.mocked(bridge.vault.unlock).mock.calls.length).toBe(desbloqueiosAntes)
     expect(screen.queryByRole("button", { name: strings.rail.chat })).toBeNull()
@@ -223,9 +222,9 @@ describe("um aparelho removido, com a prova (1.3.16)", () => {
     })
     await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1))
     expect(ordem).toEqual(["lock", "destroy"])
-    // The phrase stays, above the sign-up gate: this device no longer has the account.
-    const frase = "Este aparelho foi tirado da conta noutro aparelho."
-    await waitFor(() => expect(document.querySelector(".gate-convite")?.textContent).toContain(frase))
+    // Its own screen: this device no longer has the account, and the two ways back are there.
+    expect(await screen.findByRole("heading", { name: strings.entrada.removido })).toBeTruthy()
+    expect(screen.getByRole("button", { name: strings.entrada.comFicheiro })).toBeTruthy()
     expect(screen.queryByRole("button", { name: strings.rail.chat })).toBeNull()
   })
 
@@ -256,8 +255,37 @@ describe("um aparelho removido, com a prova (1.3.16)", () => {
     act(() => {
       statusRef.current?.({ detail: "x", level: "error", code: "device-revoked", route: "toast", removido: true })
     })
-    const frase = "Este aparelho foi tirado da conta noutro aparelho."
-    await waitFor(() => expect(document.querySelector(".gate-convite")?.textContent).toContain(frase))
+    expect(await screen.findByRole("heading", { name: strings.entrada.removido })).toBeTruthy()
+  })
+
+  it("nem pergunta se pode criar votações depois de trancar (20/11/2026)", async () => {
+    const statusRef: { current: ((status: unknown) => void) | null } = { current: null }
+    let trancado = false
+    const lock = vi.fn(async () => {
+      trancado = true
+      return { ok: true }
+    })
+    const bridge = ponte({ statusRef, lock })
+    // `mayCreatePoll` (1.3.21) is asked on every render: with the vault locked the session throws.
+    bridge.channels.mayCreatePoll = () => {
+      if (trancado) throw new Error("no identity loaded")
+      return true
+    }
+    render(<App bridge={bridge} />)
+    await screen.findByRole("button", { name: strings.rail.chat })
+    await act(async () => {
+      screen.getByRole("button", { name: strings.rail.chat }).click()
+      await Promise.resolve()
+    })
+    const linha = document.querySelector<HTMLElement>(".channel-name")
+    await act(async () => {
+      linha?.click()
+      await Promise.resolve()
+    })
+    act(() => {
+      statusRef.current?.({ detail: "x", level: "error", code: "device-revoked", route: "toast", removido: true })
+    })
+    expect(await screen.findByRole("heading", { name: strings.entrada.removido })).toBeTruthy()
   })
 
   it("sem a prova (cópia substituída, servidor antigo): só tranca, não apaga", async () => {
@@ -316,8 +344,7 @@ describe("um aparelho revogado no arranque a frio", () => {
       soltarLock()
       await new Promise((resolve) => setTimeout(resolve, 20))
     })
-    const frase = "Este aparelho foi tirado da conta noutro aparelho."
-    await waitFor(() => expect(document.querySelector(".gate-convite")?.textContent).toContain(frase))
+    expect(await screen.findByRole("heading", { name: strings.entrada.removido })).toBeTruthy()
     expect(screen.queryByRole("button", { name: strings.rail.chat })).toBeNull()
     // One silent attempt only: the gate doesn't retry on its own.
     expect(vi.mocked(bridge.vault.unlock).mock.calls.length).toBe(1)
@@ -331,23 +358,23 @@ describe("apagar a conta esquece as marcas do browser", () => {
     not from the account. After "Delete account", the new account in this
     browser inherited them.
     */
-  it("no portão: depois do destroy, as duas chaves saem", async () => {
+  it("no aparelho removido: depois do destroy, as duas chaves saem", async () => {
+    // The gate itself no longer deletes anything (21/11/2026): the removed device is the destroy left at the gate.
     localStorage.setItem(LAST_READ_KEY, JSON.stringify({ "!velho:casa.pt": 1234 }))
     localStorage.setItem(DM_CLOSED_KEY, JSON.stringify({ [DM_EU_ZE]: 99 }))
-    const user = userEvent.setup()
+    rememberAccountName(SINGLE_ACCOUNT_ID, "Ana")
+    const statusRef: { current: ((status: unknown) => void) | null } = { current: null }
     const destroy = vi.fn(async () => ({ ok: true }))
-    const unlock = async (secret: string | null) => {
-      if (secret === null) throw new Error("no key in the system keychain")
-      return { ok: true }
-    }
-    render(<App bridge={ponte({ unlock, destroy })} />)
-    await user.click(await screen.findByRole("button", { name: strings.gate.lostAccountAction }))
-    const folha = await screen.findByRole("alertdialog", { name: strings.settings.destroyTitle })
-    await user.type(within(folha).getByLabelText(strings.settings.destroyConfirmLabel), strings.settings.destroyConfirmWord)
-    await user.click(within(folha).getByRole("button", { name: strings.settings.destroyConfirm }))
+    render(<App bridge={ponte({ statusRef, destroy })} />)
+    await screen.findByRole("button", { name: strings.rail.chat })
+    act(() => {
+      statusRef.current?.({ detail: "x", level: "error", code: "device-revoked", route: "toast", removido: true })
+    })
     await waitFor(() => expect(destroy).toHaveBeenCalledOnce())
     await waitFor(() => expect(localStorage.getItem(LAST_READ_KEY)).toBeNull())
     expect(localStorage.getItem(DM_CLOSED_KEY)).toBeNull()
+    // And the display name kept outside the vault (21/11/2026).
+    expect(storedAccountName(SINGLE_ACCOUNT_ID)).toBe("")
   })
 })
 

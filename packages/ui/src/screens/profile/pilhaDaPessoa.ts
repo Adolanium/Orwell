@@ -32,7 +32,8 @@ interface EstadoNoHistorico {
   sessao: string
   /** How many of our entries there are, including this one. */
   profundidade: number
-  entrada: EntradaDaPessoa
+  /** The person page of this entry. Absent on a phone level (see `definirBase`). */
+  entrada?: EntradaDaPessoa
 }
 
 function lerEstado(estado: unknown, sessao: string): EstadoNoHistorico | null {
@@ -40,7 +41,7 @@ function lerEstado(estado: unknown, sessao: string): EstadoNoHistorico | null {
   const nosso = (estado as Record<string, unknown>)[CHAVE]
   if (typeof nosso !== "object" || nosso === null) return null
   const candidato = nosso as Partial<EstadoNoHistorico>
-  if (candidato.sessao !== sessao || typeof candidato.profundidade !== "number" || !candidato.entrada) return null
+  if (candidato.sessao !== sessao || typeof candidato.profundidade !== "number") return null
   return candidato as EstadoNoHistorico
 }
 
@@ -61,6 +62,16 @@ export interface PilhaDaPessoa {
   ligar: () => void
   /** Drops the `popstate` listener. */
   desligar: () => void
+  /**
+   * How many phone levels sit under the person pages (option B, 20/11/2026):
+   * 0 is a list, 1 a conversation pushed over it, 2 the members over that.
+   * Each level is one history entry, so the browser back button goes back one
+   * level. Raising it with a page open drops the page: it belonged to the old
+   * place.
+   */
+  definirBase: (base: number) => void
+  /** The phone levels now. */
+  base: () => number
 }
 
 /**
@@ -93,34 +104,48 @@ export function criarPilhaDaPessoa({
   historico,
   janela,
   aoMudar,
+  aoMudarBase,
   sessao = Math.random().toString(36).slice(2),
 }: {
   historico: Pick<History, "pushState" | "go"> | null
   janela: Pick<Window, "addEventListener" | "removeEventListener"> | null
   aoMudar: (actual: EntradaDaPessoa | null) => void
+  /** The browser button took phone levels away. Never called for `definirBase`. */
+  aoMudarBase?: (base: number) => void
   sessao?: string
 }): PilhaDaPessoa {
   const pilha: EntradaDaPessoa[] = []
+  /** The phone levels, below the pages. See `definirBase`. */
+  let base = 0
   /** How many of our entries the history has, above the start one. */
   let noHistorico = 0
   let aCaminho = false
   let semHistorico = historico === null
+  /**
+   * The history above this depth holds page entries where phone levels now go.
+   * The trip goes down to here first, and then pushes the right entries.
+   */
+  let sujoAcimaDe: number | null = null
 
   const avisar = (): void => aoMudar(pilha.at(-1) ?? null)
 
-  /** Makes the history have the same depth as the stack. */
+  /** Makes the history have the same depth as the phone levels plus the stack. */
   const acertar = (): void => {
     if (semHistorico || aCaminho || historico === null) return
-    if (noHistorico > pilha.length) {
+    const alvo = base + pilha.length
+    const limite = Math.min(alvo, sujoAcimaDe ?? alvo)
+    if (noHistorico > limite) {
       aCaminho = true
-      historico.go(pilha.length - noHistorico)
+      historico.go(limite - noHistorico)
       return
     }
-    while (noHistorico < pilha.length) {
+    sujoAcimaDe = null
+    while (noHistorico < alvo) {
       const profundidade = noHistorico + 1
-      const entrada = pilha[noHistorico] as EntradaDaPessoa
+      const entrada = profundidade > base ? pilha[profundidade - base - 1] : undefined
+      const estado: EstadoNoHistorico = entrada ? { sessao, profundidade, entrada } : { sessao, profundidade }
       try {
-        historico.pushState({ [CHAVE]: { sessao, profundidade, entrada } satisfies EstadoNoHistorico }, "")
+        historico.pushState({ [CHAVE]: estado }, "")
       } catch {
         semHistorico = true
         return
@@ -141,8 +166,17 @@ export function criarPilhaDaPessoa({
       return
     }
     // The browser button, back or forward.
-    if (profundidade < pilha.length) pilha.length = profundidade
-    else if (estado && profundidade > pilha.length) pilha.push(estado.entrada)
+    if (profundidade < base) {
+      // Below the pages: a phone level goes, and every page above it.
+      pilha.length = 0
+      base = profundidade
+      avisar()
+      aoMudarBase?.(base)
+      return
+    }
+    const paginas = profundidade - base
+    if (paginas < pilha.length) pilha.length = paginas
+    else if (estado?.entrada && paginas > pilha.length) pilha.push(estado.entrada)
     avisar()
   }
   return {
@@ -167,6 +201,18 @@ export function criarPilhaDaPessoa({
     },
     ligar: () => janela?.addEventListener("popstate", aoPopstate),
     desligar: () => janela?.removeEventListener("popstate", aoPopstate),
+    definirBase: (novaBase) => {
+      if (novaBase === base) return
+      if (pilha.length > 0) {
+        // The pages sat above the old level; their entries go before new ones come.
+        if (novaBase > base) sujoAcimaDe = base
+        pilha.length = 0
+        avisar()
+      }
+      base = novaBase
+      acertar()
+    },
+    base: () => base,
   }
 }
 
@@ -176,18 +222,23 @@ export function criarPilhaDaPessoa({
  * The three functions are stable: they can go into the dependencies of a
  * `useCallback` without being remade on each render.
  */
-export function usePilhaDaPessoa(): {
+export function usePilhaDaPessoa(aoMudarBase?: (base: number) => void): {
   actual: EntradaDaPessoa | null
   abrir: (entrada: EntradaDaPessoa) => void
   voltar: () => void
   fechar: () => void
+  definirBase: (base: number) => void
 } {
   const [actual, setActual] = useState<EntradaDaPessoa | null>(null)
   const pilha = useRef<PilhaDaPessoa | null>(null)
+  // The latest callback, read when the button is pressed: the stack is made once.
+  const mudarBase = useRef(aoMudarBase)
+  mudarBase.current = aoMudarBase
   pilha.current ??= criarPilhaDaPessoa({
     historico: typeof window === "undefined" ? null : window.history,
     janela: typeof window === "undefined" ? null : window,
     aoMudar: setActual,
+    aoMudarBase: (base) => mudarBase.current?.(base),
   })
   useEffect(() => {
     // In the effect, not at creation: strict mode mounts, unmounts and mounts again,
@@ -200,6 +251,7 @@ export function usePilhaDaPessoa(): {
     abrir: (entrada: EntradaDaPessoa) => pilha.current?.abrir(entrada),
     voltar: () => pilha.current?.voltar(),
     fechar: () => pilha.current?.fechar(),
+    definirBase: (base: number) => pilha.current?.definirBase(base),
   }))
   return { actual, ...accoes }
 }

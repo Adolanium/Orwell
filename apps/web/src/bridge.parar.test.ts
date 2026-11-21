@@ -10,6 +10,8 @@ import { describe, expect, it, vi } from "vitest"
 
 const registo: string[] = []
 let terminarEscrita: () => void = () => {}
+/** What the fake backend answers to `retomarPosse`, and what the fake session answers to `retomarEscrita`. */
+const retoma = { posse: true, escrita: true }
 
 vi.mock("@enclave/client-core", async (original) => ({
   // The real module underneath: a new export of client-core that bridge.ts reads must not break every suite here.
@@ -45,6 +47,10 @@ vi.mock("@enclave/client-core", async (original) => ({
       registo.push("connect")
       return Promise.resolve()
     }
+    retomarEscrita(): boolean {
+      registo.push("retomar-escrita")
+      return retoma.escrita
+    }
   },
   Vault: class {},
 }))
@@ -56,6 +62,10 @@ vi.mock("./vault-backend.js", () => ({
   BrowserVaultBackend: class {
     selar(): void {
       registo.push("selar")
+    }
+    retomarPosse(id: string): Promise<boolean> {
+      registo.push(`retomar-posse:${id}`)
+      return Promise.resolve(retoma.posse)
     }
     escritasAcabadas(): Promise<void> {
       registo.push("a-esperar-escritas")
@@ -128,5 +138,76 @@ describe("pararDeEscrever", () => {
     await segunda
     // The second one only waits for the disk: it does not disconnect, drain or seal again.
     expect(registo.slice(depoisDaPrimeira.length)).toEqual(["a-esperar-escritas", "escritas-acabadas"])
+  })
+})
+
+describe("retomarEscrita (resumed from the back-forward cache)", () => {
+  async function parada() {
+    registo.length = 0
+    const ponte = createBrowserBridge()
+    const parado = ponte.pararDeEscrever()
+    await vi.waitFor(() => expect(registo).toContain("a-esperar-escritas"))
+    terminarEscrita()
+    await parado
+    registo.length = 0
+    return ponte
+  }
+
+  it("still the owner: the vault and the session write again, and it connects", async () => {
+    retoma.posse = true
+    retoma.escrita = true
+    const ponte = await parada()
+    expect(await ponte.retomarEscrita("a")).toBe(true)
+    expect(registo).toEqual(["retomar-posse:a", "retomar-escrita", "connect"])
+    // No longer stopped: connecting is allowed again.
+    await expect(ponte.session.connect()).resolves.toEqual({ ok: true })
+  })
+
+  it("someone else owned the vault meanwhile: stays stopped, and does not connect", async () => {
+    retoma.posse = false
+    retoma.escrita = true
+    const ponte = await parada()
+    expect(await ponte.retomarEscrita("a")).toBe(false)
+    expect(registo).toEqual(["retomar-posse:a"])
+    await expect(ponte.session.connect()).rejects.toThrow("this tab no longer writes")
+  })
+
+  it("the media store cannot resume: seals the vault again and stays stopped", async () => {
+    retoma.posse = true
+    retoma.escrita = false
+    const ponte = await parada()
+    expect(await ponte.retomarEscrita("a")).toBe(false)
+    expect(registo).toEqual(["retomar-posse:a", "retomar-escrita", "selar"])
+    await expect(ponte.session.connect()).rejects.toThrow("this tab no longer writes")
+  })
+
+  it("a bridge that never stopped has nothing to resume", async () => {
+    registo.length = 0
+    const ponte = createBrowserBridge()
+    expect(await ponte.retomarEscrita("a")).toBe(true)
+    expect(registo).toEqual([])
+  })
+})
+
+describe("retomarEscrita overtaken by a new stop", () => {
+  it("the page hides again while the record is read: stays stopped, sealed, and does not connect", async () => {
+    retoma.posse = true
+    retoma.escrita = true
+    registo.length = 0
+    const ponte = createBrowserBridge()
+    const parado = ponte.pararDeEscrever()
+    await vi.waitFor(() => expect(registo).toContain("a-esperar-escritas"))
+    terminarEscrita()
+    await parado
+    registo.length = 0
+    const retoma1 = ponte.retomarEscrita("a")
+    // Hidden again before the record answers.
+    const outra = ponte.pararDeEscrever()
+    terminarEscrita()
+    await outra
+    expect(await retoma1).toBe(false)
+    expect(registo).not.toContain("connect")
+    expect(registo).not.toContain("retomar-escrita")
+    await expect(ponte.session.connect()).rejects.toThrow("this tab no longer writes")
   })
 })

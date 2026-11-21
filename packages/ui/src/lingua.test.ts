@@ -159,7 +159,7 @@ describe("mudar de língua", () => {
     definirLingua("en")
     expect(strings.menu.leave).toBe("Leave the channel")
     expect(strings.sidebar.newRoom).toBe("New room")
-    expect(strings.gate.create).toBe("Create account")
+    expect(strings.entrada.criarConta).toBe("Create account")
   })
 
   it("as funções continuam a montar-se, com a mesma assinatura", () => {

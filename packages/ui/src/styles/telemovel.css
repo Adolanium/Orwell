@@ -1,0 +1,626 @@
+/* ===========================================================================
+   THE PHONE LAYOUT (option B, 20/11/2026)
+   ===========================================================================
+   Four tabs at the bottom, and each conversation pushed full screen over its
+   list. On a phone every menu is complete and no feature is lost.
+
+   Everything here hangs from `.app.telemovel`, and that class exists only
+   where `useTelemovel()` says the screen is 840 px or narrower. At 841 px and
+   up no rule here matches: the desktop and the tablet stay as they were.
+
+   `:root` in front of each selector is weight, not style. The Aurora sheet
+   (`aurora.gen.css`) scopes the 1.3.19 drawer rules under
+   `:root[data-theme="aurora"]`, and it loads after this file. The extra
+   `:root` lets the phone layout win in every theme.
+
+   The shell writes three attributes on `.app` (see `App.tsx`):
+   - `data-separador`: comunidades, mensagens, amigos or tu;
+   - `data-profundidade`: 0 a list, 1 a pushed screen, 2 the members over a conversation;
+   - `data-separadores`: "sim" while the bar of tabs is on screen.
+
+   Every list and every pushed screen sits in the SAME grid cell. The pushed
+   screen comes later in the DOM and has an opaque background, so it covers
+   the list; the list stays mounted under it (it keeps its scroll, and the
+   swipe from the edge shows it), and the shell makes it `inert`.
+   =========================================================================== */
+
+:root .app.telemovel {
+  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas: none;
+}
+
+/* The desktop rail and its hamburger: the tabs and the rail of communities
+   take their place. These were the two doors to the channel column. */
+:root .app.telemovel > .rail,
+:root .app.telemovel .drawer-scrim,
+:root .app.telemovel .people-scrim,
+:root .app.telemovel .people-bar-conversas {
+  display: none;
+}
+
+/* Each list and each pushed screen: the whole first row. */
+:root .app.telemovel > *,
+:root .app.telemovel > .vista-guardada > * {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* --------------------------------------------------------- Communities */
+
+/* The rail of communities: 72 px, the faces 48 px, the main rail's notices. */
+:root .app.telemovel > .carril-comunidades {
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) 0 var(--space-5);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  background: var(--bg-rail);
+}
+
+:root .app.telemovel .carril-comunidade {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+}
+
+:root .app.telemovel .carril-comunidade .room-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  transition: border-radius var(--dur) var(--ease);
+}
+
+:root .app.telemovel .carril-comunidade.active .room-icon {
+  border-radius: 16px;
+}
+
+:root .app.telemovel .carril-nova {
+  color: var(--ok, var(--accent));
+}
+
+/* The chosen community's channels: the same column as on a computer, as a
+   plain panel next to the rail, not a drawer. */
+:root .app.telemovel > .sidebar {
+  grid-column: 2;
+  position: static;
+  inset: auto;
+  width: auto;
+  transform: none;
+  visibility: visible;
+  box-shadow: none;
+  border-right: 0;
+  border-radius: 16px 0 0 0;
+  overflow: hidden;
+  /* The drawer's `z-index` would lift this grid item over the pushed screen. */
+  z-index: auto;
+}
+
+/* The channel lines, the room lines and "Nova sala": 44 px for a finger. */
+:root .app.telemovel > .sidebar button:is(.channel, .room) {
+  min-height: 44px;
+}
+
+/* The account card lives in "Tu" on the phone. */
+:root .app.telemovel > .sidebar > .me-faixa,
+:root .app.telemovel .people-aside > .me-faixa {
+  display: none;
+}
+
+/* ------------------------------------------------- Messages and Friends */
+
+:root .app.telemovel .people-destination {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+:root .app.telemovel .people-destination > * {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+/* Messages: the list of direct conversations, full screen. */
+:root .app.telemovel .people-aside {
+  z-index: auto;
+  position: static;
+  inset: auto;
+  width: auto;
+  transform: none;
+  visibility: visible;
+  box-shadow: none;
+  border-right: 0;
+}
+
+:root .app.telemovel[data-separador="mensagens"][data-profundidade="0"] .people-column,
+:root .app.telemovel[data-separador="amigos"] .people-aside {
+  display: none;
+}
+
+/* Messages with a conversation: the conversation over the list. The stripe of
+   Friends (its tabs) belongs to Friends, not to a conversation. */
+:root .app.telemovel[data-separador="mensagens"] .people-column {
+  z-index: 1;
+}
+
+:root .app.telemovel[data-separador="mensagens"] .people-bar {
+  display: none;
+}
+
+/* ------------------------------------------------------------- "Tu" */
+
+:root .app.telemovel > .menu-do-tu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-5) var(--space-5);
+  overflow-y: auto;
+  background: var(--bg-main);
+}
+
+.menu-do-tu-titulo {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  color: var(--titulo);
+}
+
+.menu-do-tu-lista {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.menu-do-tu-entrada {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  min-height: 52px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-do-tu-icone {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: var(--secundario);
+}
+
+.menu-do-tu-cartao {
+  margin-top: auto;
+}
+
+/* ------------------------------------------------------ pushed screens */
+
+/* A pushed screen: over its list, opaque, and the motion it enters with. */
+:root .app.telemovel .ecra-empurrado {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  background: var(--bg-main);
+  box-shadow: -14px 0 34px rgb(var(--sombra-cor) / 0.35);
+  animation: telemovel-entra var(--dur) var(--ease);
+}
+
+/* Without a bar, the screen is the whole cell. */
+:root .app.telemovel .ecra-empurrado > :last-child {
+  grid-row: 1 / -1;
+  min-height: 0;
+}
+
+:root .app.telemovel .ecra-empurrado > .barra-do-telemovel ~ :last-child {
+  grid-row: 2;
+}
+
+@keyframes telemovel-entra {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+/* The strip at the left edge that starts the swipe back. Over the content,
+   20 px wide; `pan-y` keeps the vertical scroll for the browser. */
+.borda-de-voltar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 20px;
+  z-index: 3;
+  touch-action: pan-y;
+}
+
+/* The header of a pushed screen that has no header of its own (polls,
+   tickets, the screens of "Tu"). */
+.barra-do-telemovel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 56px;
+  padding: 0 var(--space-3) 0 var(--space-1);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-main);
+}
+
+.barra-do-telemovel-titulos {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+/* `pele.css` hides the community at 840 px and less; the phone header has the
+   second line for it ("# channel" over "community · topic"). */
+:root .app.telemovel .topbar-empurrada .topbar-contexto {
+  display: flex;
+  min-width: 0;
+  line-height: 1.2;
+  color: var(--secundario);
+}
+
+.barra-do-telemovel-titulo {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--titulo);
+}
+
+.barra-do-telemovel-contexto {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-sm);
+  color: var(--secundario);
+}
+
+/* The back arrow: in the conversation header, the members header and the bar above. */
+.topbar-voltar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.topbar-voltar:hover,
+.topbar-voltar:focus-visible {
+  background: var(--bg-hover);
+}
+
+/* The conversation header on the phone: the arrow, then "# channel" with the
+   community under it, then the buttons (search, pinned, call, members). */
+:root .app.telemovel .topbar.topbar-empurrada {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  row-gap: 0;
+  min-height: 56px;
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1);
+  overflow: visible;
+}
+
+:root .app.telemovel .topbar-empurrada > * {
+  grid-row: 1 / 3;
+}
+
+:root .app.telemovel .topbar-empurrada > .topbar-voltar {
+  grid-column: 1;
+}
+
+:root .app.telemovel .topbar-empurrada > .topbar-glifo,
+:root .app.telemovel .topbar-empurrada > .room-icon {
+  grid-column: 2;
+}
+
+:root .app.telemovel .topbar-empurrada > h1 {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: end;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A direct conversation has no second line: the name takes both. */
+:root .app.telemovel .topbar-empurrada:not(:has(.topbar-contexto)) > h1 {
+  grid-row: 1 / 3;
+  align-self: center;
+}
+
+:root .app.telemovel .topbar-empurrada > .topbar-contexto {
+  grid-column: 3;
+  grid-row: 2;
+  align-self: start;
+  overflow: hidden;
+  font-size: var(--font-sm);
+}
+
+:root .app.telemovel .topbar-empurrada > .topbar-contexto > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root .app.telemovel .topbar-empurrada > .topbar-espaco {
+  display: none;
+}
+
+/* The members toggle and the header buttons: 44 px, as the rest of the phone. */
+:root .app.telemovel .topbar-empurrada .members-toggle,
+:root .app.telemovel .topbar-empurrada .action {
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin-left: 0;
+}
+
+/* The members: a pushed screen over the conversation, full width. */
+:root .app.telemovel .members {
+  position: fixed;
+  top: var(--seguro-topo);
+  right: var(--seguro-direita);
+  bottom: var(--seguro-fundo);
+  left: var(--seguro-esquerda);
+  width: auto;
+  z-index: var(--z-panel);
+  border-left: 0;
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform var(--dur) var(--ease), visibility 0s var(--dur);
+}
+
+:root .app.telemovel .members.open {
+  transform: none;
+  visibility: visible;
+  transition: transform var(--dur) var(--ease);
+}
+
+:root .app.telemovel .members-scrim {
+  display: none;
+}
+
+:root .app.telemovel .members-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 56px;
+  padding-left: var(--space-1);
+}
+
+/* --------------------------------------------------------- the tabs */
+
+:root .app.telemovel > .separadores {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  display: flex;
+  border-top: 1px solid var(--line);
+  background: var(--bg-rail);
+}
+
+.separador {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 56px;
+  padding: var(--space-1) 0;
+  border: 0;
+  background: transparent;
+  color: var(--secundario);
+  font: inherit;
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+
+.separador.active {
+  color: var(--titulo);
+  font-weight: 600;
+}
+
+.separador-icone {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 26px;
+}
+
+/* The rail's notices, placed on the tab's icon: the pill under it, the
+   pastille and the seals at its corners. */
+.separador .rail-pill {
+  top: auto;
+  bottom: -6px;
+  left: 50%;
+  width: 14px;
+  height: 4px;
+  border-radius: 4px;
+  translate: -50% 0;
+}
+
+.separador .rail-count,
+.separador .rail-toque {
+  right: -10px;
+  bottom: auto;
+  top: -6px;
+  border-color: var(--bg-rail);
+}
+
+.separador .rail-chamada {
+  left: -10px;
+  right: auto;
+  top: -6px;
+}
+
+.separador.tocado .separador-icone {
+  color: var(--danger, var(--erro, currentColor));
+}
+
+/* The floating call dock and the alerts rise above the tabs. */
+:root:has(.app.telemovel[data-separadores="sim"]) .toast-stack,
+:root .app.telemovel[data-separadores="sim"] .call-dock {
+  bottom: calc(var(--space-5) + var(--seguro-fundo) + 57px);
+}
+
+/* ------------------------------------------------ menus as sheets */
+
+/* The veil behind a menu that is a sheet (`ContextMenu`, 840 px and down). */
+.context-veu {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-toast);
+  background: rgb(0 0 0 / 0.45);
+}
+
+/* The whole menu at the bottom: the same entries, the same order, each one
+   44 px tall for a finger. */
+.context-menu.context-folha.context-folha-inteira {
+  max-height: min(80dvh, 640px);
+  padding-top: var(--space-4);
+}
+
+.context-menu.context-folha button {
+  min-height: 44px;
+}
+
+.context-menu.context-folha.context-folha-inteira::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  translate: -50% 0;
+}
+
+/* --------------------------------------------- reduced motion: slower */
+
+/*
+  Reduced motion: nothing stops, it moves slower (the rule of this app, see
+  `movimentoReduzido.test.ts`). The universal rule in `base.css` zeroes every
+  transition and animation with `!important`; these take the motion back,
+  with more time and less distance. The swipe from the edge moves with the
+  finger in any case, and its end uses Web Animations (`BordaDeVoltar`).
+*/
+@media (prefers-reduced-motion: reduce) {
+  :root .app.telemovel .ecra-empurrado {
+    animation-name: telemovel-entra-calma !important;
+    animation-duration: 0.45s !important;
+  }
+
+  :root .app.telemovel .members,
+  :root .app.telemovel .members.open {
+    transition-duration: 0.45s, 0s !important;
+  }
+
+  :root .app.telemovel .members:not(.open) {
+    transition-delay: 0s, 0.45s !important;
+  }
+}
+
+@keyframes telemovel-entra-calma {
+  from {
+    opacity: 0.4;
+    transform: translateX(24%);
+  }
+}
+
+/* -------------------------------------------- what 390 px used to hide */
+
+/*
+  The nudge in a direct conversation. Up to option B the composer line hid it
+  at 480 px and less (`screens.css`), and since 20/11/2026 the "+" menu has no
+  nudge either: on a phone there was no way to send one. On the phone layout
+  it stays in the line, where the computer has it, 44 px for a finger.
+*/
+:root .app.telemovel .composer-line .composer-buzz {
+  display: inline-flex;
+}
+
+/*
+  The channel topic, under the community name in the conversation header.
+  `pele.css` hides it at 840 px and less; the phone header has a second line
+  for the community, and the topic follows it there, cut with an ellipsis.
+*/
+:root .app.telemovel .topbar-empurrada .topbar-topico {
+  display: inline;
+}
+
+/* "Subir" on each track of "Partilhar áudio": the phone's way to reorder the
+   list, which the computer does by dragging. Hidden off the phone layout, so
+   the computer looks as it did. */
+.audio-faixa-subir {
+  display: none;
+}
+
+:root .app.telemovel .audio-faixa-subir {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--secundario);
+  cursor: pointer;
+}
+
+/* Search and pinned messages hang from their header button on a computer.
+   On the phone the button is near the right edge and the panel went past the
+   left one (measured: x = -32 at 390 px). Here they take the width of the
+   screen, under the header. */
+:root .app.telemovel .procura-panel,
+:root .app.telemovel .pinned-panel {
+  position: fixed;
+  top: calc(var(--seguro-topo) + 60px);
+  right: calc(var(--seguro-direita) + var(--space-2));
+  left: calc(var(--seguro-esquerda) + var(--space-2));
+  width: auto;
+  max-width: none;
+}

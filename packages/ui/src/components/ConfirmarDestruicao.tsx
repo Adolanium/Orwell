@@ -113,37 +113,24 @@ export function ConfirmarDestruicao({
 }
 
 /**
- * Delete account on this device: the same sheet across all three paths.
+ * Delete account on this device: the same sheet on both paths that delete.
  *
- * Settings, the gate ("Lost your account? Create a new one."), and Setup with
- * an existing vault. And at the gate, the two paths for "Sign in with another
- * account" (import and pair), each with its own phrase. There were three rituals
- * (a typed word, two `window.confirm` prompts in a row, two others), for the
- * same action and the same loss. Now it's one, and only the phrase about
- * channels changes: with the vault open the account leaves them before deleting;
- * with it closed there are no keys to do that, and the phrase states the cost
- * upfront.
+ * Settings, and "Join another account" in Devices (phase 8.2). The gate has
+ * none since 21/11/2026: no way in deletes an account ("Esqueci-me" and "Usar
+ * outra conta" add an empty account next to it). Only the phrase about channels
+ * changes between the two.
  */
 export function ApagarConta({
   porta,
   fazer,
   onClose,
 }: {
-  /** `join`: "Join to another account", in Devices (phase 8.2). */
-  porta: "configuracoes" | "portao" | "importar" | "emparelhar" | "juntar"
+  /** `juntar`: "Join to another account", in Devices (phase 8.2). */
+  porta: "configuracoes" | "juntar"
   fazer: () => Promise<void> | void
   onClose: () => void
 }): React.JSX.Element {
-  const canais =
-    porta === "configuracoes"
-      ? strings.settings.destroySteps
-      : porta === "portao"
-        ? strings.settings.destroyStepsGate
-        : porta === "importar"
-          ? strings.settings.destroyStepsImport
-          : porta === "juntar"
-            ? strings.settings.destroyStepsJoin
-            : strings.settings.destroyStepsPair
+  const canais = porta === "configuracoes" ? strings.settings.destroySteps : strings.settings.destroyStepsJoin
   return (
     <ConfirmarDestruicao
       titulo={strings.settings.destroyTitle}

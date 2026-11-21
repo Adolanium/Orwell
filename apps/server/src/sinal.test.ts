@@ -1,5 +1,6 @@
 import {
   CAPACIDADE_SINAL_EFEMERO,
+  CAPACIDADE_SINAL_PARA,
   fromBase64,
   generateIdentity,
   parseServerName,
@@ -331,6 +332,66 @@ describe("channel.sinal", () => {
     await bruno.cliente.sincronizar()
     expect(bruno.cliente.pendentes()).toStrictEqual([])
     expect(ana.cliente.fechado).toBe(false)
+  })
+
+  it("um sinal com para só chega às ligações desse aparelho; sem para, a todos", async () => {
+    const ana = guardar(await entrar(NOVO))
+    const bruno = guardar(await entrar(NOVO))
+    const carla = guardar(await entrar(NOVO))
+    expect(ana.hello.capabilities).toContain(CAPACIDADE_SINAL_PARA)
+    const canal = canalNovo()
+    await sentar(ana.cliente, [bruno, carla], canal)
+
+    const doBruno = toBase64(bruno.identidade.signingPublicKey)
+    ana.cliente.enviar({ t: "channel.sinal", channel: canal, sinal: "UEFSQQ", para: doBruno })
+    expect(await bruno.cliente.proximaDe("channel.sinal")).toStrictEqual({ t: "channel.sinal", channel: canal, from: ana.endereco, sinal: "UEFSQQ" })
+    await carla.cliente.sincronizar()
+    expect(carla.cliente.pendentes().filter((f) => f.t === "channel.sinal")).toStrictEqual([])
+
+    // Without `para`, the broadcast as before.
+    ana.cliente.enviar({ t: "channel.sinal", channel: canal, sinal: "VE9ET1M" })
+    for (const quem of [bruno, carla]) expect((await quem.cliente.proximaDe("channel.sinal")).sinal).toBe("VE9ET1M")
+  })
+
+  it("um sinal com para de um aparelho desligado é descartado, sem recusa", async () => {
+    const ana = guardar(await entrar(NOVO))
+    const bruno = await entrar(NOVO)
+    const carla = guardar(await entrar(NOVO))
+    const canal = canalNovo()
+    await sentar(ana.cliente, [bruno, carla], canal)
+    const doBruno = toBase64(bruno.identidade.signingPublicKey)
+    bruno.cliente.fechar()
+    await new Promise((r) => setTimeout(r, 100))
+    ana.cliente.enviar({ t: "channel.sinal", channel: canal, sinal: "TklOR1VFTQ", para: doBruno, ref: "x" })
+    await ana.cliente.sincronizar()
+    await carla.cliente.sincronizar()
+    expect(ana.cliente.pendentes().filter((f) => f.t.startsWith("channel.sinal"))).toStrictEqual([])
+    expect(carla.cliente.pendentes().filter((f) => f.t === "channel.sinal")).toStrictEqual([])
+  })
+
+  it("com para, o tecto do canal conta só as cópias enviadas", async () => {
+    // 60 characters to two members would cost 120, over 100; to one, 60.
+    config.sinal = { bytesPorCanalPorMinuto: 100 }
+    const ana = guardar(await entrar(NOVO))
+    const bruno = guardar(await entrar(NOVO))
+    const carla = guardar(await entrar(NOVO))
+    const canal = canalNovo()
+    await sentar(ana.cliente, [bruno, carla], canal)
+    ana.cliente.enviar({ t: "channel.sinal", channel: canal, sinal: "A".repeat(60) })
+    expect((await ana.cliente.proximaDe("channel.sinal.rejected")).code).toBe("sinal-too-large")
+    ana.cliente.enviar({ t: "channel.sinal", channel: canal, sinal: "A".repeat(60), para: toBase64(carla.identidade.signingPublicKey) })
+    expect((await carla.cliente.proximaDe("channel.sinal")).sinal).toBe("A".repeat(60))
+    await ana.cliente.sincronizar()
+    expect(ana.cliente.pendentes().filter((f) => f.t === "channel.sinal.rejected")).toStrictEqual([])
+  })
+
+  it("um cliente antigo, sem para, continua a receber e a enviar em difusão", async () => {
+    const ana = guardar(await entrar(NOVO))
+    const bruno = guardar(await entrar(NOVO))
+    const canal = canalNovo()
+    await sentar(ana.cliente, [bruno], canal)
+    bruno.cliente.enviar({ t: "channel.sinal", channel: canal, sinal: "QU5USUdP" })
+    expect((await ana.cliente.proximaDe("channel.sinal")).sinal).toBe("QU5USUdP")
   })
 
   it("o tecto de saída do canal soma todos os membros, e conta as cópias", async () => {

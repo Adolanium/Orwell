@@ -10,6 +10,7 @@ import {
   criarVigiaDasTransmissoes,
   ERRO_DA_CHAMADA_QUE_CAIU,
   haOutraPessoa,
+  incomingRingStops,
   paraDeChamar,
   type EstadoDaTransmissao,
   type ParDaTransmissao,
@@ -280,5 +281,27 @@ describe("a transmissão", () => {
       const vigia = aTransmitir()
       expect(vigia.observar(estado({ euPartilho: true, ensurdecido: true, pares: [par(ANA, { aVerONossoEcra: true }), par(RUI)] }), DEPOIS)).toEqual([])
     })
+  })
+})
+
+describe("the incoming ring stops (21/11/2026)", () => {
+  it("rings on while only the caller is in the call", () => {
+    expect(incomingRingStops(DM, null, [ANA], EU)).toBe(false)
+  })
+
+  it("stops when this device answers", () => {
+    expect(incomingRingStops(DM, DM, [ANA], EU)).toBe(true)
+  })
+
+  it("stops when another device of my account answers", () => {
+    expect(incomingRingStops(DM, null, [ANA, EU], EU)).toBe(true)
+  })
+
+  it("stops when the call ends: nobody is in it", () => {
+    expect(incomingRingStops(DM, null, [], EU)).toBe(true)
+  })
+
+  it("being in another call does not stop it", () => {
+    expect(incomingRingStops(DM, LAGAR, [ANA], EU)).toBe(false)
   })
 })

@@ -25,6 +25,15 @@
  *  - `semChave`: a local `keypackage.claim` that left a requested device (or the
  *    whole account) without a key package. It is the server's side of the
  *    client's `reseat-failed … no invite keys`. Each one also writes one log line.
+ *    Claims, not attempts (1.3.26): the same claim again from the same connection
+ *    within `REPETICAO_MS` (a client tries up to three times in ~3 s) counts once
+ *    and writes no line.
+ *  - `semChaveEmPedido` (1.3.26): of the `semChave`, the claims for an account
+ *    that asked for a seat (`pedidos`) in the last `EM_PEDIDO_MS`. That is what the
+ *    deaf channel's seat request (P3) runs into. The rest is mostly a device seating
+ *    its siblings and invites to accounts with no keys. A claim names no channel, so
+ *    this is by account: a seat request in one channel and a claim for another
+ *    channel of the same account in the same 30 s count here too.
  *  - `avisosDeChaves`: `keypackage.low` frames sent, at login and after claims.
  *  - `recusasPorEpoca`: commits refused with `stale-epoch`.
  */
@@ -36,8 +45,11 @@ export const ACONTECIMENTOS_DOS_LUGARES = [
   "pedidosSemOuvintes",
   "respondidos",
   "semChave",
+  "semChaveEmPedido",
   "avisosDeChaves",
   "recusasPorEpoca",
+  "pacotesServidos",
+  "recusasDepoisDeReclamar",
 ] as const
 export type AcontecimentoDosLugares = (typeof ACONTECIMENTOS_DOS_LUGARES)[number]
 
@@ -73,6 +85,12 @@ export class ContadoresDosLugares {
    * pending admissions.
    */
   readonly #pedidosEmAberto = new Map<string, number>()
+  /** The last seat request of each account, for `semChaveEmPedido`. Bounded like `#pedidosEmAberto`. */
+  readonly #pedidoDaConta = new Map<string, number>()
+  /** The last claim that served packages on each connection: when, and how many. For `recusasDepoisDeReclamar`. */
+  readonly #ultimaReclamacao = new Map<string, { em: number; n: number }>()
+  /** The last empty claim of each "connection|account|devices", to count claims, not attempts. */
+  readonly #reclamacoesVazias = new Map<string, number>()
   readonly #desde: number
   readonly #escrever: Escrever
   #linhasNoMinuto = { minuto: -1, escritas: 0, caladas: 0 }
@@ -80,6 +98,12 @@ export class ContadoresDosLugares {
   /** How long a seat request waits for its Welcome to count as answered. Like `Gateway.PENDENTE_MS`. */
   static JANELA_DO_PEDIDO_MS = 10 * 60_000
   static readonly PEDIDOS_EM_ABERTO_MAXIMO = 10_000
+  /** The same empty claim within this time is a retry of the same claim. The client waits 1.5 s between tries. */
+  static REPETICAO_MS = 10_000
+  /** A claim this soon after the account's seat request counts as `semChaveEmPedido`. */
+  static EM_PEDIDO_MS = 30_000
+  /** A stale-epoch refusal this soon after the same connection was served packages counts as `recusasDepoisDeReclamar`. */
+  static RECUSA_DEPOIS_DE_RECLAMAR_MS = 60_000
 
   constructor(escrever: Escrever = (linha) => process.stderr.write(`${linha}\n`), agora = currentMinute()) {
     this.#escrever = escrever
@@ -101,14 +125,8 @@ export class ContadoresDosLugares {
     this.notar("pedidos", Math.floor(agora / 60_000))
     if (ouviram === 0) this.notar("pedidosSemOuvintes", Math.floor(agora / 60_000))
     const chave = `${canal}|${conta}`
-    this.#pedidosEmAberto.delete(chave)
-    this.#pedidosEmAberto.set(chave, agora)
-    // Oldest first (insertion order): past the cap, the oldest request goes.
-    while (this.#pedidosEmAberto.size > ContadoresDosLugares.PEDIDOS_EM_ABERTO_MAXIMO) {
-      const primeiro = this.#pedidosEmAberto.keys().next().value
-      if (primeiro === undefined) break
-      this.#pedidosEmAberto.delete(primeiro)
-    }
+    lembrar(this.#pedidosEmAberto, chave, agora)
+    lembrar(this.#pedidoDaConta, conta, agora)
   }
 
   /** A Welcome stored for `conta` in `canal`: if that account asked for a seat there lately, it was answered. */
@@ -126,9 +144,27 @@ export class ContadoresDosLugares {
    * The line names no address, device, channel or IP: only the kind of claim and
    * how many devices were asked and served. `reseat` is a claim that named devices
    * (a seat repair since 1.3.25 names the asker's device); `convite` named none.
+   *
+   * `reclamacao` (1.3.26): who claimed (the connection, never written out), for whom,
+   * and which devices. With it, a retry of the same claim is not counted again, and a
+   * claim for an account that just asked for a seat also counts as `semChaveEmPedido`.
    */
-  semChave(tipo: "reseat" | "convite", pedidos: number, servidos: number, agora = Date.now()): void {
+  semChave(
+    tipo: "reseat" | "convite",
+    pedidos: number,
+    servidos: number,
+    agora = Date.now(),
+    reclamacao?: { quem: string; alvo: string; aparelhos?: readonly string[] | undefined },
+  ): void {
     const minuto = Math.floor(agora / 60_000)
+    if (reclamacao !== undefined) {
+      const chave = `${reclamacao.quem}|${reclamacao.alvo}|${[...(reclamacao.aparelhos ?? [])].sort().join(",")}`
+      const anterior = this.#reclamacoesVazias.get(chave)
+      lembrar(this.#reclamacoesVazias, chave, agora)
+      if (anterior !== undefined && agora - anterior < ContadoresDosLugares.REPETICAO_MS) return
+      const pediu = this.#pedidoDaConta.get(reclamacao.alvo)
+      if (pediu !== undefined && agora - pediu <= ContadoresDosLugares.EM_PEDIDO_MS) this.notar("semChaveEmPedido", minuto)
+    }
     this.notar("semChave", minuto)
     const linhas = this.#linhasNoMinuto
     if (linhas.minuto !== minuto) {
@@ -146,6 +182,54 @@ export class ContadoresDosLugares {
     this.#escrever(`enclave: ${nome}: no key package (devices asked ${pedidos}, served ${servidos})`)
   }
 
+  /** A local claim served `n` key packages to connection `quem` (never written out). */
+  reclamou(quem: string, n: number, agora = Date.now()): void {
+    if (n <= 0) return
+    const minuto = Math.floor(agora / 60_000)
+    for (let i = 0; i < n; i++) this.notar("pacotesServidos", minuto)
+    this.#ultimaReclamacao.delete(quem)
+    this.#ultimaReclamacao.set(quem, { em: agora, n })
+    while (this.#ultimaReclamacao.size > ContadoresDosLugares.PEDIDOS_EM_ABERTO_MAXIMO) {
+      const primeiro = this.#ultimaReclamacao.keys().next().value
+      if (primeiro === undefined) break
+      this.#ultimaReclamacao.delete(primeiro)
+    }
+  }
+
+  /**
+   * A commit refused with `stale-epoch` (layer A, 21/11/2026). When the same connection
+   * was served key packages just before, it is the shape that spent the iPhone's pool in
+   * production: claim, commit, refused, claim again. Counted, and one line that names no
+   * connection, address, channel or IP: only the seconds and the packages.
+   */
+  recusaPorEpoca(quem: string, agora = Date.now()): void {
+    const minuto = Math.floor(agora / 60_000)
+    this.notar("recusasPorEpoca", minuto)
+    const antes = this.#ultimaReclamacao.get(quem)
+    if (antes === undefined || agora - antes.em > ContadoresDosLugares.RECUSA_DEPOIS_DE_RECLAMAR_MS) return
+    this.notar("recusasDepoisDeReclamar", minuto)
+    this.#escreverComTecto(
+      minuto,
+      `enclave: stale-epoch-after-claim: commit refused ${Math.round((agora - antes.em) / 1_000)} s after ${antes.n} key package(s) were claimed on the same connection`,
+    )
+  }
+
+  /** One log line, under the per-minute cap shared with `semChave`. */
+  #escreverComTecto(minuto: number, linha: string): void {
+    const linhas = this.#linhasNoMinuto
+    if (linhas.minuto !== minuto) {
+      if (linhas.caladas > 0) this.#escrever(`enclave: no-key-package: ${linhas.caladas} more in minute ${linhas.minuto}, not written`)
+      this.#linhasNoMinuto = { minuto, escritas: 0, caladas: 0 }
+    }
+    const agoraLinhas = this.#linhasNoMinuto
+    if (agoraLinhas.escritas >= LINHAS_DE_REGISTO_POR_MINUTO) {
+      agoraLinhas.caladas += 1
+      return
+    }
+    agoraLinhas.escritas += 1
+    this.#escrever(linha)
+  }
+
   contagem(agora = currentMinute()): ContagemDosLugares {
     const contagens = Object.fromEntries(
       ACONTECIMENTOS_DOS_LUGARES.map((a) => [a, { ultimaHora: 0, ultimas24h: 0 }]),
@@ -159,6 +243,17 @@ export class ContadoresDosLugares {
       }
     }
     return { v: 1, minuto: agora, desde: this.#desde, contagens }
+  }
+}
+
+/** Set `chave` as the newest entry; past the cap, the oldest goes (insertion order). */
+function lembrar(mapa: Map<string, number>, chave: string, agora: number): void {
+  mapa.delete(chave)
+  mapa.set(chave, agora)
+  while (mapa.size > ContadoresDosLugares.PEDIDOS_EM_ABERTO_MAXIMO) {
+    const primeiro = mapa.keys().next().value
+    if (primeiro === undefined) break
+    mapa.delete(primeiro)
   }
 }
 

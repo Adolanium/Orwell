@@ -10,7 +10,7 @@ import { Skeleton } from "../../components/Skeleton.js"
 import { MarcaDeChamada } from "../../components/MarcaDeChamada.js"
 import { useVolumes } from "../../hooks/useVolumes.js"
 import { useToqueLongo } from "../../hooks/useToqueLongo.js"
-import { PersonAddIcon } from "../../icons.js"
+import { PersonAddIcon, SetaParaTrasIcon } from "../../icons.js"
 import { agruparMembros, type CargoDoMembro } from "../../lib/agruparMembros.js"
 import { tintaDoPapel } from "../../lib/roleColours.js"
 import { strings } from "../../strings.js"
@@ -34,6 +34,7 @@ export interface ChannelRole {
  * an eternal "A carregar…" over a fetch that already failed is a lie.
  */
 function MemberPanelInteira({
+  afastados = 0,
   channel,
   open = false,
   onClose,
@@ -55,8 +56,16 @@ function MemberPanelInteira({
   micCaladoDe,
   oficial = false,
   pedirPerfis,
+  onVoltar,
+  syncing = false,
+  daysAway = null,
 }: {
   channel: string
+  /**
+   * The phone (option B, 20/11/2026): the panel is a pushed screen over the
+   * conversation, and its header starts with a back arrow. Absent elsewhere.
+   */
+  onVoltar?: (() => void) | undefined
   /** On narrow screens the panel is a slide-in overlay; this is it, open.
    * On wide screens it is a plain grid column and this flag is inert. */
   open?: boolean
@@ -72,6 +81,11 @@ function MemberPanelInteira({
    */
   onClose?: (() => void) | undefined
   members: string[]
+  /**
+   * How many accounts hold the keys but the server says are gone (P7). Not in
+   * `members` and not in the count; said in one line, so nobody who can read is hidden.
+   */
+  afastados?: number | undefined
   /**
    * Ask for the names of these accounts (the common room). Called only for the
    * rows of the offline list that are on screen. Absent: an older host.
@@ -182,8 +196,21 @@ function MemberPanelInteira({
    * does not announce itself as open.
    */
   oficial?: boolean | undefined
+  /**
+   * This channel's history is syncing (D2): the same truth as the "Chat history
+   * is syncing." marker in the conversation, decided by the shell. The column
+   * goes grey and quiet until it ends, and says so at the top.
+   */
+  syncing?: boolean | undefined
+  /**
+   * Local calendar days since this device was last online with this account.
+   * `null` (a device that never was) and 0 (the same day) say nothing: the
+   * status line is then only "Now syncing".
+   */
+  daysAway?: number | null | undefined
 }): React.JSX.Element {
   const painel = useRef<HTMLElement>(null)
+  const saindo = useSaidaDoSync(syncing)
   const fecharRef = useRef(onClose)
   fecharRef.current = onClose
 
@@ -340,11 +367,17 @@ function MemberPanelInteira({
       {open && onClose && <div className="members-scrim" aria-hidden="true" onMouseDown={onClose} />}
       <aside
         ref={painel}
-        className={open ? "members open" : "members"}
+        className={["members", open && "open", syncing && "syncing"].filter(Boolean).join(" ")}
         role={open && onClose ? "dialog" : undefined}
         aria-label={open && onClose ? strings.members.drawerLabel : undefined}
+        aria-busy={syncing || undefined}
       >
         <header className="members-header">
+          {onVoltar && (
+            <button type="button" className="topbar-voltar" aria-label={strings.telemovel.voltar} onClick={onVoltar}>
+              <SetaParaTrasIcon size={22} />
+            </button>
+          )}
           <span>
             {state === "ready"
               ? strings.members.count(members.length)
@@ -354,6 +387,27 @@ function MemberPanelInteira({
           </span>
         </header>
 
+        {/* The syncing state, at the top of the column (21/11/2026). While it
+            stays, the rows below are grey and take no pointer or key: the list
+            is still arriving, and a person opened from it could be out of date.
+            When the sync ends the block fades out with the rows coming back
+            (`MEMBERS_SYNC_EXIT_MS`), and only then leaves the tree. */}
+        {(syncing || saindo) && (
+          <div
+            className={syncing ? "members-syncing" : "members-syncing leaving"}
+            role={syncing ? "status" : undefined}
+            aria-hidden={syncing ? undefined : true}
+          >
+            <span className="members-syncing-title">{strings.members.syncingTitle}</span>
+            {daysAway !== null && daysAway > 0 && (
+              <span className="members-syncing-away">{strings.members.syncingAway(daysAway)}</span>
+            )}
+            <span className="members-syncing-track" aria-hidden="true">
+              <span className="members-syncing-bar" />
+            </span>
+          </div>
+        )}
+
         {/* Below the count and above the names, because it is the count it corrects:
             four names in a list read as four people.
 
@@ -361,8 +415,9 @@ function MemberPanelInteira({
             cannot invite, and knowing where you are does not depend on any
             right. */}
         {oficial && <p className="members-open field-note">{strings.members.openChannel}</p>}
+        {state === "ready" && afastados > 0 && <p className="members-afastados field-note">{strings.members.afastados(afastados)}</p>}
 
-        <ul className="member-list">
+        <ul className="member-list" inert={syncing || undefined}>
           {state === "loading" &&
             [0, 1, 2].map((row) => (
               <li key={`skeleton-${row}`} aria-hidden="true">
@@ -433,6 +488,36 @@ function MemberPanelInteira({
       </aside>
     </>
   )
+}
+
+/**
+ * How long the column takes to come back when a sync ends, in ms. The same
+ * value as the transition on `.member-list` and `.members-syncing` in
+ * `screens.css`, with and without reduced motion.
+ */
+export const MEMBERS_SYNC_EXIT_MS = 360
+
+/**
+ * True for `MEMBERS_SYNC_EXIT_MS` after `syncing` goes from true to false: the
+ * status block stays in the tree while it fades, instead of vanishing and
+ * pulling the list up under the pointer.
+ */
+function useSaidaDoSync(syncing: boolean): boolean {
+  const [saindo, setSaindo] = useState(false)
+  const antes = useRef(syncing)
+  useEffect(() => {
+    const sincronizava = antes.current
+    antes.current = syncing
+    if (syncing) {
+      setSaindo(false)
+      return
+    }
+    if (!sincronizava) return
+    setSaindo(true)
+    const relogio = setTimeout(() => setSaindo(false), MEMBERS_SYNC_EXIT_MS)
+    return () => clearTimeout(relogio)
+  }, [syncing])
+  return saindo
 }
 
 /** Above this many members, the panel shows only who is online. */

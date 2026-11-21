@@ -5,7 +5,7 @@
  * and **jsdom applies no stylesheets and animates nothing.** It says that `--voz`
  * was written to the card, which is half the story; it does not know if the bars
  * move up, if the card ring grows, if anything shifts because of it, or if with
- * `prefers-reduced-motion` the design stays still. Those are calculated pixels,
+ * `prefers-reduced-motion` the wave still moves, only slower. Those are calculated pixels,
  * and you need a browser to have them.
  *
  * And there is a second thing only a browser can tell you: **the cost**. This runs
@@ -17,7 +17,7 @@
  *   ANTIGO=1 node scripts/medir-voz-visivel.mjs
  *
  * The second form restores by CSS the old design, no wave at all, and the call
- * card without a ring, and the measurements that bite must come out RED. If
+ * card without a speaking ring or halo, and the measurements that bite must come out RED. If
  * they are the same in both, you are not measuring anything.
  *
  * What it does NOT prove: that the meter measures well (that is
@@ -165,6 +165,24 @@ window.__aoCanto = () => {
   }
 }
 
+/*
+  The speaking ring of a card: the green SVG ring over the resting one
+  (\`.anel-de-voz.fala\`). Since e6775878 the card itself has no shadow
+  that follows the voice: the ring only changes \`opacity\`, the halo only
+  \`opacity\` and \`transform\`, and neither has a layout size that moves.
+*/
+window.__anel = (cartao) => {
+  const anel = cartao.querySelector(".anel-de-voz.fala")
+  if (!anel) return { visivel: false, opacidade: 0, caixa: "" }
+  const r = anel.getBoundingClientRect()
+  const estilo = getComputedStyle(anel)
+  return {
+    visivel: estilo.display !== "none" && r.width > 0,
+    opacidade: +estilo.opacity,
+    caixa: \`\${Math.round(r.width)}x\${Math.round(r.height)}\`,
+  }
+}
+
 window.__voz = (valor) => {
   for (const alvo of document.querySelectorAll(".call-chip, .call-dock")) {
     if (valor === null) alvo.style.removeProperty("--voz")
@@ -246,7 +264,7 @@ await build({
  */
 const ANTIGO = `
   .onda { display: none !important; }
-  .call-chip { box-shadow: none !important; }
+  .call-chip .anel-de-voz.fala, .call-chip .halo-de-voz { display: none !important; }
 `
 
 writeFileSync(
@@ -361,29 +379,34 @@ async function abrir(opcoes = {}, procura = "") {
   )
 
   /*
-    The card ring, and the promise it has to keep: grow without pushing.
+    The card ring, and the promise it has to keep: light up without pushing.
 
-    It is drawn with `box-shadow` and not `border` for exactly this reason. A
-    border is part of the box, and changing it pushed the whole card row on each
-    syllable from each person.
+    The ring is the green SVG circle around the avatar, and it only changes
+    `opacity`. It used to be the card's `box-shadow` (before e6775878), and
+    before that a `border`, which is part of the box: changing it pushed the
+    whole card row on each syllable from each person. The ring is read after
+    its transition settles, because that is what the person sees.
   */
-  const anel = await page.evaluate(() => {
+  const anel = await page.evaluate(async () => {
     const cartao = document.querySelector(".call-chip")
     const posicao = () =>
       [...document.querySelectorAll(".call-chip")].map((c) => {
         const r = c.getBoundingClientRect()
         return `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}`
       })
+    const assenta = () => new Promise((r) => setTimeout(r, 600))
     window.__voz(0)
-    const calado = { sombra: getComputedStyle(cartao).boxShadow, caixas: posicao() }
+    await assenta()
+    const calado = { anel: window.__anel(cartao), caixas: posicao() }
     window.__voz(1)
-    const aFalar = { sombra: getComputedStyle(cartao).boxShadow, caixas: posicao() }
+    await assenta()
+    const aFalar = { anel: window.__anel(cartao), caixas: posicao() }
     return { calado, aFalar }
   })
   check(
     "o cartão de quem fala acende um anel",
-    anel.calado.sombra !== anel.aFalar.sombra && /px/.test(anel.aFalar.sombra),
-    `${anel.calado.sombra} → ${anel.aFalar.sombra}`,
+    anel.aFalar.anel.visivel && anel.calado.anel.opacidade < 0.05 && anel.aFalar.anel.opacidade > 0.95,
+    `visível ${anel.aFalar.anel.visivel}; opacidade ${anel.calado.anel.opacidade} → ${anel.aFalar.anel.opacidade}`,
   )
   check(
     "e nada se desloca por causa disso: os cartões ficam todos onde estavam",
@@ -480,32 +503,37 @@ async function abrir(opcoes = {}, procura = "") {
   const { ctx, page } = await abrir({ reducedMotion: "reduce" })
 
   /*
-    With this setting on, changing the level cannot change a single pixel of
-    geometry. We measure with the voice varying end to end: if any bar changed
-    size, it would show here.
+    With this setting on, the wave keeps moving with the voice, only slower
+    (1.3.26; before, it stopped for good). Nothing stops: a still wave reads as
+    a broken meter. Right after the level jumps the bars have barely moved (no
+    jump in the same frame); once the slow transition ends they stand taller.
   */
-  const quieto = await page.evaluate(() => {
+  const quieto = await page.evaluate(async () => {
     const barras = () =>
       [...document.querySelectorAll(".call-dock-onda .onda-barra")].map(
         (b) => +b.getBoundingClientRect().height.toFixed(2),
       )
+    const quadro = () => new Promise((r) => requestAnimationFrame(() => r()))
     window.__voz(0)
+    await new Promise((r) => setTimeout(r, 900))
     const calado = barras()
-    window.__voz(0.5)
-    const meio = barras()
     window.__voz(1)
-    return { calado, meio, alto: barras(), altura: document.querySelector(".call-dock-onda").offsetHeight }
+    await quadro()
+    await quadro()
+    const logo = barras()
+    await new Promise((r) => setTimeout(r, 1200))
+    return { calado, logo, alto: barras(), altura: document.querySelector(".call-dock-onda").offsetHeight }
   })
+  const maior = (lista) => Math.max(...lista)
   check(
-    "com movimento reduzido, mudar o nível não mexe um único píxel",
-    JSON.stringify(quieto.calado) === JSON.stringify(quieto.alto) &&
-      JSON.stringify(quieto.calado) === JSON.stringify(quieto.meio),
-    `${JSON.stringify(quieto.calado)} → ${JSON.stringify(quieto.alto)}`,
+    "reduced motion: the level does not jump to its height in the same frame",
+    maior(quieto.logo) < maior(quieto.alto) - 1,
+    `${JSON.stringify(quieto.calado)} → ${JSON.stringify(quieto.logo)} → ${JSON.stringify(quieto.alto)}`,
   )
   check(
-    "e as barras ficam à altura toda, em vez de desaparecerem",
-    quieto.alto.every((altura) => altura >= quieto.altura - 0.5),
-    `${JSON.stringify(quieto.alto)} de ${quieto.altura}px`,
+    "reduced motion: and the bars still rise with the voice, slower",
+    maior(quieto.alto) > maior(quieto.calado) * 2,
+    `${JSON.stringify(quieto.calado)} → ${JSON.stringify(quieto.alto)} of ${quieto.altura}px`,
   )
 
   /*
@@ -535,17 +563,40 @@ async function abrir(opcoes = {}, procura = "") {
     `a 30%: centro ${cores.baixinho[2]}, ponta ${cores.baixinho[0]}`,
   )
 
-  const cartao = await page.evaluate(() => {
+  /*
+    With reduced motion the ring still lights up, only slower: two frames after
+    the voice jumps it has barely started, and once its (doubled) transition
+    ends it is fully lit. Its box keeps the same size, the card shadow does not
+    follow the voice, and the frame changes colour in place.
+  */
+  const cartao = await page.evaluate(async () => {
     const chip = document.querySelector(".call-chip")
+    const quadro = () => new Promise((r) => requestAnimationFrame(() => r()))
+    const ler = () => ({
+      anel: window.__anel(chip),
+      sombra: getComputedStyle(chip).boxShadow,
+      moldura: getComputedStyle(chip).borderTopColor,
+    })
     window.__voz(0)
-    const calado = { sombra: getComputedStyle(chip).boxShadow, moldura: getComputedStyle(chip).borderTopColor }
+    await new Promise((r) => setTimeout(r, 900))
+    const calado = ler()
     window.__voz(1)
-    return { calado, aFalar: { sombra: getComputedStyle(chip).boxShadow, moldura: getComputedStyle(chip).borderTopColor } }
+    await quadro()
+    await quadro()
+    const logo = ler()
+    await new Promise((r) => setTimeout(r, 900))
+    return { calado, logo, aFalar: ler() }
   })
   check(
     "o anel do cartão não cresce, e a moldura muda de cor no lugar dele",
-    cartao.aFalar.sombra === "none" && cartao.calado.moldura !== cartao.aFalar.moldura,
-    `sombra ${cartao.aFalar.sombra}; moldura ${cartao.calado.moldura} → ${cartao.aFalar.moldura}`,
+    cartao.aFalar.anel.visivel &&
+      cartao.calado.anel.caixa === cartao.aFalar.anel.caixa &&
+      cartao.calado.sombra === cartao.aFalar.sombra &&
+      cartao.logo.anel.opacidade < 0.5 &&
+      cartao.aFalar.anel.opacidade > 0.95 &&
+      cartao.calado.moldura !== cartao.aFalar.moldura,
+    `anel ${cartao.calado.anel.caixa} → ${cartao.aFalar.anel.caixa}, opacidade ${cartao.calado.anel.opacidade} → ${cartao.logo.anel.opacidade} → ${cartao.aFalar.anel.opacidade}; ` +
+      `sombra igual ${cartao.calado.sombra === cartao.aFalar.sombra}; moldura ${cartao.calado.moldura} → ${cartao.aFalar.moldura}`,
   )
 
   await ctx.close()

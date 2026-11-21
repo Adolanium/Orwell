@@ -14,6 +14,7 @@ import {
 } from "./motor.js"
 import { PREFERENCIAS_DE_SOM_POR_OMISSAO } from "./preferencias.js"
 import { moradaDeTeste } from "../../testes/moradas.js"
+import { tocarCotoveladaEnviada } from "../lib/sounds.js"
 
 /**
  * The engine rules, one by one.
@@ -692,5 +693,49 @@ describe("os outros sons da chamada", () => {
       if (tipo === "voz-perdida") expect(vibracoes, tipo).toHaveLength(1)
       else expect(vibracoes, tipo).toEqual([])
     }
+  })
+})
+
+/* ---------------------------------------- the nudge I send (21/11/2026) */
+
+describe("a cotovelada de quem envia", () => {
+  it("toca o mesmo som, com a janela à frente, e sem vibrar", () => {
+    const m = montar({ ambiente: { janelaAFrente: () => true } })
+    expect(tocarCotoveladaEnviada(m.motor)).toBe("tocou")
+    expect(m.tocados).toEqual([{ tipo: "cotovelada", amplitude: amplitudeDe(ESTADO.volume) }])
+    // The vibration is for the person nudged; the sender has the phone in hand.
+    expect(m.vibracoes).toEqual([])
+  })
+
+  it("a cotovelada que chega continua a vibrar", () => {
+    // The neighbor case: without it, a `semVibracao` read too broadly would go unnoticed.
+    const m = montar()
+    expect(m.motor.tocar({ tipo: "cotovelada" })).toBe("tocou")
+    expect(m.vibracoes).toEqual([[60, 40, 60, 40, 60]])
+  })
+
+  it("com a cotovelada desligada nos Sons, não toca", () => {
+    const m = montar({
+      estado: { som: { ...PREFERENCIAS_DE_SOM_POR_OMISSAO, porTipo: { ...PREFERENCIAS_DE_SOM_POR_OMISSAO.porTipo, cotovelada: false } } },
+    })
+    expect(tocarCotoveladaEnviada(m.motor)).toBe("tipo-desligado")
+    expect(m.tocados).toEqual([])
+  })
+
+  it("segue o volume, e o volume zero é silêncio", () => {
+    const m = montar({ estado: { volume: 30 } })
+    tocarCotoveladaEnviada(m.motor)
+    expect(m.tocados[0]?.amplitude).toBe(amplitudeDe(30))
+    const mudo = montar({ estado: { volume: 0 } })
+    expect(tocarCotoveladaEnviada(mudo.motor)).toBe("volume-zero")
+  })
+
+  it("cinco seguidas dão um som: o tecto de 4 s da cotovelada", () => {
+    const m = montar()
+    const motivos = Array.from({ length: 5 }, () => tocarCotoveladaEnviada(m.motor))
+    expect(motivos).toEqual(["tocou", "rajada", "rajada", "rajada", "rajada"])
+    expect(m.tocados).toHaveLength(1)
+    m.relogio.avancar(4_000)
+    expect(tocarCotoveladaEnviada(m.motor)).toBe("tocou")
   })
 })

@@ -180,4 +180,4 @@ export type View = "perfil" | "chat" | "social" | "pessoas" | "config"
  * `"suspensa"`: the server suspended this account; the gate shows `ContaSuspensa`,
  * with the vault open to sign the review request.
  */
-export type Stage = "loading" | "error" | "setup" | "emparelhar" | "saiu-de-beta" | "unlock" | "suspensa" | "ready"
+export type Stage = "loading" | "error" | "setup" | "emparelhar" | "saiu-de-beta" | "unlock" | "removido" | "suspensa" | "ready"

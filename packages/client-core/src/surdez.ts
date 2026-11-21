@@ -199,11 +199,16 @@ export class PedidosDeLugar {
    * a series asks in `adiantamentoMs`, but never less than the first wait
    * after its last request: a connection that drops every ten seconds must not
    * ask every ten seconds.
+   *
+   * `so` (1.3.26): only these channels. A member came online, and only the
+   * channels where that member sits have someone new to answer.
    */
-  adiantar(): void {
+  adiantar(so?: Iterable<string>): void {
     const agora = this.#porta.agora()
     const minimo = this.#regras.atrasos[0] ?? 0
-    for (const canal of this.#canais.values()) {
+    const escolhidos = so === undefined ? null : new Set(so)
+    for (const [nome, canal] of this.#canais) {
+      if (escolhidos !== null && !escolhidos.has(nome)) continue
       const cedo = agora + this.#variar(this.#regras.adiantamentoMs)
       const depoisDoUltimo = canal.ultimo === null ? cedo : canal.ultimo + minimo
       canal.proxima = Math.min(canal.proxima, Math.max(cedo, depoisDoUltimo))

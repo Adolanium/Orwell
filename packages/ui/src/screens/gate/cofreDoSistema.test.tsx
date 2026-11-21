@@ -7,6 +7,7 @@ import { en } from "../../linguas/en.js"
 import { strings } from "../../strings.js"
 import { ToastProvider } from "../../components/Toast.js"
 import { Emparelhar } from "./Emparelhar.js"
+import { ateAPalavraPasse, comEmparelhamento } from "../../../testes/emparelharAtePalavraPasse.js"
 import { Setup } from "./Setup.js"
 import { identidadeParaOGestor } from "./CampoDeIdentidade.js"
 import { Unlock } from "./Unlock.js"
@@ -44,6 +45,13 @@ function ponteQuePedeFrase(): EnclaveBridge {
   } as unknown as EnclaveBridge
 }
 
+/** A device with no vault yet, that pairs: `Emparelhar` only runs there. */
+function ponteDeAparelhoNovo(): EnclaveBridge {
+  const ponte = ponteQuePedeFrase()
+  ponte.vault.status = async () => ({ exists: false, supportsOsProtection: false })
+  return ponte
+}
+
 /** The host for someone without an account yet: it's the path of `Setup`. */
 function ponteQueCriaConta(): EnclaveBridge {
   return {
@@ -60,7 +68,7 @@ function ponteQueCriaConta(): EnclaveBridge {
 async function abrirOPortao(): Promise<void> {
   render(
     <BridgeContext.Provider value={ponteQuePedeFrase()}>
-      <Unlock onDone={vi.fn()} onStartOver={vi.fn()} />
+      <Unlock onDone={vi.fn()} />
     </BridgeContext.Provider>,
   )
   await waitFor(() => expect(document.querySelector('input[type="password"]')).not.toBeNull())
@@ -107,13 +115,13 @@ describe("desbloquear: o gestor do sistema é convidado a preencher", () => {
     const aoEntrar = vi.fn()
     render(
       <BridgeContext.Provider value={ponteQuePedeFrase()}>
-        <Unlock onDone={aoEntrar} onStartOver={vi.fn()} />
+        <Unlock onDone={aoEntrar} />
       </BridgeContext.Provider>,
     )
     await waitFor(() => expect(document.querySelector('input[type="password"]')).not.toBeNull())
 
     const formulario = campoDaFrase().closest("form") as HTMLFormElement
-    const botao = screen.getByRole("button", { name: strings.gate.open })
+    const botao = screen.getByRole("button", { name: strings.entrada.entrar })
     // A submit button INSIDE the form: that's what makes the mobile keyboard's "go"
     // open the vault, instead of doing nothing.
     expect(botao.getAttribute("type")).toBe("submit")
@@ -139,13 +147,14 @@ describe("desbloquear: o gestor do sistema é convidado a preencher", () => {
  */
 describe("e onde se GUARDA a frase, o nome é o mesmo", () => {
   it("emparelhar um aparelho novo põe o campo de identidade no ecrã da frase-passe", async () => {
+    const { bridge, emitir } = comEmparelhamento(ponteDeAparelhoNovo())
     render(
-      <BridgeContext.Provider value={ponteQuePedeFrase()}>
-        {/* `linkInicial` goes straight to the key step, which is what asks for the password. */}
-        <Emparelhar linkInicial="enclave://pair/x" onDone={vi.fn()} onBack={vi.fn()} />
+      <BridgeContext.Provider value={bridge}>
+        <Emparelhar linkInicial="https://orwell.pt/app/emparelhar#6gzjKC5Y-jxiXv_ZLoIzYX6ZL4PeZ24HirzSb__z6VY" onDone={vi.fn()} onBack={vi.fn()} />
       </BridgeContext.Provider>,
     )
-    await waitFor(() => expect(screen.getByRole("heading", { name: strings.pairing.keyTitle })).toBeTruthy())
+    // No record from the other device: a new account password, which the manager should save.
+    await ateAPalavraPasse(emitir, "nova")
 
     const identidade = campoDeIdentidade()
     expect(identidade, "o Emparelhar perdeu o campo de identidade").not.toBeNull()
@@ -163,10 +172,8 @@ describe("e onde se GUARDA a frase, o nome é o mesmo", () => {
         </BridgeContext.Provider>
       </ToastProvider>,
     )
-    await waitFor(() => expect(screen.getByPlaceholderText(strings.gate.namePlaceholder)).toBeTruthy())
-    await pessoa.type(screen.getByPlaceholderText(strings.gate.namePlaceholder), "Duarte{Enter}")
-    await pessoa.keyboard("{Enter}") // the photo (27 October 2026): skipped
-    await waitFor(() => expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(strings.gate.askPass))
+    await pessoa.click(await screen.findByRole("button", { name: strings.entrada.criarConta }))
+    await waitFor(() => expect(screen.getByLabelText(strings.entrada.nome)).toBeTruthy())
 
     const identidade = campoDeIdentidade()
     expect(identidade, "o Setup perdeu o campo de identidade").not.toBeNull()
@@ -179,12 +186,13 @@ describe("e onde se GUARDA a frase, o nome é o mesmo", () => {
     const noPortao = campoDeIdentidade()?.value
     cleanup()
 
+    const comPar = comEmparelhamento(ponteDeAparelhoNovo())
     render(
-      <BridgeContext.Provider value={ponteQuePedeFrase()}>
-        <Emparelhar linkInicial="enclave://pair/x" onDone={vi.fn()} onBack={vi.fn()} />
+      <BridgeContext.Provider value={comPar.bridge}>
+        <Emparelhar linkInicial="https://orwell.pt/app/emparelhar#6gzjKC5Y-jxiXv_ZLoIzYX6ZL4PeZ24HirzSb__z6VY" onDone={vi.fn()} onBack={vi.fn()} />
       </BridgeContext.Provider>,
     )
-    await waitFor(() => expect(screen.getByRole("heading", { name: strings.pairing.keyTitle })).toBeTruthy())
+    await ateAPalavraPasse(comPar.emitir, "conta")
 
     expect(campoDeIdentidade()?.value).toBe(noPortao)
     expect(noPortao).toBeTruthy()
@@ -222,24 +230,21 @@ describe("o que o ecrã diz enquanto a chave se deriva", () => {
 
     render(
       <BridgeContext.Provider value={ponte}>
-        <Unlock onDone={vi.fn()} onStartOver={vi.fn()} />
+        <Unlock onDone={vi.fn()} />
       </BridgeContext.Provider>,
     )
     await waitFor(() => expect(document.querySelector('input[type="password"]')).not.toBeNull())
-    expect(screen.queryByText(strings.gate.openingNote)).toBeNull()
-
     fireEvent.change(campoDaFrase(), { target: { value: "a frase certa" } })
     fireEvent.submit(campoDaFrase().closest("form") as HTMLFormElement)
 
-    const nota = await screen.findByText(strings.gate.openingNote)
-    expect(nota.getAttribute("role")).toBe("status")
-    expect(screen.getByRole("button", { name: strings.gate.opening })).toBeTruthy()
+    // The button says it, with the ring; the long note under it went (21/11/2026).
+    const botao = await screen.findByRole("button", { name: strings.entrada.aAbrir })
+    expect(botao.querySelector(".anel-ocupado")).toBeTruthy()
   })
 
-  it("a nota existe nas duas línguas e não tem travessões", () => {
-    expect(strings.gate.openingNote).toBeTruthy()
-    expect(en.gate?.openingNote).toBeTruthy()
-    expect(strings.gate.openingNote).not.toMatch(/[—–]/)
+  it("o texto existe nas duas línguas e não tem travessões", () => {
+    expect(en.entrada?.aAbrir).toBeTruthy()
+    expect(strings.entrada.aAbrir).not.toMatch(/[—–]/)
   })
 })
 
@@ -291,7 +296,7 @@ describe("um cofre do beta nunca chega à decifra", () => {
 
     render(
       <BridgeContext.Provider value={ponte}>
-        <Unlock onDone={vi.fn()} onStartOver={vi.fn()} />
+        <Unlock onDone={vi.fn()} />
       </BridgeContext.Provider>,
     )
     await waitFor(() => expect(document.querySelector('input[type="password"]')).not.toBeNull())

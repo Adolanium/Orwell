@@ -251,7 +251,7 @@ try {
     window.__aoNascer = { href: location.href }
   })
   await b.goto(link, { waitUntil: "domcontentloaded" })
-  await b.getByPlaceholder("Como queres aparecer").waitFor({ timeout: 60_000 })
+  await b.getByRole("heading", { name: "Bem-vindo ao Orwell" }).waitFor({ timeout: 60_000 })
 
   const depois = await b.evaluate(() => ({ pathname: location.pathname, hash: location.hash, search: location.search, historia: history.length, nascer: window.__aoNascer.href }))
   check("(a) logo após o arranque o caminho é /app/", depois.pathname === "/app/", depois.pathname)
@@ -390,7 +390,7 @@ try {
   const ctxD = await browser.newContext({ ...CONTEXTO, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
   const d = await ctxD.newPage()
   await d.goto(link, { waitUntil: "domcontentloaded" })
-  await d.getByPlaceholder("Como queres aparecer").waitFor({ timeout: 60_000 })
+  await d.getByRole("heading", { name: "Bem-vindo ao Orwell" }).waitFor({ timeout: 60_000 })
   const medidas = await d.evaluate(() => {
     const linha = document.querySelector(".gate-convite").getBoundingClientRect()
     const cartao = document.querySelector(".gate-card").getBoundingClientRect()

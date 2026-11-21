@@ -6,7 +6,19 @@ import { CodigoCurto } from "./ligacao-curta.js"
 import { AtestacaoDeIdade } from "./idade-da-conta.js"
 import { DeviceManifestWire, RevogadosNoManifesto } from "./manifest.js"
 import { PAIR_ID_PATTERN, PAIR_PAYLOAD_MAX_CHARS } from "./pair.js"
+import { PAIR_CODE_NAMEPLATE_PATTERN } from "./pairCode.js"
 import { ConviteDeRegisto, ModoDeRegisto } from "./registo.js"
+import {
+  ContaNova,
+  CriarCanais,
+  RoomQuota,
+  REFUSAL_ROOM_LIMIT,
+  DesafioDeTrabalho,
+  FilaDaSalaComum,
+  ProvaDeTrabalho,
+  RECUSA_DE_CONTA_NOVA,
+  RECUSA_DE_LIMITE_DE_CANAIS,
+} from "./anti-abuso.js"
 import { SELO_DO_CONVITE_MAX_CARACTERES } from "./selo-do-convite.js"
 
 /**
@@ -99,6 +111,42 @@ export const CAPACIDADE_BUNDLE = "keypackage-bundle"
 export const CAPACIDADE_EMPARELHAMENTO = "pairing"
 
 /**
+ * The capability that says "this server has short-code pairing boxes"
+ * (1.3.26, `pairCode.ts`): accepts `pair.code.open` from a connection WITHOUT
+ * an account (the new device, which shows the code) and `pair.code.join` from
+ * an authenticated account (the device that types it), and relays
+ * `pair.send` between them without reading, as for `pairing`.
+ *
+ * Server first, client second: a new device that does not hear it in
+ * `hello.ok` does not show a code, and the person uses the QR or the long
+ * code of the device with the account, as before. An old app never sends the
+ * new frames, so nothing changes for it.
+ */
+export const CAPABILITY_PAIRING_PAKE = "pairing-pake"
+
+/**
+ * The capability that says "send me my account's new manifest when it changes"
+ * (1.3.26, importing an account file on a new device).
+ *
+ * **Announced in both directions, and the client's announcement decides
+ * delivery**, like `CAPACIDADE_SINAL_EFEMERO`. The server announces it in
+ * `hello.ok`; a client announces it in `hello.capabilities`. After a
+ * `manifest.publish` the server accepts, it sends the stored manifest as an
+ * unasked `manifest.result` to the OTHER live connections of the same account
+ * that announced it. An older client never announces it, and so never gets a
+ * `manifest.result` it did not ask for.
+ *
+ * What it is for: a device that joined the account with the account file shows
+ * a notice on the other devices at once ("A new device joined the account"),
+ * not on their next connection. The receiver verifies the manifest as always
+ * (signature, address, version that never goes back).
+ *
+ * What the server learns: nothing new. It already stores the manifest and knows
+ * which connections belong to the account.
+ */
+export const CAPACIDADE_MANIFESTO_AO_VIVO = "manifest-push"
+
+/**
  * The capability that says "this server routes ephemeral channel signals"
  * (`channel.sinal`): a frame encrypted by the client, which the server passes to
  * other members connected at that moment and does not store.
@@ -121,6 +169,26 @@ export const CAPACIDADE_EMPARELHAMENTO = "pairing"
  * the server does not have. See `docs/THREAT-MODEL.md`, "Ephemeral channel signals".
  */
 export const CAPACIDADE_SINAL_EFEMERO = "sinal-efemero"
+
+/**
+ * The capability that says "this server delivers a `channel.sinal` with `para`
+ * only to the connections of that device" (1.3.26).
+ *
+ * `para` is a DEVICE key, in base64url: the key that signed the connection's
+ * login (with the chain, the device key; without one, the account key). A
+ * signal for one device used to go to every connection in the channel, and the
+ * server counted its bytes times all of them: in a channel with a few hundred
+ * connections, one answer did not fit in the channel's minute.
+ *
+ * Only announced by the server. A server before it drops the unknown field
+ * and delivers to everyone, as before; the client checks this capability before
+ * it counts a signal with `para` as one copy. A signal without `para` is still
+ * delivered to every connection in the channel.
+ *
+ * **What the server learns:** the device each addressed signal is for. See
+ * `docs/THREAT-MODEL.md`, "Ephemeral channel signals".
+ */
+export const CAPACIDADE_SINAL_PARA = "sinal-para"
 
 /**
  * The PROTOCOL limit for the content of a `channel.sinal`, in
@@ -251,6 +319,23 @@ export const CAPACIDADE_SELO_DO_CONVITE = "selo-do-convite"
  * `codeKey` and `prova` always: a server that does not know them strips them when parsing.
  */
 export const CAPACIDADE_RESGATE_POR_PROVA = "resgate-por-prova"
+
+/**
+ * The server answers `channel.members.get` with its roster of the channel (P7, 1.3.26).
+ *
+ * The roster is the `subscriptions` table the server already keeps to deliver to
+ * offline accounts, plus the accounts with a recent Welcome there (invited, not
+ * connected yet). The client never shows this list: it only uses it to leave out
+ * of the count the accounts of THIS server that have a leaf in the tree but that
+ * the server says are gone. See `Session.membrosVisiveis`.
+ *
+ * What the server learns that it did not know: nothing. The answer is its own data,
+ * and only to a connection subscribed to the channel.
+ */
+export const CAPACIDADE_MEMBROS_DO_CANAL = "membros-do-canal"
+
+/** The largest roster `channel.members` carries. Above this the server says it does not know. */
+export const MEMBROS_DO_CANAL_MAX = 5_000
 
 /**
  * The error code that rejects a client below the server's minimum version
@@ -450,6 +535,9 @@ export function ambitoDaChamada(channel: string, room: string): string {
 
 const Base64 = z.string().regex(/^[A-Za-z0-9_-]*$/, "expected unpadded base64url")
 
+/** See `pedido-de-lugar.ts`. Bounded: an Ed25519 signature is 86 characters in base64url. */
+const ProvaDoPedidoDeLugarWire = z.object({ em: z.number().int().nonnegative(), assinatura: Base64.max(128) })
+
 /** The seal of the invite on the wire, with a cap. See `selo-do-convite.ts`. */
 const SeloDoConvite = Base64.max(SELO_DO_CONVITE_MAX_CARACTERES)
 
@@ -472,6 +560,9 @@ const Address = z.string().min(3).max(255)
 
 /** The identifier of a pairing box: 22 base64url characters, nothing more. See `pair.ts`. */
 const PairId = z.string().regex(PAIR_ID_PATTERN, "expected a 22-char base64url pair id")
+
+/** The two characters of a short code that the server sees. See `pairCode.ts`. */
+const Nameplate = z.string().regex(PAIR_CODE_NAMEPLATE_PATTERN, "expected a 2-char pairing nameplate")
 
 /**
  * The encrypted content of a `pair.send`. The server does not read it, and the
@@ -596,15 +687,20 @@ const TramasDoClienteSemCofre = z.discriminatedUnion("t", [
    * Step 2: prove possession of the signing key presented at `auth.begin`.
    *
    * **`posse` and `assumirPosse`: which copy of a device speaks for it.**
-   * Importing an account file makes a COPY of the device that exported it: the
-   * same device key and the same MLS leaf in each channel. The server does not
-   * distinguish the two by key, and two connected copies consume the same ratchet
-   * and break channels (measured 27 October 2026 in
-   * `scripts/e2e-exportar-importar.mjs`). So each device has a GENERATION of
-   * possession on the server: the copy just imported asks for the next one
-   * (`assumirPosse`), and a copy that presents a generation below the current
-   * one is rejected as revoked. That is what makes the interface text true:
-   * "the old device can no longer use it."
+   * Up to 1.3.25, importing an account file made a COPY of the device that
+   * exported it: the same device key and the same MLS leaf in each channel. Two
+   * connected copies of one device consume the same ratchet and break channels
+   * (measured 27 October 2026 in `scripts/e2e-exportar-importar.mjs`), so each
+   * device has a GENERATION of possession on the server: the copy just imported
+   * asked for the next one (`assumirPosse`), and a copy that presents a
+   * generation below the current one is rejected as revoked.
+   *
+   * **Since 1.3.26 an import never copies a device** (21/11/2026): the
+   * importing device makes a NEW device key, certified by the account key in
+   * the file, and adds it to the manifest in one short
+   * connection with the old key (`passagem.ts` in the core). Both devices keep
+   * working, each with its own leaves, so no ratchet is shared. A 1.3.26 client
+   * never sends `assumirPosse`; the server still honours it from a 1.3.25 client.
    *
    * Here and not in `auth.begin`: raising the generation takes possession from
    * the other copy, and only whoever already proved the key can do it. Optional
@@ -628,6 +724,20 @@ const TramasDoClienteSemCofre = z.discriminatedUnion("t", [
      * a server before 1.3.25 (an unknown field is dropped).
      */
     conviteDeRegisto: ConviteDeRegisto.optional(),
+    /**
+     * The proof of work for a NEW account (1.3.26, see `anti-abuso.ts`): the
+     * challenge from a `hello.ok`, and the nonce that meets it. Ignored for an
+     * account that already exists, and by a server before 1.3.26.
+     */
+    provaDeTrabalho: ProvaDeTrabalho.optional(),
+    /**
+     * A community invite, for a NEW account over the network limit (1.3.26, see
+     * `provarConviteNoRegisto`): the invite's `codeHash`, and the proof that the
+     * app holds the link. The invite is not spent here; `invite.redeem` spends it
+     * as always. Ignored for an account that already exists, and by an older
+     * server.
+     */
+    conviteDeComunidade: z.object({ codeHash: Base64.min(1).max(64), prova: Base64.min(1).max(128) }).optional(),
   }),
 
   z.object({ t: z.literal("channel.subscribe"), channels: z.array(z.string()).max(512) }),
@@ -816,8 +926,13 @@ const TramasDoClienteSemCofre = z.discriminatedUnion("t", [
    * What the server learns: that an account already subscribed to a channel
    * wants back in. It knew the subscription; it learns nothing about content
    * and nothing about anyone else. Nothing is stored.
+   *
+   * `prova` (1.3.26): the asking device's signature over the channel, the
+   * account, its device key and the time (`pedido-de-lugar.ts`). The server
+   * forwards it in `channel.rejoin` and cannot make one: with it, the members may
+   * take out the named leaf also when it looks alive. An older server drops it.
    */
-  z.object({ t: z.literal("channel.rejoin.request"), channel: z.string() }),
+  z.object({ t: z.literal("channel.rejoin.request"), channel: z.string(), prova: ProvaDoPedidoDeLugarWire.optional() }),
 
   /**
    * "Who else has an account on this server?"
@@ -1085,7 +1200,29 @@ const TramasDoClienteSemCofre = z.discriminatedUnion("t", [
 
   z.object({ t: z.literal("ping") }),
   /** Request to be put in charge of creating a channel. See `channel.claim.result`. */
-  z.object({ t: z.literal("channel.claim"), channel: z.string() }),
+  z.object({
+    t: z.literal("channel.claim"),
+    channel: z.string(),
+    /**
+     * This claim is for a channel (community) the person asked to create, not a
+     * direct message, the feed or the account's channel (1.3.26). The server
+     * counts it against the account's cap (`CAPACIDADE_LIMITE_DE_CANAIS`). An
+     * older client never sends it; see `invite.create` for what still counts.
+     */
+    comunidade: z.literal(true).optional(),
+  }),
+  /** How many channels this account created and may create (1.3.26). See `channel.quota.result`. */
+  z.object({ t: z.literal("channel.quota") }),
+  /**
+   * "I am about to create this room in this channel" (1.3.26). A room is a
+   * `channel.meta` inside the channel's encrypted group, so the server cannot
+   * see it; this frame is how it counts rooms against the account's cap
+   * (`CAPABILITY_ROOM_LIMIT`). Answered by `room.claim.result`. `room` is the
+   * room id the app drew (`newRoomId`), opaque to the server.
+   */
+  z.object({ t: z.literal("room.claim"), channel: z.string(), room: z.string().min(1).max(64) }),
+  /** "This room was deleted": its place is free again (1.3.26). No answer. */
+  z.object({ t: z.literal("room.release"), channel: z.string(), room: z.string().min(1).max(64) }),
 
   /**
    * Leave the common room's join card on the server.
@@ -1108,6 +1245,14 @@ const TramasDoClienteSemCofre = z.discriminatedUnion("t", [
    * `channel.groupinfo`.
    */
   z.object({ t: z.literal("channel.groupinfo.take"), channel: z.string() }),
+
+  /**
+   * "Which accounts does the server have in this channel?" (P7, 1.3.26)
+   *
+   * Only for a channel this connection is subscribed to, and only with
+   * `CAPACIDADE_MEMBROS_DO_CANAL`. Reply: `channel.members`.
+   */
+  z.object({ t: z.literal("channel.members.get"), channel: z.string() }),
 
   /**
    * "Go read this page and tell me the title and image it declares."
@@ -1201,6 +1346,29 @@ const TramasDoClienteSemCofre = z.discriminatedUnion("t", [
   z.object({ t: z.literal("pair.close"), pairId: PairId }),
 
   /**
+   * Open a SHORT-CODE pairing box (1.3.26, `CAPABILITY_PAIRING_PAKE`).
+   * **Passes without an account**: it is the NEW device that opens it, because
+   * it is the one that shows the code. `nameplate` is the first two characters
+   * of the code, so the device with the account can find the box; the other
+   * four never reach the server. `pairId` is random, made by the new device,
+   * and names the box from here on (`pair.send`, `pair.close`).
+   * Responds with `pair.opened`, or `pair.rejected` (`exists`: the nameplate or
+   * the id is taken, make another code; `full`; `rate-limited`).
+   *
+   * The box waits five minutes for a join. Nothing persists.
+   */
+  z.object({ t: z.literal("pair.code.open"), nameplate: Nameplate, pairId: PairId }),
+
+  /**
+   * Join a short-code box by its nameplate. **Requires an authenticated
+   * account**: the device that types the code is the one with the account.
+   * Capped per account per window. The first join takes the nameplate off the
+   * server, so a code joins once, whatever happens next.
+   * Responds with `pair.code.joined` (with the box id), or `pair.code.rejected`.
+   */
+  z.object({ t: z.literal("pair.code.join"), nameplate: Nameplate }),
+
+  /**
    * An ephemeral signal for the other members of this channel who are connected right now.
    * See `CAPACIDADE_SINAL_EFEMERO`.
    *
@@ -1219,6 +1387,13 @@ const TramasDoClienteSemCofre = z.discriminatedUnion("t", [
     channel: z.string().max(255),
     sinal: Base64.min(1).max(SINAL_MAX_CARACTERES),
     ref: z.string().max(64).optional(),
+    /**
+     * The one device this signal is for (base64url device key). With it, a
+     * server that announces `CAPACIDADE_SINAL_PARA` delivers only to that
+     * device's connections in the channel, and drops it when none is
+     * connected. Without it, every other connection in the channel.
+     */
+    para: Base64.min(1).max(64).optional(),
   }),
 ])
 export type ClientFrame = z.infer<typeof ClientFrame>
@@ -1286,11 +1461,23 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
      * See `registo.ts`. Absent on older servers, which are `aberto`.
      */
     registo: ModoDeRegisto.optional(),
+    /**
+     * The proof-of-work challenge for a new account (1.3.26): solve it before
+     * the `auth.finish` that creates the account. Absent when the server does
+     * not ask for one, or takes no new accounts. See `anti-abuso.ts`.
+     */
+    provaDeTrabalho: DesafioDeTrabalho.optional(),
   }),
 
   z.object({ t: z.literal("auth.challenge"), nonce: Base64 }),
   /** `posse`: this device's possession generation on the server (see `auth.finish`). */
-  z.object({ t: z.literal("auth.ok"), address: Address, posse: z.number().int().min(0).optional() }),
+  z.object({
+    t: z.literal("auth.ok"),
+    address: Address,
+    posse: z.number().int().min(0).optional(),
+    /** This account is in its first 72 hours, and the server applies the new-account limits (1.3.26). See `ContaNova`. */
+    contaNova: ContaNova.optional(),
+  }),
 
   z.object({
     t: z.literal("channel.event"),
@@ -1356,6 +1543,11 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
     // KeyPackages the manifest does not cover.
     keyPackages: z.array(z.object({ deviceKey: Base64, keyPackage: Base64 })).max(APARELHOS_POR_CONTA).optional(),
     manifest: DeviceManifestWire.nullable().optional(),
+    /**
+     * Why the pool came back empty, when it is not empty (1.3.26): this account
+     * is new and reached the people it may add today. See `anti-abuso.ts`.
+     */
+    recusa: z.literal(RECUSA_DE_CONTA_NOVA).optional(),
   }),
   /**
    * "This device has few key packages left on the server: publish more."
@@ -1391,6 +1583,13 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
      * from a server with `CAPACIDADE_LIGACOES_CURTAS`.
      */
     codigoCurto: CodigoCurto.optional(),
+    /**
+     * The invite was NOT made (1.3.26): the channel's creator already has all
+     * the channels it may, and this channel was not counted yet (it was created
+     * by an app that did not say it was a channel). Only to a client with
+     * `CAPACIDADE_LIMITE_DE_CANAIS`; an older one gets no answer.
+     */
+    recusa: z.literal(RECUSA_DE_LIMITE_DE_CANAIS).optional(),
   }),
   z.object({
     t: z.literal("invite.list.result"),
@@ -1480,8 +1679,18 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
    * take out only that device's leaf, never a sibling that is merely offline (C1 of
    * the 1.3.20 review). The members still check it against the tree and the proof of
    * life, so a wrong value can only narrow a repair. An older client ignores it.
+   *
+   * `prova` (1.3.26): the device's own signature, as it came in the request, and only
+   * with `device`. A member takes out a named leaf that looks alive only with a valid
+   * proof; without one, only a leaf with no proof of life. An older client ignores it.
    */
-  z.object({ t: z.literal("channel.rejoin"), channel: z.string(), address: Address, device: Base64.optional() }),
+  z.object({
+    t: z.literal("channel.rejoin"),
+    channel: z.string(),
+    address: Address,
+    device: Base64.optional(),
+    prova: ProvaDoPedidoDeLugarWire.optional(),
+  }),
 
   /** Local accounts, in community mode. Empty when the mode is off. */
   z.object({ t: z.literal("directory.list.result"), addresses: z.array(Address) }),
@@ -1512,6 +1721,30 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
     owner: z.string(),
     mine: z.boolean(),
     empty: z.boolean().optional(),
+    /**
+     * Not the creator (1.3.26): the account is new and reached the new channels it
+     * may open today (`conta-nova`), or it created all the channels it may
+     * (`limite-de-canais`, only for a claim with `comunidade`).
+     */
+    recusa: z.enum([RECUSA_DE_CONTA_NOVA, RECUSA_DE_LIMITE_DE_CANAIS]).optional(),
+    /** The count after this claim, for a claim with `comunidade`. */
+    criarCanais: CriarCanais.optional(),
+  }),
+  /** The answer to `channel.quota`. Absent cap (`null`): this server does not limit this account. */
+  z.object({
+    t: z.literal("channel.quota.result"),
+    criarCanais: CriarCanais.nullable(),
+    /** The rooms (1.3.26). Absent: a server without the room cap; `null`: no cap for this account. */
+    rooms: RoomQuota.nullable().optional(),
+  }),
+  /** The answer to `room.claim`. `ok: false` with `refusal`: the account created all the rooms it may. */
+  z.object({
+    t: z.literal("room.claim.result"),
+    channel: z.string(),
+    room: z.string(),
+    ok: z.boolean(),
+    refusal: z.literal(REFUSAL_ROOM_LIMIT).optional(),
+    rooms: RoomQuota.optional(),
   }),
 
   /**
@@ -1522,7 +1755,17 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
    * a request handled, and that is what made every failure on this path silent: the
    * person saw "request sent" and stayed out, with no other sign anywhere.
    */
-  z.object({ t: z.literal("channel.rejoin.sent"), channel: z.string(), ouviram: z.number().int().nonnegative() }),
+  z.object({
+    t: z.literal("channel.rejoin.sent"),
+    channel: z.string(),
+    ouviram: z.number().int().nonnegative(),
+    /**
+     * The common room is at its ceiling of joins per hour (1.3.26): the request
+     * was not passed on, and this account waits in the queue. Ask again in
+     * `esperaMs`. An old client reads `ouviram: 0` and asks again on its own.
+     */
+    fila: FilaDaSalaComum.optional(),
+  }),
 
   /**
    * The common room's join card, or nothing if there is none.
@@ -1533,6 +1776,21 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
    * ask members for entry and try again.
    */
   z.object({ t: z.literal("channel.groupinfo"), channel: z.string(), info: z.string().optional() }),
+
+  /**
+   * The server roster of a channel (P7, 1.3.26). See `CAPACIDADE_MEMBROS_DO_CANAL`.
+   *
+   * `contas`: the accounts subscribed. `convidados`: accounts with a Welcome in the
+   * last days that are not subscribed yet. Both absent: the server does not know
+   * (a channel hosted elsewhere, a connection not subscribed, a roster above
+   * `MEMBROS_DO_CANAL_MAX`), and the client keeps the tree.
+   */
+  z.object({
+    t: z.literal("channel.members"),
+    channel: z.string(),
+    contas: z.array(Address).max(MEMBROS_DO_CANAL_MAX).optional(),
+    convidados: z.array(Address).max(MEMBROS_DO_CANAL_MAX).optional(),
+  }),
 
   /**
    * The server refused to forward what was sent to this channel.
@@ -1562,14 +1820,28 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
      * `rate-limited`: the account exceeded the send cap per minute. The send was NOT stored or
      * delivered; `retryAfterMs` says when there is room. Sent only to clients that announced
      * `CAPACIDADE_ENVIO_RECUSADO`.
+     *
+     * `conta-nova` (1.3.26): a new-account rule refused it, and waiting a few
+     * seconds does not help. In the common room, a first-day account sent a
+     * message too large for text (an image, a file, a GIF); anywhere, the account
+     * reached the new channels it may open today. Not retried. Sent only to
+     * clients that announced `CAPACIDADE_LIMITES_DE_CONTA_NOVA`; the others get
+     * nothing, as for a send the server drops.
      */
-    reason: z.enum(["no-seat", "stale-epoch", "stale-groupinfo", "update-required", "rate-limited"]),
+    reason: z.enum(["no-seat", "stale-epoch", "stale-groupinfo", "update-required", "rate-limited", "conta-nova"]),
     /** Echo of the rejected send's `ref`, so the sender knows which one it was. */
     ref: z.string().max(64).optional(),
     /** With `rate-limited`: how many ms until the cap lets another send through. */
     retryAfterMs: z.number().int().nonnegative().optional(),
     /** With `stale-epoch` and `stale-groupinfo`: the epoch the channel is at for the server. */
     epoch: z.number().int().nonnegative().optional(),
+    /**
+     * With `rate-limited` (1.3.26): the refusal is the common room's limit for
+     * a new account, not the account's send cap. Only this channel waits; the
+     * other channels keep sending. With `no-seat`: the account is new and
+     * reached the new channels it may open today.
+     */
+    contaNova: z.literal(true).optional(),
   }),
 
   z.object({
@@ -1776,6 +2048,14 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
     address: Address,
     atestacao: AtestacaoDeIdade.nullable(),
     chave: z.object({ keyId: z.string().min(1).max(64), key: z.string().min(1).max(100) }).nullable(),
+    /**
+     * Present only while the account is in its first 24 hours (1.3.26): the
+     * instant that period ends, rounded UP to the hour, from the server's own
+     * record. The common room shows that account's links as plain text until
+     * then. Not signed: the reader trusts its own server for this, as it does
+     * for the room itself.
+     */
+    novaAte: z.number().int().nonnegative().optional(),
   }),
 
   /**
@@ -1821,6 +2101,15 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
     pairId: PairId,
     reason: z.enum(["closed", "peer-left", "expired", "intruder"]),
   }),
+  /** The short-code box was found and this connection is in it: the box id, for `pair.send` from now on. */
+  z.object({ t: z.literal("pair.code.joined"), nameplate: Nameplate, pairId: PairId }),
+  /**
+   * A `pair.code.join` that did not happen. `unknown`: no open box has this
+   * nameplate (wrong code, expired, or already used: the server cannot tell
+   * them apart and does not try); `rate-limited`: this account typed too many
+   * codes in the window. Never fatal.
+   */
+  z.object({ t: z.literal("pair.code.rejected"), nameplate: Nameplate, reason: z.enum(["unknown", "rate-limited"]) }),
   /** A `pair.open` or `pair.join` that did not happen. Never fatal: the person can try again. */
   z.object({
     t: z.literal("pair.rejected"),

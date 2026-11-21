@@ -6,6 +6,7 @@ import { Button } from "../../components/Button.js"
 import { Modal } from "../../components/Modal.js"
 import { ToastContext } from "../../components/Toast.js"
 import { strings, traduzirErro } from "../../strings.js"
+import { storedAccountName } from "../../lib/accountNames.js"
 
 /**
  * "Switch account".
@@ -98,7 +99,7 @@ export function FolhaMudarDeConta({
               disabled={aMudar}
               onClick={() => fazer(() => bridge.contas?.mudar(conta.id) ?? Promise.resolve())}
             >
-              {conta.nome || strings.contas.semNome}
+              {conta.nome || storedAccountName(conta.id) || strings.contas.semNome}
             </Button>
             <p className="field-note">{conta.memorizada ? strings.contas.abreSozinha : strings.contas.pedeFrase}</p>
           </div>

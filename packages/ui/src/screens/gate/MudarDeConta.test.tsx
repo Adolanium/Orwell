@@ -62,11 +62,11 @@ function ponte(contas: ContaNaLista[], extra: Partial<NonNullable<EnclaveBridge[
   } as unknown as EnclaveBridge & { chamadas: string[] }
 }
 
-function noPortao(bridge: EnclaveBridge, onStartOver = vi.fn()): void {
+function noPortao(bridge: EnclaveBridge): void {
   render(
     <ToastProvider>
       <BridgeContext.Provider value={bridge}>
-        <Unlock onDone={vi.fn()} onStartOver={onStartOver} />
+        <Unlock onDone={vi.fn()} />
       </BridgeContext.Provider>
     </ToastProvider>,
   )
@@ -110,42 +110,19 @@ describe('"Mudar de conta" no portão', () => {
     expect(recarregar).not.toHaveBeenCalled()
   })
 
-  it("apagar esta conta com outra no aparelho recarrega para a que fica; sem outra, vai ao registo", async () => {
-    const comOutra = ponte([{ ...BRUNO, activa: true }])
-    const onStartOver = vi.fn()
-    noPortao(comOutra, onStartOver)
-    fireEvent.click(await screen.findByRole("button", { name: strings.gate.lostAccountAction }))
-    const pergunta = await screen.findByRole("alertdialog", { name: strings.settings.destroyTitle })
-    fireEvent.change(within(pergunta).getByLabelText(strings.settings.destroyConfirmLabel), {
-      target: { value: strings.settings.destroyConfirmWord },
-    })
-    fireEvent.click(within(pergunta).getByRole("button", { name: strings.settings.destroyConfirm }))
-    await waitFor(() => expect(recarregar).toHaveBeenCalled())
-    expect(onStartOver).not.toHaveBeenCalled()
-    cleanup()
-
-    const sozinha = ponte([{ ...ANA, temCofre: false }])
-    const outroStartOver = vi.fn()
-    recarregar.mockReset()
-    noPortao(sozinha, outroStartOver)
-    fireEvent.click(await screen.findByRole("button", { name: strings.gate.lostAccountAction }))
-    const outra = await screen.findByRole("alertdialog", { name: strings.settings.destroyTitle })
-    fireEvent.change(within(outra).getByLabelText(strings.settings.destroyConfirmLabel), {
-      target: { value: strings.settings.destroyConfirmWord },
-    })
-    fireEvent.click(within(outra).getByRole("button", { name: strings.settings.destroyConfirm }))
-    await waitFor(() => expect(outroStartOver).toHaveBeenCalled())
-    expect(recarregar).not.toHaveBeenCalled()
+  it("o portão nunca apaga uma conta para mudar de conta (21/11/2026)", async () => {
+    const bridge = ponte([ANA, BRUNO])
+    noPortao(bridge)
+    await screen.findByRole("button", { name: strings.contas.mudar })
+    expect(screen.queryByRole("button", { name: /apagar|Criar conta nova/i })).toBeNull()
   })
 })
 
-describe('"Entrar com outra conta" ganha a terceira via', () => {
-  it('"Acrescentar outra conta" guarda esta e recarrega para o registo', async () => {
+describe('"Usar outra conta" no portão', () => {
+  it("acrescenta uma conta vazia e recarrega para a entrada; esta fica", async () => {
     const bridge = ponte([ANA])
     noPortao(bridge)
-    fireEvent.click(await screen.findByRole("button", { name: strings.gate.otherAccount }))
-    const folha = await screen.findByRole("dialog", { name: strings.gate.otherAccountTitle })
-    fireEvent.click(within(folha).getByRole("button", { name: strings.contas.acrescentar }))
+    fireEvent.click(await screen.findByRole("button", { name: strings.entrada.outraConta }))
     await waitFor(() => expect(recarregar).toHaveBeenCalled())
     expect(bridge.chamadas).toEqual(["acrescentar"])
   })

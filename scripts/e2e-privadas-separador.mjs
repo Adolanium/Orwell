@@ -37,6 +37,8 @@ import { Session, Vault } from "@enclave/client-core"
 import { chromium, firefox, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { irParaEmparelhar } from "./fase7-comum.mjs"
+import { appAberta, irPara, nomesDasComunidades } from "./separadores.mjs"
+import { juntarComPalavras } from "./juntar-aparelho.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
@@ -183,7 +185,8 @@ function escutar(context, saco) {
 }
 
 const CONTEXTO = { locale: "pt-PT" }
-const dentro = (page) => page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+// The app is open: the rail on a computer, the tabs on a phone (no rail there).
+const dentro = (page) => appAberta(page)
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** Wait until the condition is true, or time runs out. Returns whether it happened. */
@@ -261,16 +264,20 @@ function enderecoDaUltimaConta() {
 
 
 async function separador(page, nome) {
-  await page.getByRole("button", { name: "Amigos", exact: true }).first().click()
+  // On a phone, Friends is its own tab (option B); on a computer, the rail.
+  await irPara(page, "amigos")
   await page.locator(".people-destination").waitFor({ timeout: 15_000 })
   await page.locator(".people-tabs").getByRole("button", { name: nome }).click()
 }
 
-/** How many channels the "Communities" list has. By the DOM: at 390 px the list is in a drawer. */
+/**
+ * How many channels the "Communities" list has. By the DOM. On a phone (option B)
+ * the sidebar lists only the chosen community: count the faces on the rail.
+ */
 async function canaisEmComunidades(page) {
-  await page.getByRole("button", { name: "Comunidades", exact: true }).first().click().catch(() => {})
+  await irPara(page, "comunidades").catch(() => {})
   await wait(500)
-  return page.evaluate(() => document.querySelectorAll(".channel-list .channel-name").length)
+  return (await nomesDasComunidades(page)).length
 }
 
 const MOTORES = { chromium, firefox, webkit }
@@ -292,8 +299,8 @@ async function prova(motor) {
 
   // Add a device: the link, and the phone pastes it.
   await pc.getByRole("button", { name: "Configurações", exact: true }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await pc.getByRole("button", { name: "Acrescentar aparelho" }).click()
+  await pc.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await pc.getByRole("button", { name: "Juntar um aparelho" }).click()
   const folha = pc.locator(".sheet").first()
   await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
@@ -305,21 +312,9 @@ async function prova(motor) {
   const tel = await ctxTel.newPage()
   await tel.goto(APP, { waitUntil: "domcontentloaded" })
   await irParaEmparelhar(tel)
-  await tel.getByRole("heading", { name: "Emparelhar este aparelho" }).waitFor({ timeout: 10_000 })
-  await tel.getByLabel("Ou cola o link").fill(link)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 10_000 })
-  const frases = tel.locator('.gate-card input[type="password"]')
-  await frases.nth(0).fill(FRASE)
-  await frases.nth(1).fill(FRASE)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await tel.getByRole("button", { name: "São as mesmas" }).click()
-  await folha.getByRole("button", { name: "São as mesmas" }).click()
-  await tel.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 })
+  await tel.getByLabel("Ou cola o código").waitFor({ timeout: 10_000 })
+  await juntarComPalavras(tel, folha, link, FRASE)
   await folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
-  await tel.getByRole("button", { name: "Entrar", exact: true }).click()
   await dentro(tel)
   check(`[${motor}] o telemóvel entra na conta`, true)
   await wait(3_000)
@@ -360,7 +355,7 @@ async function prova(motor) {
   await tel2.goto(APP, { waitUntil: "domcontentloaded" })
   await wait(2_000)
   await tel.close()
-  const pedeFrase = await ate(async () => (await tel2.locator('input[type="password"]').count()) > 0 || (await tel2.getByRole("button", { name: "Configurações" }).count()) > 0, 60_000)
+  const pedeFrase = await ate(async () => (await tel2.locator('input[type="password"]').count()) > 0 || (await tel2.getByRole("button", { name: "Configurações" }).or(tel2.locator(".separadores")).count()) > 0, 60_000)
   if (pedeFrase && (await tel2.locator('input[type="password"]').count()) > 0) {
     await tel2.locator('input[type="password"]').first().fill(FRASE)
     await tel2.keyboard.press("Enter")

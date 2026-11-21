@@ -106,8 +106,15 @@ export function RichText({
   nameFor,
   onMention,
   etiquetas,
+  semLigacoes = false,
 }: {
   children: string
+  /**
+   * Addresses as plain text, not links (1.3.26): the common room shows the
+   * links of an account in its first 24 hours like this. A link nobody can
+   * click is a link no spam can use.
+   */
+  semLigacoes?: boolean | undefined
   /**
    * The current name of whoever was mentioned. Without this, the mention shows
    * the address, which is ugly but still true, and is what you want in a place
@@ -119,7 +126,7 @@ export function RichText({
   /** Roles and rooms. Absent: tags read as their raw text, as in a 1.3.7. */
   etiquetas?: Etiquetas | undefined
 }): React.JSX.Element {
-  return <>{desenharArvore(analisarFormatacao(children), nameFor, onMention, etiquetas)}</>
+  return <>{desenharArvore(analisarFormatacao(children), nameFor, onMention, etiquetas, semLigacoes)}</>
 }
 
 /** The formatting tree as elements. Text leaves go to the URL and mention
@@ -129,6 +136,7 @@ function desenharArvore(
   nameFor: ((address: string) => string) | undefined,
   onMention: ((address: string) => void) | undefined,
   etiquetas: Etiquetas | undefined,
+  semLigacoes = false,
 ): React.ReactNode {
   return pedacos.map((pedaco, indice) => {
     if (pedaco.tipo === "codigo") {
@@ -141,21 +149,21 @@ function desenharArvore(
       )
     }
     if (pedaco.tipo === "forte") {
-      return <strong key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention, etiquetas)}</strong>
+      return <strong key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention, etiquetas, semLigacoes)}</strong>
     }
     if (pedaco.tipo === "enfase") {
-      return <em key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention, etiquetas)}</em>
+      return <em key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention, etiquetas, semLigacoes)}</em>
     }
     if (pedaco.tipo === "rasurado") {
       // `<s>` not `<del>`: `del` says this was removed from a document, and what
       // the person meant was "this no longer applies". These are different things and
       // screen readers announce them differently.
-      return <s key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention, etiquetas)}</s>
+      return <s key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention, etiquetas, semLigacoes)}</s>
     }
     if (pedaco.tipo === "spoiler") {
-      return <Spoiler key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention, etiquetas)}</Spoiler>
+      return <Spoiler key={indice}>{desenharArvore(pedaco.filhos, nameFor, onMention, etiquetas, semLigacoes)}</Spoiler>
     }
-    return <Fragment key={indice}>{desenharTexto(pedaco.texto, nameFor, onMention, etiquetas)}</Fragment>
+    return <Fragment key={indice}>{desenharTexto(pedaco.texto, nameFor, onMention, etiquetas, semLigacoes)}</Fragment>
   })
 }
 
@@ -164,6 +172,7 @@ function desenharTexto(
   nameFor: ((address: string) => string) | undefined,
   onMention: ((address: string) => void) | undefined,
   etiquetas: Etiquetas | undefined,
+  semLigacoes = false,
 ): React.ReactNode {
   // `split` with groups also returns the separators, and groups that did not
   // participate come as `undefined`, hence the filter, not a direct `map`.
@@ -204,7 +213,7 @@ function desenharTexto(
         }
         MENTION_ADDRESS.lastIndex = 0
 
-        if (!ENDERECOS.test(pedaco)) {
+        if (semLigacoes || !ENDERECOS.test(pedaco)) {
           ENDERECOS.lastIndex = 0
           return <span key={indice}>{pedaco}</span>
         }

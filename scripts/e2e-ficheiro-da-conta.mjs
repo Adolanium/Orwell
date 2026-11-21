@@ -1,18 +1,17 @@
 /**
- * The account file (.enclave) at sign-up, and the one-time notice (16/11/2026).
+ * The account file (.enclave) at sign-up, and the banner that stays (21/11/2026).
  *
  *   npm run build && node --dns-result-order=ipv4first scripts/e2e-ficheiro-da-conta.mjs
  *
  * Three browsers, through the interface:
- *  1. WebKit at 390 px, touch (the iPhone): a new account stops on "Guarda o
- *     ficheiro da conta". "Continuar" is off; the box alone does not turn it on;
- *     the download alone does not either; both do. The file is an account file.
- *     Reloading does not show the notice.
- *  2. Firefox at 390 px: an account that never saved its file (the mark taken
- *     away, as for an account from before this step) gets the notice once, with
- *     the same button; closing it is final.
- *  3. Chromium at 1280 px: the file from step 1 imports with the password, and
- *     the app opens with no notice.
+ *  1. Chromium at 390 px, touch: a new account stops on "Guarda o
+ *     ficheiro da conta". "Guardar o ficheiro" saves it and opens the app. The
+ *     file is an account file. No banner, now or after reloading.
+ *  2. Firefox at 390 px: "Fazer mais tarde" opens the app with the banner "Ainda
+ *     não guardaste o ficheiro da conta.". It stays after reloading and after
+ *     closing its sheet; it goes when the file is saved, and does not come back.
+ *  3. WebKit at 1280 px: the file from step 1 signs in with the password, and
+ *     the app opens with no banner.
  *
  * ALL LOCAL AND DISPOSABLE: ports 8722 and 8723. Captures in
  * `.verify-data/prova-ficheiro-da-conta/`.
@@ -20,8 +19,8 @@
 import { mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { chromium, firefox, webkit } from "playwright"
-import { criarConta, passarOFicheiroDaConta } from "./conta.mjs"
-import { dentro, espera, irParaONome, verificador } from "./fase7-comum.mjs"
+import { criarConta } from "./conta.mjs"
+import { dentro, espera, importarFicheiro, verificador } from "./fase7-comum.mjs"
 import { levantarServidor, RAIZ } from "./servidor-descartavel.mjs"
 
 const FRASE = "frase-de-verificacao-2026"
@@ -50,17 +49,15 @@ async function abrir(motor, nome, contexto = {}) {
 }
 
 const titulo = (page) => page.getByRole("heading", { name: "Guarda o ficheiro da conta" })
-const aviso = (page) => page.getByRole("heading", { name: "Ainda não guardaste o ficheiro da conta" })
-const continuar = (page) => page.getByRole("button", { name: "Continuar", exact: true })
-const caixa = (page) => page.getByRole("checkbox", { name: "Guardei o ficheiro num sítio seguro." })
+const faixa = (page) => page.locator(".faixa-do-ficheiro:visible").filter({ hasText: "Ainda não guardaste o ficheiro da conta." }).first()
+const guardar = (page) => page.getByRole("button", { name: "Guardar o ficheiro", exact: true })
 const semRolagem = (page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
 
 /** Reload, type the password if the gate asks, and wait for the app. */
 async function recarregar(page) {
   await page.reload({ waitUntil: "domcontentloaded" })
   const campo = page.locator('input[type="password"]').first()
-  const config = page.getByRole("button", { name: "Configurações", exact: true }).first()
-  await campo.or(config).first().waitFor({ timeout: 60_000 })
+  await campo.or(page.locator(".app")).first().waitFor({ timeout: 60_000 })
   if (await campo.count()) {
     await campo.fill(FRASE)
     await page.keyboard.press("Enter")
@@ -68,69 +65,66 @@ async function recarregar(page) {
   await dentro(page)
 }
 
-/** The notice shows within a few seconds of opening, or not at all. */
-async function avisoAparece(page, ms = 6_000) {
-  return aviso(page)
+/** The banner shows within a few seconds of opening, or not at all. */
+async function faixaAparece(page, ms = 6_000) {
+  return faixa(page)
     .waitFor({ timeout: ms })
     .then(() => true, () => false)
 }
 
 let ficheiro = null
 try {
-  // 1. WebKit at 390 px: the step.
-  const ana = await abrir(webkit, "webkit-390", TELEMOVEL)
+  /*
+    1. Chromium at 390 px: the step, saved at once. Not WebKit: there the button
+    opens the share sheet ("Save to Files" on the iPhone), which a headless
+    browser never closes, so nothing downloads.
+  */
+  const ana = await abrir(chromium, "chromium-390", TELEMOVEL)
   await criarConta(ana.page, { nome: "Ana", frase: FRASE, servidor: srv.NOME, ficheiro: false })
   check("depois de criar a conta, aparece o passo do ficheiro", await titulo(ana.page).waitFor({ timeout: 90_000 }).then(() => true, () => false))
-  await ana.page.screenshot({ path: join(CAPTURAS, "1-passo-webkit-390.png"), fullPage: true })
+  await ana.page.screenshot({ path: join(CAPTURAS, "1-passo-chromium-390.png"), fullPage: true })
   check("a 390 px, o passo não traz rolagem horizontal", await semRolagem(ana.page))
-  check('"Continuar" começa desligado', await continuar(ana.page).isDisabled())
-  await caixa(ana.page).check()
-  check('só a caixa não liga "Continuar"', await continuar(ana.page).isDisabled())
-  await caixa(ana.page).uncheck()
-  const botao = ana.page.getByRole("button", { name: "Descarregar o ficheiro da conta" })
-  await botao.and(ana.page.locator(":enabled")).waitFor({ timeout: 30_000 })
-  const [descarga] = await Promise.all([ana.page.waitForEvent("download", { timeout: 30_000 }), botao.tap()])
+  check('o passo diz "Precisas dele para entrar na tua conta noutro aparelho."', (await ana.page.getByText("Precisas dele para entrar na tua conta noutro aparelho.").count()) === 1)
+  check('e tem "Fazer mais tarde"', (await ana.page.getByRole("button", { name: "Fazer mais tarde" }).count()) === 1)
+  await guardar(ana.page).and(ana.page.locator(":enabled")).waitFor({ timeout: 30_000 })
+  const [descarga] = await Promise.all([ana.page.waitForEvent("download", { timeout: 30_000 }), guardar(ana.page).tap()])
   ficheiro = join(CAPTURAS, "conta.enclave")
   await descarga.saveAs(ficheiro)
   const texto = readFileSync(ficheiro, "utf8")
-  check("o ficheiro descarregado é um ficheiro de conta", texto.includes('"format":"enclave-vault"'), descarga.suggestedFilename())
+  check("o ficheiro guardado é um ficheiro de conta", texto.includes('"format":"enclave-vault"'), descarga.suggestedFilename())
   check("o ficheiro não traz a palavra-passe", !texto.includes(FRASE))
-  check('só a descarga não liga "Continuar"', await continuar(ana.page).isDisabled())
-  const partilha = await ana.page.getByRole("button", { name: "Partilhar", exact: true }).count()
-  console.log(`   "Partilhar" no WebKit sem folha de partilha: ${partilha ? "visível" : "escondido"}`)
-  await caixa(ana.page).check()
-  await ana.page.screenshot({ path: join(CAPTURAS, "2-passo-pronto-webkit-390.png"), fullPage: true })
-  check('descarga e caixa ligam "Continuar"', await continuar(ana.page).isEnabled())
-  await continuar(ana.page).tap()
-  check("Continuar abre a app", await dentro(ana.page).then(() => true, () => false))
-  check("na app, a conta nova não recebe o aviso", !(await avisoAparece(ana.page)))
+  check("guardar abre a app", await dentro(ana.page).then(() => true, () => false))
+  check("na app, quem guardou não vê a faixa", !(await faixaAparece(ana.page)))
   await recarregar(ana.page)
-  check("depois de recarregar, o aviso também não aparece", !(await avisoAparece(ana.page)))
+  check("depois de recarregar, a faixa também não aparece", !(await faixaAparece(ana.page)))
 
-  // 2. Firefox at 390 px: an account from before the step gets the notice once.
+  // 2. Firefox at 390 px: "Fazer mais tarde" leaves the banner, until a file is saved.
   const bruno = await abrir(firefox, "firefox-390", TELEMOVEL)
-  await criarConta(bruno.page, { nome: "Bruno", frase: FRASE, servidor: srv.NOME })
+  await criarConta(bruno.page, { nome: "Bruno", frase: FRASE, servidor: srv.NOME, ficheiro: false })
+  await titulo(bruno.page).waitFor({ timeout: 90_000 })
+  await bruno.page.getByRole("button", { name: "Fazer mais tarde" }).click()
   await dentro(bruno.page)
-  await bruno.page.evaluate(() => localStorage.removeItem("enclave.ficheiroDaConta"))
+  check('"Fazer mais tarde": a faixa aparece dentro da app', await faixaAparece(bruno.page, 30_000))
+  await bruno.page.screenshot({ path: join(CAPTURAS, "3-faixa-firefox-390.png") })
+  check("a 390 px, a faixa não traz rolagem horizontal", await semRolagem(bruno.page))
   await recarregar(bruno.page)
-  check("uma conta sem o ficheiro guardado recebe o aviso ao abrir", await avisoAparece(bruno.page, 30_000))
-  await bruno.page.screenshot({ path: join(CAPTURAS, "3-aviso-firefox-390.png") })
-  check("a 390 px, o aviso não traz rolagem horizontal", await semRolagem(bruno.page))
-  check("o aviso tem o mesmo botão", (await bruno.page.getByRole("button", { name: "Descarregar o ficheiro da conta" }).count()) === 1)
-  await bruno.page.locator(".ficheiro-da-conta-aviso").getByRole("button", { name: "Fechar", exact: true }).click()
-  check("o aviso fecha", await aviso(bruno.page).waitFor({ state: "detached", timeout: 10_000 }).then(() => true, () => false))
+  check("a faixa fica depois de recarregar", await faixaAparece(bruno.page, 30_000))
+  await faixa(bruno.page).getByRole("button", { name: "Guardar", exact: true }).click()
+  const folha = bruno.page.locator(".ficheiro-da-conta-aviso")
+  await folha.getByRole("button", { name: "Fechar", exact: true }).click()
+  check("fechar a folha sem guardar não tira a faixa", await faixaAparece(bruno.page, 5_000))
+  await faixa(bruno.page).getByRole("button", { name: "Guardar", exact: true }).click()
+  await Promise.all([bruno.page.waitForEvent("download", { timeout: 30_000 }), folha.getByRole("button", { name: "Guardar o ficheiro", exact: true }).click()])
+  check("guardado o ficheiro, a faixa sai", await faixa(bruno.page).waitFor({ state: "detached", timeout: 15_000 }).then(() => true, () => false))
   await recarregar(bruno.page)
-  check("fechado uma vez, não volta", !(await avisoAparece(bruno.page)))
+  check("e não volta", !(await faixaAparece(bruno.page)))
 
   // 3. Chromium at 1280 px: the file from step 1 is the account.
-  const outro = await abrir(chromium, "chromium-1280")
-  await irParaONome(outro.page)
-  await outro.page.locator('.import-account input[type="file"]').setInputFiles(ficheiro)
-  await outro.page.locator('input[name="import-password"]').fill(FRASE)
-  await outro.page.getByRole("button", { name: "Importar", exact: true }).click()
-  check("o ficheiro importa com a palavra-passe, noutro browser", await dentro(outro.page).then(() => true, () => false))
-  check("uma conta importada do ficheiro não recebe o aviso", !(await avisoAparece(outro.page)))
-  await outro.page.screenshot({ path: join(CAPTURAS, "4-importada-chromium-1280.png") })
+  const outro = await abrir(webkit, "webkit-1280")
+  await importarFicheiro(outro.page, ficheiro, FRASE)
+  check("o ficheiro entra com a palavra-passe, noutro browser", await dentro(outro.page).then(() => true, () => false))
+  check("uma conta que entrou pelo ficheiro não vê a faixa", !(await faixaAparece(outro.page)))
+  await outro.page.screenshot({ path: join(CAPTURAS, "4-pelo-ficheiro-webkit-1280.png") })
   await espera(500)
 } catch (erro) {
   check("o guião correu até ao fim", false, String(erro?.message ?? erro).slice(0, 300))

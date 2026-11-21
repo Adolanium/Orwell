@@ -230,3 +230,57 @@ describe("ContextMenu — a escada", () => {
     expect(screen.queryByRole("menuitem", { name: "Estúdio" })).toBeNull()
   })
 })
+
+/**
+ * The phone (option B, 20/11/2026): the whole menu is a sheet at the bottom
+ * of the screen, so a phone shows the full menu. The sheet carries the SAME entries, in the SAME order, as the
+ * menu at the pointer on a computer: it is the same `items` array, drawn in
+ * another place.
+ */
+describe("ContextMenu — a folha do telemóvel", () => {
+  const larguraOriginal = window.innerWidth
+  afterEach(() => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: larguraOriginal })
+  })
+
+  const itens = (): MenuItem[] => [
+    { label: "Copiar texto", onSelect: () => {} },
+    { label: "Responder", onSelect: () => {} },
+    { label: "Fixar", separatorBefore: true, onSelect: () => {} },
+    { label: "Eliminar", destructive: true, onSelect: () => {} },
+  ]
+  const nomes = (): string[] => screen.getAllByRole("menuitem").map((botao) => botao.textContent ?? "")
+
+  it("at 390 px the menu is a sheet, with the same entries in the same order as on a computer", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 })
+    const { unmount } = render(<Harness items={itens()} />)
+    const noComputador = nomes()
+    expect(screen.getByRole("menu").className).not.toContain("context-folha")
+    unmount()
+
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 })
+    render(<Harness items={itens()} />)
+    const menu = screen.getByRole("menu")
+    expect(menu.className).toContain("context-folha")
+    // A sheet is not placed at the finger: no left and top from the pointer.
+    expect(menu.style.left).toBe("")
+    expect(menu.style.top).toBe("")
+    expect(nomes()).toEqual(noComputador)
+  })
+
+  it("the veil behind the sheet closes it, and the tap does not reach what is below", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 })
+    render(<Harness items={itens()} />)
+    const veu = document.querySelector(".context-veu")
+    expect(veu).not.toBeNull()
+    fireEvent.pointerDown(veu as Element)
+    expect(screen.getByText("fechado")).toBeTruthy()
+  })
+
+  it("the tablet and the computer (841 px and more) keep the menu at the pointer", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 841 })
+    render(<Harness items={itens()} />)
+    expect(screen.getByRole("menu").className).not.toContain("context-folha")
+    expect(document.querySelector(".context-veu")).toBeNull()
+  })
+})

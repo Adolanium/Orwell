@@ -1,4 +1,4 @@
-import { motor, janelaComFoco, type Motivo } from "../sons/motor.js"
+import { motor, janelaComFoco, type Motivo, type Motor } from "../sons/motor.js"
 import type { TipoDeSom } from "../sons/familia.js"
 
 /**
@@ -25,6 +25,26 @@ export const TIPO_DO_TOQUE: Record<SoundKind, TipoDeSom> = {
 export function playSound(kind: SoundKind): boolean {
   const motivo: Motivo = motor.tocar({ tipo: TIPO_DO_TOQUE[kind] })
   return motivo === "tocou"
+}
+
+/**
+ * The nudge I just sent, on my own device (21/11/2026): the same
+ * sound the other person hears, so the gesture is heard on both ends, like in
+ * MSN.
+ *
+ * Called only once the send was accepted: a nudge the session refused (rate,
+ * error) plays nothing. It is the response to a gesture, so it never arrives
+ * marked `deMim`; every other engine rule still holds: the master switch, the
+ * nudge toggle, Busy, Invisible, the pause, the volume and the 4 s burst cap.
+ * The focus rule never applied to the nudge. Sound only: the phone is already
+ * in hand, and the vibration is for the person being nudged.
+ *
+ * My other devices play it too (21/11/2026): there the nudge
+ * arrives as an event from my own account, and `useCotoveladaPorVer` plays it.
+ * This device never gets that event, so the sound is never twice.
+ */
+export function tocarCotoveladaEnviada(motorDoSom: Pick<Motor, "tocar"> = motor): Motivo {
+  return motorDoSom.tocar({ tipo: TIPO_DO_TOQUE.buzz, semVibracao: true })
 }
 
 /** Waits for the first gesture to create audio. See `motor.armar`. */

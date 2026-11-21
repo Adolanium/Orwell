@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url"
 import { chromium, webkit } from "playwright"
 import { FRASE } from "./ambiente.mjs"
 import { criarConta } from "./conta.mjs"
+import { appAberta, irPara, mostrarLista, separadorActual } from "./separadores.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = resolve(process.argv[2] ?? join(RAIZ, "apps/web/dist"))
@@ -97,7 +98,8 @@ for (let volta = 0; volta < 60; volta++) {
 }
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
-const dentro = (page) => page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+// The app is open: the rail on a computer, the tabs on a phone (no rail there).
+const dentro = (page) => appAberta(page)
 
 /** The portrait of the sidebar: what exists, where, and what is on top of it. */
 const medir = (page) =>
@@ -119,6 +121,10 @@ const medir = (page) =>
       sidebarClasses: sidebar?.className,
       sidebar: caixa(sidebar),
       canais: [...document.querySelectorAll(".channel-name")].map((n) => n.getAttribute("title") ?? n.textContent),
+      // On a phone (option B) the other communities are faces on the rail, and what sits over the list.
+      carril: [...document.querySelectorAll(".carril-comunidade:not(.carril-nova)")].map((n) => n.getAttribute("aria-label")),
+      separador: document.querySelector(".app.telemovel")?.getAttribute("data-separador") ?? null,
+      profundidade: document.querySelector(".app.telemovel")?.getAttribute("data-profundidade") ?? null,
       arvore: caixa(arvore),
       arvorePai: arvore ? caixa(arvore.parentElement) : null,
       salas,
@@ -172,11 +178,11 @@ try {
     console.log("Carla: sala comum chegou em", Date.now() - t0, "ms")
     await wait(3000)
     console.log("CARLA ENTROU:", JSON.stringify(await medir(c)))
-    const h = c.getByRole("button", { name: "Abrir o painel lateral" })
-    if (await h.isVisible().catch(() => false)) await h.tap()
+    // No drawer since option B: the Communities list is the screen.
+    await mostrarLista(c)
     await wait(800)
-    console.log("CARLA GAVETA:", JSON.stringify(await medir(c)))
-    if (CAPTURAS) await c.screenshot({ path: join(CAPTURAS, "c-1-gaveta.png") })
+    console.log("CARLA LISTA:", JSON.stringify(await medir(c)))
+    if (CAPTURAS) await c.screenshot({ path: join(CAPTURAS, "c-1-lista.png") })
     const linhaComum = c.locator(".channel-row").first()
     if (await linhaComum.count()) { await linhaComum.locator("button.channel").tap(); await wait(1500) }
     console.log("CARLA TOCOU NO COMUM:", JSON.stringify(await medir(c)))
@@ -242,11 +248,10 @@ try {
   await wait(6000)
   console.log("BRUNO DEPOIS DE ENTRAR:", JSON.stringify(await medir(b)))
   if (CAPTURAS) { mkdirSync(CAPTURAS, { recursive: true }); await b.screenshot({ path: join(CAPTURAS, "b-1-entrou.png") }) }
-  const hamb = b.getByRole("button", { name: "Abrir o painel lateral" })
-  console.log("hamburguer visível:", await hamb.isVisible().catch(() => false))
-  if (await hamb.isVisible().catch(() => false)) await hamb.tap()
+  console.log("separadores no ecrã:", (await b.locator(".separadores").count()) === 1)
+  await mostrarLista(b)
   await wait(800)
-  console.log("BRUNO GAVETA:", JSON.stringify(await medir(b)))
+  console.log("BRUNO LISTA:", JSON.stringify(await medir(b)))
   console.log("BRUNO ROLANTES:", JSON.stringify(await b.evaluate(() => {
     const out = []
     for (const el of document.querySelectorAll(".sidebar, .sidebar *")) {
@@ -255,40 +260,27 @@ try {
     }
     return out
   })))
-  if (CAPTURAS) await b.screenshot({ path: join(CAPTURAS, "b-2-gaveta.png") })
+  if (CAPTURAS) await b.screenshot({ path: join(CAPTURAS, "b-2-lista.png") })
   const linha = b.locator(".channel-row").first()
   if (await linha.count()) { await linha.tap(); await wait(1200) }
   console.log("BRUNO TOCOU NO CANAL:", JSON.stringify(await medir(b)))
   if (CAPTURAS) await b.screenshot({ path: join(CAPTURAS, "b-3-canal.png") })
 
-  // --- Bruno closes the drawer, goes elsewhere and comes back ---------------
-  const fecharGaveta = async () => {
-    const veu = b.locator(".drawer-scrim")
-    if (await veu.isVisible().catch(() => false)) {
-      const caixa = await veu.boundingBox()
-      await b.touchscreen.tap(caixa.x + caixa.width - 10, caixa.y + caixa.height / 2)
-      await wait(500)
-    }
-  }
+  // --- Bruno goes to the other tabs and comes back --------------------------
+  // The drawer and its veil are gone (option B): the list is the Communities tab.
   const abrirGaveta = async () => {
-    const h = b.getByRole("button", { name: "Abrir o painel lateral" })
-    if (await h.isVisible().catch(() => false)) await h.tap()
+    await mostrarLista(b)
     await wait(800)
   }
-  const destinos = await b.locator(".rail button").evaluateAll((bs) => bs.map((x) => x.getAttribute("aria-label") ?? x.textContent))
-  console.log("CARRIL:", JSON.stringify(destinos))
-  await fecharGaveta()
-  for (const nome of ["Eu", "Feed", "Amigos"]) {
-    const botao = b.locator(".rail").getByRole("button", { name: nome, exact: true }).first()
-    if (!(await botao.count())) { console.log("sem destino", nome); continue }
-    await botao.tap()
+  const destinos = await b.locator(".separadores button").evaluateAll((bs) => bs.map((x) => x.getAttribute("aria-label") ?? x.textContent))
+  console.log("SEPARADORES:", JSON.stringify(destinos))
+  for (const separador of ["tu", "mensagens", "amigos"]) {
+    await irPara(b, separador)
     await wait(1200)
-    await b.locator(".rail").getByRole("button", { name: "Comunidades", exact: true }).first().tap()
+    await irPara(b, "comunidades")
     await wait(1200)
-    await abrirGaveta()
-    console.log(`BRUNO DEPOIS DE ${nome}:`, JSON.stringify(await medir(b)))
-    if (CAPTURAS) await b.screenshot({ path: join(CAPTURAS, `b-4-depois-${nome}.png`) })
-    await fecharGaveta()
+    console.log(`BRUNO DEPOIS DE ${separador}:`, JSON.stringify(await medir(b)))
+    if (CAPTURAS) await b.screenshot({ path: join(CAPTURAS, `b-4-depois-${separador}.png`) })
   }
 
   // --- Ana's page, opened by Bruno from one of her messages ----------------
@@ -304,11 +296,11 @@ try {
   if (chegou) {
     await caraDaAna.tap()
     await wait(1200)
-    console.log("PÁGINA: vista-guardada display =", await b.locator(".vista-guardada").evaluate((el) => getComputedStyle(el).display), "| destino:", await b.locator(".rail-btn.active").first().getAttribute("aria-label").catch(() => "?"))
+    console.log("PÁGINA: vista-guardada display =", await b.locator(".vista-guardada").evaluate((el) => getComputedStyle(el).display), "| separador:", await separadorActual(b))
     if (CAPTURAS) await b.screenshot({ path: join(CAPTURAS, "b-p1-pagina.png") })
     await abrirGaveta()
-    console.log("BRUNO PÁGINA GAVETA:", JSON.stringify(await medir(b)))
-    if (CAPTURAS) await b.screenshot({ path: join(CAPTURAS, "b-p2-pagina-gaveta.png") })
+    console.log("BRUNO PÁGINA LISTA:", JSON.stringify(await medir(b)))
+    if (CAPTURAS) await b.screenshot({ path: join(CAPTURAS, "b-p2-pagina-lista.png") })
     const outra = b.locator('.room-tree button.room', { hasText: "conversa" }).first()
     if (await outra.isVisible().catch(() => false)) {
       await outra.tap()
@@ -324,11 +316,11 @@ try {
   if (await voz.count()) {
     await voz.tap()
     await wait(4000)
-    console.log("BRUNO NA CHAMADA, GAVETA FECHADA:", JSON.stringify(await medir(b)))
+    console.log("BRUNO NA CHAMADA, CONVERSA EMPURRADA:", JSON.stringify(await medir(b)))
     if (CAPTURAS) await b.screenshot({ path: join(CAPTURAS, "b-7-chamada.png") })
     await abrirGaveta()
-    console.log("BRUNO NA CHAMADA, GAVETA:", JSON.stringify(await medir(b)))
-    if (CAPTURAS) await b.screenshot({ path: join(CAPTURAS, "b-8-chamada-gaveta.png") })
+    console.log("BRUNO NA CHAMADA, LISTA:", JSON.stringify(await medir(b)))
+    if (CAPTURAS) await b.screenshot({ path: join(CAPTURAS, "b-8-chamada-lista.png") })
     const conversa = b.locator('.room-tree button.room', { hasText: "conversa" }).first()
     if (await conversa.isVisible().catch(() => false)) {
       await conversa.tap()
@@ -349,24 +341,22 @@ try {
   await wait(3000)
   console.log("BRUNO REABERTO:", JSON.stringify(await medir(b2)))
   if (CAPTURAS) await b2.screenshot({ path: join(CAPTURAS, "b-5-reaberto.png") })
-  const h2 = b2.getByRole("button", { name: "Abrir o painel lateral" })
-  if (await h2.isVisible().catch(() => false)) await h2.tap()
+  await mostrarLista(b2)
   await wait(800)
-  console.log("BRUNO REABERTO GAVETA:", JSON.stringify(await medir(b2)))
-  if (CAPTURAS) await b2.screenshot({ path: join(CAPTURAS, "b-6-reaberto-gaveta.png") })
+  console.log("BRUNO REABERTO LISTA:", JSON.stringify(await medir(b2)))
+  if (CAPTURAS) await b2.screenshot({ path: join(CAPTURAS, "b-6-reaberto-lista.png") })
 
   // --- Ana, at 390 in a new mobile context: not the same account; it shrinks ----
   await a.setViewportSize({ width: 390, height: 844 })
   await wait(800)
-  const hambA = a.getByRole("button", { name: "Abrir o painel lateral" })
-  if (await hambA.isVisible().catch(() => false)) await hambA.click()
+  await mostrarLista(a)
   await wait(800)
-  console.log("ANA 390 GAVETA:", JSON.stringify(await medir(a)))
-  if (CAPTURAS) await a.screenshot({ path: join(CAPTURAS, "a-390-gaveta.png") })
-  // The last channel in the list: tap it and see if its rooms fit on screen.
-  const ultimo = a.locator(".channel-row").last()
+  console.log("ANA 390 LISTA:", JSON.stringify(await medir(a)))
+  if (CAPTURAS) await a.screenshot({ path: join(CAPTURAS, "a-390-lista.png") })
+  // The last community: its face on the rail (the sidebar lists only the chosen one), and whether its rooms fit on screen.
+  const ultimo = a.locator(".carril-comunidade:not(.carril-nova)").last()
   await ultimo.scrollIntoViewIfNeeded().catch(() => {})
-  await ultimo.tap().catch((e) => console.log("tap no último falhou:", e.message.split("\n")[0]))
+  await ultimo.click().catch((e) => console.log("toque no último falhou:", e.message.split("\n")[0]))
   await wait(1200)
   const rolagem = await a.evaluate(() => {
     const out = []
@@ -376,7 +366,7 @@ try {
     }
     return out
   })
-  console.log("ROLANTES NA GAVETA:", JSON.stringify(rolagem))
+  console.log("ROLANTES NA LISTA:", JSON.stringify(rolagem))
   console.log("ANA 390 ÚLTIMO CANAL:", JSON.stringify(await medir(a)))
   if (CAPTURAS) await a.screenshot({ path: join(CAPTURAS, "a-390-ultimo.png") })
 } catch (erro) {

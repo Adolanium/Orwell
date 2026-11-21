@@ -79,7 +79,8 @@ const VERSOES = [
         '"Yes, pair this device"',
         "six words",
         "does not have the account key",
-        "breaks the channel encryption",
+        // 1.3.26: importing the file adds a device and never removes one.
+        "it joins as a new device",
         ".enclave",
         "iOS 15.4",
         "Lockdown Mode",
@@ -143,7 +144,8 @@ const VERSOES = [
         '"Sim, emparelhar este aparelho"',
         "seis palavras",
         "não tem a chave da conta",
-        "parte a cifra dos canais",
+        // 1.3.26: importing the file adds a device and never removes one.
+        "como um aparelho novo",
         ".enclave",
         "iOS 15.4",
         "Modo de Segurança Extrema",

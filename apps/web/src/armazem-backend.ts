@@ -63,6 +63,11 @@ export class BrowserArmazemBackend implements ArmazemBackend {
     this.#selado = true
   }
 
+  /** A tab resumed from the back-forward cache that still owns the vault writes again. */
+  dessselar(): void {
+    this.#selado = false
+  }
+
   /**
    * The quota the browser gives this origin (design §4), or null if it does
    * not say. The core subtracts the margin and keeps the smaller of the two

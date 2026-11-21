@@ -26,7 +26,6 @@ import { strings } from "../../strings.js"
 import { LinkPreview } from "../social/LinkPreview.js"
 import { PedidoCard } from "./PedidoCard.js"
 import { vazioDaConversa } from "./vazioDaConversa.js"
-import { FraseDoMomento } from "../../components/FraseDoMomento.js"
 import { Votacao } from "../../components/Votacao.js"
 import { votacaoDe, type Apuramento } from "../../lib/votacoes.js"
 import { NomeDePessoa } from "../../components/NomeDePessoa.js"
@@ -89,6 +88,7 @@ export const MessageRow = memo(function MessageRow({
   etiquetas,
   mencionaMe = false,
   mencaoVista = false,
+  autorNovo = false,
 }: {
   message: ChatMessage
   /** Same sender, shortly after the previous message: no name, no avatar. */
@@ -229,6 +229,13 @@ export const MessageRow = memo(function MessageRow({
    * in front): its light fades out, and stays out. A boolean, for the memo.
    */
   mencaoVista?: boolean | undefined
+  /**
+   * The author's account is in its first 24 hours, in the common room (1.3.26):
+   * links as plain text, and images, files and link cards hidden, with the
+   * reason. The content is end-to-end encrypted, so this side is the only one
+   * that can do it. See `anti-abuso.ts` in the protocol.
+   */
+  autorNovo?: boolean | undefined
 }): React.JSX.Element {
   const toast = useToast()
   /** The tags with this message's checked mentions: a role chip only where the core kept the role. */
@@ -411,7 +418,7 @@ stays, that is why it travels. */}
         {message.payload.moderada === true && <p className="message-moderada">{strings.chat.messageModerated}</p>}
         {(message.payload.body ?? "") !== "" && !votacao && (
           <p>
-            <RichText nameFor={nomeDeMencao} onMention={onMention} etiquetas={etiquetasDaLinha}>
+            <RichText nameFor={nomeDeMencao} onMention={onMention} etiquetas={etiquetasDaLinha} semLigacoes={autorNovo}>
               {corpoParaMostrar(message.payload)}
             </RichText>
           </p>
@@ -457,7 +464,10 @@ stays, that is why it travels. */}
         */}
         {/* Which message these attachments belong to: to request them from other members when missing (S5). */}
         <AnexosDoItem.Provider value={anexosDoItem}>
-          {imagens.length > 0 && (
+          {autorNovo && (imagens.length > 0 || ficheiros.length > 0 || (message.payload.links?.length ?? 0) > 0) && (
+            <p className="field-note message-anexos-escondidos">{strings.contaNova.anexosEscondidos}</p>
+          )}
+          {!autorNovo && imagens.length > 0 && (
             <div className="message-media">
               <PostImages media={imagens} onOpen={onOpenImage} />
             </div>
@@ -465,7 +475,7 @@ stays, that is why it travels. */}
 
           {/* And what is not an image: one line per file, with a button to save.
               Nothing opens here, see `FileAttachments`. */}
-          <FileAttachments files={ficheiros} />
+          {!autorNovo && <FileAttachments files={ficheiros} />}
         </AnexosDoItem.Provider>
 
         {/*
@@ -473,7 +483,7 @@ stays, that is why it travels. */}
           here. NOTHING here goes and fetches anything from the site: if it did,
           the link owner would know who opened this conversation and when,           without anyone having clicked anything.
           */}
-        {message.payload.links?.map((link, index) => <LinkPreview key={index} link={link} />)}
+        {!autorNovo && message.payload.links?.map((link, index) => <LinkPreview key={index} link={link} />)}
 
         {/* The invite, or the friend request, with the reply next to where it
             arrived. See `PedidoCard`. */}
@@ -936,13 +946,14 @@ function TimelineInteira({
   destacada = null,
   semCaixaDeEscrita = false,
   lugar = null,
-  fraseDoLugar = false,
+  aSincronizar = false,
   presenceFor,
   emChamada,
   onResponder,
   citacaoDe,
   onIrParaOriginal,
   ocultar,
+  autoresNovos,
 }: {
   channel: string
   /**
@@ -974,14 +985,12 @@ function TimelineInteira({
    */
   semCaixaDeEscrita?: boolean | undefined
   /**
-   * This conversation is a channel, not a direct (phase 6, layer 1).
-   *
-   * With a `place` and the new conversation, empty says once "You see the
-   * conversation from now on...". Only in a channel: that is where someone
-   * enters a conversation already underway. Whoever created the channel has no
-   * place, and does not see it.
+   * The past from before the place is arriving now, from other members or
+   * from a sibling device (D2). Only then does the marker show ("Chat history
+   * is syncing."); with nothing to bring, no sentence at all. The shell passes
+   * `useSincronia().aSincronizar`, the same condition the members column uses.
    */
-  fraseDoLugar?: boolean | undefined
+  aSincronizar?: boolean | undefined
   /**
    * The state of each person, for the face ring. Absent: faces have no ring,
    * because this screen does not know the state and grey would say "offline".
@@ -1113,6 +1122,8 @@ function TimelineInteira({
    * Absent, nothing folds. The shell decides where: in a room, not in a direct.
    */
   ocultar?: ((message: ChatMessage) => boolean) | undefined
+  /** Authors in their first 24 hours, in the common room (1.3.26). See `MessageRow.autorNovo`. */
+  autoresNovos?: ReadonlySet<string> | undefined
 }): React.JSX.Element {
   const container = useRef<HTMLDivElement>(null)
 
@@ -1143,7 +1154,7 @@ function TimelineInteira({
     if (indice === 0 && canLoadOlder) return null
     return indice
   }, [lugar, messages, canLoadOlder, me])
-  const marcaDoLugar = lugar ? (
+  const marcaDoLugar = lugar && aSincronizar ? (
     <div className="timeline-lugar" role="note" data-lugar={lugar.seq}>
       <span className="timeline-lugar-texto">{strings.sincronia.lugar}</span>
       <time className="timeline-lugar-data" dateTime={new Date(lugar.em).toISOString()}>
@@ -1853,11 +1864,6 @@ function TimelineInteira({
             body={semCaixaDeEscrita ? strings.chat.timelineEmptyLocked : strings.chat.timelineEmptyBody}
           />
         ))}
-      {semNada && porque === "nova" && fraseDoLugar && lugar !== null && (
-        <div className="timeline-frase-do-lugar">
-          <FraseDoMomento id="canal" />
-        </div>
-      )}
 
       {desenhadas.map((message, i) => {
         const index = inicio + i
@@ -1908,6 +1914,7 @@ function TimelineInteira({
             key={chave}
             message={message}
             grouped={grouped}
+            autorNovo={autoresNovos?.has(message.sender) ?? false}
             authorName={nameFor(message.sender)}
             apelido={apelidoDe?.(message.sender)}
             profile={directory.get(message.sender)}

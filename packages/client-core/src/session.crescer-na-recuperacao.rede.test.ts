@@ -78,21 +78,25 @@ describe("crescimentos na recuperação", () => {
     await ana!.session.connect()
     await ate(() => ana!.session.membersOf(canal).length === 5, "a Ana vê os cinco", 30_000)
     // The cascade fires at the end of recovery: wait for it, and for nothing else.
-    await ate(() => (envios.get("profile") ?? 0) >= 2, "o perfil da Ana sai na ligação e na cascata", 15_000)
-    await new Promise((resolve) => setTimeout(resolve, 2_000))
+    await ate(() => (envios.get("profile") ?? 0) >= 1, "o perfil da Ana sai na ligação", 15_000)
+    // The cascade, if any, comes at the end of recovery: give it time to show.
+    await new Promise((resolve) => setTimeout(resolve, 5_000))
 
     /*
-      Two rounds: one for each connection (the handshake publishes the profile
-      and repairs the rooms of restored channels) and the cascade, once, at the
-      end of recovery. Before this fix there were four: one for the connection
-      and one per entry (4 profiles and 12 `channel.meta`).
+      One round: the connection (the handshake publishes the profile and repairs
+      the rooms of restored channels). Up to 1.3.25 the cascade at the end of
+      recovery resent the whole profile once more (2 here), and before that fix
+      once per entry (4 profiles and 12 `channel.meta`). Since 1.3.26 (profiles,
+      the latest version only) the cascade resends nothing to newcomers whose
+      leaves ask for profiles (`EXTENSAO_PERFIS_A_PEDIDO`): they pull Ana's
+      latest signed profile from a member (`pp`), checked below by her name.
 
       And no rooms at all since 1.3.12: neither the connection nor the cascade
       repeats authority and rooms (`republicar-so-com-sinal.test.ts` in the
       server). Bruno invited each of them, and his Welcome portrait carried them.
       Up to 1.3.10 this was `2 * salas` here.
     */
-    expect(envios.get("profile")).toBe(2)
+    expect(envios.get("profile")).toBe(1)
     const salas = ana!.session.roomsOf(canal).length
     expect(salas).toBeGreaterThan(0)
     expect(envios.get("channel.meta") ?? 0).toBe(0)

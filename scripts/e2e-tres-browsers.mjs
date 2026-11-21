@@ -23,6 +23,7 @@ import { criarConta } from "./conta.mjs"
 import { aceitarConvite, convidar } from "./convite.mjs"
 import { abrirCanal, abrirDirecta, aceitarAmizade, ate, consultar, contasDoServidor, criarCanal, dentro, dizer, irParaEmparelhar, ouviu, pedirAmizade, temCanal, verificador } from "./fase7-comum.mjs"
 import { levantarServidor } from "./servidor-descartavel.mjs"
+import { colarCodigo, confirmarEAbrir, palavrasDe } from "./juntar-aparelho.mjs"
 
 const FRASE = "frase-de-verificacao-2026"
 const SEGUINTE = /^(Continuar|Seguinte)$/
@@ -78,29 +79,19 @@ try {
   ]) {
     await ana.page.keyboard.press("Escape").catch(() => {})
     await ana.page.getByRole("button", { name: "Configurações", exact: true }).first().click()
-    await ana.page.getByRole("button", { name: "Aparelhos", exact: true }).click()
-    await ana.page.getByRole("button", { name: "Acrescentar aparelho" }).click()
+    await ana.page.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+    await ana.page.getByRole("button", { name: "Juntar um aparelho" }).click()
     const folha = ana.page.locator(".sheet").first()
     await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
     const link = await folha.locator("code[data-link]").getAttribute("data-link")
     const novo = await abrir(motor, nome)
     await irParaEmparelhar(novo.page)
-    await novo.page.getByLabel("Ou cola o link").fill(link)
-    await novo.page.getByRole("button", { name: SEGUINTE }).first().click()
-    await novo.page.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 15_000 })
-    const campos = novo.page.locator('.gate-card input[type="password"]')
-    for (let i = 0; i < (await campos.count()); i++) await campos.nth(i).fill(FRASE)
-    await novo.page.getByRole("button", { name: SEGUINTE }).first().click()
-    await novo.page.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-    await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-    const iguais = (await novo.page.locator(".sas-palavras").getAttribute("data-palavras")) === (await folha.locator(".sas-palavras").getAttribute("data-palavras"))
-    await novo.page.getByRole("button", { name: "São as mesmas" }).click()
-    await folha.getByRole("button", { name: "São as mesmas" }).click()
-    const feito = await novo.page.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 }).then(() => true, () => false)
+    await colarCodigo(novo.page, folha, link)
+    const iguais = (await palavrasDe(novo.page)) === (await palavrasDe(folha))
+    const feito = await confirmarEAbrir(novo.page, folha, FRASE).then(() => true, () => false)
     await folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
-    await novo.page.getByRole("button", { name: "Entrar", exact: true }).click()
     await dentro(novo.page)
-    check(`o ${nome} emparelha com o Chromium (as mesmas seis palavras)`, iguais && feito)
+    check(`o ${nome} emparelha com o Chromium (as mesmas três palavras)`, iguais && feito)
   }
   const manifesto = consultar(srv.base, "SELECT manifest FROM device_manifests WHERE address = ?", enderecoAna)[0]
   const nAparelhos = manifesto ? JSON.parse(manifesto.manifest).devices.length : 0

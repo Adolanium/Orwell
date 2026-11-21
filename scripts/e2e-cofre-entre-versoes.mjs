@@ -298,7 +298,7 @@ async function correr({ nome, cria, abre, ecra }) {
       // The gate must ASK for the phrase. If the creation screen shows instead, the
       // vault was lost, worse than not opening.
       const pedeFrase = page.locator('.gate-card input[type="password"]').first()
-      const ecraDeCriacao = page.getByPlaceholder("Como queres aparecer")
+      const ecraDeCriacao = page.getByRole("heading", { name: "Bem-vindo ao Orwell" })
       const desfecho = await Promise.race([
         pedeFrase.waitFor({ timeout: 60_000 }).then(() => "pede-frase"),
         ecraDeCriacao.waitFor({ timeout: 60_000 }).then(() => "cofre-perdido"),

@@ -23,6 +23,9 @@ import { FolhaMudarDeConta } from "../gate/MudarDeConta.js"
  * - **remembered session**: "Expire session" disappears (design decision 3), with
  *   the line explaining why. "Sign out" forgets the session and locks.
  * - **no memory**: as it has always been.
+ *
+ * "Change password" moved to Settings › Account and security (21/11/2026,
+ * `ContaESeguranca.tsx`), with everything else that is about the account.
  */
 export function CartaoDaSessao({
   onLock,
@@ -87,11 +90,11 @@ export function CartaoDaSessao({
     const frase = fraseDoCampo(formulario, "new-password", "")
     const confirmacao = fraseDoCampo(formulario, "confirm-password", "")
     if (frase.length < 8) {
-      setErroDaFrase(strings.gate.passphraseShort)
+      setErroDaFrase(strings.entrada.curta)
       return
     }
     if (frase !== confirmacao) {
-      setErroDaFrase(strings.gate.passphraseMismatch)
+      setErroDaFrase(strings.entrada.diferentes)
       return
     }
     setErroDaFrase(null)
@@ -135,10 +138,10 @@ export function CartaoDaSessao({
               >
                 {/* The same name that the gate will use when asking to fill it. See `CampoDeIdentidade`. */}
                 <CampoDeIdentidade />
-                <Field label={strings.gate.devicePassphrase}>
+                <Field label={strings.entrada.palavraPasse}>
                   <input type="password" name="new-password" autoComplete="new-password" autoFocus />
                 </Field>
-                <Field label={strings.gate.confirmPassphrase}>
+                <Field label={strings.entrada.palavraPasseOutraVez}>
                   <input type="password" name="confirm-password" autoComplete="new-password" />
                 </Field>
                 {estado?.memoriaDisponivel && bridge.vault.memorizar && (

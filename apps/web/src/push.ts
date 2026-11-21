@@ -43,6 +43,11 @@ export interface AmbienteDoPush {
   instalada: boolean
   /** The active registration, or `null` when there is none in time. */
   registo: () => Promise<RegistoDoPush | null>
+  /**
+   * The person granted notifications in this browser. Without it no push
+   * subscription can exist. Absent: read as granted (a test double from before 1.3.26).
+   */
+  permissaoConcedida?: () => boolean
 }
 
 export function ambienteDoBrowser(): AmbienteDoPush {
@@ -54,6 +59,7 @@ export function ambienteDoBrowser(): AmbienteDoPush {
       return ehIos()
     },
     instalada: typeof window !== "undefined" && window.matchMedia?.("(display-mode: standalone)").matches === true,
+    permissaoConcedida: () => typeof Notification !== "undefined" && Notification.permission === "granted",
     registo: async () => {
       if (!temServiceWorker) return null
       return Promise.race([
@@ -122,16 +128,55 @@ export function dadosDaSubscricao(
   }
 }
 
-/** Cancel the browser subscription, if there is one. Never throws. */
+/*
+  "Never throws" for real (1.3.26): WebKit registers the service worker with no
+  `pushManager` and no `getNotifications` on the registration. The optional
+  chain stopped at the registration only, and the TypeError went up through
+  account deletion: a device removed from the account kept its vault. The
+  calls run inside the `try` now, so a missing member is a missing feature.
+*/
+
+/**
+ * How long `cancelarNoBrowser` waits. WebKit can leave `getSubscription()`
+ * unanswered for ever, and account deletion waits for this before erasing the
+ * vault: a removed device hung at "loading" with its vault on disk.
+ */
+export const PRAZO_DO_CANCELAR_MS = 5_000
+
+/**
+ * Cancel the browser subscription, if there is one. Never throws, and never waits more than `PRAZO_DO_CANCELAR_MS`.
+ *
+ * Without notification permission there is no subscription, and the Push API is
+ * not touched at all: in WebKit, `pushManager.getSubscription()` on a
+ * registration with no permission froze the page (main thread and timers), and
+ * a device removed from the account never erased its vault (1.3.26).
+ */
 export async function cancelarNoBrowser(amb: AmbienteDoPush): Promise<void> {
-  const registo = await amb.registo().catch(() => null)
-  const sub = await registo?.pushManager.getSubscription().catch(() => null)
-  await sub?.unsubscribe().catch(() => false)
+  if (amb.permissaoConcedida && !amb.permissaoConcedida()) return
+  const cancelar = (async () => {
+    try {
+      const registo = await amb.registo().catch(() => null)
+      const sub = await registo?.pushManager?.getSubscription?.().catch(() => null)
+      await sub?.unsubscribe().catch(() => false)
+    } catch {
+      // No Push in this browser: nothing to cancel.
+    }
+  })()
+  let relogio: ReturnType<typeof setTimeout> | undefined
+  const prazo = new Promise<void>((resolve) => {
+    relogio = setTimeout(resolve, PRAZO_DO_CANCELAR_MS)
+  })
+  await Promise.race([cancelar, prazo])
+  clearTimeout(relogio)
 }
 
 /** Close the push notices still on screen: the socket now brings the messages. Never throws. */
 export async function fecharAvisosDoPush(amb: AmbienteDoPush): Promise<void> {
-  const registo = await amb.registo().catch(() => null)
-  const avisos = (await registo?.getNotifications({ tag: ETIQUETA_DO_PUSH }).catch(() => [])) ?? []
-  for (const aviso of avisos) aviso.close()
+  try {
+    const registo = await amb.registo().catch(() => null)
+    const avisos = (await registo?.getNotifications?.({ tag: ETIQUETA_DO_PUSH }).catch(() => [])) ?? []
+    for (const aviso of avisos) aviso.close()
+  } catch {
+    // No notices API in this browser: nothing to close.
+  }
 }

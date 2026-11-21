@@ -72,6 +72,12 @@ export type EstadoDaPosse =
   | { t: "cedido" }
   /** Exited for good (old version). Does not rejoin the queue. */
   | { t: "largado" }
+  /**
+   * Into the back-forward cache: stopped writing (saving first) and released the
+   * lock, but the page is still in memory. `retomar` asks for the lock again.
+   * Not an owner: another tab can take over in the meantime.
+   */
+  | { t: "suspenso" }
 
 /**
  * How to stop.
@@ -102,6 +108,17 @@ export interface Posse {
   fechar(): void
   /** The page became visible again. Broadcast confirms it is still the owner. */
   ficouVisivel(): void
+  /**
+   * The page goes into the back-forward cache (iOS: also a screen lock or an app
+   * switch, on a page that stays in memory). Like `largar`, but not for good:
+   * saves, stops writing, releases the lock and waits in `suspenso`.
+   */
+  suspender(): Promise<void>
+  /**
+   * The suspended page is back. Asks for the lock again: `dono` if it is free,
+   * `espera` if another tab took over meanwhile. Does nothing unless `suspenso`.
+   */
+  retomar(): void
 }
 
 export interface OpcoesDaPosse {
@@ -166,6 +183,10 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
     paragem ??= opcoes.pararDeEscrever(modo).catch(() => {})
     return paragem
   }
+  /** A resumed owner writes again, so its next stop must run again. Only `retomar` calls this. */
+  const esquecerParagem = (): void => {
+    paragem = null
+  }
 
   const canal = opcoes.criarCanal ? abrirCanal(opcoes.criarCanal, opcoes.nome) : null
   const enviar = (mensagem: Mensagem): void => {
@@ -195,6 +216,18 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
 
   // No protection at all: the behavior from before, and whoever uses this knows the risks.
   queueMicrotask(() => mudar({ t: "dono", via: "nenhuma" }))
+  /** The save of a suspend is running; a resume that arrives now waits for it (`retomarDepois`). */
+  let aSuspenderSemProtecao = false
+  let retomarDepoisSemProtecao = false
+  const retomarSemProtecao = (): void => {
+    if (aSuspenderSemProtecao) {
+      retomarDepoisSemProtecao = true
+      return
+    }
+    if (estado.t !== "suspenso") return
+    esquecerParagem()
+    mudar({ t: "dono", via: "nenhuma" })
+  }
   return montar({
     pedir() {},
     async largar() {
@@ -203,6 +236,23 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
     },
     fechar() {},
     ficouVisivel() {},
+    async suspender() {
+      // Hidden again before the save ended: the latest intent wins, so no resume after it.
+      if (aSuspenderSemProtecao) {
+        retomarDepoisSemProtecao = false
+        return
+      }
+      if (estado.t !== "dono") return
+      aSuspenderSemProtecao = true
+      await parar({ gravar: true })
+      aSuspenderSemProtecao = false
+      if (estado.t === "dono") mudar({ t: "suspenso" })
+      if (retomarDepoisSemProtecao) {
+        retomarDepoisSemProtecao = false
+        retomarSemProtecao()
+      }
+    },
+    retomar: retomarSemProtecao,
   })
 
   // ---------------------------------------------------------------------------
@@ -217,12 +267,19 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
     let pedido: ReturnType<typeof setTimeout> | null = null
     /** Already said "yielding" and waits to be removed. */
     let aCeder = false
+    /**
+     * A resume that arrived while the suspend's save was still running (1.3.26
+     * review, finding 2): the suspend runs it when it ends. See `retomarComTrinco`.
+     */
+    let retomarDepois = false
     let saiu = false
+    /** Suspended (back-forward cache): out of the queue until `retomar`. */
+    let suspenso = false
 
     const segurar = (): Promise<void> => {
-      // Left in the meantime (old version mid-request): the granted lock is given
-      // back right away, never becoming an owner.
-      if (saiu) return Promise.resolve()
+      // Left in the meantime (old version mid-request), or suspended: the granted
+      // lock is given back right away, never becoming an owner.
+      if (saiu || suspenso) return Promise.resolve()
       if (pedido) clearTimeout(pedido)
       pedido = null
       mudar({ t: "dono", via: "trinco" })
@@ -234,6 +291,8 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
     /** The owner lost the lock: either by yielding or by being taken. */
     const perdido = (): void => {
       soltar = null
+      // Suspended already stopped and released: a late rejection changes nothing.
+      if (suspenso) return
       // No "yielding" before, the other may already be reading: seal without writing.
       void parar({ gravar: aCeder }).then(() => {
         if (estado.t !== "largado") mudar({ t: "cedido" })
@@ -241,7 +300,7 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
     }
 
     const entrarNaFila = (): void => {
-      if (saiu) return
+      if (saiu || suspenso) return
       fila?.abort()
       const controlo = new AbortController()
       fila = controlo
@@ -260,7 +319,7 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
     }
 
     const tomar = (): void => {
-      if (saiu) return
+      if (saiu || suspenso) return
       if (pedido) clearTimeout(pedido)
       pedido = null
       fila?.abort()
@@ -312,17 +371,32 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
     })
 
     // The start: try without waiting. If nothing, join the queue.
-    trincos
-      .request(opcoes.nome, { mode: "exclusive", ifAvailable: true }, (trinco) => {
-        if (trinco === null) {
-          entrarNaFila()
-          return undefined
-        }
-        return segurar()
-      })
-      .catch((erro: unknown) => {
-        if (ehAborto(erro)) perdido()
-      })
+    const comecar = (): void => {
+      trincos
+        .request(opcoes.nome, { mode: "exclusive", ifAvailable: true }, (trinco) => {
+          if (trinco === null) {
+            entrarNaFila()
+            return undefined
+          }
+          return segurar()
+        })
+        .catch((erro: unknown) => {
+          if (ehAborto(erro)) perdido()
+        })
+    }
+    comecar()
+
+    /** Resume, or remember the resume when the suspend's save is still running (`retomarDepois`). */
+    const retomarComTrinco = (): void => {
+      if (saiu || !suspenso) return
+      if (estado.t !== "suspenso") {
+        retomarDepois = true
+        return
+      }
+      suspenso = false
+      esquecerParagem()
+      comecar()
+    }
 
     return {
       pedir(opcoesDoPedido) {
@@ -363,6 +437,30 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
       ficouVisivel() {
         // The lock is not lost by the page being hidden.
       },
+      async suspender() {
+        if (saiu) return
+        // Hidden again before the save ended: the latest intent wins, so no resume after it.
+        if (suspenso) {
+          retomarDepois = false
+          return
+        }
+        suspenso = true
+        fila?.abort()
+        fila = null
+        if (pedido) clearTimeout(pedido)
+        pedido = null
+        if (estado.t === "dono") await parar({ gravar: true })
+        const largar = soltar
+        soltar = null
+        largar?.()
+        aCeder = false
+        mudar({ t: "suspenso" })
+        if (retomarDepois) {
+          retomarDepois = false
+          retomarComTrinco()
+        }
+      },
+      retomar: retomarComTrinco,
     }
   }
 
@@ -384,6 +482,21 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
     let aConfirmar = false
     let aCandidatar = false
     let saiu = false
+    /** Suspended (back-forward cache): silent and out of the election until `retomar`. */
+    let suspenso = false
+    /** A resume that arrived during the suspend's save (1.3.26 review, finding 2). See `retomarPorDifusao`. */
+    let retomarDepois = false
+    /** Resume, or remember the resume when the suspend's save is still running. */
+    const retomarPorDifusao = (): void => {
+      if (saiu || !suspenso) return
+      if (estado.t !== "suspenso") {
+        retomarDepois = true
+        return
+      }
+      suspenso = false
+      esquecerParagem()
+      candidatar()
+    }
 
     /** The most recent announcement wins, ties broken by larger ID. */
     const ganhaAoMeu = (outroDesde: number, outroId: string): boolean =>
@@ -397,7 +510,7 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
     const souOuQueroSerDono = (): boolean => estado.t === "dono" || aConfirmar
 
     const assumir = (): void => {
-      if (saiu) return
+      if (saiu || suspenso) return
       if (pedido) clearTimeout(pedido)
       pedido = null
       aCandidatar = false
@@ -432,7 +545,7 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
         one that loses never becomes owner, not even for a moment.
       */
       setTimeout(() => {
-        if (!aConfirmar || saiu) return
+        if (!aConfirmar || saiu || suspenso) return
         aConfirmar = false
         mudar({ t: "dono", via: "difusao" })
       }, BATIMENTO_MS)
@@ -456,7 +569,7 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
 
     /** Ask who the owner is. If no one replies in the window, take over. */
     const candidatar = (): void => {
-      if (aCandidatar || saiu) return
+      if (aCandidatar || saiu || suspenso) return
       aCandidatar = true
       const perguntaEm = Date.now()
       enviar({ t: "quem", de: id })
@@ -465,9 +578,10 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
       setTimeout(
         () => {
           aCandidatar = false
-          if (saiu || souOuQueroSerDono() || estado.t === "cedido") return
+          if (saiu || suspenso || souOuQueroSerDono() || estado.t === "cedido") return
           if (ouvidoEm >= perguntaEm) {
-            if (estado.t === "a-decidir") mudar(ESPERA)
+            // An owner answered: a resumed tab waits like a new one.
+            if (estado.t === "a-decidir" || estado.t === "suspenso") mudar(ESPERA)
             return
           }
           assumir()
@@ -478,6 +592,14 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
 
     canal.addEventListener("message", ({ data }) => {
       if (!ehMensagem(data) || data.de === id || saiu) return
+      // Suspended: not an owner and not a candidate, but it keeps hearing who is.
+      if (suspenso) {
+        if (data.t === "dono") {
+          maiorDesde = Math.max(maiorDesde, data.desde)
+          ouvidoEm = Date.now()
+        }
+        return
+      }
       switch (data.t) {
         case "quem":
           if (souOuQueroSerDono()) enviar({ t: "dono", de: id, desde })
@@ -558,6 +680,31 @@ export function criarPosse(opcoes: OpcoesDaPosse): Posse {
         }
         mudar({ t: "largado" })
       },
+      async suspender() {
+        if (saiu) return
+        // Hidden again before the save ended: the latest intent wins, so no resume after it.
+        if (suspenso) {
+          retomarDepois = false
+          return
+        }
+        suspenso = true
+        if (pedido) clearTimeout(pedido)
+        pedido = null
+        const eraDono = estado.t === "dono"
+        aConfirmar = false
+        aCandidatar = false
+        pararDeBater()
+        if (eraDono) {
+          await parar({ gravar: true })
+          enviar({ t: "larguei", de: id })
+        }
+        mudar({ t: "suspenso" })
+        if (retomarDepois) {
+          retomarDepois = false
+          retomarPorDifusao()
+        }
+      },
+      retomar: retomarPorDifusao,
       fechar() {
         if (estado.t === "dono") enviar({ t: "larguei", de: id })
         // A page that is leaving stops responding: otherwise the "who is the owner?"

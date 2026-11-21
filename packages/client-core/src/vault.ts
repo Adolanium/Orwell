@@ -1,7 +1,25 @@
 import { marcarArranque } from "./marcasDeArranque.js"
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js"
 import { argon2id } from "@noble/hashes/argon2.js"
-import { fromBase64, toBase64, type CorpoDaDenuncia, type Motivo } from "@enclave/protocol"
+import {
+  fromBase64,
+  generateDeviceKey,
+  identityFromPrivateKey,
+  parseServerName,
+  signDeviceCert,
+  toBase64,
+  type CorpoDaDenuncia,
+  type Motivo,
+} from "@enclave/protocol"
+import {
+  ERRO_FICHEIRO_DE_APARELHO_REVOGADO,
+  ERRO_FICHEIRO_SEM_CHAVE_DA_CONTA,
+  type PassagemDoImportar,
+  type PedidoDePassagem,
+} from "./passagem.js"
+import { importDeviceKey, newImportSeed, type PendingImportKeys } from "./pendingImportKeys.js"
+import { ERRO_APARELHO_ATRASADO, ERRO_COFRE_POR_SELAR, ERRO_NAO_E_A_PALAVRA_PASSE_DA_CONTA } from "./palavraPasseDaConta.js"
+import type { PalavraPasseDaConta } from "@enclave/protocol"
 import { chavesDeOrdem, chaveDoEvento, venceCarimbo } from "./dobras.js"
 import { comoNoEcra, lerVoto, votacaoGuardada, votacoesAbertasPresas, votosAGuardar } from "./votos.js"
 import { fixadasPresas } from "./fixadas.js"
@@ -503,6 +521,19 @@ export interface VaultContents {
    * (up to 124 KB with avatar) in a loop.
    */
   perfilPublicadoPara?: Record<string, string[]>
+  /**
+   * The device keys of every other leaf in each channel when our profile went out
+   * there last (1.3.26), ours left out. A leaf not on the list joined since: it gets
+   * the profile again if it does not ask for profiles itself, or if it is a device of
+   * ours. See `perfilPorReenviar`.
+   */
+  perfilPublicadoParaAparelhos?: Record<string, string[]>
+  /**
+   * The `updatedAt` of our profile edit still waiting to go out (1.3.26): the
+   * channels and our other devices get it a few seconds after the last edit, or on
+   * the next opening when the app closed first. See `Session.publicarPerfilPendente`.
+   */
+  perfilPorPublicar?: number
   /** F10: when we last replied to a request for profiles in each channel. At most once a day. */
   perfisDadosEm?: Record<string, number>
   /**
@@ -563,6 +594,21 @@ export interface VaultContents {
    */
   identityCreatedAtMinute?: number
   /**
+   * The last time this device was online with this account (ms since epoch).
+   *
+   * Written while online, by each vault write and on a deliberate disconnect
+   * (see `Session.previousOnlineAt`). It is device-local: the vault is one per
+   * account per device and this field never travels to siblings. The members
+   * column reads the value from BEFORE this opening to say "You haven't logged
+   * in X days" while a channel's history syncs. Absent: a device that has never
+   * been online with this account, or a vault from before 1.3.26. Both read as
+   * "do not know", and the interface says nothing about days.
+   *
+   * Never in an account file: the export leaves it out and the import drops it,
+   * so an imported device reads as a new device here (no days to say).
+   */
+  lastOnlineAt?: number
+  /**
    * The ownership generation of this device on the server (`auth.finish`, in the protocol).
    *
    * An imported file is a COPY of the device that exported it: same key, same leaf in each
@@ -578,6 +624,28 @@ export interface VaultContents {
    * and two connections from this copy do not close each other (see `auth.finish` in the protocol).
    */
   assumirPosse?: string
+  /**
+   * The device keys of this account that this device already knows (1.3.26): the
+   * ones it saw in a manifest of its own account, or paired itself. A key that
+   * shows up in a later manifest and is not here is a device this one did not add:
+   * the session tells the person ("A new device joined the account", with
+   * "Remove"). Absent in an older vault, and in an imported one: the first read
+   * fills it in silence. See `Session.#notarAparelhosDaConta`.
+   */
+  aparelhosConhecidos?: string[]
+  /**
+   * The version of the account password record this vault is sealed with
+   * (1.3.26, `PalavraPasseDaConta`). Absent: this device's own password, from
+   * before the first change anywhere in the account (version 0). The salt and
+   * the key are the vault's own, so they are not repeated here.
+   */
+  palavraPasseDaConta?: { versao: number }
+  /**
+   * The highest account password version a sibling sent to this device, adopted
+   * or not (S1, 21/11/2026). Above `palavraPasseDaConta.versao`, this device is
+   * behind, and a password change here is refused until it catches up.
+   */
+  highestAccountPasswordVersionSeen?: number
   /** The one-shot peer bootstrap already ran on this device. */
   bootstrapDone?: boolean
   /**
@@ -934,6 +1002,18 @@ export interface AutoriaDoPerfilNoCanal {
 /** A heavy thing missing from a sibling: the bytes of an entry, a video, or a profile with portrait. */
 export type ItemDeMediaDoIrmao = { c: string; e: string } | { v: string } | { a: string }
 
+/**
+ * A sibling's conversation entries in one channel, compact (20/11/2026): a
+ * bitset of `seq`s from `s` (bit `i` of byte `j` is `s + 8 * j + i`, base64url)
+ * and the identity keys of its sends without echo. See `conversaDe` and
+ * `faltamDaConversa` in `historico/conteudo.ts`.
+ */
+export interface ConversaNoIrmao {
+  s: number
+  b: string
+  k?: string[]
+}
+
 /** A channel in the history plan. `cursor` is the sort key of the last entry pulled; `null` is the start. */
 export interface CanalNoPlano {
   total: number
@@ -942,6 +1022,12 @@ export interface CanalNoPlano {
   /** The summary of the channel on the sibling, when the plan was made. Ends up in `trazidos` at the finish. */
   resumo: string
   fim?: true
+  /**
+   * The sibling's conversation entries, from its inventory (`CanalNoInventario.q`,
+   * 20/11/2026): what lets a stopped plan say exactly how many messages are
+   * missing here. Absent from an older sibling: the number is then unknown.
+   */
+  conversa?: ConversaNoIrmao
   /**
    * Entries of this channel the sibling holds and could not send (12/11/2026):
    * an entry that does not serialize, skipped by `paginaDe`. They leave the
@@ -2601,6 +2687,15 @@ interface VaultFile {
  */
 export const VERSAO_DO_COFRE = 3
 
+/**
+ * The vault contents as they go into an account file: everything but
+ * `lastOnlineAt`, which belongs to this device and never travels.
+ */
+function paraExportar(contents: VaultContents): Omit<VaultContents, "lastOnlineAt"> {
+  const { lastOnlineAt: _local, ...resto } = contents
+  return resto
+}
+
 /*
   Version 2 (20/10/2026, phase S2 of absolute sync): the state book
   (`estadoDoCanal`) leaves `history`. A version 1 vault opens and migrates on
@@ -2792,6 +2887,115 @@ export interface ResultadoDoImportar {
 }
 
 /**
+ * Turn the decrypted contents of an account file into the vault of a NEW device
+ * of the account, in place, and say what the handover needs (1.3.26).
+ *
+ * - A new device key, certified by the account key of the file.
+ * - Out goes what belongs to the device that exported the file: its MLS groups
+ *   and key packages (the leaves are that device's), its SFrame counters, its
+ *   anchors and gaps, its commits and sends still waiting for a verdict, its
+ *   possession generation, and the announcements it made in each channel. This
+ *   device gets its own seats, through the paths that already seat a device of
+ *   the manifest (`lugaresPorPedir`, answered by `#repararAparelhosDaConta` and
+ *   `#answerRejoinAgora`, and the siblings' `#assentarAparelhosEmFalta`).
+ * - The history, the account state, the profile, the friends, and the images'
+ *   references stay.
+ *
+ * `null` for a file with no identity at all (nothing to renew). Throws
+ * `ERRO_FICHEIRO_SEM_CHAVE_DA_CONTA` for a file with a device and no account
+ * key (a phone paired before 1.3.16): it cannot certify a new device, and a copy
+ * of its device is what this replaces.
+ */
+export function devolverComoAparelhoNovo(
+  conteudo: Partial<VaultContents>,
+  /** The new device's key, when the import keeps one stable across retries (`pendingImportKeys.ts`). Drawn here otherwise. */
+  deviceKey?: { privateKey: Uint8Array; publicKey: Uint8Array },
+): { pedido: PedidoDePassagem } | null {
+  if (!conteudo.signingPrivateKey) {
+    if (conteudo.deviceSigningPrivateKey) throw new Error(ERRO_FICHEIRO_SEM_CHAVE_DA_CONTA)
+    return null
+  }
+  if (!conteudo.deviceSigningPrivateKey || !conteudo.homeserver) throw new Error(ERRO_FICHEIRO_SEM_CHAVE_DA_CONTA)
+  const chaveDaConta = fromBase64(conteudo.signingPrivateKey)
+  const chaveDoAparelhoAntigo = fromBase64(conteudo.deviceSigningPrivateKey)
+  const novo = deviceKey ?? generateDeviceKey()
+  // Throws for a key or server name that does not read: the file is not an account then.
+  const identidade = identityFromPrivateKey(chaveDaConta, parseServerName(conteudo.homeserver), novo.privateKey)
+  const pedido = {
+    address: identidade.address,
+    homeserver: conteudo.homeserver,
+    chaveDaConta: chaveDaConta.slice(),
+    chaveDoAparelhoAntigo,
+    posse: conteudo.posseDoAparelho,
+    chaveNova: novo.publicKey,
+    versaoVista: conteudo.deviceManifests?.[identidade.address],
+  }
+  chaveDaConta.fill(0)
+
+  conteudo.deviceSigningPrivateKey = toBase64(novo.privateKey)
+  novo.privateKey.fill(0)
+  // A vault with both forms (a phone paired after 1.3.16) keeps both consistent.
+  if (conteudo.deviceCert) conteudo.deviceCert = toBase64(signDeviceCert(pedido.chaveDaConta, novo.publicKey, identidade.address))
+
+  // The channels this device will ask a seat in: those of the history and of the groups.
+  const agora = Date.now()
+  const canais = new Set([
+    ...Object.keys(conteudo.groups ?? {}),
+    ...Object.keys(conteudo.history ?? {}),
+    ...Object.keys(conteudo.estadoDoCanal ?? {}),
+  ])
+  const lugares: NonNullable<VaultContents["lugaresPorPedir"]> = {}
+  for (const canal of canais) {
+    // The account channel is `#cuidarDoCanalDaConta`'s; a channel the account left stays left.
+    if (canal === conteudo.moradaDaConta || conteudo.canaisArquivados?.[canal] !== undefined) continue
+    // The first request on the first connection: there is no main device seating this one, so no turn to wait for.
+    lugares[canal] = { desde: agora, tentativas: 0, proxima: agora }
+  }
+
+  conteudo.groups = {}
+  conteudo.pendingKeyPackages = []
+  conteudo.lastSeq = {}
+  conteudo.deadWelcomes = []
+  conteudo.lugaresPorPedir = lugares
+  for (const campo of [
+    "sframeReservas",
+    "posseDoAparelho",
+    "assumirPosse",
+    "seatSince",
+    "lacunas",
+    "pendingCommits",
+    "enviosPorConfirmar",
+    "livroPorConfirmar",
+    "reenviadoPara",
+    "reenvioPorFazer",
+    "reenvioAnunciado",
+    "permissoesAnunciadas",
+    "aparelhosConhecidos",
+  ] as const) {
+    delete conteudo[campo]
+  }
+  return { pedido }
+}
+
+/**
+ * The account of a decrypted account file: its address and account private key
+ * (a copy: the caller zeroes it). `null` when the file cannot add a device; then
+ * `devolverComoAparelhoNovo` says why.
+ */
+function contaDoFicheiro(conteudo: Partial<VaultContents>): { address: string; accountKey: Uint8Array } | null {
+  if (!conteudo.signingPrivateKey || !conteudo.deviceSigningPrivateKey || !conteudo.homeserver) return null
+  try {
+    const accountKey = fromBase64(conteudo.signingPrivateKey)
+    const oldDeviceKey = fromBase64(conteudo.deviceSigningPrivateKey)
+    const { address } = identityFromPrivateKey(accountKey, parseServerName(conteudo.homeserver), oldDeviceKey)
+    oldDeviceKey.fill(0)
+    return { address, accountKey }
+  } catch {
+    return null
+  }
+}
+
+/**
  * The media store as seen by the vault (design §9): it opens when the vault
  * opens, locks when the vault locks, and is destroyed with the account. It is
  * the `ArmazemDeMedia`; the vault only knows these three doors.
@@ -2973,7 +3177,11 @@ export class Vault {
    * This is F3's convergence: after this, "Sign out" signs out for real, and
    * the vault can go in an account file without asking for another passphrase.
    */
-  async definirPalavraPasse(frase: string): Promise<void> {
+  definirPalavraPasse(frase: string): Promise<void> {
+    return this.#serializeKeyChange(() => this.#definirPalavraPasse(frase))
+  }
+
+  async #definirPalavraPasse(frase: string): Promise<void> {
     if (!this.#key || this.#provisorio) throw new Error("vault is locked")
     if (this.#protection !== "os") throw new Error("this vault already has a passphrase")
     const nova = await this.#derivarChaveNova(frase)
@@ -2994,6 +3202,217 @@ export class Vault {
     antiga.key.fill(0)
     await this.#largarMemoria()
   }
+
+  /**
+   * Change the password of a password vault (1.3.26, Settings).
+   *
+   * What the password protects, and only that: the vault on THIS device. The
+   * vault key is Argon2id(password, salt), and the vault is sealed with it. The
+   * server never sees the password or the vault. An account file is a copy of
+   * the vault as it was sealed when it was saved, so each file keeps opening
+   * with the password of its day; this does not reach them. Each device of the
+   * account has its own vault and its own password, and this does not reach
+   * them either.
+   *
+   * `actual` is proven first: it must derive, with this vault's salt, the key
+   * that is open now. Then the new key derives with a NEW salt, and the vault is
+   * written sealed by it in ONE write (`#persist`: the backends write a temporary
+   * file and rename it, or one IndexedDB transaction). A failed write leaves the
+   * file on disk sealed by the old password and the open vault on the old key:
+   * the account is never left between the two.
+   *
+   * A remembered session held the old key: it now holds the new one (or is
+   * dropped, when storing fails).
+   */
+  mudarPalavraPasse(actual: string, nova: string, opcoes: { versao?: number | ((current: number) => number) } = {}): Promise<void> {
+    return this.#serializeKeyChange(() => this.#mudarPalavraPasse(actual, nova, opcoes))
+  }
+
+  async #mudarPalavraPasse(actual: string, nova: string, opcoes: { versao?: number | ((current: number) => number) }): Promise<void> {
+    if (!this.#key || this.#provisorio) throw new Error("vault is locked")
+    if (this.#protection !== "passphrase") throw new Error("this vault has no passphrase to change")
+    this.#refuseWhenBehind()
+    const salt = this.#salt
+    const prova = await this.#derivar(actual, salt, KDF)
+    const aberta = this.#key
+    const certa = aberta !== null && iguaisEmTempoConstante(prova, aberta)
+    prova.fill(0)
+    if (!certa) throw new Error("the current passphrase is not right")
+    const novaChave = await this.#derivarChaveNova(nova)
+    // Derivation yielded to the event loop twice: someone may have locked, or changed it, in the meantime.
+    if (!this.#key || this.#provisorio || this.#protection !== "passphrase" || this.#key !== aberta) {
+      novaChave.key.fill(0)
+      throw new Error("vault is locked")
+    }
+    // Read inside the queue: a record adopted just before this change counts.
+    const versao = typeof opcoes.versao === "function" ? opcoes.versao(this.#contents.palavraPasseDaConta?.versao ?? 0) : opcoes.versao
+    await this.#selarCom(novaChave, versao)
+  }
+
+  /**
+   * "I forgot the current password" (S4, 21/11/2026): change the password of an
+   * OPEN vault without the current one. The open vault is the proof: whoever
+   * holds this device unlocked (a remembered session) can do it. The desktop asks
+   * the system first where it can (Touch ID, in the bridge); the web cannot, and
+   * `docs/THREAT-MODEL.md` writes that down as an accepted risk. The rest is
+   * `mudarPalavraPasse`: one write, a new salt, the same queue and the same
+   * refusal on a device that is behind.
+   */
+  changePasswordWithOpenVault(nova: string, opcoes: { versao?: number | ((current: number) => number) } = {}): Promise<void> {
+    return this.#serializeKeyChange(async () => {
+      if (!this.#key || this.#provisorio) throw new Error("vault is locked")
+      if (this.#protection !== "passphrase") throw new Error("this vault has no passphrase to change")
+      this.#refuseWhenBehind()
+      const aberta = this.#key
+      const novaChave = await this.#derivarChaveNova(nova)
+      if (!this.#key || this.#provisorio || this.#protection !== "passphrase" || this.#key !== aberta) {
+        novaChave.key.fill(0)
+        throw new Error("vault is locked")
+      }
+      const versao = typeof opcoes.versao === "function" ? opcoes.versao(this.#contents.palavraPasseDaConta?.versao ?? 0) : opcoes.versao
+      await this.#selarCom(novaChave, versao)
+    })
+  }
+
+  /** S1: a sibling sent a newer record that this vault has not adopted yet. A change from here would lose to it. */
+  #refuseWhenBehind(): void {
+    const seen = this.#contents.highestAccountPasswordVersionSeen ?? 0
+    if (seen > (this.#contents.palavraPasseDaConta?.versao ?? 0)) throw new Error(ERRO_APARELHO_ATRASADO)
+  }
+
+  /**
+   * Every change of the vault key goes through this one queue (S2, 21/11/2026).
+   * Records adopted back to back (v1, v2, v3 after a recovery), or a change
+   * typed here while a record comes in, each derive and write in turn. Without
+   * it, a v1 write that failed after v2 had set the key put the old key back.
+   */
+  #keyChanges: Promise<unknown> = Promise.resolve()
+
+  #serializeKeyChange<T>(step: () => Promise<T>): Promise<T> {
+    const run = this.#keyChanges.then(step, step)
+    this.#keyChanges = run.catch(() => {})
+    return run
+  }
+
+  /**
+   * Seal this vault with `nova` in ONE write, and with the account password
+   * version in that same write. A failed write puts the old key (and version)
+   * back. A remembered session follows the new key. A temporary vault only
+   * changes in memory, like everything else in it.
+   */
+  async #selarCom(nova: { key: Uint8Array; salt: Uint8Array; protection: "os" | "passphrase" }, versao?: number): Promise<void> {
+    const antiga = { key: this.#key!, salt: this.#salt, protection: this.#protection }
+    const versaoAntes = this.#contents.palavraPasseDaConta
+    this.#adoptarChave(nova)
+    if (versao !== undefined) this.#contents.palavraPasseDaConta = { versao }
+    try {
+      await this.#persist()
+    } catch (erro) {
+      // Only our own change goes back. A lock during the write (or any other key) is not ours to undo.
+      if (this.#key === nova.key) {
+        this.#adoptarChave(antiga)
+        if (versaoAntes === undefined) delete this.#contents.palavraPasseDaConta
+        else this.#contents.palavraPasseDaConta = versaoAntes
+      } else {
+        antiga.key.fill(0)
+      }
+      nova.key.fill(0)
+      throw erro
+    }
+    antiga.key.fill(0)
+    if (this.#provisorio) return
+    const memoria = this.#backend.memoria
+    if (memoria && (await memoria.existe().catch(() => false))) {
+      await memoria.guardar(this.exportSessionKey()).catch(() => this.#largarMemoria())
+    }
+  }
+
+  /**
+   * The account password record of this vault: its salt and key, with the
+   * version it was sealed with (0 before any change). `null` for a vault with no
+   * password (keychain only), a locked one, or a temporary one still waiting for
+   * the account password. Copies: the caller sends them, the vault keeps its own.
+   */
+  palavraPasseDaConta(): PalavraPasseDaConta | null {
+    if (!this.#key || this.#protection !== "passphrase" || this.#porSelar) return null
+    return { versao: this.#contents.palavraPasseDaConta?.versao ?? 0, sal: toBase64(this.#salt), chave: toBase64(this.#key) }
+  }
+
+  /**
+   * Adopt the account password record that another device sent (the account
+   * channel, 1.3.26): the vault is sealed with that key and salt, so from now on
+   * the account password opens it. One write; a failure leaves the vault as it
+   * was. A keychain vault becomes a password vault: the account has one password.
+   */
+  adoptarPalavraPasseDaConta(
+    registo: PalavraPasseDaConta,
+    opcoes: { onlyIf?: (current: PalavraPasseDaConta | null) => boolean } = {},
+  ): Promise<boolean> {
+    return this.#serializeKeyChange(async () => {
+      // Seen, adopted or not: a record that fails to adopt below still marks this device as behind (S1).
+      if (this.#key && registo.versao > (this.#contents.highestAccountPasswordVersionSeen ?? 0)) {
+        this.#contents.highestAccountPasswordVersionSeen = registo.versao
+      }
+      // `onlyIf` sees the record as it is NOW, after every change queued before this one.
+      if (opcoes.onlyIf && !opcoes.onlyIf(this.palavraPasseDaConta())) return false
+      await this.#adoptarPalavraPasseDaConta(registo)
+      return true
+    })
+  }
+
+  async #adoptarPalavraPasseDaConta(registo: PalavraPasseDaConta): Promise<void> {
+    if (!this.#key) throw new Error("vault is locked")
+    const chave = fromBase64(registo.chave)
+    const salt = fromBase64(registo.sal)
+    if (chave.length !== 32 || salt.length !== 16) throw new Error("the vault file is damaged")
+    await this.#selarCom({ key: chave, salt, protection: "passphrase" }, registo.versao)
+    this.#porSelar = false
+  }
+
+  /**
+   * After pairing (1.3.26): the temporary vault takes the account password. The
+   * typed password must derive, with the record's salt, the record's key; if not,
+   * nothing changes and this throws `ERRO_NAO_E_A_PALAVRA_PASSE_DA_CONTA`.
+   */
+  /**
+   * Check that `frase` is the account password of `registo`, without touching
+   * this vault (it may hold another account): "Join another account" checks the
+   * password before the swap. Throws `ERRO_NAO_E_A_PALAVRA_PASSE_DA_CONTA`.
+   */
+  async verifyAccountPassword(frase: string, registo: PalavraPasseDaConta): Promise<void> {
+    const proof = await this.#derivar(frase, fromBase64(registo.sal), KDF)
+    const right = iguaisEmTempoConstante(proof, fromBase64(registo.chave))
+    proof.fill(0)
+    if (!right) throw new Error(ERRO_NAO_E_A_PALAVRA_PASSE_DA_CONTA)
+  }
+
+  selarComPalavraPasseDaConta(frase: string, registo: PalavraPasseDaConta): Promise<void> {
+    return this.#serializeKeyChange(async () => {
+      if (!this.#key) throw new Error("vault is locked")
+      const prova = await this.#derivar(frase, fromBase64(registo.sal), KDF)
+      const certa = iguaisEmTempoConstante(prova, fromBase64(registo.chave))
+      prova.fill(0)
+      if (!certa) throw new Error(ERRO_NAO_E_A_PALAVRA_PASSE_DA_CONTA)
+      await this.#adoptarPalavraPasseDaConta(registo)
+    })
+  }
+
+  /** After pairing with a host that sent no record (older, or no password of its own): the temporary vault takes a new password. */
+  selarComPalavraPasseNova(frase: string): Promise<void> {
+    return this.#serializeKeyChange(async () => {
+      if (!this.#key || !this.#porSelar) throw new Error("vault is locked")
+      const nova = await this.#derivarChaveNova(frase)
+      await this.#selarCom(nova)
+      this.#porSelar = false
+    })
+  }
+
+  /** The temporary vault of a pairing that has no password yet (`criarProvisorioPorSelar`). */
+  get porSelar(): boolean {
+    return this.#porSelar && this.#key !== null
+  }
+
+  #porSelar = false
 
   /** Forget the remembered session. Does not lock or touch the vault. */
   async esquecerSessao(): Promise<void> {
@@ -3108,6 +3527,25 @@ export class Vault {
     this.#abrirArmazem()
   }
 
+  /**
+   * A temporary vault for a pairing that asks for the password AFTER it (1.3.26):
+   * a random key and salt, in memory only, and `confirmarProvisorio` refuses it
+   * until `selarComPalavraPasseDaConta` or `selarComPalavraPasseNova` gives it
+   * the password. No derivation here: there is no password yet.
+   */
+  criarProvisorioPorSelar(): void {
+    this.lock()
+    this.#adoptarChave({
+      key: crypto.getRandomValues(new Uint8Array(32)),
+      salt: crypto.getRandomValues(new Uint8Array(16)),
+      protection: "passphrase",
+    })
+    this.#contents = newVaultContents()
+    this.#provisorio = true
+    this.#porSelar = true
+    this.#abrirArmazem()
+  }
+
   /** The open vault lives in memory only, and the disk one is something else. */
   get provisorio(): boolean {
     return this.#provisorio && this.#key !== null
@@ -3120,6 +3558,8 @@ export class Vault {
    */
   async confirmarProvisorio(): Promise<void> {
     if (!this.provisorio) return
+    // A vault without the account password yet would reach the disk sealed by a key nobody can type.
+    if (this.#porSelar) throw new Error(ERRO_COFRE_POR_SELAR)
     this.#provisorio = false
     try {
       await this.#persist()
@@ -3666,7 +4106,15 @@ export class Vault {
     const file = this.#lerFicheiro(raw)
 
     let payload: VaultFile
-    if (file.protection === "passphrase") {
+    if (file.protection === "passphrase" && this.#key && this.#protection === "passphrase" && this.#contents.lastOnlineAt !== undefined) {
+      // The disk bytes carry this device's last moment online, which never travels
+      // (`lastOnlineAt`): re-sealed without it, under the same key and salt, with a new nonce.
+      this.aoSerializar?.(this.#contents)
+      const nonce = crypto.getRandomValues(new Uint8Array(24))
+      const ciphertext = xchacha20poly1305(this.#key, nonce).encrypt(new TextEncoder().encode(JSON.stringify(paraExportar(this.#contents))))
+      payload = { ...file, salt: toBase64(this.#salt), nonce: toBase64(nonce), ciphertext: bytesParaBase64(ciphertext) }
+      delete payload.wrappedKey
+    } else if (file.protection === "passphrase") {
       payload = { ...file }
       delete payload.wrappedKey
     } else {
@@ -3679,7 +4127,7 @@ export class Vault {
       const nonce = crypto.getRandomValues(new Uint8Array(24))
       this.aoSerializar?.(this.#contents)
       const ciphertext = xchacha20poly1305(key, nonce).encrypt(
-        new TextEncoder().encode(JSON.stringify(this.#contents)),
+        new TextEncoder().encode(JSON.stringify(paraExportar(this.#contents))),
       )
       key.fill(0)
       payload = {
@@ -3712,7 +4160,7 @@ export class Vault {
   async importVault(
     data: Uint8Array | FonteDeBytes,
     passphrase: string,
-    opcoes: { armazem?: ArmazemDeMedia } = {},
+    opcoes: { armazem?: ArmazemDeMedia; passagem?: PassagemDoImportar; pendingImportKeys?: PendingImportKeys } = {},
   ): Promise<ResultadoDoImportar> {
     const fonte = data instanceof Uint8Array ? fonteDeBytes(data) : data
     let json: string | null = null
@@ -3781,25 +4229,95 @@ export class Vault {
     }
 
     /*
-      The imported copy claims ownership of the device on first login
-      (`assumirPosse`). Without this the device that exported it would keep speaking for the
-      account with the same key and the same MLS sheet, and the two copies would break
-      each other's channels (`scripts/e2e-exportar-importar.mjs`, October 27
-      2026). Re-sealed with the same key and a new nonce: the file's
-      passphrase stays the one that opens this vault.
+      A NEW device of the account, never a copy.
+      Up to 1.3.25 this vault was a copy of the device that exported it, and it
+      claimed that device's possession (`assumirPosse`): the original was closed
+      with Erro 748. Now this device draws its own key, certified by the account
+      key in the file, and the device that exported keeps working. See
+      `devolverComoAparelhoNovo` and `passagem.ts`.
+
+      The handover (`opcoes.passagem`) runs BEFORE anything is written here: a
+      refusal (a file from a removed device, a full account) leaves this
+      device's vault as it was. Without `passagem` (tests and tools) nothing goes
+      to the server.
+
+      Re-sealed with the same key and a new nonce: the file's passphrase stays
+      the one that opens this vault.
     */
     let selado: VaultFile
     // The imported vault's references: they say which container blobs get in, and with which class.
     let refs: Record<string, RefDeMedia> = {}
+    /*
+      A failed import must not take a seat in the account (B1). The new device
+      key comes from a seed stored on this device BEFORE the handover, so the
+      next try of a file of the same account gets the same key, and the
+      handover finds it already in. The seed goes once the vault is written.
+      See `pendingImportKeys.ts`.
+    */
+    let pendingAddress: string | null = null
     try {
-      const conteudo = JSON.parse(new TextDecoder().decode(plaintext)) as Partial<VaultContents>
+      const parse = (): Partial<VaultContents> => {
+        try {
+          return JSON.parse(new TextDecoder().decode(plaintext)) as Partial<VaultContents>
+        } catch {
+          throw new Error("this is not an enclave account file")
+        }
+      }
+      let conteudo = parse()
       refs = conteudo.media ?? {}
-      conteudo.assumirPosse = toBase64(crypto.getRandomValues(new Uint8Array(18)))
+      const pendentes = opcoes.passagem ? opcoes.pendingImportKeys : undefined
+      for (let attempt = 0; ; attempt++) {
+        let deviceKey: { privateKey: Uint8Array; publicKey: Uint8Array } | undefined
+        let reused = false
+        const conta = pendentes ? contaDoFicheiro(conteudo) : null
+        if (pendentes && conta) {
+          pendingAddress = conta.address
+          let seed = attempt === 0 ? await pendentes.read(conta.address).catch(() => null) : null
+          reused = seed !== null
+          if (seed === null) {
+            seed = newImportSeed()
+            // Without storage the import still goes on: only a retry would draw another key.
+            await pendentes.write(conta.address, seed).catch(() => {})
+          }
+          deviceKey = importDeviceKey(conta.accountKey, seed)
+          conta.accountKey.fill(0)
+          seed.fill(0)
+        }
+        let passagem: { pedido: PedidoDePassagem } | null
+        try {
+          passagem = devolverComoAparelhoNovo(conteudo, deviceKey)
+        } catch (erro) {
+          if ((erro as Error).message === ERRO_FICHEIRO_SEM_CHAVE_DA_CONTA) throw erro
+          throw new Error("this is not an enclave account file")
+        } finally {
+          deviceKey?.privateKey.fill(0)
+        }
+        if (passagem === null) break
+        try {
+          if (opcoes.passagem) await opcoes.passagem(passagem.pedido)
+          break
+        } catch (erro) {
+          /*
+            The kept key itself was removed meanwhile (another device removed the
+            ghost of a failed try): the server refuses a removed key forever. Draw a
+            new seed once, from the file as it was. A second refusal is the file's.
+          */
+          if (reused && attempt === 0 && (erro as Error).message === ERRO_FICHEIRO_DE_APARELHO_REVOGADO) {
+            conteudo = parse()
+            continue
+          }
+          throw erro
+        } finally {
+          passagem.pedido.chaveDoAparelhoAntigo.fill(0)
+          passagem.pedido.chaveDaConta.fill(0)
+        }
+      }
+      // An imported device is a new device to "You haven't signed in for X days",
+      // even from a file of another build that still carried it.
+      delete conteudo.lastOnlineAt
       const nonce = crypto.getRandomValues(new Uint8Array(24))
       const cifrado = xchacha20poly1305(key, nonce).encrypt(new TextEncoder().encode(JSON.stringify(conteudo)))
       selado = { ...file, nonce: toBase64(nonce), ciphertext: bytesParaBase64(cifrado) }
-    } catch {
-      throw new Error("this is not an enclave account file")
     } finally {
       key.fill(0)
       plaintext.fill(0)
@@ -3807,6 +4325,8 @@ export class Vault {
 
     this.lock()
     await this.#backend.write(comCabecalho(JSON.stringify(selado)))
+    // The vault holds the new key now: the next import draws a new one.
+    if (pendingAddress !== null) await opcoes.pendingImportKeys?.remove(pendingAddress).catch(() => {})
     await this.#largarMemoria()
     // From here on the account is in: nothing throws, and what does not stay is counted.
     const referenciados = registos.filter(({ sha }) => refs[sha] !== undefined)
@@ -3816,6 +4336,12 @@ export class Vault {
       has no key for any of its blobs, and a sha common to both (a friend's portrait,
       an image in a shared channel) kept the old account's blob, which the backends
       never overwrite: the image failed with Erro 522 and "Fetch" never fixed it.
+
+      This is the store of the account this import REPLACES on this device, not
+      the imported account's: its images come in from the container right below,
+      and the rest from the other devices ("Fetch"). Keeping it was weighed for
+      1.3.26 and refused: this device cannot tell, before writing, whether the
+      old store holds the same account, and a wrong guess is the Erro 522 again.
     */
     await opcoes.armazem.destruir().catch(() => {})
     return guardarBlobsImportados(fonte, referenciados, refs, opcoes.armazem)
@@ -3854,6 +4380,7 @@ export class Vault {
     this.#key = null
     this.#contents = newVaultContents()
     this.#provisorio = false
+    this.#porSelar = false
     // The store forgets the inventory and the keys it had in memory; the blobs stay on disk, unreadable.
     this.#armazem?.trancar()
     this.#armazemAberto = null
@@ -3872,6 +4399,14 @@ export class Vault {
     await this.#armazem?.destruir()
     await this.#backend.clear()
   }
+}
+
+/** Two keys are equal, without an early exit on the first different byte. */
+function iguaisEmTempoConstante(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false
+  let diferenca = 0
+  for (let i = 0; i < a.length; i++) diferenca |= a[i]! ^ b[i]!
+  return diferenca === 0
 }
 
 /**

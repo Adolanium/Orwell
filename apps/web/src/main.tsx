@@ -248,7 +248,61 @@ function arrancarComoDono(via: "trinco" | "difusao" | "nenhuma"): void {
   void versaoMudou().then((mudou) => (mudou ? bloquearPorVersao() : abrirAplicacao(via)))
 }
 
+/*
+  Back from the back-forward cache without a reload (21/11/2026).
+
+  iOS fires `pagehide` with `persisted` on every screen lock and app switch, on a
+  page that stays in memory. It used to release ownership for good and reload on
+  return: the installed app restarted every time, and long work (the history
+  between devices) started over and never finished. Now the page suspends
+  (`posse.suspender`: saves, stops writing, releases the lock) and, back in view,
+  asks for the lock again. With the lock it resumes writing only if it still owns
+  the vault and nobody wrote it meanwhile (`retomarEscrita`); in every other case
+  it reloads, as before, which puts it back in the queue with fresh state:
+  - another tab took the lock (`espera`), or the bridge refuses (another tab owned
+    and wrote the vault meanwhile, or a writer with old code did);
+  - a new version came out while it was away: reloading brings it.
+*/
+let aRetomar = false
+/**
+ * A suspend's save is still running (1.3.26 review, finding 2). iOS can show the
+ * page again before it ends; the resume then waits for the save inside `posse`
+ * instead of being dropped, which left the page on screen with its vault sealed.
+ */
+let aSuspender = false
+function retomarDaCache(): void {
+  if (versaoVelha) return
+  if (posse.estado.t !== "suspenso" && !aSuspender) return
+  aRetomar = true
+  posse.retomar()
+}
+
+function acabarDeRetomar(): void {
+  aRetomar = false
+  const ponte = bridge
+  if (!ponte) {
+    // Suspended before the app ever opened: nothing in memory to keep.
+    window.location.reload()
+    return
+  }
+  void versaoMudou()
+    .then((mudou) => (mudou ? false : ponte.retomarEscrita(posse.id)))
+    .then(
+      (retomou) => {
+        // Hidden again meanwhile (`suspenso`): nothing to do now, the next return tries again.
+        if (!retomou && posse.estado.t === "dono") window.location.reload()
+      },
+      () => window.location.reload(),
+    )
+}
+
 function desenhar(estado: EstadoDaPosse): void {
+  if (aRetomar) {
+    if (estado.t === "dono") acabarDeRetomar()
+    // Another tab owns the vault now: this memory is stale. The reload joins the queue.
+    else if (estado.t === "espera") window.location.reload()
+    return
+  }
   switch (estado.t) {
     case "dono":
       arrancarComoDono(estado.via)
@@ -279,43 +333,49 @@ function desenhar(estado: EstadoDaPosse): void {
       return
     case "a-decidir":
     case "largado":
-      // Undecided lasts less than half a second. Hung keeps what is on screen.
+    case "suspenso":
+      // Undecided lasts less than half a second. Hung keeps what is on screen, and so does suspended.
       return
   }
 }
 
 posse.aoMudar(desenhar)
 /*
-  Leaving for the navigation cache (`persisted`) the page does not die: it releases
-  ownership for good, like an old version, so another tab can take over. On return,
-  the `pageshow` below reloads.
+  Leaving for the navigation cache (`persisted`) the page does not die: it suspends
+  ownership, so another tab can take over. On return, `retomarDaCache` asks for it
+  again (see above).
 */
 window.addEventListener("pagehide", (evento) => {
   // With a call open the ownership stays: see `pagina-escondida.ts`.
   const decisao = aoEsconderAPagina({ persisted: evento.persisted, emChamada: bridge?.emChamada() ?? false })
-  if (decisao === "largar") void posse.largar()
+  if (decisao === "suspender") {
+    aSuspender = true
+    void posse.suspender().finally(() => {
+      aSuspender = false
+    })
+  }
   else if (decisao === "fechar") posse.fechar()
 })
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return
   /*
-    iOS can fire `pagehide` with `persisted` (which releases ownership) and then
-    never fire the `pageshow` that would reload. The page comes back to view with
-    no owner and no queue. If it was not the old version that released it, reload.
+    iOS can fire `pagehide` with `persisted` (which suspends ownership) and then
+    never fire the `pageshow`. The page comes back to view suspended: resume here.
   */
-  if (posse.estado.t === "largado" && !versaoVelha) {
-    window.location.reload()
+  if (posse.estado.t === "suspenso" || aSuspender) {
+    retomarDaCache()
     return
   }
   posse.ficouVisivel()
 })
 /*
-  A page that comes back from the navigation cache (back button) comes back with the
-  ownership from before, which by then may belong to another tab. Reloading asks
-  the question again, from the start. Not with a call open: see `aoMostrarAPagina`.
+  A page that comes back from the navigation cache (back button) asks the ownership
+  question again, without a reload: by then the vault may belong to another tab.
+  Not with a call open: see `aoMostrarAPagina`. Running after `visibilitychange`
+  did the same is harmless: `retomarDaCache` only acts while suspended or suspending.
 */
 window.addEventListener("pageshow", (evento) => {
-  if (aoMostrarAPagina({ persisted: evento.persisted, emChamada: bridge?.emChamada() ?? false }) === "recarregar") window.location.reload()
+  if (aoMostrarAPagina({ persisted: evento.persisted, emChamada: bridge?.emChamada() ?? false }) === "retomar") retomarDaCache()
 })
 
 watchForNewVersion(bloquearPorVersao)

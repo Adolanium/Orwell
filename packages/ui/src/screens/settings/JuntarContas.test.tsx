@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { BridgeContext } from "../../App.js"
 import type { EnclaveBridge, PairEvento } from "../../bridge.js"
 import { ToastProvider } from "../../components/Toast.js"
@@ -35,6 +35,11 @@ function ponte(): { bridge: EnclaveBridge; emitir: (evento: PairEvento) => void;
         chamadas.push(`trocar ${frase}`)
         return { address: DORA }
       }),
+      joinCheckPassword: vi.fn(async (frase: string) => {
+        chamadas.push(`check ${frase}`)
+        if (frase === "wrong-password") throw new Error("this is not the account password")
+        return { accountPassword: true }
+      }),
       juntarCancelar: vi.fn(async () => {
         chamadas.push("cancelar")
         return { ok: true }
@@ -60,7 +65,7 @@ function ponte(): { bridge: EnclaveBridge; emitir: (evento: PairEvento) => void;
       },
     },
   } as unknown as EnclaveBridge
-  return { bridge, emitir: (evento) => ouvinte?.(evento), chamadas }
+  return { bridge, emitir: (evento) => act(() => ouvinte?.(evento)), chamadas }
 }
 
 function montar(bridge: EnclaveBridge): { onDone: ReturnType<typeof vi.fn> } {
@@ -81,15 +86,21 @@ async function ateAsPalavras(emitir: (evento: PairEvento) => void): Promise<void
   fireEvent.click(screen.getByRole("button", { name: strings.juntar.comecar }))
   fireEvent.change(screen.getByLabelText(strings.pairing.pasteLabel), { target: { value: LINK } })
   fireEvent.click(screen.getByRole("button", { name: strings.pairing.pasteAction }))
-  fireEvent.change(screen.getByLabelText(strings.gate.devicePassphrase), { target: { value: "frase-nova-1" } })
-  fireEvent.change(screen.getByLabelText(strings.gate.confirmPassphrase), { target: { value: "frase-nova-1" } })
-  fireEvent.click(screen.getByRole("button", { name: strings.gate.next }))
+  // No password before the words (1.3.26): only "apagar", then the pairing.
+  expect(document.querySelector('input[type="password"]')).toBeNull()
   fireEvent.change(screen.getByLabelText(strings.settings.destroyConfirmLabel), { target: { value: strings.settings.destroyConfirmWord } })
   fireEvent.click(screen.getByRole("button", { name: strings.settings.destroyConfirm }))
   await waitFor(() => expect(screen.getByText(strings.pairing.connecting)).toBeTruthy())
   emitir({ fase: "ligado" })
-  emitir({ fase: "sas", palavras: "uma duas três quatro cinco seis" })
+  emitir({ fase: "sas", palavras: "uma-duas-tres-quatro-cinco-seis" })
   await waitFor(() => expect(screen.getByRole("button", { name: strings.pairing.sasSame })).toBeTruthy())
+}
+
+/** "Palavra-passe da conta", after the words: the main account's, one field. */
+async function typePassword(frase: string): Promise<void> {
+  const field = await screen.findByLabelText(strings.juntarAparelho.palavraPasseDaConta)
+  fireEvent.change(field, { target: { value: frase } })
+  fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.continuar }))
 }
 
 describe("juntar a outra conta", () => {
@@ -98,9 +109,10 @@ describe("juntar a outra conta", () => {
     const { onDone } = montar(bridge)
     await ateAsPalavras(emitir)
     fireEvent.click(screen.getByRole("button", { name: strings.pairing.sasSame }))
-    emitir({ fase: "certificado", address: DORA })
+    emitir({ fase: "certificado", address: DORA, palavraPasse: "conta" })
+    await typePassword("account-password-1")
     await waitFor(() => expect(screen.getByText(strings.juntar.feito(DORA))).toBeTruthy())
-    expect(chamadas).toEqual([`juntar ${LINK}`, "confirm", "avisar", "trocar frase-nova-1"])
+    expect(chamadas).toEqual([`juntar ${LINK}`, "confirm", "check account-password-1", "avisar", "trocar account-password-1"])
     fireEvent.click(screen.getByRole("button", { name: strings.juntar.continuar }))
     expect(onDone).toHaveBeenCalled()
   })
@@ -123,9 +135,38 @@ describe("juntar a outra conta", () => {
     montar(bridge)
     await ateAsPalavras(emitir)
     fireEvent.click(screen.getByRole("button", { name: strings.pairing.sasSame }))
-    emitir({ fase: "certificado", address: DORA })
+    emitir({ fase: "certificado", address: DORA, palavraPasse: "conta" })
+    await typePassword("account-password-1")
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("121"))
     expect(chamadas.some((chamada) => chamada.startsWith("trocar"))).toBe(false)
     expect(chamadas).toContain("cancelar")
+  })
+
+  it("a wrong account password is Error 140 by the field, and nothing is warned or deleted", async () => {
+    const { bridge, emitir, chamadas } = ponte()
+    montar(bridge)
+    await ateAsPalavras(emitir)
+    fireEvent.click(screen.getByRole("button", { name: strings.pairing.sasSame }))
+    emitir({ fase: "certificado", address: DORA, palavraPasse: "conta" })
+    await typePassword("wrong-password")
+    expect((await screen.findByRole("alert")).textContent).toContain("140")
+    expect(chamadas).not.toContain("avisar")
+    expect(screen.getByLabelText(strings.juntarAparelho.palavraPasseDaConta)).toBeTruthy()
+  })
+
+  it("with no record from the main account, a new password is chosen, typed twice", async () => {
+    const { bridge, emitir, chamadas } = ponte()
+    ;(bridge.pairing!.joinCheckPassword as ReturnType<typeof vi.fn>).mockResolvedValue({ accountPassword: false })
+    montar(bridge)
+    await ateAsPalavras(emitir)
+    fireEvent.click(screen.getByRole("button", { name: strings.pairing.sasSame }))
+    emitir({ fase: "certificado", address: DORA, palavraPasse: "nova" })
+    fireEvent.change(await screen.findByLabelText(strings.juntarAparelho.palavraPasseDaConta), { target: { value: "new-password-1" } })
+    fireEvent.change(screen.getByLabelText(strings.entrada.palavraPasseOutraVez), { target: { value: "other-password" } })
+    fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.continuar }))
+    expect((await screen.findByRole("alert")).textContent).toBe(strings.entrada.diferentes)
+    fireEvent.change(screen.getByLabelText(strings.entrada.palavraPasseOutraVez), { target: { value: "new-password-1" } })
+    fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.continuar }))
+    await waitFor(() => expect(chamadas).toContain("trocar new-password-1"))
   })
 })

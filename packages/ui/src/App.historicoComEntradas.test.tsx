@@ -153,11 +153,12 @@ function subirAteAoPrincipio(): void {
 describe("o histórico no ecrã quando entra gente no canal", () => {
   it("os perfis republicados não empurram a conversa para fora do ecrã", async () => {
     const ouvinte: { atual: ((m: unknown) => void) | null } = { atual: null }
+    // The seed holds the newest 100 lines (`HISTORY_PAGE_LINES`, history-last-100): 101 is the first on screen.
     const cofre = Array.from({ length: 200 }, (_, i) => guardada(i + 1, `conversa antiga número ${i + 1}`))
     await noCanal(cofre, ouvinte)
     expect(await screen.findByText("conversa antiga número 200")).toBeTruthy()
     subirAteAoPrincipio()
-    expect(screen.getByText("conversa antiga número 1")).toBeTruthy()
+    expect(screen.getByText("conversa antiga número 101")).toBeTruthy()
 
     // A wave of entries: three hundred republished profiles (fifteen entries,
     // twenty connected members), and the rooms and authority of whoever runs them.
@@ -173,7 +174,7 @@ describe("o histórico no ecrã quando entra gente no canal", () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByText("conversa antiga número 1")).toBeTruthy()
+    expect(screen.getByText("conversa antiga número 101")).toBeTruthy()
     expect(screen.getByText("conversa antiga número 200")).toBeTruthy()
   }, 20_000)
 
@@ -201,11 +202,12 @@ describe("o histórico no ecrã quando entra gente no canal", () => {
 
   it("nem as salas e os cargos que se repetem a cada entrada", async () => {
     const ouvinte: { atual: ((m: unknown) => void) | null } = { atual: null }
+    // The seed holds the newest 100 lines (`HISTORY_PAGE_LINES`, history-last-100): 101 is the first on screen.
     const cofre = Array.from({ length: 200 }, (_, i) => guardada(i + 1, `conversa antiga número ${i + 1}`))
     await noCanal(cofre, ouvinte)
     expect(await screen.findByText("conversa antiga número 200")).toBeTruthy()
     subirAteAoPrincipio()
-    expect(screen.getByText("conversa antiga número 1")).toBeTruthy()
+    expect(screen.getByText("conversa antiga número 101")).toBeTruthy()
 
     // Whoever runs and whoever alternates tell the rooms again at each growth.
     await act(async () => {
@@ -219,7 +221,7 @@ describe("o histórico no ecrã quando entra gente no canal", () => {
       }
       await Promise.resolve()
     })
-    expect(screen.getByText("conversa antiga número 1")).toBeTruthy()
+    expect(screen.getByText("conversa antiga número 101")).toBeTruthy()
 
     // And the new conversation still fits: the cap is on the conversation.
     await act(async () => {

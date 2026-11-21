@@ -199,7 +199,9 @@ if ((await cotoveladaDoBruno().count()) === 0) {
 }
 check("o Bruno consegue abrir a mesma conversa directa", (await cotoveladaDoBruno().count()) === 1)
 
-const abanar = (page) => page.evaluate(() => document.querySelector(".main")?.classList.contains("buzzing") ?? null)
+// A nudge that arrives shakes through `.app.buzzing` since 21/11/2026 (`useNudgeShake`); the sender's own press through `.main.buzzing`.
+const abanar = (page) =>
+  page.evaluate(() => (document.querySelector(".main") ? document.querySelector(".main").classList.contains("buzzing") || (document.querySelector(".app")?.classList.contains("buzzing") ?? false) : null))
 
 check("antes da cotovelada, o ecrã do Bruno está quieto", (await abanar(bruno.page)) === false)
 

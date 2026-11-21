@@ -8,6 +8,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const feito: string[] = []
 let memorizada = false
+/** A profile publish that never ends (a stalled socket), for the lock to cap. */
+let publicacaoPresa = false
 
 vi.mock("@enclave/client-core", async (original) => ({
   // The real module underneath: a new export of client-core that bridge.ts reads must not break every suite here.
@@ -26,6 +28,10 @@ vi.mock("@enclave/client-core", async (original) => ({
   Session: class {
     on(): () => void {
       return () => {}
+    }
+    async publicarPerfilPendente(): Promise<void> {
+      feito.push("publicar-perfil")
+      if (publicacaoPresa) await new Promise<void>(() => {})
     }
     disconnect(): void {
       feito.push("desligar")
@@ -102,9 +108,29 @@ describe("a ponte do browser e a sessão memorizada", () => {
     const ponte = createBrowserBridge()
     await ponte.vault.lock()
     expect(feito.indexOf("esquecer-sessao")).toBe(0)
-    // The blobs in the store queue reach the disk before locking.
-    expect(feito).toEqual(["esquecer-sessao", "desligar", "esquecer-grupos", "drenar-armazem", "trancar"])
+    // A waiting profile edit goes out while the socket is open; the blobs in the store queue reach the disk before locking.
+    expect(feito).toEqual(["esquecer-sessao", "publicar-perfil", "desligar", "esquecer-grupos", "drenar-armazem", "trancar"])
     expect(memorizada).toBe(false)
+  })
+
+  it("a profile publish that never ends holds the lock two seconds at most (1.3.26)", async () => {
+    publicacaoPresa = true
+    vi.useFakeTimers()
+    try {
+      const ponte = createBrowserBridge()
+      let trancou = false
+      const tranca = ponte.vault.lock().then(() => {
+        trancou = true
+      })
+      await vi.advanceTimersByTimeAsync(1_999)
+      expect(trancou).toBe(false)
+      await vi.advanceTimersByTimeAsync(2)
+      await tranca
+      expect(feito.at(-1)).toBe("trancar")
+    } finally {
+      vi.useRealTimers()
+      publicacaoPresa = false
+    }
   })
 
   it("`memorizar(true)` memoriza e `memorizar(false)` esquece, sem trancar", async () => {

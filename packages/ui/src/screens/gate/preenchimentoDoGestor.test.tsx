@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { BridgeContext } from "../../App.js"
 import type { EnclaveBridge } from "../../bridge.js"
 import { strings } from "../../strings.js"
 import { ToastProvider } from "../../components/Toast.js"
 import { Emparelhar } from "./Emparelhar.js"
+import { ateAPalavraPasse, comEmparelhamento } from "../../../testes/emparelharAtePalavraPasse.js"
 import { Setup } from "./Setup.js"
 import { Unlock } from "./Unlock.js"
 
@@ -81,7 +82,7 @@ describe("desbloquear: o que vale é o que está no campo", () => {
     }
     render(
       <BridgeContext.Provider value={ponteQuePedeFrase(unlock)}>
-        <Unlock onDone={vi.fn()} onStartOver={vi.fn()} />
+        <Unlock onDone={vi.fn()} />
       </BridgeContext.Provider>,
     )
     await waitFor(() => expect(document.querySelector('input[name="password"]')).not.toBeNull())
@@ -127,27 +128,13 @@ describe("criar conta: o cofre nasce com o que está no campo", () => {
       </ToastProvider>,
     )
 
-    // The question from the other device (phase 8.1): it is a new account.
-    fireEvent.click(await screen.findByRole("button", { name: strings.gate.outroAparelhoNao }))
-    // Name step: typed by hand, the way a person types.
-    const nome = await screen.findByPlaceholderText(strings.gate.namePlaceholder)
-    fireEvent.change(nome, { target: { value: "Duarte" } })
-    fireEvent.click(screen.getByRole("button", { name: strings.gate.next }))
-    // Photo step (October 27, 2026): skipped.
-    await screen.findByRole("button", { name: strings.gate.skipPhoto })
-    fireEvent.click(screen.getByRole("button", { name: strings.gate.skipPhoto }))
-
-    // Passphrase step: this is where the manager writes, and without telling anyone.
-    await waitFor(() => expect(document.querySelector('input[name="new-password"]')).not.toBeNull())
-    const frase = campoPorNome("new-password")
-    encherSemEventos(frase, FRASE)
-    fireEvent.submit(frase.closest("form") as HTMLFormElement)
-
-    // Confirmation step: the manager repeats it, and also without telling anyone.
-    await waitFor(() => expect(document.querySelector('input[name="confirm-password"]')).not.toBeNull())
-    const confirmacao = campoPorNome("confirm-password")
-    encherSemEventos(confirmacao, FRASE)
-    fireEvent.submit(confirmacao.closest("form") as HTMLFormElement)
+    // The first screen: a new account. Name, password and the second password in one form (21/11/2026).
+    fireEvent.click(await screen.findByRole("button", { name: strings.entrada.criarConta }))
+    fireEvent.change(await screen.findByLabelText(strings.entrada.nome), { target: { value: "Duarte" } })
+    // This is where the manager writes, both fields, and without telling anyone.
+    encherSemEventos(campoPorNome("new-password"), FRASE)
+    encherSemEventos(campoPorNome("confirm-password"), FRASE)
+    fireEvent.submit(campoPorNome("new-password").closest("form") as HTMLFormElement)
 
     await waitFor(() => expect(criados).toContain(FRASE))
     // A vault created with an empty passphrase (or any other) is a vault that
@@ -160,38 +147,26 @@ describe("criar conta: o cofre nasce com o que está no campo", () => {
 // 3. Add device, the same screen, on the phone that pairs.
 // ---------------------------------------------------------------------------
 
-describe("emparelhar: o cofre do aparelho novo nasce com o que está no campo", () => {
-  it("a frase que o gestor pôs no campo é a frase com que o cofre é criado", async () => {
-    const criados: (string | null)[] = []
-    const ponte = {
-      vault: {
-        status: async () => ({ exists: false, supportsOsProtection: false }),
-        create: async (frase: string | null) => {
-          criados.push(frase)
-          return { ok: true }
-        },
-        destroy: async () => ({ ok: true }),
-        // The step after the vault is born offers the account file: it calls export.
-        export: async () => ({ data: "ficheiro" }),
-      },
-      pairing: { join: async () => ({ ok: true }), cancel: async () => ({ ok: true }) },
-      on: { pair: () => () => {} },
+describe("emparelhar: a palavra-passe da conta é a que está no campo", () => {
+  it('em "Estás dentro", a frase que o gestor pôs no campo é a que sela o cofre', async () => {
+    const chamadas: string[] = []
+    const base = {
+      vault: { status: async () => ({ exists: false, supportsOsProtection: false }) },
+      identity: { load: async () => ({ address: "@a:orwell.pt", accountId: "a" }) },
+      session: { connect: async () => ({ ok: true }) },
     } as unknown as EnclaveBridge
-
+    const { bridge, emitir } = comEmparelhamento(base, chamadas)
     render(
       <ToastProvider>
-        <BridgeContext.Provider value={ponte}>
-          <Emparelhar linkInicial="https://orwell.pt/app/par#segredo" onDone={vi.fn()} onBack={vi.fn()} />
+        <BridgeContext.Provider value={bridge}>
+          <Emparelhar linkInicial="https://orwell.pt/app/emparelhar#6gzjKC5Y-jxiXv_ZLoIzYX6ZL4PeZ24HirzSb__z6VY" onDone={vi.fn()} onBack={vi.fn()} />
         </BridgeContext.Provider>
       </ToastProvider>,
     )
-
-    await waitFor(() => expect(document.querySelector('input[name="new-password"]')).not.toBeNull())
-    encherSemEventos(campoPorNome("new-password"), FRASE)
-    encherSemEventos(campoPorNome("confirm-password"), FRASE)
-    fireEvent.submit(campoPorNome("new-password").closest("form") as HTMLFormElement)
-
-    await waitFor(() => expect(criados).toContain(FRASE))
-    expect(criados).not.toContain("")
+    await ateAPalavraPasse(emitir, "conta")
+    encherSemEventos(campoPorNome("current-password"), FRASE)
+    fireEvent.submit(campoPorNome("current-password").closest("form") as HTMLFormElement)
+    await waitFor(() => expect(chamadas).toContain(`seal ${FRASE}`))
+    expect(chamadas).not.toContain("seal ")
   })
 })

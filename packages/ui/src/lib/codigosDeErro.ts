@@ -94,6 +94,15 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "this vault already has a passphrase": 136,
   // "Switch account" (`contasDoAparelho.ts`): the requested account is not on this device.
   "there is no such account on this device": 137,
+  // "Change password" (1.3.26, `Vault.mudarPalavraPasse`).
+  "the current passphrase is not right": 138,
+  "this vault has no passphrase to change": 139,
+  // One password on all devices of the account (1.3.26, `palavraPasseDaConta.ts`).
+  "this is not the account password": 140,
+  "the account password is missing": 141,
+  // S1 and S4 of the review of 21/11/2026: a device that is behind, and the desktop's Touch ID refused.
+  "sync this device before you change the password": 142,
+  "the system did not confirm that it is you": 143,
 
   "could not reach the homeserver": 201,
   "no connection to the server": 202,
@@ -132,7 +141,18 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "this server does not accept new accounts": 230,
   "this server needs a registration invite": 231,
   "the registration invite is not valid": 232,
+  // The abuse brake, part 2 (1.3.26): the proof of work did not pass, and the network limit.
+  "the account check did not pass": 233,
+  "this network created many accounts today": 234,
 
+  // A new account (1.3.26) reached the new channels it may open today. See `anti-abuso.ts`.
+  "this new account opened all the new channels it can today": 367,
+  // The cap on channels one account creates (1.3.26): 1 in the first 72 h, 5 for every account.
+  "this account created all the channels it can": 368,
+  // The cap on rooms (inside channels) one account creates (1.3.26): 30.
+  "this account created all the rooms it can": 369,
+  // A message held for its video preview, whose send failed after the box emptied (1.3.26).
+  "the message could not be sent": 370,
   "not a member of this channel": 301,
   "you may not invite in this channel": 302,
   "that person is already in this channel": 303,
@@ -218,6 +238,10 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   // A deaf room (1.3.25, P2 and P5): the core holds what is said there, and the room
   // says so. 390, not 367, so it does not collide with branches written at the same time.
   "this device is not receiving this channel": 390,
+  // "Load older" past the device (history-last-100, 1.3.26): the older lines come only
+  // from other members, and none online answered. 395, far from the numbers branches
+  // written at the same time take.
+  "no member online has the older messages": 395,
 
   "the call could not be set up on this server": 401,
   "the call has no send path": 402,
@@ -259,6 +283,10 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "could not capture this sound source": 482,
   "this device cannot capture a sound source": 483,
   "the system does not allow recording the sound": 484,
+  // The macOS permission for the microphone and the camera (1.3.26), read by the
+  // installed app before a capture. See `recusa-do-sistema.ts` in core.
+  "the system does not allow the microphone": 485,
+  "the system does not allow the camera": 486,
   "could not read this audio file": 443,
   "could not play this audio file": 444,
   // SFU refusals (see `CHAVES_DAS_RECUSAS_DO_SFU` in `call-sfu.ts`).
@@ -340,6 +368,8 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "media store failed": 521,
   "media blob is damaged": 522,
   "conversation archive page is missing": 523,
+  // A first-day account in the common room (1.3.26): no images, files or GIFs there yet.
+  "this new account cannot send images, files or gifs in the common room yet": 524,
 
   "a friend request is already pending": 601,
   "that person is blocked": 602,
@@ -357,6 +387,9 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "this device does not know the account feed yet": 613,
   // The display name stops at 12 graphemes on write (`nomeDeApresentacao.ts`).
   "the display name is too long": 614,
+  // A new account (1.3.26): the people it may add today, and direct messages before friendship.
+  "this new account added all the people it can today": 615,
+  "this new account must send a friend request first": 616,
 
   "this device has no account key": 701,
   "this server cannot pair devices": 702,
@@ -408,12 +441,25 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   "the bug report is not valid": 760,
   "too many bug reports sent": 761,
   "the server did not take the bug report": 762,
+  // Importing the account file makes a new device (1.3.26, `client-core/src/passagem.ts`).
+  "this account file is from a device that left the account": 763,
+  "this account is full, so the file cannot add a device": 764,
+  "this account file cannot add a device": 765,
+  "the server did not add this device to the account": 766,
   // Poll deadline and close.
   "only the author or a moderator may close this poll": 780,
   // Creating polls is a role power (`votacoes`, 1.3.21). See `Session.send`.
   "you may not create polls in this channel": 781,
   // Notifications when the app is closed (Web Push, `client-core/src/push.ts`). Block 790-799,
   // away from 763-789 so a code taken in another branch does not collide.
+  // The short pairing code (1.3.26, `pairCode.ts` and `emparelhar.ts`). Block 770-779, between
+  // the polls (780) and what the other 1.3.26 branches took (763-766).
+  "the pairing code is not right": 770,
+  "this pairing code is wrong or expired": 771,
+  "the short pairing code expired": 772,
+  "that is not a pairing code": 773,
+  "this server cannot pair with a short code": 774,
+  "this pairing code is for another server": 775,
   "this server does not send notifications when the app is closed": 790,
   "the browser refused the notification subscription": 791,
   "the server refused the notification subscription": 792,
@@ -452,6 +498,12 @@ export const CHAVES_DO_EMPARELHAMENTO: Readonly<Record<string, string>> = {
   manifesto: "the server refused the device list",
   "manifesto-cheio": "this account already has four devices",
   "mesma-conta": "an account cannot be joined to itself",
+  "wrong-code": "the pairing code is not right",
+  "unknown-code": "this pairing code is wrong or expired",
+  "expired-code": "the short pairing code expired",
+  "invalid-code": "that is not a pairing code",
+  "server-without-short-code": "this server cannot pair with a short code",
+  "code-for-another-server": "this pairing code is for another server",
 }
 
 /**
@@ -473,6 +525,9 @@ export const CHAVES_DO_SERVIDOR: Readonly<Record<string, string>> = {
   "registration-closed": "this server does not accept new accounts",
   "registration-invite-required": "this server needs a registration invite",
   "registration-invite-invalid": "the registration invite is not valid",
+  "registration-proof-required": "the account check did not pass",
+  "registration-proof-invalid": "the account check did not pass",
+  "registration-network-limit": "this network created many accounts today",
 }
 
 /** The key of a server error, by its code. */

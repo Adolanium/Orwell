@@ -1,5 +1,6 @@
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { copiarTexto } from "../../lib/copiar.js"
+import { APARELHOS_MUDARAM } from "../../lib/ficheiroDaConta.js"
 import { TextoDeErro } from "../../components/TextoDeErro.js"
 import { useBridge } from "../../App.js"
 import type { PairEvento } from "../../bridge.js"
@@ -11,6 +12,7 @@ import { QrCode } from "../../components/QrCode.js"
 import { useToast } from "../../components/Toast.js"
 import { CopyIcon } from "../../icons.js"
 import { strings, translateError, translatePairingError } from "../../strings.js"
+import { TypeCode } from "./TypeCode.js"
 
 /**
  * Add a device, from the computer (the side that HAS the account).
@@ -37,6 +39,32 @@ export function AcrescentarAparelho({ onClose, onConcluido }: { onClose: () => v
   const toast = useToast()
   const heading = useId()
   const [fase, setFase] = useState<Fase>({ que: "a-abrir" })
+  /** The server knows short codes (1.3.26): the new device's code can be typed here. */
+  const [knowsShortCode, setKnowsShortCode] = useState(false)
+  /** Switching from this QR to a typed code: the QR pairing's "cancelled" is not news. */
+  const switchingToCode = useRef(false)
+  /** A code was typed: the QR of this screen is no longer the pairing. */
+  const [byCode, setByCode] = useState(false)
+
+  useEffect(() => {
+    if (!bridge.pairing?.typeCode) return
+    void bridge.pairing
+      .status()
+      .then((status) => setKnowsShortCode(status.serverKnowsShortCode === true))
+      .catch(() => {})
+  }, [bridge])
+
+  const submitCode = (text: string): void => {
+    const typeCode = bridge.pairing?.typeCode
+    if (!typeCode) return
+    switchingToCode.current = true
+    setByCode(true)
+    setFase({ que: "a-abrir" })
+    typeCode(text).catch((error: Error) => {
+      switchingToCode.current = false
+      setFase({ que: "falhou", razao: translatePairingError(error.message, error.cause) })
+    })
+  }
 
   useEffect(() => {
     if (!bridge.pairing || !bridge.on.pair) {
@@ -51,6 +79,8 @@ export function AcrescentarAparelho({ onClose, onConcluido }: { onClose: () => v
           setFase({ que: "aguarda", link })
           return
         case "ligado":
+          // A typed code is now this pairing: from here its failures are news again.
+          switchingToCode.current = false
           setFase({ que: "ligado", link })
           return
         case "sas":
@@ -59,11 +89,15 @@ export function AcrescentarAparelho({ onClose, onConcluido }: { onClose: () => v
         case "concluido":
           setFase({ que: "concluido" })
           onConcluido?.()
+          // A second device: the account-file banner may go (`App.tsx`).
+          window.dispatchEvent(new Event(APARELHOS_MUDARAM))
           return
         case "falhou":
+          if (switchingToCode.current && evento.razao === "cancelado") return
           setFase({ que: "falhou", razao: translatePairingError(evento.razao) })
           return
         case "certificado":
+        case "code":
           return
       }
     })
@@ -85,7 +119,7 @@ export function AcrescentarAparelho({ onClose, onConcluido }: { onClose: () => v
 
   const copiar = (link: string): void => {
     void copiarTexto(link)
-      .then(() => toast(strings.pairing.linkCopied, "info"))
+      .then(() => toast(strings.juntarAparelho.codigoCopiado, "info"))
       .catch(() => toast(strings.common.copyFailed, "error"))
   }
 
@@ -103,7 +137,7 @@ export function AcrescentarAparelho({ onClose, onConcluido }: { onClose: () => v
   return (
     <Modal className="sheet narrow" labelledBy={heading} onClose={onClose}>
       <header className="sheet-header">
-        <h2 id={heading}>{fase.que === "sas" ? strings.pairing.sasTitle : fase.que === "concluido" ? strings.pairing.doneTitle : strings.pairing.hostTitle}</h2>
+        <h2 id={heading}>{fase.que === "sas" ? strings.juntarAparelho.palavrasTitulo : strings.juntarAparelho.titulo}</h2>
         {/*
          * In the final phases the body already has "Close" as the primary action,
          * in the place the eye goes after reading the outcome. The header one
@@ -121,39 +155,42 @@ export function AcrescentarAparelho({ onClose, onConcluido }: { onClose: () => v
       <div className="sheet-body" aria-live="polite">
         {fase.que === "a-abrir" && <p className="field-note">{strings.common.connectionConnecting}</p>}
 
-        {(fase.que === "aguarda" || fase.que === "ligado") && (
+        {fase.que === "ligado" && byCode && <p className="field-note" role="status">{strings.common.connectionConnecting}</p>}
+
+        {(fase.que === "aguarda" || (fase.que === "ligado" && !byCode)) && (
           <>
-            <p className="field-note">{strings.pairing.hostLead}</p>
-            <QrCode texto={fase.link} alt={strings.pairing.qrAlt} />
+            <p className="field-note">{strings.juntarAparelho.contaLead}</p>
+            <QrCode texto={fase.link} alt={strings.juntarAparelho.qrAlt} />
             <div className="emparelhar-link">
               <code data-link={fase.link}>{fase.link}</code>
               <Button variant="ghost" type="button" onClick={() => copiar(fase.link)}>
                 <CopyIcon size={15} />
-                {strings.pairing.copyLink}
+                {strings.juntarAparelho.copiarCodigo}
               </Button>
             </div>
             <p className="field-note" role="status">
-              {fase.que === "ligado" ? strings.common.connectionConnecting : strings.pairing.waitingGuest}
+              {fase.que === "ligado" ? strings.juntarAparelho.aLigar : strings.juntarAparelho.aEspera}
             </p>
+            {/* 1.3.26: or the new device shows a short code, and it is typed here. */}
+            {fase.que === "aguarda" && knowsShortCode && <TypeCode onCode={submitCode} />}
           </>
         )}
 
         {fase.que === "sas" && (
           <>
-            <p className="field-note">{strings.pairing.sasLead}</p>
+            <p className="field-note">{strings.juntarAparelho.palavrasNaConta}</p>
             <PalavrasDoSas palavras={fase.palavras} />
-            <p className="field-note">{strings.pairing.sasHistoricoNoNovo}</p>
             {fase.confirmado ? (
               <p className="field-note" role="status">
-                {strings.pairing.sasConfirmedHere}
+                {strings.juntarAparelho.confirmadoAqui}
               </p>
             ) : (
               <div className="sheet-actions sas-actions">
                 <Button variant="ghost" type="button" onClick={() => responder(false)}>
-                  {strings.pairing.sasDifferent}
+                  {strings.juntarAparelho.nao}
                 </Button>
                 <Button variant="primary" type="button" onClick={() => responder(true)}>
-                  {strings.pairing.sasSame}
+                  {strings.juntarAparelho.sim}
                 </Button>
               </div>
             )}
@@ -162,6 +199,7 @@ export function AcrescentarAparelho({ onClose, onConcluido }: { onClose: () => v
 
         {fase.que === "concluido" && (
           <>
+            <p className="field-note">{strings.juntarAparelho.concluido}</p>
             <p className="field-note">{strings.pairing.doneHostBody}</p>
             {/* "Keep this device on", with the progress, right where the pairing ended (16/11/2026). */}
             <AvisoDoEnvio estado={historico} />

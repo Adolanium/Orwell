@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
-import { Session, Vault, type VaultBackend } from "@enclave/client-core"
+import { AntiEntropia, Session, Vault, type VaultBackend } from "@enclave/client-core"
 import { parseServerName, type ServerName } from "@enclave/protocol"
 import { buildServer, type Enclave } from "./app.js"
 import type { ServerConfig } from "./config.js"
@@ -92,11 +92,23 @@ Session.prototype.send = function (this: Session, canal, payload) {
 
 let espera = 0
 let acaso = 0
+let intervalo = 0
+let repetir = 0
 beforeAll(async () => {
   espera = Session.ESPERA_DO_PEDIDO_DE_PERFIS_MS
   acaso = Session.ACASO_DO_PEDIDO_DE_PERFIS_MS
+  intervalo = AntiEntropia.INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS
+  repetir = Session.REPETIR_PEDIDO_DE_PERFIS_MS
   Session.ESPERA_DO_PEDIDO_DE_PERFIS_MS = 1_500
   Session.ACASO_DO_PEDIDO_DE_PERFIS_MS = 0
+  /*
+    One profile request a minute per channel: Bruno's name waited for the
+    minute of Carla's login request, and the test spent seventy seconds there.
+    Ten seconds between requests keep the same order (the login request first,
+    Bruno's held back by the cap and re-armed after it), with the wait shorter.
+  */
+  AntiEntropia.INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS = 10_000
+  Session.REPETIR_PEDIDO_DE_PERFIS_MS = 11_000
   dataDir = mkdtempSync(join(tmpdir(), "enclave-sem-nome-"))
   const config: ServerConfig = {
     serverName: parseServerName("localhost"),
@@ -130,6 +142,8 @@ afterEach(() => {
 afterAll(async () => {
   Session.ESPERA_DO_PEDIDO_DE_PERFIS_MS = espera
   Session.ACASO_DO_PEDIDO_DE_PERFIS_MS = acaso
+  AntiEntropia.INTERVALO_DOS_PEDIDOS_DE_PERFIS_MS = intervalo
+  Session.REPETIR_PEDIDO_DE_PERFIS_MS = repetir
   Session.prototype.send = enviar
   await enclave?.close()
   rmSync(dataDir, { recursive: true, force: true })

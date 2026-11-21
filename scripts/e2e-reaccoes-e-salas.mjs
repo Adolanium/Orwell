@@ -44,6 +44,7 @@ import {
   verificador,
 } from "./fase7-comum.mjs"
 import { levantarServidor, RAIZ } from "./servidor-descartavel.mjs"
+import { juntarComPalavras } from "./juntar-aparelho.mjs"
 
 const FRASE = "frase-de-verificacao-2026"
 const CANAL = "lagar"
@@ -126,28 +127,16 @@ async function toqueLongo(alvo, ms = 800) {
 
 async function emparelhar(pc, motor, nome, contexto) {
   await pc.getByRole("button", { name: "Configurações", exact: true }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await pc.getByRole("button", { name: "Acrescentar aparelho" }).click()
+  await pc.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await pc.getByRole("button", { name: "Juntar um aparelho" }).click()
   const folha = pc.locator(".sheet").first()
   await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
   const tel = await abrir(motor, nome, contexto)
   await irParaEmparelhar(tel.page)
-  await tel.page.getByLabel("Ou cola o link").fill(link)
-  await tel.page.getByRole("button", { name: "Continuar" }).click()
-  const frases = tel.page.locator('.gate-card input[type="password"]')
-  await frases.nth(0).waitFor({ timeout: 10_000 })
-  await frases.nth(0).fill(FRASE)
-  await frases.nth(1).fill(FRASE)
-  await tel.page.getByRole("button", { name: "Continuar" }).click()
-  await tel.page.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await tel.page.getByRole("button", { name: "São as mesmas" }).click()
-  await folha.getByRole("button", { name: "São as mesmas" }).click()
-  await tel.page.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 })
+  await juntarComPalavras(tel.page, folha, link, FRASE)
   await folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
   await pc.keyboard.press("Escape").catch(() => {})
-  await tel.page.getByRole("button", { name: "Entrar", exact: true }).click()
   await dentro(tel.page)
   return tel
 }

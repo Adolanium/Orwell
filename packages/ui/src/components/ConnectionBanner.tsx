@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react"
 import type { ConnectionState } from "../bridge.js"
 import { strings, translateError } from "../strings.js"
 import { TextoDeErro } from "./TextoDeErro.js"
+import { FaixaDoFicheiro } from "./FaixaDoFicheiro.js"
 
 /**
  * What the banner needs from the shell and doesn't come in props for each screen.
@@ -70,11 +71,14 @@ export function ConnectionBanner({
     return () => clearInterval(timer)
   }, [caiuEm])
 
-  if (state === "online") return null
+  // The account-file banner rides here, on every screen that draws this one (21/11/2026).
+  if (state === "online") return <FaixaDoFicheiro />
   // Already translated by the shell: starts with the code line ("Error 202").
   const jaTraduzido = detail !== null && /^\S+ \d{3}\n/.test(detail)
   const aLigar = state === "connecting"
   return (
+    <>
+    <FaixaDoFicheiro />
     <div className="connection-banner" role="status">
       <span>{caiuEm !== null ? strings.connection.semLigacaoHa(tempoSemLigacao(caiuEm, agora)) : strings.connection.banner}</span>
       {detail && (
@@ -96,5 +100,6 @@ export function ConnectionBanner({
         </button>
       )}
     </div>
+    </>
   )
 }

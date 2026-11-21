@@ -64,6 +64,8 @@ export interface TextosDoAnfitriao {
     mensagem: string
     detalhe: string
   }
+  /** The reason Touch ID shows: macOS writes "Orwell is trying to <reason>". */
+  touchIdReason: string
 }
 
 const EN: TextosDoAnfitriao = {
@@ -88,6 +90,7 @@ const EN: TextosDoAnfitriao = {
     mensagem: "Some messages are not sent yet. Quit anyway?",
     detalhe: "Messages that wait for a connection are lost when you quit.",
   },
+  touchIdReason: "change the account password",
 }
 
 const PT: TextosDoAnfitriao = {
@@ -112,6 +115,7 @@ const PT: TextosDoAnfitriao = {
     mensagem: "Há mensagens por enviar. Sair na mesma?",
     detalhe: "As mensagens à espera de ligação perdem-se ao sair.",
   },
+  touchIdReason: "mudar a palavra-passe da conta",
 }
 
 /** The words in a language. Anything that is not "pt" is English. */

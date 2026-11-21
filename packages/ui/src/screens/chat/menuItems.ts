@@ -85,7 +85,8 @@ export function itensDoCanal(ctx: {
     propriedades: () => void
     /** Opens the polls page of this channel. Absent when the host has no polls (the entry does not appear). */
     votacoes?: (() => void) | undefined
-    novaSala: () => void
+    /** Absent when the account created all the rooms it may (1.3.26): the entry does not appear. */
+    novaSala?: (() => void) | undefined
     novaCategoria: () => void
     sair: () => void
     eliminar: () => void
@@ -123,8 +124,8 @@ export function itensDoCanal(ctx: {
     because seeing who is in charge does not depend on being in charge.
   */
   if (ctx.podeOrganizar) {
-    itens.push({ label: strings.menu.newRoom, separatorBefore: true, onSelect: ctx.accoes.novaSala })
-    itens.push({ label: strings.menu.newCategory, onSelect: ctx.accoes.novaCategoria })
+    if (ctx.accoes.novaSala) itens.push({ label: strings.menu.newRoom, separatorBefore: true, onSelect: ctx.accoes.novaSala })
+    itens.push({ label: strings.menu.newCategory, separatorBefore: !ctx.accoes.novaSala, onSelect: ctx.accoes.novaCategoria })
   }
   itens.push({ label: strings.menu.properties, separatorBefore: !ctx.podeOrganizar, onSelect: ctx.accoes.propriedades })
 
@@ -148,9 +149,41 @@ export function itensDoCanal(ctx: {
   return itens
 }
 
+/**
+ * "Mover", with a cascade: up, down, and to another category (phone, option B,
+ * 20/11/2026).
+ *
+ * On a computer a room and a category move by drag and drop. A finger on a
+ * phone has no reliable HTML drag, and that order had no other door: this
+ * entry is that door. The shell gives it only on the phone, so the computer
+ * menus stay as they are. Each step is one drop on a computer: the same
+ * functions publish it (`arrumarSala`, `arrumarCategoria`).
+ *
+ * Null when there is nowhere to go: no entry that leads nowhere.
+ */
+export function itemDeMover(ctx: {
+  acima?: (() => void) | undefined
+  abaixo?: (() => void) | undefined
+  categorias?: readonly { nome: string; ir: () => void }[] | undefined
+}): MenuItem | null {
+  const submenu: MenuItem[] = []
+  if (ctx.acima) submenu.push({ label: strings.menu.moverParaCima, onSelect: ctx.acima })
+  if (ctx.abaixo) submenu.push({ label: strings.menu.moverParaBaixo, onSelect: ctx.abaixo })
+  ;(ctx.categorias ?? []).forEach((categoria, indice) =>
+    submenu.push({
+      label: categoria.nome,
+      onSelect: categoria.ir,
+      ...(indice === 0 ? { section: strings.menu.moverParaCategoria } : {}),
+    }),
+  )
+  return submenu.length === 0 ? null : { label: strings.menu.mover, onSelect: () => {}, submenu }
+}
+
 export function itensDaSala(ctx: {
   sala: SalaResumo
   podeOrganizar: boolean
+  /** The phone's "Mover" cascade (`itemDeMover`). Absent on a computer. */
+  mover?: MenuItem | null | undefined
   silencio?: Silencio | undefined
   accoes: {
     abrir: () => void
@@ -179,6 +212,7 @@ export function itensDaSala(ctx: {
   if (!ctx.podeOrganizar) return itens
 
   itens.push({ label: strings.menu.renameRoom, separatorBefore: true, onSelect: ctx.accoes.renomear })
+  if (ctx.mover) itens.push(ctx.mover)
   if (ctx.accoes.quemEscreve) itens.push({ label: strings.soLeitura.menu, onSelect: ctx.accoes.quemEscreve })
   itens.push({ label: strings.menu.closeRoom, separatorBefore: true, destructive: true, onSelect: ctx.accoes.fechar })
   return itens
@@ -208,6 +242,8 @@ export function itensDaSala(ctx: {
  */
 export function itensDaCategoria(ctx: {
   podeOrganizar: boolean
+  /** The phone's "Mover" cascade (`itemDeMover`). Absent on a computer. */
+  mover?: MenuItem | null | undefined
   accoes: {
     /**
      * A new room, already in this category (1.3.25): the same as the `+` left of
@@ -233,6 +269,7 @@ export function itensDaCategoria(ctx: {
     // What goes INTO the category first, apart from what changes the category itself.
     ...(criarSala ? [{ label: strings.menu.criarSalaNaCategoria, onSelect: criarSala }] : []),
     { label: strings.menu.renameCategory, ...(criarSala ? { separatorBefore: true } : {}), onSelect: ctx.accoes.renomear },
+    ...(ctx.mover ? [ctx.mover] : []),
     /*
       Without `destructive`, like "rename": hiding does not destroy anything. And
       that is exactly why the sheet this opens must say it also protects nothing,       see `categoryProperties.note`.

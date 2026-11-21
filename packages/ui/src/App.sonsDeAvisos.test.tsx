@@ -311,6 +311,64 @@ describe("a chamada a entrar", () => {
 })
 
 /*
+  The ring in a direct conversation stops when I answer, decline, the call ends,
+  or after 30 s (21/11/2026). Answering on ANOTHER device of my account is
+  answering too: this device stops ringing.
+*/
+describe("the incoming ring stops (21/11/2026)", () => {
+  afterEach(() => {
+    vi.mocked(motor.chamadaATocar).mockReset().mockReturnValue(null)
+    vi.mocked(motor.pararChamada).mockClear()
+  })
+
+  it("another device of my account answers: this device stops ringing", async () => {
+    await abrir()
+    await ligar()
+    await entraNaChamada(DM, "", 10_000)
+    vi.mocked(motor.chamadaATocar).mockReturnValue(DM)
+    vi.mocked(motor.pararChamada).mockClear()
+    await callEvent(DM, EU, true)
+    expect(motor.pararChamada).toHaveBeenCalledWith(DM)
+  })
+
+  it("the ring shows a notice with Decline, and Decline stops the ring on this device", async () => {
+    await abrir()
+    await ligar()
+    await entraNaChamada(DM, "", 10_000)
+    vi.mocked(motor.chamadaATocar).mockReturnValue(DM)
+    vi.mocked(motor.pararChamada).mockClear()
+    const decline = await screen.findByRole("button", { name: strings.call.declineRing })
+    await userEvent.click(decline)
+    expect(motor.pararChamada).toHaveBeenCalledWith(DM)
+    expect(screen.queryByRole("button", { name: strings.call.declineRing })).toBeNull()
+  })
+
+  it("the notice goes when the caller gives up", async () => {
+    await abrir()
+    await ligar()
+    await entraNaChamada(DM, "", 10_000)
+    await screen.findByRole("button", { name: strings.call.declineRing })
+    await callEvent(DM, ANA, false)
+    expect(screen.queryByRole("button", { name: strings.call.declineRing })).toBeNull()
+  })
+
+  it("a call in a community room shows no notice", async () => {
+    await abrir()
+    await ligar()
+    await entraNaChamada(LAGAR, "voz", 10_000)
+    expect(screen.queryByRole("button", { name: strings.call.declineRing })).toBeNull()
+  })
+})
+
+/** Someone joins or leaves a call, now. */
+async function callEvent(channel: string, from: string, joined: boolean, room = ""): Promise<void> {
+  await act(async () => {
+    onCallActivity?.({ channel, from, joined, room })
+    await Promise.resolve()
+  })
+}
+
+/*
   When muting and when unmuting, a
   short sound. The "mute all" plays both ways: the sound goes through the alert
   motor, which "mute all" does not silence (it only silences the call voices).

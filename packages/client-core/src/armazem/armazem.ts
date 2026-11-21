@@ -50,6 +50,11 @@ export interface ArmazemBackend {
   /** Refuses writes from now on (the web, on losing ownership). */
   selar(): void
   /**
+   * Lifts `selar` (the web, a tab resumed from the back-forward cache that still
+   * owns the vault). Optional: a backend without it stays sealed, and the tab reloads.
+   */
+  dessselar?(): void
+  /**
    * The quota the platform gives, in bytes, or null with no known limit. Only
    * the web has one (`navigator.storage.estimate()`); the desktop writes to
    * disk. Read on open.
@@ -197,6 +202,19 @@ export class ArmazemDeMedia {
   selar(): void {
     this.#selado = true
     this.#backend.selar()
+  }
+
+  /**
+   * Undo `selar`, for a web tab resumed from the back-forward cache that still
+   * owns the vault (the host checked that first). `false`, and still sealed, if
+   * the backend cannot lift its own seal.
+   */
+  retomar(): boolean {
+    if (!this.#selado) return true
+    if (typeof this.#backend.dessselar !== "function") return false
+    this.#backend.dessselar()
+    this.#selado = false
+    return true
   }
 
   /** Deletes everything for this account (deleting the account, design §9). A sealed store deletes nothing. */

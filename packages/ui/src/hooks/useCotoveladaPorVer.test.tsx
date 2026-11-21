@@ -100,10 +100,11 @@ describe("receber uma cotovelada", () => {
     expect(result.current).toBeNull()
   })
 
-  it("a de outro aparelho da própria conta não toca nem acende", () => {
+  // 21/11/2026: both sides hear the nudge, on every device of both accounts.
+  it("one from another device of my own account plays the sound, and does not light Friends: it is my own gesture", () => {
     const { result, receber } = montar(nasComunidades)
     receber(DM, EU)
-    expect(tocados).toEqual([])
+    expect(tocados).toEqual(["buzz"])
     expect(result.current).toBeNull()
   })
 

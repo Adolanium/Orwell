@@ -24,6 +24,9 @@
  * to OLD elements is undone by hand in `aurora.css`, measured against 1.3.19
  * in `aurora.test.ts`.
  *
+ * Markup the app no longer renders is left out (`RETIRADAS`): its 1.3.19 rules
+ * would only be dead weight in the sheet.
+ *
  * The output is generated: never edit it. postcss comes with Vite.
  */
 import { execFileSync } from "node:child_process"
@@ -37,6 +40,8 @@ const REF = process.argv[2] ?? "35f112d3"
 const SAIDA = join(RAIZ, "packages/ui/src/styles/aurora.gen.css")
 const ESCOPO = ':root[data-theme="aurora"]'
 const SUFIXO = "-aurora"
+/** Classes of markup the app no longer renders: a rule whose every selector names one is dropped. */
+const RETIRADAS = [/\.frase-do-momento(?![\w-])/, /\.primeiros-passos(?![\w-])|\.primeiros-passos-/]
 
 const git = (caminho) => execFileSync("git", ["show", `${REF}:packages/ui/src/${caminho}`], { cwd: RAIZ, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
 
@@ -75,7 +80,16 @@ for (const { caminho, raiz } of raizes) {
   })
   raiz.walkRules((regra) => {
     if (regra.parent?.type === "atrule" && /keyframes$/.test(regra.parent.name)) return
-    regra.selectors = regra.selectors.flatMap(escopar)
+    const vivos = regra.selectors.filter((seletor) => !RETIRADAS.some((retirada) => retirada.test(seletor)))
+    if (vivos.length === 0) {
+      regra.remove()
+      return
+    }
+    regra.selectors = vivos.flatMap(escopar)
+  })
+  // An at-rule (`@media`, `@supports`) whose every rule was retired goes too.
+  raiz.walkAtRules((regra) => {
+    if (regra.nodes && regra.nodes.length === 0) regra.remove()
   })
   raiz.walkDecls(/^animation(-name)?$/, (declaracao) => {
     declaracao.value = renomear(declaracao.value)

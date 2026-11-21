@@ -537,3 +537,188 @@ describe("sem nada", () => {
     expect(a.posse.estado.t).toBe("largado")
   })
 })
+
+/**
+ * Suspend and resume (the iOS back-forward cache, 21/11/2026).
+ *
+ * iOS fires `pagehide` with `persisted` when the screen locks or the user
+ * switches apps, on a page that never leaves memory. The page used to release
+ * ownership for good and reload on return: every lock of the phone restarted
+ * the app and threw away whatever history was half way in. Now it suspends
+ * (stops writing, saving, and releases the lock), and on return it asks for
+ * the lock again. One owner per browser still holds: a suspended tab is not an
+ * owner, and another tab can take over in the meantime.
+ */
+describe("suspend and resume", () => {
+  it("with Web Locks: suspending saves, stops and releases the lock, and the next tab takes over", async () => {
+    const trincos = new TrincosFalsos()
+    const a = abrir("a", { trincos })
+    await passar(0)
+    const b = abrir("b", { trincos })
+    await passar(0)
+    const suspensa = a.posse.suspender()
+    await passar(60)
+    await suspensa
+    expect(a.modos).toEqual([true])
+    expect(a.posse.estado).toEqual({ t: "suspenso" })
+    await passar(0)
+    expect(b.posse.estado.t).toBe("dono")
+  })
+
+  it("with Web Locks: alone, resuming takes the lock back, and a second suspend stops again", async () => {
+    const trincos = new TrincosFalsos()
+    const a = abrir("a", { trincos })
+    await passar(0)
+    const suspensa = a.posse.suspender()
+    await passar(60)
+    await suspensa
+    expect(trincos.dono).toBeNull()
+    a.posse.retomar()
+    await passar(0)
+    expect(a.posse.estado).toEqual({ t: "dono", via: "trinco" })
+    expect(trincos.dono).not.toBeNull()
+    const outra = a.posse.suspender()
+    await passar(60)
+    await outra
+    // The stop ran again: a resumed owner writes again, so it must save again.
+    expect(a.paragens).toBe(2)
+    expect(a.posse.estado.t).toBe("suspenso")
+  })
+
+  it("with Web Locks: resuming while another tab owns waits in the queue and never becomes owner", async () => {
+    const trincos = new TrincosFalsos()
+    const a = abrir("a", { trincos })
+    await passar(0)
+    const b = abrir("b", { trincos })
+    await passar(0)
+    const suspensa = a.posse.suspender()
+    await passar(60)
+    await suspensa
+    await passar(0)
+    expect(b.posse.estado.t).toBe("dono")
+    a.posse.retomar()
+    await passar(0)
+    expect(a.posse.estado).toEqual(ESPERA)
+    expect(a.estados.filter((t) => t === "dono")).toHaveLength(1)
+  })
+
+  it("with Web Locks: resume is a no-op unless suspended", async () => {
+    const trincos = new TrincosFalsos()
+    const a = abrir("a", { trincos })
+    await passar(0)
+    a.posse.retomar()
+    await passar(0)
+    expect(a.posse.estado).toEqual({ t: "dono", via: "trinco" })
+    expect(a.paragens).toBe(0)
+  })
+
+  it("with BroadcastChannel: alone, resuming becomes owner again", async () => {
+    const barramento = new Barramento()
+    const a = abrir("a", { criarCanal: barramento.criar })
+    await passar(ASSUMIR_POR_DIFUSAO)
+    expect(a.posse.estado.t).toBe("dono")
+    const suspensa = a.posse.suspender()
+    await passar(60)
+    await suspensa
+    expect(a.posse.estado.t).toBe("suspenso")
+    a.posse.retomar()
+    await passar(ASSUMIR_POR_DIFUSAO)
+    expect(a.posse.estado).toEqual({ t: "dono", via: "difusao" })
+  })
+
+  it("with BroadcastChannel: resuming after another tab took over waits", async () => {
+    const barramento = new Barramento()
+    const a = abrir("a", { criarCanal: barramento.criar })
+    await passar(ASSUMIR_POR_DIFUSAO)
+    const b = abrir("b", { criarCanal: barramento.criar })
+    await passar(ASSUMIR_POR_DIFUSAO)
+    expect(b.posse.estado.t).toBe("espera")
+    const suspensa = a.posse.suspender()
+    await passar(60)
+    await suspensa
+    // B hears the release and takes over.
+    await passar(ASSUMIR_POR_DIFUSAO)
+    expect(b.posse.estado.t).toBe("dono")
+    a.posse.retomar()
+    await passar(ASSUMIR_POR_DIFUSAO)
+    expect(a.posse.estado.t).toBe("espera")
+    expect(b.posse.estado.t).toBe("dono")
+  })
+
+  /*
+    A quick hide and show (1.3.26 review, finding 2). iOS can fire `pageshow`
+    before the save of `pagehide` ends: `retomar` used to return (the state was
+    still "dono"), the save then ended in "suspenso", and no other show came,
+    because the page was already visible. The tab stayed on screen with its
+    vault sealed. A resume during the suspend now waits for it and then runs.
+  */
+  it("with Web Locks: a resume during the suspend's save runs when the save ends", async () => {
+    const trincos = new TrincosFalsos()
+    const a = abrir("a", { trincos }, 200)
+    await passar(0)
+    const suspensa = a.posse.suspender()
+    await passar(50)
+    expect(a.posse.estado.t).toBe("dono") // the save is still running
+    a.posse.retomar()
+    await passar(200)
+    await suspensa
+    await passar(0)
+    expect(a.posse.estado).toEqual({ t: "dono", via: "trinco" })
+    expect(trincos.dono).not.toBeNull()
+    expect(a.estados).toContain("suspenso")
+  })
+
+  it("with Web Locks: hide, show and hide again during the save stays suspended", async () => {
+    const trincos = new TrincosFalsos()
+    const a = abrir("a", { trincos }, 200)
+    await passar(0)
+    const suspensa = a.posse.suspender()
+    await passar(50)
+    a.posse.retomar()
+    void a.posse.suspender()
+    await passar(200)
+    await suspensa
+    await passar(0)
+    expect(a.posse.estado).toEqual({ t: "suspenso" })
+    expect(trincos.dono).toBeNull()
+  })
+
+  it("with BroadcastChannel: a resume during the suspend's save runs when the save ends", async () => {
+    const barramento = new Barramento()
+    const a = abrir("a", { criarCanal: barramento.criar }, 200)
+    await passar(ASSUMIR_POR_DIFUSAO)
+    expect(a.posse.estado.t).toBe("dono")
+    const suspensa = a.posse.suspender()
+    await passar(50)
+    a.posse.retomar()
+    await passar(200)
+    await suspensa
+    await passar(ASSUMIR_POR_DIFUSAO)
+    expect(a.posse.estado).toEqual({ t: "dono", via: "difusao" })
+  })
+
+  it("without protection: a resume during the suspend's save runs when the save ends", async () => {
+    const a = abrir("a", {}, 200)
+    await passar(0)
+    const suspensa = a.posse.suspender()
+    await passar(50)
+    a.posse.retomar()
+    await passar(200)
+    await suspensa
+    await passar(0)
+    expect(a.posse.estado).toEqual({ t: "dono", via: "nenhuma" })
+  })
+
+  it("without protection: suspend saves and stops, resume is owner again", async () => {
+    const a = abrir("a", {})
+    await passar(0)
+    const suspensa = a.posse.suspender()
+    await passar(60)
+    await suspensa
+    expect(a.modos).toEqual([true])
+    expect(a.posse.estado.t).toBe("suspenso")
+    a.posse.retomar()
+    await passar(0)
+    expect(a.posse.estado).toEqual({ t: "dono", via: "nenhuma" })
+  })
+})

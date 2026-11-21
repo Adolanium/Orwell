@@ -61,10 +61,10 @@
  * moving height would force the page to recalculate sixty times a second. The
  * script counts layouts and fails if they grow.
  *
- * With `prefers-reduced-motion` the bars stop for good: they stay at full height
- * and light up in the same order, from center outward, each one at its
- * `--degrau`. The level is still all there, with nothing changing size. See
- * `components.css`.
+ * With `prefers-reduced-motion` the bars keep moving, only slower (1.3.26; they
+ * used to stop for good): they follow the level through a slow `transform`
+ * transition, and they also light up in the same order, from center outward,
+ * each one at its `--degrau`. See `components.css`.
  *
  * ## For those who hear the screen
  *

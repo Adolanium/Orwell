@@ -325,6 +325,8 @@ export type VeredictoDoRelato =
         | "servidor-serve"
         | "lapide"
         | "ja-temos"
+        // A poll item in a room this account may not read (21/11/2026). Decided in `pedido.ts`, after these checks.
+        | "sala"
     }
 
 /**

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { en, errosEn } from "./linguas/en.js"
 import { errosPt, pt } from "./linguas/pt.js"
-import { strings } from "./strings.js"
+import { strings, translateError } from "./strings.js"
 
 /**
  * The hierarchy, locked by tests because it broke once.
@@ -26,8 +26,11 @@ describe("terminologia — o que é canal", () => {
     // The phrase stopped talking about the encryption (revision STE100 from
     // 20/10/2026): it states the effect on the person. The channel and room rule
     // still applies to it.
-    expect(strings.settings.importReplacesDevice).toContain("passa a conta para este aparelho")
-    expect(strings.settings.importReplacesDevice).not.toContain("salas")
+    // 1.3.26: importing adds a device and never removes one. Since 21/11/2026 the
+    // gate says it in the path's name, and the full account is the 764 sentence.
+    expect(strings.entrada.comFicheiro).toContain("conta")
+    expect(strings.entrada.comFicheiro).not.toContain("salas")
+    expect(translateError("this account is full, so the file cannot add a device")).toContain("aparelhos")
   })
 
   it("o que o cofre guarda e se apaga são canais, não salas", () => {
@@ -127,6 +130,8 @@ describe("terminologia — o carril nomeia o sítio, o vocabulário nomeia a coi
     expect(strings.rail.social).toBe("Feed")
     expect(strings.rail.people).toBe("Amigos")
     expect(strings.rail.settings).toBe("Configurações")
+    // The phone tab is the same destination, with the same name (option B, 20/11/2026).
+    expect(strings.telemovel.comunidades).toBe(strings.rail.chat)
   })
 
   it("a coluna que o botão abre repete o nome do botão, e não inventa outro", () => {
@@ -143,6 +148,8 @@ describe("terminologia — o carril nomeia o sítio, o vocabulário nomeia a coi
   it('"comunidade" é nome de destino e mais nada: no resto, a palavra é canal', () => {
     const fora = frasesComCaminho()
       .filter(({ caminho }) => !caminho.startsWith("rail.") && !caminho.startsWith("sidebar.header"))
+      // The phone tab of the same destination: it names the place, like the rail.
+      .filter(({ caminho }) => caminho !== "telemovel.comunidades")
       // The only exception, and it is the owner's text (3/11/2026): "the channel
       // Orwell, the community of all users". The phrase says channel for the group;
       // the community is the people in it.

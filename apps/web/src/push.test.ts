@@ -1,8 +1,9 @@
 import { fromBase64, toBase64 } from "@enclave/protocol"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   ETIQUETA_DO_PUSH,
   cancelarNoBrowser,
+  PRAZO_DO_CANCELAR_MS,
   dadosDaSubscricao,
   estadoDoPushNoBrowser,
   fecharAvisosDoPush,
@@ -142,5 +143,80 @@ describe("cancelar e fechar", () => {
     const { amb, fechados } = ambiente()
     await fecharAvisosDoPush(amb)
     expect(fechados).toEqual([ETIQUETA_DO_PUSH, ETIQUETA_DO_PUSH])
+  })
+})
+
+/**
+ * WebKit (Safari in a tab, the headless WebKit): the service worker registers,
+ * but the registration has no `pushManager` and no `getNotifications`. Removing
+ * the device from the account erases the vault after `cancelarNoBrowser`, and
+ * this threw a TypeError there ("undefined is not an object"), so the removed
+ * device kept its vault and stayed at the gate (1.3.26). "Never throws" must hold.
+ */
+describe("um registo sem Push (WebKit)", () => {
+  const semPush = {
+    temPushManager: false,
+    ios: false,
+    instalada: false,
+    registo: async () => ({}) as never,
+  }
+  it("cancelar não rebenta", async () => {
+    await expect(cancelarNoBrowser(semPush)).resolves.toBeUndefined()
+  })
+  it("fechar os avisos não rebenta", async () => {
+    await expect(fecharAvisosDoPush(semPush)).resolves.toBeUndefined()
+  })
+})
+
+/**
+ * WebKit again: a registration whose `getSubscription()` never answers. Account
+ * deletion awaited it, and a device removed from the account hung at "loading"
+ * with its vault on disk (1.3.26, `e2e-exportar-importar` firefox→webkit). The
+ * cancel is best-effort: it gives up after `PRAZO_DO_CANCELAR_MS`.
+ */
+describe("um getSubscription que nunca responde (WebKit)", () => {
+  it("cancelar desiste no prazo, e não fica à espera para sempre", async () => {
+    vi.useFakeTimers()
+    try {
+      const preso = {
+        temPushManager: true,
+        ios: false,
+        instalada: false,
+        registo: async () => ({ pushManager: { getSubscription: () => new Promise(() => {}) } }) as never,
+      }
+      let acabou = false
+      const cancelar = cancelarNoBrowser(preso).then(() => {
+        acabou = true
+      })
+      await vi.advanceTimersByTimeAsync(PRAZO_DO_CANCELAR_MS + 10)
+      await cancelar
+      expect(acabou).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+/**
+ * The root cause in WebKit (1.3.26): with no notification permission there can
+ * be no push subscription, and asking the registration for one anyway
+ * (`pushManager.getSubscription()`) froze the WebKit page, main thread and
+ * timers. A device removed from the account then never erased its vault.
+ * Without the permission, cancelling does not touch the Push API at all.
+ */
+describe("sem permissão de notificações não há subscrição a cancelar", () => {
+  it("cancelar nem pede o registo", async () => {
+    let pediu = false
+    await cancelarNoBrowser({
+      temPushManager: true,
+      ios: false,
+      instalada: false,
+      permissaoConcedida: () => false,
+      registo: async () => {
+        pediu = true
+        return null
+      },
+    })
+    expect(pediu).toBe(false)
   })
 })

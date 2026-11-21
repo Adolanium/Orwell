@@ -64,7 +64,7 @@ function montar(bridge: EnclaveBridge, props: Partial<Parameters<typeof Unlock>[
   render(
     <ToastProvider>
       <BridgeContext.Provider value={bridge}>
-        <Unlock onDone={onDone} onStartOver={vi.fn()} {...props} />
+        <Unlock onDone={onDone} {...props} />
       </BridgeContext.Provider>
     </ToastProvider>,
   )
@@ -82,8 +82,8 @@ async function entrarComFrase(): Promise<void> {
   fireEvent.submit(campo.closest("form") as HTMLFormElement)
 }
 
-describe('o portão: "Memorizar a sessão"', () => {
-  it("aparece ligada, por baixo da palavra-passe, e memoriza depois de abrir e antes de ligar", async () => {
+describe('o portão: "Manter sessão iniciada"', () => {
+  it("aparece DESLIGADA (21/11/2026), sem nota; marcada, memoriza depois de abrir e antes de ligar", async () => {
     const chamadas: string[] = []
     const memorizar = vi.fn(async (ligar: boolean) => {
       chamadas.push(`memorizar ${ligar}`)
@@ -91,9 +91,9 @@ describe('o portão: "Memorizar a sessão"', () => {
     })
     const { onDone } = montar(ponte(COM_MEMORIA, { memorizar, chamadas }))
     await waitFor(() => expect(caixa()).not.toBeNull())
-    expect(caixa()?.checked).toBe(true)
-    expect(screen.getByText(strings.gate.memorizar)).toBeTruthy()
-    expect(screen.getByText(strings.gate.memorizarNota)).toBeTruthy()
+    expect(caixa()?.checked).toBe(false)
+    expect(screen.getByText(strings.entrada.manterSessao)).toBeTruthy()
+    fireEvent.click(caixa() as HTMLInputElement)
     // Inside the form, after the field: Enter key still opens it.
     expect(caixa()?.closest("form")).toBe(document.querySelector('input[type="password"]')?.closest("form"))
 
@@ -102,13 +102,11 @@ describe('o portão: "Memorizar a sessão"', () => {
     expect(chamadas).toEqual(["unlock silencioso", "unlock", "memorizar true", "load", "connect"])
   })
 
-  it("desligada, não memoriza", async () => {
+  it("desligada (como vem), não memoriza", async () => {
     const memorizar = vi.fn(async () => ({ ok: true }))
     const { onDone } = montar(ponte(COM_MEMORIA, { memorizar }))
     await waitFor(() => expect(caixa()).not.toBeNull())
-    fireEvent.click(caixa() as HTMLInputElement)
     expect(caixa()?.checked).toBe(false)
-    expect(screen.queryByText(strings.gate.memorizarNota)).toBeNull()
     await entrarComFrase()
     await waitFor(() => expect(onDone).toHaveBeenCalled())
     expect(memorizar).not.toHaveBeenCalled()
@@ -120,9 +118,10 @@ describe('o portão: "Memorizar a sessão"', () => {
     })
     const { onDone } = montar(ponte(COM_MEMORIA, { memorizar }))
     await waitFor(() => expect(caixa()).not.toBeNull())
+    fireEvent.click(caixa() as HTMLInputElement)
     await entrarComFrase()
     await waitFor(() => expect(onDone).toHaveBeenCalledWith("@ana:orwell.pt"))
-    expect(await screen.findByText(strings.gate.memorizarFalhou)).toBeTruthy()
+    expect(memorizar).toHaveBeenCalled()
   })
 
   it("não aparece sem memória na plataforma, num cofre `os`, nem numa ponte que não sabe memorizar", async () => {
@@ -139,23 +138,5 @@ describe('o portão: "Memorizar a sessão"', () => {
       expect(caixa()).toBeNull()
       cleanup()
     }
-  })
-})
-
-describe("o achado 9: aparelho revogado com um cofre `os`", () => {
-  it('sem campo de palavra-passe, que ali não serve: só "Começar de novo"', async () => {
-    montar(ponte({ ...COM_MEMORIA, protection: "os" }), { semTentativaSilenciosa: true })
-    expect(await screen.findByText(strings.gate.revogadoSemFrase)).toBeTruthy()
-    expect(document.querySelector('input[type="password"]')).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: strings.gate.comecarDeNovo }))
-    // The "clear" sheet, with the word written, like the rest of the gate.
-    expect(await screen.findByRole("alertdialog", { name: strings.settings.destroyTitle })).toBeTruthy()
-  })
-
-  it("com palavra-passe, o portão revogado continua a pedi-la, parado", async () => {
-    montar(ponte(COM_MEMORIA), { semTentativaSilenciosa: true })
-    await waitFor(() => expect(document.querySelector('input[type="password"]')).not.toBeNull())
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(screen.queryByText(strings.gate.revogadoSemFrase)).toBeNull()
   })
 })

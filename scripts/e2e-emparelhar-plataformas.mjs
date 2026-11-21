@@ -23,6 +23,7 @@ import { aceitarConvite, convidar } from "./convite.mjs"
 import { abrirCanal, abrirDirecta, aceitarAmizade, ate, consultar, contasDoServidor, criarCanal, dentro, dizer, escutar, irParaEmparelhar, moradaNova, moradasEstreadas, ouviu, pedirAmizade, temCanal, verificador } from "./fase7-comum.mjs"
 import { abrirSecretaria } from "./secretaria.mjs"
 import { levantarServidor } from "./servidor-descartavel.mjs"
+import { juntarComPalavras } from "./juntar-aparelho.mjs"
 
 const FRASE = "frase-de-verificacao-2026"
 const so = process.argv.find((a) => a.startsWith("--so="))?.split("=")[1]
@@ -30,7 +31,7 @@ const COMBINACOES = [
   ["web", "sec"],
   ["sec", "web"],
 ].filter(([p, n]) => !so || so === `${p}-${n}`)
-const AVISO = "Este aparelho foi tirado da conta noutro aparelho"
+const AVISO = "Este aparelho saiu da conta"
 const SEGUINTE = /^(Continuar|Seguinte)$/
 
 const { check, resumo } = verificador()
@@ -86,8 +87,8 @@ try {
 
     // 2. Add device: the link, pasted into the new one, and the six words.
     await principal.page.getByRole("button", { name: "Configurações", exact: true }).first().click()
-    await principal.page.getByRole("button", { name: "Aparelhos", exact: true }).click()
-    await principal.page.getByRole("button", { name: "Acrescentar aparelho" }).click()
+    await principal.page.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+    await principal.page.getByRole("button", { name: "Juntar um aparelho" }).click()
     const folha = principal.page.locator(".sheet").first()
     await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
     const link = await folha.locator("code[data-link]").getAttribute("data-link")
@@ -95,26 +96,13 @@ try {
 
     const novo = await abrirAparelho(tipoNovo, `novo-${tipoNovo}`)
     await irParaEmparelhar(novo.page)
-    await novo.page.getByLabel("Ou cola o link").fill(link)
-    await novo.page.getByRole("button", { name: SEGUINTE }).first().click()
-    await novo.page.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 15_000 })
+    const feito = await juntarComPalavras(novo.page, folha, link, FRASE).then(() => true, () => false)
     // On browser you enter a password; on desktop the key stays in the keychain,
     // like in the installed app, and there is no field.
-    const campos = novo.page.locator('.gate-card input[type="password"]')
-    for (let i = 0; i < (await campos.count()); i++) await campos.nth(i).fill(FRASE)
-    await novo.page.getByRole("button", { name: SEGUINTE }).first().click()
     const t0 = Date.now()
-    await novo.page.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-    await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-    const pNovo = await novo.page.locator(".sas-palavras").getAttribute("data-palavras")
-    const pPrincipal = await folha.locator(".sas-palavras").getAttribute("data-palavras")
     check(`${etiqueta}: as mesmas seis palavras nos dois ecrãs`, pNovo === pPrincipal && pNovo?.split("-").length === 6, `${pNovo} (${Date.now() - t0} ms)`)
-    await novo.page.getByRole("button", { name: "São as mesmas" }).click()
-    await folha.getByRole("button", { name: "São as mesmas" }).click()
-    const feito = await novo.page.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 }).then(() => true, () => false)
     check(`${etiqueta}: o novo recebe o certificado e fica da conta`, feito, `${Date.now() - t0} ms`)
     await folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
-    await novo.page.getByRole("button", { name: "Entrar", exact: true }).click()
     await dentro(novo.page)
     check(`${etiqueta}: o novo não criou conta`, contasDoServidor(srv.base).length === antes + 2)
 
@@ -146,7 +134,8 @@ try {
     // 4. Revoke from the main device.
     const commitsAntes = eventosDe(idDoCanal, "handshake")
     await principal.page.getByRole("button", { name: "Configurações", exact: true }).first().click()
-    await principal.page.getByRole("button", { name: "Aparelhos", exact: true }).click()
+    await principal.page.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+    await principal.page.getByRole("button", { name: /^Aparelhos/ }).click()
     const revogar = principal.page.locator(".aparelhos-lista li:not(.este)").getByRole("button", { name: /^Revogar/ }).first()
     await revogar.waitFor({ timeout: 20_000 })
     await revogar.click()

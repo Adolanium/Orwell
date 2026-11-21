@@ -73,3 +73,41 @@ export function verificarProvaDoConvite(
     return false
   }
 }
+
+/**
+ * A community invite at registration (1.3.26).
+ *
+ * Over the limit of new accounts per network (Erro 234), a new account gets in
+ * with a registration invite from the operator, or with a live community
+ * invite: the link someone who uses Orwell sends. The app proves it holds the
+ * link the same way as in `invite.redeem`, with the key from the code, but over
+ * a message of its own (another domain), so a registration proof can never
+ * stand in for a redeem proof, and the other way round. It signs the
+ * `codeHash` and the address that registers: a copied proof only works for
+ * that same new account, which exists after its first login.
+ */
+const DOMINIO_DO_REGISTO = "orwell/convite/registo/v1"
+
+/** The signed bytes of a registration proof. */
+export function mensagemDoConviteNoRegisto(pedido: { codeHash: string; address: string }): Uint8Array {
+  return new TextEncoder().encode([DOMINIO_DO_REGISTO, pedido.codeHash, pedido.address].join("\n"))
+}
+
+/** The proof, in base64url, that goes in `auth.finish` (`conviteDeComunidade`). */
+export function provarConviteNoRegisto(codigo: string, pedido: { codeHash: string; address: string }): string {
+  const { privada } = chaveDaProvaDoConvite(codigo)
+  try {
+    return toBase64(ed25519.sign(mensagemDoConviteNoRegisto(pedido), privada))
+  } finally {
+    privada.fill(0)
+  }
+}
+
+/** The server checks a registration proof against the invite's key. Never throws. */
+export function verificarConviteNoRegisto(codeKey: string, prova: string, pedido: { codeHash: string; address: string }): boolean {
+  try {
+    return ed25519.verify(fromBase64(prova), mensagemDoConviteNoRegisto(pedido), fromBase64(codeKey))
+  } catch {
+    return false
+  }
+}

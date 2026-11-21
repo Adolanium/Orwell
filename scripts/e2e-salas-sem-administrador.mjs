@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url"
 import { chromium } from "playwright"
 import { FRASE } from "./ambiente.mjs"
 import { criarConta } from "./conta.mjs"
+import { appAberta, mostrarLista } from "./separadores.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
@@ -121,7 +122,8 @@ for (const [o_que, caminho] of [["a web construída", join(DIST, "index.html")],
   }
 }
 
-const dentro = (page) => page.getByRole("button", { name: "Configurações", exact: true }).first().waitFor({ timeout: 90_000 })
+// The app is open: the rail on a computer, the tabs on a phone (no rail there).
+const dentro = (page) => appAberta(page)
 const linhaComum = (page) => page.locator(".channel-row").first()
 const salasNoEcra = (page) => page.evaluate(() => [...document.querySelectorAll(".room-tree .room-name")].map((n) => n.textContent))
 
@@ -180,13 +182,13 @@ try {
   /*
     The common room is already the open channel: the tree draws itself
     below it as soon as rooms arrive. The channel line is not touched before
-    that, on purpose: on a mobile, tapping a channel that still has no rooms
-    closes the drawer (`canalComArvore`, in `App.tsx`), and whoever joins
-    stays in the "general" conversation without seeing the rooms that arrive
-    later. This is half the complaint, and it is noted in the report.
+    that, on purpose: whoever joins must see the rooms that arrive later in
+    the list, without a tap that opens a conversation over it.
+
+    Since option B (20/11/2026) the phone has no drawer: the list of the
+    Communities tab is the screen. Show it (it is already there after login).
   */
-  const hamburguer = c.getByRole("button", { name: "Abrir o painel lateral" })
-  await hamburguer.tap()
+  await mostrarLista(c)
   await wait(500)
   let salas = []
   const inicio = Date.now()
@@ -214,8 +216,11 @@ try {
   await c.locator(".room-tree button.room", { hasText: "prensa" }).first().tap()
   await wait(800)
   const aberta = await c.locator(".room-tree .room.current .room-name, .room-row.current .room-name").first().textContent().catch(() => null)
-  const gavetaFechou = await c.evaluate(() => document.querySelector(".sidebar")?.classList.contains("open") === false)
-  check('tocar em "prensa" abre a conversa dela e a gaveta sai', gavetaFechou && (aberta === null || aberta === "prensa"), `${aberta}`)
+  // The drawer used to leave; now the conversation is pushed full screen over the list.
+  const empurrada = await c.evaluate(
+    () => document.querySelector(".ecra-empurrado") !== null && document.querySelector(".app.telemovel")?.getAttribute("data-profundidade") === "1",
+  )
+  check('tocar em "prensa" abre a conversa dela, em ecrã inteiro por cima da lista', empurrada && (aberta === null || aberta === "prensa"), `${aberta}`)
   await c.screenshot({ path: join(CAPTURAS, `salas-sem-administrador-${TELEMOVEL.width}-sala.png`) })
   check("nenhum erro de página", erros.length === 0, erros[0] ?? "")
 } catch (erro) {

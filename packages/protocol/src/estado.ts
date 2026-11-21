@@ -206,6 +206,31 @@ export type DenunciaDaConta = z.infer<typeof DenunciaDaConta>
 /** Reports per payload. Each can hold 16 messages of 16,000 characters: ten fit comfortably under the send cap. */
 export const DENUNCIAS_POR_PAYLOAD_MAX = 10
 
+/**
+ * The account password record (1.3.26): the same password on every device of
+ * the account.
+ *
+ * `chave` is Argon2id(password, `sal`), the vault key itself, never the
+ * password. Every device of the account seals its vault with this key and this
+ * salt, so the password that opens one opens all. It travels only inside the
+ * account channel (MLS, readable by the account's leaves only) and inside the
+ * pairing box, the same two paths the account private key already takes. The
+ * server stores the MLS event for its retention and cannot open it.
+ *
+ * `versao` only goes up: a device adopts a record with a higher version, or the
+ * same version with a lower `chave` (`venceAPalavraPasse` in the core), so two
+ * changes made at once on two devices end on the same record everywhere.
+ * Version 0 is a device's own password before any change (pairing only).
+ */
+export const PalavraPasseDaConta = z.object({
+  versao: z.number().int().min(0).max(1_000_000),
+  /** 16 bytes, base64url. */
+  sal: z.string().regex(/^[A-Za-z0-9_-]{22}$/),
+  /** 32 bytes, base64url. */
+  chave: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+})
+export type PalavraPasseDaConta = z.infer<typeof PalavraPasseDaConta>
+
 export type MarcasDeLidas = z.infer<typeof MarcasDeLidas>
 export type MarcasDeArquivo = z.infer<typeof MarcasDeArquivo>
 export type MarcasDeBloqueio = z.infer<typeof MarcasDeBloqueio>
@@ -252,6 +277,12 @@ export const PAYLOADS_DE_ESTADO = [
       payload and drops the field.
     */
     denuncias: z.array(DenunciaDaConta).max(DENUNCIAS_POR_PAYLOAD_MAX).optional().catch(undefined),
+    /*
+      The account password record (1.3.26), optional for the same reason: a new
+      `t` would be refused by an older sibling and count toward its deafness.
+      A 1.3.25 sibling drops the field and keeps its own password.
+    */
+    palavraPasse: PalavraPasseDaConta.optional().catch(undefined),
   }),
 ] as const
 

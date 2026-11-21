@@ -7,22 +7,6 @@
  * destroy the identity that was just minted.
  */
 
-/**
- * The first screen of Setup (phase 8.1).
- *
- * "Do you already use Orwell on another device?", before any account question.
- * Creating an account was the main path and pairing sat in a button below
- * the name; people would create a second account on the second device, and one
- * extra account does not join the first (the account is the key). The question
- * only exists where there is somewhere to pair to: without that path, it goes
- * straight to creation, as before.
- */
-export type EcraInicial = "outro-aparelho" | "criar"
-
-export function ecraInicial({ podeEmparelhar }: { podeEmparelhar: boolean }): EcraInicial {
-  return podeEmparelhar ? "outro-aparelho" : "criar"
-}
-
 /*
   Four, not five. There was a fifth step, "room", that no longer did anything:
   the common room became announced by the server and handled in

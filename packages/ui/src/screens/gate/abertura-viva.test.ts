@@ -1,4 +1,9 @@
+import { readdirSync, readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+import postcss, { type Declaration, type Rule } from "postcss"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { clearDiagnostics, diagnosticsSnapshot } from "../../lib/diagnostics.js"
 import {
   aberturaDesmontou,
   aberturaMontou,
@@ -7,6 +12,7 @@ import {
   origemDaAbertura,
   SAIDA_MS,
   SAIDA_REDUZIDA_MS,
+  VEIL_DEADLINE_MS,
 } from "./abertura-viva.js"
 
 /**
@@ -50,6 +56,7 @@ beforeEach(() => {
 
 afterEach(() => {
   esquecerAbertura()
+  clearDiagnostics()
   document.body.replaceChildren()
   delete (Element.prototype as { getAnimations?: unknown }).getAnimations
   vi.unstubAllGlobals()
@@ -194,5 +201,156 @@ describe("a saída da abertura", () => {
     aberturaDesmontou(ultimo)
     await depoisDoCommit()
     expect(document.querySelector(".abertura-veu")).toBeNull()
+  })
+})
+
+/** The exit copy going up, the way the last splash leaves. */
+async function veilUp(): Promise<void> {
+  const ultimo = splash()
+  document.body.append(ultimo)
+  aberturaMontou(ultimo)
+  ultimo.remove()
+  aberturaDesmontou(ultimo)
+  await depoisDoCommit()
+}
+
+const veilLines = () => diagnosticsSnapshot().filter((linha) => linha.code === "opening-veil-long")
+
+describe("a saída que não depende dos temporizadores (21/11/2026)", () => {
+  it("o caminho normal não muda: sai pelos temporizadores e não escreve no registo", async () => {
+    await veilUp()
+    vi.advanceTimersByTime(MINIMO_VISIVEL_MS + SAIDA_MS)
+    expect(document.querySelector(".abertura-veu")).toBeNull()
+    expect(document.documentElement.className).toBe("")
+    expect(veilLines()).toEqual([])
+    // The listeners went with it: a page coming back later touches nothing.
+    vi.setSystemTime(Date.now() + 60_000)
+    document.dispatchEvent(new Event("visibilitychange"))
+    window.dispatchEvent(new Event("focus"))
+    expect(veilLines()).toEqual([])
+  })
+
+  it("com os temporizadores parados, a página que volta depois do prazo arruma a saída", async () => {
+    await veilUp()
+    // The tab froze: wall time runs, no timer fires.
+    vi.setSystemTime(Date.now() + 10_000)
+    expect(document.querySelector(".abertura-veu")).not.toBeNull()
+    expect(document.documentElement.classList.contains("abertura-a-segurar")).toBe(true)
+
+    document.dispatchEvent(new Event("visibilitychange"))
+    expect(document.querySelector(".abertura-veu")).toBeNull()
+    expect(document.documentElement.className).toBe("")
+    expect(veilLines()).toHaveLength(1)
+    expect(veilLines()[0]).toMatchObject({ outcome: "page-back" })
+    expect(veilLines()[0]?.detail).toMatch(/^veil 10000 ms, hold 10000 ms, visible$/)
+  })
+
+  it.each(["pageshow", "focus"])("também ao %s", async (evento) => {
+    await veilUp()
+    vi.setSystemTime(Date.now() + 5_000)
+    window.dispatchEvent(new Event(evento))
+    expect(document.querySelector(".abertura-veu")).toBeNull()
+    expect(veilLines()).toHaveLength(1)
+  })
+
+  it("a página que volta antes do prazo deixa a saída normal seguir", async () => {
+    await veilUp()
+    window.dispatchEvent(new Event("focus"))
+    document.dispatchEvent(new Event("visibilitychange"))
+    expect(document.documentElement.classList.contains("abertura-a-segurar")).toBe(true)
+    vi.advanceTimersByTime(MINIMO_VISIVEL_MS)
+    expect(document.documentElement.classList.contains("abertura-a-sair")).toBe(true)
+  })
+
+  it("um separador escondido não arruma: espera ficar visível", async () => {
+    await veilUp()
+    vi.setSystemTime(Date.now() + 10_000)
+    const visibilidade = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+    document.dispatchEvent(new Event("visibilitychange"))
+    expect(document.querySelector(".abertura-veu")).not.toBeNull()
+    visibilidade.mockReturnValue("visible")
+    document.dispatchEvent(new Event("visibilitychange"))
+    expect(document.querySelector(".abertura-veu")).toBeNull()
+    visibilidade.mockRestore()
+  })
+
+  it("um temporizador que acorda depois do prazo do CSS arruma logo, sem esbater outra vez", async () => {
+    await veilUp()
+    // The first timer runs late, past the CSS deadline: the stylesheet already faded.
+    vi.setSystemTime(Date.now() + VEIL_DEADLINE_MS + 1_000)
+    vi.advanceTimersToNextTimer()
+    expect(document.querySelector(".abertura-veu")).toBeNull()
+    expect(document.documentElement.classList.contains("abertura-a-sair")).toBe(false)
+    expect(veilLines()[0]).toMatchObject({ outcome: "late-timer" })
+  })
+})
+
+/**
+ * The CSS deadline itself. jsdom runs no CSS animations, so here the stylesheet is
+ * read as text and the rules that decide are checked; the same thing measured in
+ * real Chromium, Firefox and WebKit, with the timers frozen, is
+ * `scripts/opening-veil-deadline-proof.mjs`.
+ */
+describe("o prazo do véu na folha (pele.css)", () => {
+  const ESTILOS = join(dirname(fileURLToPath(import.meta.url)), "../../styles/")
+  const folha = (nome: string) => postcss.parse(readFileSync(ESTILOS + nome, "utf8"))
+  const emMovimentoReduzido = (regra: Rule) =>
+    regra.parent?.type === "atrule" && /prefers-reduced-motion:\s*reduce/.test((regra.parent as { params: string }).params)
+  function declaracoes(nome: string, seletor: string, reduzido: boolean): Declaration[] {
+    const encontradas: Declaration[] = []
+    folha(nome).walkRules((regra) => {
+      if (regra.selectors.includes(seletor) && emMovimentoReduzido(regra) === reduzido)
+        regra.walkDecls((d) => void encontradas.push(d))
+    })
+    return encontradas
+  }
+  const animacao = (nome: string, seletor: string) =>
+    declaracoes(nome, seletor, false).find((d) => d.prop === "animation")?.value
+
+  it("o véu e a app por baixo têm um fim próprio, em VEIL_DEADLINE_MS, com o esbatimento de SAIDA_MS", () => {
+    expect(animacao("pele.css", ".abertura-veu")).toBe(`veil-deadline ${SAIDA_MS}ms ease-out ${VEIL_DEADLINE_MS / 1000}s both`)
+    expect(animacao("pele.css", ".abertura-a-segurar body > :not(.abertura-veu)")).toBe(
+      `veil-deadline ${SAIDA_MS}ms ease-out ${VEIL_DEADLINE_MS / 1000}s reverse both`,
+    )
+  })
+
+  it("o nome não começa por abertura-: o acertarFase não lhe mexe no início", () => {
+    expect(animacao("pele.css", ".abertura-veu")?.startsWith("abertura-")).toBe(false)
+  })
+
+  it("o véu não traz o fundo do .gate", () => {
+    expect(declaracoes("pele.css", "body > .abertura-veu", false)).toEqual([
+      expect.objectContaining({ prop: "background", value: "transparent" }),
+    ])
+  })
+
+  it("com movimento reduzido o prazo esbate na mesma, mais devagar, e ganha às regras universais", () => {
+    for (const seletor of [".abertura-a-segurar body > .abertura-veu", ".abertura-a-segurar body > :not(.abertura-veu)"]) {
+      const duracao = declaracoes("pele.css", seletor, true).find((d) => d.prop === "animation-duration")
+      expect(duracao?.value).toBe(`${SAIDA_REDUZIDA_MS}ms`)
+      expect(duracao?.important).toBe(true)
+    }
+  })
+
+  it("nenhuma regra de movimento reduzido corta o atraso de 3 s", () => {
+    // The universal rules shorten durations only; no `!important` delay or
+    // shorthand may reach the veil or the app under reduced motion, in any sheet.
+    const tocam: string[] = []
+    for (const nome of readdirSync(ESTILOS).filter((f) => f.endsWith(".css"))) {
+      folha(nome).walkRules((regra) => {
+        if (!emMovimentoReduzido(regra)) return
+        regra.walkDecls((d) => {
+          if (!d.important || (d.prop !== "animation-delay" && d.prop !== "animation")) return
+          const universal = regra.selectors.some((s) => /(^|\s)\*/.test(s) || /\bbody\s*>/.test(s) || s.includes("abertura-veu"))
+          if (universal && !regra.selectors.every((s) => s.includes(".abertura-a-sair"))) tocam.push(`${nome} ${regra.selector}`)
+        })
+      })
+    }
+    expect(tocam).toEqual([])
+    // And the universal rules themselves: duration and count, never a delay.
+    const universal = declaracoes("base.css", "*", true).map((d) => d.prop)
+    expect(universal).toContain("animation-duration")
+    expect(universal).not.toContain("animation-delay")
+    expect(universal).not.toContain("animation")
   })
 })

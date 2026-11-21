@@ -32,7 +32,9 @@ import { moradaDeSala } from "@enclave/protocol"
 import { chromium, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { irParaEmparelhar } from "./fase7-comum.mjs"
+import { abrirNoTu, appAberta, escolherComunidade, irParaDirectas, textoNoEcra } from "./separadores.mjs"
 import { levantarServidor } from "./frente-lenta.mjs"
+import { juntarComPalavras } from "./juntar-aparelho.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const argumento = (nome, omissao) => {
@@ -125,21 +127,21 @@ async function cofreDe(page) {
 }
 const corposNoCofre = (cofre, canal) => [...(cofre?.history?.[canal] ?? [])].map((e) => e.payload?.body).filter(Boolean)
 
-/** Open a channel by its name on the phone (drawer), and say whether `texto` shows. */
+/**
+ * Open a channel by its name on the phone (its face on the rail of
+ * communities, then its line: the conversation is pushed full screen), and
+ * say whether `texto` shows in it.
+ */
 async function abrirEVer(page, rotulo, texto) {
-  const gaveta = page.getByRole("button", { name: "Abrir o painel lateral" })
-  if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) !== "true") await gaveta.click({ timeout: 2_000 }).catch(() => {})
-  await page.locator(".channel-name", { hasText: rotulo }).first().click({ timeout: 2_000 }).catch(() => {})
-  if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click({ timeout: 2_000 }).catch(() => {})
-  return (await page.locator("body").innerText()).includes(texto)
+  await escolherComunidade(page, rotulo, { timeout: 2_000 }).catch(() => {})
+  await page.locator(".sidebar .channel-name", { hasText: rotulo }).first().click({ timeout: 2_000 }).catch(() => {})
+  return (await textoNoEcra(page)).includes(texto)
 }
+/** Open the direct chat from the Messages tab, and say whether `texto` shows in it. */
 async function abrirDirectaEVer(page, texto) {
-  await page.getByRole("button", { name: "Amigos", exact: true }).first().click({ timeout: 2_000 }).catch(() => {})
-  await page.evaluate(() => document.querySelector(".direct-open")?.click())
-  // At 390 px the conversation list is a drawer: close it, or it covers the input bar.
-  const gaveta = page.getByRole("button", { name: "Abrir o painel lateral" })
-  if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click({ timeout: 2_000 }).catch(() => {})
-  return (await page.locator("body").innerText()).includes(texto)
+  await irParaDirectas(page).catch(() => {})
+  await page.locator(".direct-open").first().click({ timeout: 2_000 }).catch(() => {})
+  return (await textoNoEcra(page)).includes(texto)
 }
 async function dizer(page, frase) {
   const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]')
@@ -238,8 +240,8 @@ try {
 
   // 2. Pairing.
   await pc.getByRole("button", { name: "Configurações", exact: true }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await pc.getByRole("button", { name: "Acrescentar aparelho" }).click()
+  await pc.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await pc.getByRole("button", { name: "Juntar um aparelho" }).click()
   const folha = pc.locator(".sheet").first()
   await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
@@ -251,23 +253,9 @@ try {
   tel.on("pageerror", (e) => erros.push(`telemóvel: ${e.message}`))
   await tel.goto(APP, { waitUntil: "domcontentloaded" })
   await irParaEmparelhar(tel)
-  await tel.getByLabel("Ou cola o link").fill(link)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 10_000 })
-  const frases = tel.locator('.gate-card input[type="password"]')
-  await frases.nth(0).fill(FRASE)
-  await frases.nth(1).fill(FRASE)
-  const caixa = tel.locator('input[name="memorizar"]')
-  if (await caixa.count()) await caixa.setChecked(true)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await tel.getByRole("button", { name: "São as mesmas" }).click()
-  await folha.getByRole("button", { name: "São as mesmas" }).click()
-  await tel.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 })
+  await juntarComPalavras(tel, folha, link, FRASE)
   await folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
-  await tel.getByRole("button", { name: "Entrar", exact: true }).click()
-  await tel.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+  await appAberta(tel, 90_000)
   let cofre = null
   await ate(async () => {
     cofre = await cofreDe(tel)
@@ -284,12 +272,10 @@ try {
 
   // 3. "Sincronizar conta".
   passo = "abrir as Configurações"
-  const gaveta = tel.getByRole("button", { name: "Abrir o painel lateral" })
-  if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) !== "true") await gaveta.click({ timeout: 2_000 }).catch(() => {})
-  await tel.getByRole("button", { name: "Configurações", exact: true }).first().click()
+  // On the phone, Settings is a screen of the "Tu" tab, pushed over its list;
+  // its section list is the page itself.
+  await abrirNoTu(tel, "Configurações")
   passo = "abrir Ajuda e diagnóstico"
-  // At 390 px the drawer covers the page, and the section list is the page itself.
-  if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click({ timeout: 2_000 }).catch(() => {})
   await tel.getByRole("button", { name: "Ajuda e diagnóstico" }).last().click()
   passo = "carregar em Sincronizar conta"
   await tel.getByRole("button", { name: "Sincronizar conta", exact: true }).click()
@@ -305,7 +291,7 @@ try {
     pagina.on("crash", () => erros.push("telemóvel: a página rebentou"))
     telAgora = pagina
     await pagina.goto(APP, { waitUntil: "commit" })
-    await pagina.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 120_000 })
+    await appAberta(pagina, 120_000)
     await wait(20_000)
     return pagina
   }

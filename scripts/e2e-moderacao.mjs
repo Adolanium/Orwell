@@ -31,6 +31,7 @@ import { criarConta } from "./conta.mjs"
 import { aceitarConvite, convidar } from "./convite.mjs"
 import { abrirCanal, aceitarAmizade, ate, contasDoServidor, criarCanal, dentro, entrarNaVoz, pedirAmizade, verificador } from "./fase7-comum.mjs"
 import { levantarServidor, RAIZ } from "./servidor-descartavel.mjs"
+import { mostrarLista } from "./separadores.mjs"
 
 const FRASE = "frase-de-verificacao-2026"
 const CANAL = "moderacao"
@@ -264,8 +265,8 @@ try {
   check('a Carla volta a "voz"', await entrarNaVoz(carla.page))
   await carla.page.locator(".call-barra").waitFor({ timeout: 30_000 })
   {
-    const gaveta = bruno.page.getByRole("button", { name: "Abrir o painel lateral" })
-    if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) !== "true") await gaveta.click().catch(() => {})
+    // At 390 px the room tree is the Communities list (the phone tabs), not a drawer.
+    await mostrarLista(bruno.page).catch(() => {})
     await ate(async () => (await quemEstaEm(bruno.page, "voz")).includes("Carla"), 60_000)
     await abrirMenuNaVoz(bruno.page, "voz", "Carla")
     await bruno.page.locator(".context-menu").getByRole("menuitem", { name: /Mover para/ }).click()
@@ -283,7 +284,6 @@ try {
     const movida = await ate(async () => (await quemEstaEm(ana.page, ESTUDIO)).includes("Carla"), 30_000)
     check("escolher na folha move a Carla", movida >= 0)
     await bruno.page.setViewportSize({ width: 1280, height: 860 })
-    if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click().catch(() => {})
   }
 
   // 5. The founder renames roles on the spot.

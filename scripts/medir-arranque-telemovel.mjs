@@ -42,6 +42,8 @@ import { chromium, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { irParaEmparelhar } from "./fase7-comum.mjs"
 import { levantarServidor } from "./frente-lenta.mjs"
+import { appAberta, escolherComunidade, nomesDasComunidades, profundidade } from "./separadores.mjs"
+import { juntarComPalavras } from "./juntar-aparelho.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const argumento = (nome, omissao) => {
@@ -154,8 +156,9 @@ const SONDA = () => {
     const d = document
     if (d.querySelector(".abertura")) marcar(notas.ecra, "splash")
     if (d.querySelector(".gate-card")) marcar(notas.ecra, "portao")
-    if (d.querySelector('button[aria-label="Configurações"]') || [...d.querySelectorAll("button")].some((b) => b.textContent === "Configurações" || b.getAttribute("aria-label") === "Configurações")) marcar(notas.ecra, "app")
-    if (d.querySelector(".channel-name")) marcar(notas.ecra, "canais")
+    if (d.querySelector('button[aria-label="Configurações"]') || [...d.querySelectorAll("button")].some((b) => b.textContent === "Configurações" || b.getAttribute("aria-label") === "Configurações") || d.querySelector(".separadores")) marcar(notas.ecra, "app")
+    // On a phone the communities are faces on the rail (option B); the sidebar lists only the chosen one.
+    if (d.querySelector(".channel-name, .carril-comunidade:not(.carril-nova)")) marcar(notas.ecra, "canais")
     if (d.querySelector(".message, .msg, [data-message-id]")) marcar(notas.ecra, "mensagem")
     if (d.querySelector('textarea[placeholder="Escreve uma mensagem"]')) marcar(notas.ecra, "caixa")
     // Usable: the app is there, and the opening (and its fading copy) no longer covers it.
@@ -195,16 +198,19 @@ async function medirAbertura(ctx, rotulo, { frase = null, alvo } = {}) {
     await page.evaluate(() => (window.__arranque.ecra.submeteu = performance.now()))
     await page.keyboard.press("Enter")
   }
-  const entrou = await page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 180_000 }).then(() => true, () => false)
+  const entrou = await appAberta(page, 180_000).then(() => true, () => false)
   const tEntrou = Date.now() - inicio
   // The first conversation the person opens: the channel with most history.
   let tConversa = -1
   if (entrou && alvo) {
     const t = Date.now()
     const vista = await ate(async () => {
-      const gaveta = page.getByRole("button", { name: "Abrir o painel lateral" })
-      if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) !== "true") await gaveta.click({ timeout: 2_000 }).catch(() => {})
-      await page.locator(".channel-name", { hasText: alvo.canal }).first().click({ timeout: 2_000 }).catch(() => {})
+      // On a phone: the Communities tab and the face on the rail, then the line pushes the conversation.
+      // Once the conversation is pushed, stay in it: going back to the list would restart the wait.
+      if ((await profundidade(page)) === 0) {
+        await escolherComunidade(page, alvo.canal, { timeout: 2_000 }).catch(() => {})
+        await page.locator(".channel-name", { hasText: alvo.canal }).first().click({ timeout: 2_000 }).catch(() => {})
+      }
       return (await page.locator("body").innerText()).includes(alvo.texto)
     }, 120_000, 300)
     tConversa = vista ? Date.now() - inicio : -1
@@ -286,8 +292,8 @@ try {
 
   // Pair the phone (no throttling here: we measure the opens after).
   await pc.getByRole("button", { name: "Configurações", exact: true }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await pc.getByRole("button", { name: "Acrescentar aparelho" }).click()
+  await pc.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await pc.getByRole("button", { name: "Juntar um aparelho" }).click()
   const folha = pc.locator(".sheet").first()
   await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
@@ -297,24 +303,10 @@ try {
   const tel = await ctxTel.newPage()
   await tel.goto(APP, { waitUntil: "domcontentloaded" })
   await irParaEmparelhar(tel)
-  await tel.getByLabel("Ou cola o link").fill(link)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 10_000 })
-  const frases = tel.locator('.gate-card input[type="password"]')
-  await frases.nth(0).fill(FRASE)
-  await frases.nth(1).fill(FRASE)
-  const caixa = tel.locator('input[name="memorizar"]')
-  if (await caixa.count()) await caixa.setChecked(true)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await tel.getByRole("button", { name: "São as mesmas" }).click()
-  await folha.getByRole("button", { name: "São as mesmas" }).click()
-  await tel.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 })
+  await juntarComPalavras(tel, folha, link, FRASE)
   await folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
-  await tel.getByRole("button", { name: "Entrar", exact: true }).click()
-  await tel.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
-  const histOk = await ate(async () => (await tel.locator(".barra-historico").count()) === 0 && (await tel.locator(".channel-name").count()) >= 4, 240_000, 2_000)
+  await appAberta(tel)
+  const histOk = await ate(async () => (await tel.locator(".barra-historico").count()) === 0 && (await nomesDasComunidades(tel)).length >= 4, 240_000, 2_000)
   console.log(`  ..  telemóvel emparelhado; histórico e canais ${histOk ? "chegaram" : "NÃO chegaram em 4 min"}`)
   await wait(4_000)
   await tel.close()
@@ -346,7 +338,7 @@ try {
   // Forget the remembered session: the next open asks for the password.
   const p = await ctxTel.newPage()
   await p.goto(APP, { waitUntil: "domcontentloaded" })
-  await p.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+  await appAberta(p)
   await p.evaluate(async () => {
     // The remembered-session record lives beside the vault: the gate shows the password again without it.
     await new Promise((r) => {

@@ -304,7 +304,7 @@ describe("o resto fica como estava", () => {
     const { bridge } = bancada()
     const fechada = { ...bridge, vault: { ...bridge.vault, unlock: async () => { throw new Error("wrong passphrase, or the vault is damaged") } } }
     render(<App bridge={fechada as EnclaveBridge} />)
-    await screen.findByText(strings.gate.unlockTitle)
+    await screen.findByRole("heading", { name: new RegExp(`^${strings.entrada.olaSemNome}`) })
 
     expect(clicar(CURTA).tomado).toBe(false)
   })

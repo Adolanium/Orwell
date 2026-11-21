@@ -26,6 +26,7 @@ import { join } from "node:path"
 import { chromium } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { aceitarAmizade, abrirDirecta, criarCanal, dentro, dizer, contasDoServidor, espera, ouviu, pedirAmizade, verificador } from "./fase7-comum.mjs"
+import { abrirComunidade, voltarAConversa } from "./separadores.mjs"
 import { levantarServidor, RAIZ } from "./servidor-descartavel.mjs"
 
 const ETIQUETA = process.argv[2] ?? "depois"
@@ -84,14 +85,8 @@ async function tema(page, nome, canal) {
   await page.reload({ waitUntil: "domcontentloaded" })
   await dentro(page)
   await espera(1500)
-  const linha = page.locator(".channel-name", { hasText: canal }).first()
-  if (!(await linha.isVisible().catch(() => false))) {
-    await page.getByRole("button", { name: "Abrir o painel lateral" }).click().catch(() => {})
-    await espera(400)
-  }
-  await linha.click({ timeout: 30_000 })
-  const gaveta = page.getByRole("button", { name: "Abrir o painel lateral" })
-  if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click().catch(() => {})
+  // At 390 px the phone layout (tabs): the channel's conversation is pushed from its line.
+  await abrirComunidade(page, canal, { timeout: 30_000 })
   await espera(1200)
 }
 
@@ -168,7 +163,9 @@ try {
   await dedo.goto(srv.APP, { waitUntil: "domcontentloaded" })
   await criarConta(dedo, { nome: "Dora", servidor: srv.NOME })
   await dentro(dedo)
-  // The account is in the common room: its conversation opens with the box.
+  // The account is in the common room. On the phone its line is in the
+  // Communities list, and a tap pushes its conversation, with the box.
+  await voltarAConversa(dedo)
   const caixaT = dedo.locator('textarea[placeholder="Escreve uma mensagem"]')
   await caixaT.waitFor({ timeout: 60_000 })
   await caixaT.tap()

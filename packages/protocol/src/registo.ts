@@ -19,6 +19,7 @@
  * the code, or say "no new accounts here", before it makes the vault.
  */
 import { z } from "zod"
+import { CODIGO_PROVA_EM_FALTA, CODIGO_PROVA_INVALIDA, CODIGO_REDE_COM_MUITAS_CONTAS } from "./anti-abuso.js"
 
 export const MODOS_DE_REGISTO = ["aberto", "convite", "fechado"] as const
 export const ModoDeRegisto = z.enum(MODOS_DE_REGISTO)
@@ -35,6 +36,10 @@ export const CODIGOS_DE_RECUSA_DO_REGISTO: readonly string[] = [
   CODIGO_REGISTO_FECHADO,
   CODIGO_CONVITE_DE_REGISTO_EM_FALTA,
   CODIGO_CONVITE_DE_REGISTO_INVALIDO,
+  // 1.3.26, see `anti-abuso.ts`.
+  CODIGO_PROVA_EM_FALTA,
+  CODIGO_PROVA_INVALIDA,
+  CODIGO_REDE_COM_MUITAS_CONTAS,
 ]
 
 /** The code as it travels in `auth.finish`: what the person typed, with room for spaces and dashes. */

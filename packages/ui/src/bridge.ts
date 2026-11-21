@@ -355,6 +355,8 @@ export interface HistoricoDosIrmaos {
   /** What did not come, and why (12/11/2026). See `EventoDoHistorico` in the core. */
   perdidas?: number
   razao?: "sem-irmao" | "irmao-calado" | "ilegiveis"
+  /** A stopped transfer: messages missing on this device, when known exactly (20/11/2026). See `EventoDoHistorico.faltam`. */
+  faltam?: number
   /** THIS device is sending the history to a freshly paired one (16/11/2026). See `EnvioDoHistorico` in the core. */
   envio?: {
     mensagens: { feitas: number; total: number }
@@ -470,6 +472,19 @@ export interface EnclaveBridge {
      */
     definirPalavraPasse?: (frase: string) => Promise<{ ok: boolean }>
     /**
+     * "Change password" (1.3.26, `Vault.mudarPalavraPasse`): prove `actual`, then
+     * seal the vault of THIS device with `nova` in one write. Account files saved
+     * before keep opening with the old one. Throws "the current passphrase is not
+     * right" for a wrong `actual`. Optional by the rule of `preload`.
+     */
+    mudarPalavraPasse?: (actual: string, nova: string) => Promise<{ ok: boolean }>
+    /**
+     * "I forgot the current password" (S4, `Vault.changePasswordWithOpenVault`):
+     * the open vault is the proof. The desktop asks Touch ID first where it can
+     * (Erro 143 when the person does not confirm). Optional by the rule of `preload`.
+     */
+    changePasswordWithOpenVault?: (nova: string) => Promise<{ ok: boolean }>
+    /**
      * Disconnect and erase the vault. Irreversible by design: there is no
      * server-side copy of the account, so nothing can bring it back.
      *
@@ -520,6 +535,12 @@ export interface EnclaveBridge {
      * version does not bring it.
      */
     createProvisional?: (passphrase: string | null) => Promise<{ ok: boolean }>
+    /**
+     * A provisional vault with NO password yet (1.3.26): pairing asks for the
+     * account password after the six words, and `pairing.seal` gives it. Until
+     * then `pairing.done` refuses. Optional by the rule of `preload`.
+     */
+    createProvisionalToSeal?: () => Promise<{ ok: boolean }>
   }
   /**
    * "Switch account": the accounts on this device, each with its own vault and
@@ -569,9 +590,30 @@ export interface EnclaveBridge {
        * as no.
        */
       servidorRevoga?: boolean
+      /**
+       * The server announces `pairing-pake`: the short code works there
+       * (1.3.26). Absent (old host) reads as no.
+       */
+      serverKnowsShortCode?: boolean
     }>
     host: () => Promise<{ pairId: string; link: string }>
     join: (link: string) => Promise<{ ok: boolean }>
+    /**
+     * Short code (1.3.26), on the NEW device: draw a code and open its box on
+     * `server` (`defaultServer` at the gate). The code and its QR link arrive
+     * on `on.pair` as `{ fase: "codigo" }`; the rest is `join`'s. Needs a vault
+     * created and open, with no account, like `join`. Optional: an older host
+     * does not bring it.
+     */
+    showCode?: (server: string) => Promise<{ ok: boolean }>
+    /**
+     * Short code (1.3.26), on the device WITH the account: the code the person
+     * typed ("K7P · 4QM", any case) or the QR link read from the new device.
+     * Resolves when the server found the box; throws "that is not a pairing
+     * code", "this pairing code is for another server", "this server cannot
+     * pair with a short code", or a `PairFalha` (`unknown-code`, …). Optional for the same reason.
+     */
+    typeCode?: (code: string) => Promise<{ ok: boolean }>
     confirm: () => Promise<{ ok: boolean }>
     refuse: () => Promise<{ ok: boolean }>
     /** Drop the pairing. With a provisional vault open, disconnect and drop it too: disk did not change. */
@@ -582,6 +624,12 @@ export interface EnclaveBridge {
      * and only then tell the computer it is ready.
      */
     done: () => Promise<{ ok: boolean }>
+    /**
+     * After the certificate (1.3.26): the account password, checked against the
+     * record the host sent ("this is not the account password", Erro 140), or a
+     * new one when the host sent none (`certificado` with `palavraPasse: "nova"`).
+     */
+    seal?: (frase: string) => Promise<{ ok: boolean }>
     /** The devices on the own account, from the manifest; `null` without a manifest or a server that stores it. */
     devices: () => Promise<AparelhoDaConta[] | null>
     /**
@@ -619,6 +667,12 @@ export interface EnclaveBridge {
     juntar?: (link: string) => Promise<{ ok: boolean }>
     juntarAvisar?: () => Promise<{ ok: boolean }>
     juntarTrocar?: (passphrase: string | null) => Promise<{ address: string }>
+    /**
+     * Before `juntarAvisar` (1.3.26): the main account's password, checked
+     * against the record it sent ("this is not the account password", Error 140).
+     * See `Session.joinCheckPassword`. Optional by the rule of `preload`.
+     */
+    joinCheckPassword?: (passphrase: string) => Promise<{ accountPassword: boolean }>
     juntarCancelar?: () => Promise<{ ok: boolean }>
   }
   /**
@@ -669,6 +723,14 @@ export interface EnclaveBridge {
     estado: () => Promise<SincroniaDoCanal[]>
     /** `null` for whoever created the channel and for channels from before this version. */
     lugarEm: (channel: string) => Promise<{ seq: number; em: number } | null>
+    /**
+     * The last time this device was online with this account, before this
+     * opening (ms since epoch), or `null` for a device that never was. For the
+     * members column while a history syncs ("You haven't logged in X days").
+     * Optional: a host from before 1.3.26 does not have it, and the column
+     * says only "Now syncing".
+     */
+    previousOnlineAt?: () => Promise<number | null>
     /**
      * The history from a sibling device (1.0 "Arca"), now. Optional: a bridge
      * from before does not include it, and the UI does not show the bar.
@@ -767,16 +829,52 @@ export interface EnclaveBridge {
     escolherSalaComum?: (entrar: boolean) => Promise<{ ok: boolean }>
     /**
      * Who may create an account on a server (1.3.25), asked before the vault
-     * exists: `aberto`, `convite`, `fechado`, or `null` when the server could not
+     * exists: `aberto`, `convite`, `fechado`, `versao-antiga` when the server
+     * refuses this app's version (21/11/2026), or `null` when the server could not
      * be asked. See `Session.sondarRegisto`. Optional: an older host does not
      * have it, and the gate goes on as before.
      */
-    sondarRegisto?: (servidor: string) => Promise<"aberto" | "convite" | "fechado" | null>
+    sondarRegisto?: (servidor: string) => Promise<"aberto" | "convite" | "fechado" | "versao-antiga" | null>
     /**
      * The registration invite code that the new account sends at its first
      * login (1.3.25). See `Session.definirConviteDeRegisto`. Optional, like the one above.
      */
     definirConviteDeRegisto?: (codigo: string | null) => Promise<{ ok: boolean }>
+    /**
+     * The community invite link (long or short) that a new account presents at
+     * its first login, to get past the limit of new accounts per network
+     * (1.3.26). `ok` is whether the link was read. See
+     * `Session.definirConviteDeComunidade`. Optional, like the one above.
+     */
+    definirConviteDeComunidade?: (link: string | null) => Promise<{ ok: boolean }>
+    /**
+     * Prepare a NEW account before its first connection (1.3.26): ask the
+     * server for the proof-of-work challenge, solve it off the main thread, and
+     * keep the proof for the login. `aoProgresso` gets 0 to 1. `false` when the
+     * server asks for no proof. See `Session.prepararContaNova`. Optional: an
+     * older host does not have it, and the session solves it at the connection.
+     */
+    prepararContaNova?: (aoProgresso: (fraccao: number) => void) => Promise<boolean>
+    /** This account's first-days limits, from the last login, or `null` (1.3.26). See `Session.contaNova`. */
+    contaNova?: () => Promise<{ ate24h: number; ate72h: number; intervaloAte24hS: number; intervaloAte72hS: number } | null>
+    /**
+     * The channels this account created and its cap, asked from
+     * the server now, or `null` when there is no cap (1.3.26). See
+     * `Session.criarCanais`. Optional: an older host does not have it, and the
+     * interface shows "Create channel" as before.
+     */
+    criarCanais?: () => Promise<{ criados: number; maximo: number; contaNova: boolean } | null>
+    /**
+     * The rooms this account created and its cap, asked from the server now, or
+     * `null` when there is no cap (1.3.26). See `Session.roomQuota`. Optional: an
+     * older host does not have it, and the "+" of "New room" stays.
+     */
+    roomQuota?: () => Promise<{ created: number; max: number; newAccount?: boolean | undefined } | null>
+    /**
+     * Until when an account is new for the common room's links (1.3.26), or
+     * `null` when it is not. See `Session.autorNovoAte`.
+     */
+    autorNovo?: (address: string) => Promise<number | null>
     /** Announce this connection to channel-mates, or not. Hides you from
      * people; the server still knows, because it must. */
     setVisible: (visible: boolean) => Promise<{ ok: boolean }>
@@ -1243,8 +1341,16 @@ export interface EnclaveBridge {
      * two above: an older host does not bring it, and the reaction button does not appear.
      */
     react?: (channel: string, target: string, emoji: string, remove?: boolean) => Promise<{ ok: boolean }>
-    /** Read from the group's own key tree, so it cannot be padded or trimmed. */
+    /**
+     * Read from the group's own key tree, so it cannot be padded. Since 1.3.26 (P7)
+     * without the accounts the server says are gone: those are in `afastados`.
+     */
     members: (channel: string) => Promise<string[]>
+    /**
+     * Accounts that still hold a leaf (the keys) in this channel, but that the server
+     * says are gone. Not in `members`. Optional: an older host does not bring it.
+     */
+    afastados?: (channel: string) => Promise<string[]>
     /**
      * The channel's stored history, oldest first, from the encrypted vault.
      * This device's copy is the only one: the server never held the plaintext,
@@ -1270,6 +1376,18 @@ export interface EnclaveBridge {
     ) => Promise<{ entradas: StoredChatMessage[]; seguinte: number | null; falhou?: true }>
     /** Is there conversation older than the vault on this device? Absent on an older host: no. */
     temConversaArquivada?: (channel: string) => Promise<boolean>
+    /**
+     * "Load older" past what this device holds (history-last-100): the next lines of the
+     * channel's past, of `room` when given, from a member online. What comes arrives as
+     * live messages. `no-member`: no member online answered; `end`: the past is complete
+     * here. Absent on an older host: the start of the device is the start.
+     */
+    loadOlderFromMembers?: (
+      channel: string,
+      room?: string,
+    ) => Promise<{ outcome: "loaded" | "end" | "no-member" | "offline"; lines: number }>
+    /** Whether the members may still have older lines of this channel. Absent on an older host: no. */
+    hasOlderFromMembers?: (channel: string) => Promise<boolean>
     /**
      * Stop tracking a channel on this device: group secrets, history and
      * catch-up anchor are erased locally. The other members keep seeing this
@@ -1717,6 +1835,15 @@ export interface EnclaveBridge {
     abrirDefinicoes: () => Promise<{ ok: boolean }>
     /** Someone tapped share and needs to pick what to share. Requires a response. */
     aoPedir: (handler: (pedido: { id: string }) => void) => () => void
+  }
+  /**
+   * The System Settings panel where macOS grants the microphone or the camera
+   * (1.3.26). Installed app on macOS only: the call names the refused device in
+   * its error ("the system does not allow the microphone"), and the alert offers
+   * this button. Absent in the browser, where the engine asks on its own.
+   */
+  privacidadeDoSistema?: {
+    abrir: (dispositivo: "microfone" | "camara") => Promise<{ ok: boolean }>
   }
   /**
    * Is there a new version of the app installed?

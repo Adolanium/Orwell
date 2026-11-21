@@ -6,7 +6,8 @@ import userEvent from "@testing-library/user-event"
 import { formatInviteLink } from "@enclave/client-core"
 import type { EnclaveBridge } from "./bridge.js"
 import { App, INTERVALO_DO_PULSO_MS, SILENCIO_DO_PULSO_MS } from "./App.js"
-import { PRIMEIROS_PASSOS_KEY } from "./hooks/usePrimeirosPassos.js"
+import { adiarOFicheiro, criarContaNoPortao } from "./testes/portao.js"
+import { SINGLE_ACCOUNT_ID, storedAccountName } from "./lib/accountNames.js"
 import { strings } from "./strings.js"
 
 /**
@@ -45,16 +46,27 @@ interface Bancada {
   ligar: () => void
   cair: () => void
   canais: (lista: string[]) => void
+  /** A session status, as the core emits it (`device-new`…). */
+  estado: (payload: unknown) => void
 }
 
 function bancada(
-  opcoes: { cofre?: "abre" | "pede-palavra" | "nao-existe"; aplicacaoInstalada?: boolean; destroy?: () => Promise<{ ok: boolean }>; exportar?: boolean } = {},
+  opcoes: {
+    cofre?: "abre" | "pede-palavra" | "nao-existe"
+    aplicacaoInstalada?: boolean
+    destroy?: () => Promise<{ ok: boolean }>
+    exportar?: boolean
+    /** The account's devices, for the file banner and the new-device card. */
+    aparelhos?: () => number
+    revogar?: (deviceKey: string) => Promise<{ ok: boolean }>
+  } = {},
 ): Bancada {
   const cofre = opcoes.cofre ?? "abre"
   const redeem = vi.fn(async () => ({ ok: true }))
   const connect = vi.fn(async () => ({ ok: true }))
   const send = vi.fn(async () => ({ ok: true }))
   let aoLigar: ((payload: unknown) => void) | null = null
+  let aoEstado: ((payload: unknown) => void) | null = null
   let aosCanais: ((payload: unknown) => void) | null = null
   const bridge = {
     vault: {
@@ -120,7 +132,10 @@ function bancada(
     on: {
       message: () => () => {},
       epoch: () => () => {},
-      status: () => () => {},
+      status: (handler: (payload: unknown) => void) => {
+        aoEstado = handler
+        return () => {}
+      },
       connection: (handler: (payload: unknown) => void) => {
         aoLigar = handler
         return () => {}
@@ -135,6 +150,16 @@ function bancada(
       callActivity: () => () => {},
     },
     call: { on: () => () => {}, setMuted: () => {} },
+    ...(opcoes.aparelhos
+      ? {
+          pairing: {
+            status: async () => ({ temChaveDeConta: true, servidorSuporta: true, servidorRevoga: true }),
+            devices: async () =>
+              Array.from({ length: opcoes.aparelhos!() }, (_, i) => ({ deviceKey: `aparelho-${i}`, addedAt: i, esteAparelho: i === 0 })),
+            ...(opcoes.revogar ? { revoke: opcoes.revogar } : {}),
+          },
+        }
+      : {}),
     ...(opcoes.aplicacaoInstalada
       ? { actualizacao: { verificar: async () => null, dispensar: async () => {}, abrir: async () => {} } }
       : {}),
@@ -145,6 +170,7 @@ function bancada(
     connect,
     send,
     ligar: () => act(() => aoLigar?.({ state: "online" })),
+    estado: (payload: unknown) => act(() => aoEstado?.(payload)),
     cair: () => act(() => aoLigar?.({ state: "reconnecting" })),
     canais: (lista) => act(() => aosCanais?.({ channels: lista })),
   }
@@ -152,13 +178,6 @@ function bancada(
 
 
 /** The password step in Setup, and the confirmation step. */
-async function escolherFrase(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await waitFor(() => expect(document.querySelector('input[name="new-password"]')).not.toBeNull())
-  await user.type(document.querySelector('input[name="new-password"]') as HTMLInputElement, "uma frase comprida{Enter}")
-  await waitFor(() => expect(document.querySelector('input[name="confirm-password"]')).not.toBeNull())
-  await user.type(document.querySelector('input[name="confirm-password"]') as HTMLInputElement, "uma frase comprida")
-}
-
 async function dentro(): Promise<void> {
   await screen.findByRole("button", { name: strings.rail.social })
 }
@@ -439,97 +458,136 @@ describe("à espera de entrada", () => {
   })
 })
 
-/** The account-file step after creating (16/11/2026): download, tick, continue. */
-async function passarOFicheiroDaConta(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  URL.createObjectURL = vi.fn(() => "blob:conta")
-  URL.revokeObjectURL = vi.fn()
-  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
-  const descarregar = await screen.findByRole("button", { name: strings.ficheiroDaConta.descarregar })
-  await waitFor(() => expect((descarregar as HTMLButtonElement).disabled).toBe(false))
-  await user.click(descarregar)
-  await user.click(screen.getByRole("checkbox", { name: strings.ficheiroDaConta.guardei }))
-  await user.click(screen.getByRole("button", { name: strings.ficheiroDaConta.continuar }))
-}
-
-describe("o aviso único do ficheiro da conta (16/11/2026)", () => {
-  it("uma conta que já existia e nunca guardou o ficheiro recebe o aviso ao abrir; fechado, não volta", async () => {
+describe("o ficheiro da conta, numa faixa dentro da app (21/11/2026)", () => {
+  it("uma conta sem ficheiro guardado vê a faixa; fechar a folha não a tira, guardar tira", async () => {
     const user = userEvent.setup()
+    URL.createObjectURL = vi.fn(() => "blob:conta")
+    URL.revokeObjectURL = vi.fn()
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
     const { bridge, ligar } = bancada({ exportar: true })
     render(<App bridge={bridge} />)
     ligar()
-    expect(await screen.findByRole("heading", { name: strings.ficheiroDaConta.aviso })).toBeTruthy()
-    await user.click(screen.getByRole("button", { name: strings.ficheiroDaConta.fechar }))
-    await waitFor(() => expect(screen.queryByRole("heading", { name: strings.ficheiroDaConta.aviso })).toBeNull())
+    expect((await screen.findAllByText(strings.entrada.faixa)).length).toBeGreaterThan(0)
+    await user.click(screen.getAllByRole("button", { name: strings.entrada.faixaGuardar })[0]!)
+    expect(await screen.findByRole("heading", { name: strings.entrada.guardarTitulo })).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: strings.common.close }))
+    expect(screen.getAllByText(strings.entrada.faixa).length).toBeGreaterThan(0)
+    await user.click(screen.getAllByRole("button", { name: strings.entrada.faixaGuardar })[0]!)
+    const guardar = await screen.findByRole("button", { name: strings.entrada.guardarFicheiro })
+    await waitFor(() => expect((guardar as HTMLButtonElement).disabled).toBe(false))
+    await user.click(guardar)
+    await waitFor(() => expect(screen.queryByText(strings.entrada.faixa)).toBeNull())
     cleanup()
     const outra = bancada({ exportar: true })
     render(<App bridge={outra.bridge} />)
     outra.ligar()
-    await screen.findByRole("button", { name: "Configurações" }).catch(() => null)
     await new Promise((resolve) => setTimeout(resolve, 100))
-    expect(screen.queryByRole("heading", { name: strings.ficheiroDaConta.aviso })).toBeNull()
+    expect(screen.queryByText(strings.entrada.faixa)).toBeNull()
+  })
+})
+
+describe("um aparelho que entrou noutro sítio (21/11/2026)", () => {
+  const entrou = (chave: string) => ({
+    detail: `${chave}|${Math.floor(Date.now() / 1000)}`,
+    level: "info",
+    code: "device-new",
+    route: "log",
+  })
+
+  it('o cartão "Novo aparelho na tua conta" aparece no canto; "Fui eu" fecha-o', async () => {
+    const user = userEvent.setup()
+    const { bridge, ligar, estado } = bancada({ aparelhos: () => 1, revogar: vi.fn(async () => ({ ok: true })) })
+    render(<App bridge={bridge} />)
+    await dentro()
+    ligar()
+    estado(entrou("chave-nova"))
+    const cartao = await screen.findByRole("status", { name: strings.juntarAparelho.novoNaConta })
+    expect(within(cartao).getByRole("button", { name: strings.juntarAparelho.remover })).toBeTruthy()
+    await user.click(within(cartao).getByRole("button", { name: strings.juntarAparelho.fuiEu }))
+    await waitFor(() => expect(screen.queryByRole("status", { name: strings.juntarAparelho.novoNaConta })).toBeNull())
+  })
+
+  it('"Remover" usa a remoção de sempre, com a chave do aparelho', async () => {
+    const user = userEvent.setup()
+    const revogar = vi.fn(async () => ({ ok: true }))
+    const { bridge, ligar, estado } = bancada({ aparelhos: () => 1, revogar })
+    render(<App bridge={bridge} />)
+    await dentro()
+    ligar()
+    estado(entrou("chave-nova"))
+    const cartao = await screen.findByRole("status", { name: strings.juntarAparelho.novoNaConta })
+    await user.click(within(cartao).getByRole("button", { name: strings.juntarAparelho.remover }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: strings.settings.revoke }))
+    await waitFor(() => expect(revogar).toHaveBeenCalledWith("chave-nova"))
+    await waitFor(() => expect(screen.queryByRole("status", { name: strings.juntarAparelho.novoNaConta })).toBeNull())
+  })
+
+  it('"Remover" asks first; "Cancel" removes nothing and keeps the card', async () => {
+    const user = userEvent.setup()
+    const revogar = vi.fn(async () => ({ ok: true }))
+    const { bridge, ligar, estado } = bancada({ aparelhos: () => 1, revogar })
+    render(<App bridge={bridge} />)
+    await dentro()
+    ligar()
+    estado(entrou("chave-nova"))
+    const cartao = await screen.findByRole("status", { name: strings.juntarAparelho.novoNaConta })
+    await user.click(within(cartao).getByRole("button", { name: strings.juntarAparelho.remover }))
+    const dialogo = await screen.findByRole("alertdialog")
+    expect(within(dialogo).getByText(strings.settings.revokeTitle)).toBeTruthy()
+    expect(revogar).not.toHaveBeenCalled()
+    await user.click(within(dialogo).getByRole("button", { name: strings.common.cancel }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(revogar).not.toHaveBeenCalled()
+    expect(screen.getByRole("status", { name: strings.juntarAparelho.novoNaConta })).toBeTruthy()
+  })
+
+  it("a faixa do ficheiro sai logo que entra um segundo aparelho, sem reabrir a app", async () => {
+    let quantos = 1
+    const { bridge, ligar, estado } = bancada({ exportar: true, aparelhos: () => quantos })
+    render(<App bridge={bridge} />)
+    ligar()
+    expect((await screen.findAllByText(strings.entrada.faixa)).length).toBeGreaterThan(0)
+    quantos = 2
+    estado(entrou("chave-nova"))
+    await waitFor(() => expect(screen.queryByText(strings.entrada.faixa)).toBeNull())
+  })
+})
+
+describe("the display name outside the vault (21/11/2026)", () => {
+  it("is stored once the account is open, and goes with the account", async () => {
+    const statusless = bancada({ cofre: "nao-existe" })
+    const user = userEvent.setup()
+    render(<App bridge={statusless.bridge} />)
+    await criarContaNoPortao(user, { nome: "Vera" })
+    await adiarOFicheiro(user)
+    await dentro()
+    await waitFor(() => expect(storedAccountName(SINGLE_ACCOUNT_ID)).toBe("Vera"))
   })
 })
 
 describe("a primeira vez", () => {
-  it("depois de criar a conta, o cartão dá os três caminhos; fechar tira-o de vez", async () => {
+  /*
+    The first-steps card ("How to reach someone") left in 1.3.26. Its three ways
+    stay where they always were: Join with a link in the channel list, a friend
+    by address in Friends, and the address in Settings and the profile.
+  */
+  it("depois de criar a conta, não há cartão de primeiros passos", async () => {
     const user = userEvent.setup()
     const { bridge, ligar } = bancada({ cofre: "nao-existe" })
     render(<App bridge={bridge} />)
 
-    // Setup opens with the other device question (phase 8.1).
-    await user.click(await screen.findByRole("button", { name: strings.gate.outroAparelhoNao }))
-    await user.type(await screen.findByPlaceholderText(strings.gate.namePlaceholder), "Vera{Enter}")
-    await user.click(await screen.findByRole("button", { name: strings.gate.skipPhoto }))
-    // F3 of the session memory: a new account is always born with a password, also
-    // in a host with a key vault. The phrase and the confirmation.
-    await escolherFrase(user)
-    await user.click(await screen.findByRole("button", { name: strings.gate.create }))
-    await passarOFicheiroDaConta(user)
+    await criarContaNoPortao(user)
+    await adiarOFicheiro(user)
     await dentro()
     ligar()
 
-    expect(await screen.findByText(strings.primeirosPassos.titulo)).toBeTruthy()
-    const cartao = (): HTMLElement => screen.getByRole("region", { name: strings.primeirosPassos.titulo })
-    expect(within(cartao()).getByRole("button", { name: strings.primeirosPassos.copiar })).toBeTruthy()
-    await user.click(within(cartao()).getByRole("button", { name: strings.primeirosPassos.link }))
-    expect(within(screen.getByRole("dialog")).getByText(strings.prompts.joinTitle)).toBeTruthy()
-    await user.keyboard("{Escape}")
-
-    await user.click(within(cartao()).getByRole("button", { name: strings.primeirosPassos.amigo }))
-    expect(within(screen.getByRole("dialog")).getByText(strings.prompts.friendTitle)).toBeTruthy()
-    await user.keyboard("{Escape}")
-
-    await user.click(screen.getByRole("button", { name: strings.primeirosPassos.fechar }))
-    expect(screen.queryByText(strings.primeirosPassos.titulo)).toBeNull()
-    expect(localStorage.getItem(PRIMEIROS_PASSOS_KEY)).toBeNull()
-  })
-
-  it("quem desbloqueia uma conta que já existia não vê o cartão", async () => {
-    const { bridge, ligar } = bancada()
-    render(<App bridge={bridge} />)
-    await dentro()
-    ligar()
-    expect(screen.queryByText(strings.primeirosPassos.titulo)).toBeNull()
-  })
-
-  it("o primeiro canal tira o cartão", async () => {
-    const user = userEvent.setup()
-    const { bridge, ligar, canais } = bancada({ cofre: "nao-existe" })
-    render(<App bridge={bridge} />)
-    await user.click(await screen.findByRole("button", { name: strings.gate.outroAparelhoNao }))
-    await user.type(await screen.findByPlaceholderText(strings.gate.namePlaceholder), "Vera{Enter}")
-    await user.click(await screen.findByRole("button", { name: strings.gate.skipPhoto }))
-    // F3 of the session memory: a new account is always born with a password, also
-    // in a host with a key vault. The phrase and the confirmation.
-    await escolherFrase(user)
-    await user.click(await screen.findByRole("button", { name: strings.gate.create }))
-    await passarOFicheiroDaConta(user)
-    await dentro()
-    ligar()
-    await screen.findByText(strings.primeirosPassos.titulo)
-
-    canais([FEED, GERAL])
-    await waitFor(() => expect(screen.queryByText(strings.primeirosPassos.titulo)).toBeNull())
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+    expect(screen.queryByText("Como chegar a alguém")).toBeNull()
+    expect(screen.queryByText("How to reach someone")).toBeNull()
+    expect(document.querySelector(".primeiros-passos")).toBeNull()
+    expect(screen.getByRole("button", { name: strings.sidebar.joinWithLink })).toBeTruthy()
   })
 })
 

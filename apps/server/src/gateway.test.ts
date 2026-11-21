@@ -1,4 +1,5 @@
 import {
+  assinarPedidoDeLugar,
   criadaEmAtestada,
   fromBase64,
   generateIdentity,
@@ -2977,6 +2978,45 @@ describe("gateway: channel.rejoin diz o aparelho que pede", () => {
     const eco = await lig.nextOf("channel.rejoin")
     expect(eco).toEqual({ t: "channel.rejoin", channel: canal, address: antigo.address })
     expect("device" in eco).toBe(false)
+    lig.close()
+  }, 20_000)
+
+  // 1.3.26 (I2 of the 1.3.25 public review): the device's signature, forwarded as it came.
+  it("com a cadeia e a prova do aparelho: o channel.rejoin leva a prova sem lhe tocar", async () => {
+    const canal = moradaDeSala(HOME)
+    const pc = generateIdentity(HOME)
+    const telemovel = identityFromPrivateKey(pc.signingPrivateKey, HOME)
+    const ligPc = await TestClient.connect(gatewayUrl)
+    const ligTelemovel = await TestClient.connect(gatewayUrl)
+    await entrarComCadeia(ligPc, pc)
+    await entrarComCadeia(ligTelemovel, telemovel)
+    ligPc.send({ t: "channel.subscribe", channels: [canal] })
+    await ligPc.sync()
+    ligTelemovel.send({ t: "channel.subscribe", channels: [canal] })
+    await ligTelemovel.sync()
+    const prova = assinarPedidoDeLugar(telemovel.deviceSigningPrivateKey, telemovel.deviceSigningPublicKey, canal, pc.address, Date.now())
+    ligTelemovel.send({ t: "channel.rejoin.request", channel: canal, prova })
+    expect(await ligPc.nextOf("channel.rejoin")).toEqual({
+      t: "channel.rejoin",
+      channel: canal,
+      address: pc.address,
+      device: toBase64(telemovel.deviceSigningPublicKey),
+      prova,
+    })
+    ligPc.close()
+    ligTelemovel.close()
+  }, 20_000)
+
+  it("sem a cadeia, a prova não sai: sem aparelho nomeado não há folha para a verificar", async () => {
+    const canal = moradaDeSala(HOME)
+    const antigo = generateIdentity(HOME)
+    const lig = await TestClient.connect(gatewayUrl)
+    expect((await login(lig, antigo)).t).toBe("auth.ok")
+    lig.send({ t: "channel.subscribe", channels: [canal] })
+    await lig.sync()
+    const prova = assinarPedidoDeLugar(antigo.deviceSigningPrivateKey, antigo.deviceSigningPublicKey, canal, antigo.address, Date.now())
+    lig.send({ t: "channel.rejoin.request", channel: canal, prova })
+    expect(await lig.nextOf("channel.rejoin")).toEqual({ t: "channel.rejoin", channel: canal, address: antigo.address })
     lig.close()
   }, 20_000)
 })

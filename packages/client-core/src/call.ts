@@ -25,6 +25,7 @@ import { ControloDeVoz, type EstadoDoAudio } from "./audio/controlo.js"
 import { sistemaSuspendeCaptura, VigiaDoMicrofone, type MorteDoMicrofone, type SaudeDoMicrofone } from "./audio/vigia-do-microfone.js"
 import { Emitter } from "./emitter.js"
 import { chaveDoErroDoBrowser } from "./erros-do-browser.js"
+import { RecusaDoSistema, type DispositivoRecusado } from "./recusa-do-sistema.js"
 import { CifraDeMedia, cifraDeMediaEmFalta, type MaterialDeChave } from "./media-sframe.js"
 
 /**
@@ -313,6 +314,18 @@ export interface CallBridge {
    * thing the gate is blocking. Hosts with no permission model may omit it.
    */
   setMediaActive?(active: boolean): Promise<void>
+  /**
+   * Ask the operating system for the microphone (and the camera, when `video`),
+   * before the capture. Answers the device the system refuses, or `null`.
+   *
+   * macOS keeps its own permission (TCC) outside the app. When it refuses,
+   * `getUserMedia` does NOT fail: it gives a live track that carries only
+   * silence, and the call starts with no voice and no error. Only the host can
+   * read that state, so only the host can say it. Desktop only; a host that
+   * omits it lets the capture go as before. See
+   * `apps/client/src/main/permissao-de-media.ts`.
+   */
+  permissaoDoSistema?(video: boolean): Promise<DispositivoRecusado | null>
   /**
    * Is this room the channel's AFK room? (2/11/2026)
    *
@@ -1444,8 +1457,34 @@ export class Call extends Emitter<CallEvents> {
     }
   }
 
+  /**
+   * The system question in flight, one per kind (with or without the camera).
+   *
+   * Joins run one at a time (`#queue`), but the preview of the voice chain does
+   * not go through that queue: opening the preview and joining a call together
+   * asked the host twice while macOS had no answer yet, and each question can be
+   * its own dialog. The second caller now waits for the first answer. Cleared
+   * when it settles: the host keeps the answer (`permissao-de-media.ts`), and a
+   * later call must read the state again, in case the person changed it.
+   */
+  #perguntasAoSistema = new Map<boolean, Promise<DispositivoRecusado | null>>()
+
+  #permissaoDoSistema(video: boolean): Promise<DispositivoRecusado | null> {
+    const perguntar = this.bridge.permissaoDoSistema
+    if (!perguntar) return Promise.resolve(null)
+    const emCurso = this.#perguntasAoSistema.get(video)
+    if (emCurso) return emCurso
+    const pergunta = perguntar.call(this.bridge, video).finally(() => this.#perguntasAoSistema.delete(video))
+    this.#perguntasAoSistema.set(video, pergunta)
+    return pergunta
+  }
+
   /** The microphone for the preview of the chain, outside a call. */
   async #abrirMicrofoneParaPrevia(): Promise<MediaStream> {
+    // Outside a call, the system can refuse too: the preview would hear only silence.
+    if (!this.#channel && (await this.#permissaoDoSistema(false))) {
+      throw new RecusaDoSistema("microfone")
+    }
     if (!this.#channel) await this.bridge.setMediaActive?.(true)
     const tratamento = this.#tratamentoNativo(true)
     const escolhido = this.audioSettings?.inputDeviceId
@@ -1909,6 +1948,13 @@ export class Call extends Emitter<CallEvents> {
       const abrir = (a: MediaTrackConstraints, v: MediaTrackConstraints | boolean): Promise<MediaStream> =>
         guardada ? Promise.resolve(guardada) : navigator.mediaDevices.getUserMedia({ audio: a, video: v })
 
+      // A capture that came from a move already has the permission. A new one asks
+      // the system first: a refusal there gives silence, not an error.
+      if (!guardada) {
+        const recusado = await this.#permissaoDoSistema(this.#video)
+        if (recusado) throw new RecusaDoSistema(recusado)
+      }
+
       try {
         this.#local = await abrir(comMicrofone, comCamara)
       } catch (erro) {
@@ -1982,7 +2028,12 @@ export class Call extends Emitter<CallEvents> {
       // The browser error name goes in `cause`: it is what makes the phrase say
       // "permission" for a refusal and "another application" for a busy microphone.
       this.emit("error", {
-        detail: this.#video ? "could not open the camera or the microphone" : "could not open the microphone",
+        detail:
+          error instanceof RecusaDoSistema
+            ? error.message
+            : this.#video
+              ? "could not open the camera or the microphone"
+              : "could not open the microphone",
         cause: {
           nome: String((error as Error)?.name ?? ""),
           mensagem: String((error as Error)?.message ?? error),

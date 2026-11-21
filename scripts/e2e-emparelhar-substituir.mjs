@@ -1,26 +1,26 @@
 /**
- * "Sign in with another account" via pairing, on a device that ALREADY HAS an
- * account (core 1j: the temporary vault).
+ * "Usar outra conta" via another device, on a device that ALREADY HAS an
+ * account (21/11/2026: no path deletes an account).
  *
  *   node scripts/e2e-emparelhar-substituir.mjs     (needs `npm run build` first)
  *
- * The bug: the local account was deleted on "delete" BEFORE the link was created.
- * A pairing that failed after left the phone with no account at all. Now pairing
- * runs in a temporary vault, in memory, and the local account only leaves disk
- * when the new one enters.
+ * The old bug: the local account was deleted on "delete" BEFORE the link was
+ * created, and a pairing that failed left the phone with no account. Since
+ * 21/11/2026 "Usar outra conta" adds an empty account next to the one on the
+ * device, and the pairing happens there: the account on the device is never
+ * written, whatever happens.
  *
  * What gets tested, on two real browsers:
  *
  *  1. Ana has the account on the computer. Carla has a DIFFERENT account on the phone.
- *  2. A run that fails halfway: on the phone gate, "Sign in with another account",
- *     "Pair", the link, the new password, "delete" confirmed, the six words on
- *     both screens, and the computer says "They don't match". The phone shows the
- *     error; the vault on disk is still Carla's, byte for byte; "Back" goes to
- *     the gate, and Carla's password opens her account.
- *  3. A run that completes: the same path, "They match" on both screens. The phone
- *     enters Ana's account; the vault on disk opens with the new password, is a
- *     device vault (without the account's private key), and Carla's password
- *     opens nothing.
+ *  2. A run that fails halfway: on the phone gate, "Usar outra conta", "Entrar
+ *     com outro aparelho", the code, the three words on both screens, and the
+ *     computer says "Não são iguais". The phone shows the error; Carla's vault on
+ *     disk is the same, byte for byte; "Voltar a uma conta deste aparelho" opens
+ *     her gate, and her password opens her account.
+ *  3. A run that completes: the same path, yes on both screens, the password at
+ *     "Estás dentro". The phone enters Ana's account, and Carla's vault is still
+ *     on the device, byte for byte, opening with her password.
  *
  * ALL LOCAL AND ALL DISPOSABLE, like the `e2e-emparelhar.mjs` it comes from:
  * a homeserver in a temp folder, a front end acting as Caddy, its own ports,
@@ -37,6 +37,8 @@ import { xchacha20poly1305 } from "@noble/ciphers/chacha.js"
 import { argon2id } from "@noble/hashes/argon2.js"
 import { chromium } from "playwright"
 import { criarConta } from "./conta.mjs"
+import { abrirJuntarUmAparelho, colarCodigo, confirmarEAbrir } from "./juntar-aparelho.mjs"
+import { appAberta } from "./separadores.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
@@ -183,7 +185,8 @@ function escutar(context, saco) {
 }
 
 const CONTEXTO = { locale: "pt-PT" }
-const dentro = (page) => page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+// The app is open: the rail on a computer, the tabs on a phone (no rail there).
+const dentro = (page) => appAberta(page)
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 
@@ -243,35 +246,21 @@ async function portaoNovo(ctx, anterior) {
   await anterior?.close()
   const page = await ctx.newPage()
   await page.goto(APP, { waitUntil: "domcontentloaded" })
-  await page.getByRole("heading", { name: "Bem-vindo de volta" }).waitFor({ timeout: 60_000 })
+  await page.getByRole("heading", { name: /^Olá/ }).waitFor({ timeout: 60_000 })
   return page
 }
 
-/** On the computer: Settings, Devices, Add device. Returns the sheet and the link. */
+/** On the computer: Settings › Conta e segurança › Juntar um aparelho. Returns the sheet and the code. */
 async function abrirCaixa(pc) {
-  await pc.getByRole("button", { name: "Configurações" }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await pc.getByRole("button", { name: "Acrescentar aparelho" }).click()
-  const folha = pc.locator(".sheet").first()
-  await folha.locator("code[data-link]").waitFor({ timeout: 20_000 })
-  return { folha, link: await folha.locator("code[data-link]").getAttribute("data-link") }
+  return abrirJuntarUmAparelho(pc)
 }
 
-/** On the phone, from gate to six words: another account, pair, link, new key, "delete". */
-async function ateAsPalavras(tel, link) {
-  await tel.getByRole("button", { name: "Entrar com outra conta" }).click()
-  await tel.getByRole("dialog", { name: "Entrar com outra conta" }).getByRole("button", { name: "Emparelhar com o aparelho principal" }).click()
-  await tel.getByLabel("Ou cola o link").fill(link)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 10_000 })
-  const frases = tel.locator('.gate-card input[type="password"]')
-  await frases.nth(0).fill(FRASE_NOVA)
-  await frases.nth(1).fill(FRASE_NOVA)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  const pergunta = tel.getByRole("alertdialog", { name: "Apagar a conta?" })
-  await pergunta.getByLabel('Escreve "apagar" para confirmar').fill("apagar")
-  await pergunta.getByRole("button", { name: "Apagar para sempre" }).click()
-  await tel.locator(".sas-palavras").waitFor({ timeout: 30_000 })
+/** On the phone, from the gate to the three words: "Usar outra conta" (a reload), "Entrar com outro aparelho", the code. */
+async function ateAsPalavras(tel, folha, link) {
+  await Promise.all([tel.waitForEvent("load", { timeout: 30_000 }), tel.getByRole("button", { name: "Usar outra conta" }).click()])
+  await tel.getByRole("heading", { name: "Bem-vindo ao Orwell" }).waitFor({ timeout: 60_000 })
+  await tel.getByRole("button", { name: "Entrar com outro aparelho" }).click()
+  await colarCodigo(tel, folha, link)
 }
 
 try {
@@ -298,24 +287,35 @@ try {
   const carlaAntes = await cofreDe(tel, FRASE_CARLA)
   check("a Carla cria OUTRA conta no telemóvel (é um aparelho principal: tem a chave privada)", carlaAntes.signingPrivateKey?.length === 43)
 
-  // 2. The run that fails halfway: the computer says "They don't match".
+  // 2. The run that fails halfway: the computer says "Não são iguais".
   tel = await portaoNovo(ctxTel, tel)
   const discoAntes = await bytesDoCofre(tel)
   const primeira = await abrirCaixa(pc)
-  await ateAsPalavras(tel, primeira.link)
-  await primeira.folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  check('as seis palavras aparecem nos dois ecrãs, depois do "apagar" escrito', true)
-  check("com o emparelhamento a decorrer, o cofre no disco continua a ser o da Carla, byte a byte", (await bytesDoCofre(tel)) === discoAntes)
-  await tel.getByRole("button", { name: "São as mesmas" }).click()
-  await primeira.folha.getByRole("button", { name: "Não são" }).click()
-  const falhou = await tel.getByRole("heading", { name: "O emparelhamento falhou" }).waitFor({ timeout: 30_000 }).then(() => true, () => false)
-  check("o telemóvel mostra que o emparelhamento falhou", falhou)
+  await ateAsPalavras(tel, primeira.folha, primeira.link)
+  check("as três palavras aparecem nos dois ecrãs, sem nenhum \"apagar\" pelo caminho", true)
+  check("com o emparelhamento a decorrer, o cofre da Carla continua igual, byte a byte", (await bytesDoCofre(tel)) === discoAntes)
+  await tel.getByRole("button", { name: "Sim, juntar o aparelho" }).click()
+  await primeira.folha.getByRole("button", { name: "Não são iguais" }).click()
+  const falhou = await tel.getByRole("heading", { name: "O aparelho não se juntou." }).waitFor({ timeout: 30_000 }).then(() => true, () => false)
+  check("o telemóvel mostra que o aparelho não se juntou", falhou)
   await tel.screenshot({ path: join(CAPTURAS, "emparelhar-substituir-falhou.png") })
-  check("depois da falha, o cofre no disco continua a ser o da Carla, byte a byte", (await bytesDoCofre(tel)) === discoAntes)
-  check("e a palavra-passe nova não abre nada", !(await abre(tel, FRASE_NOVA)))
+  check("depois da falha, o cofre da Carla continua igual, byte a byte", (await bytesDoCofre(tel)) === discoAntes)
   await tel.getByRole("button", { name: "Voltar" }).click()
-  const noPortao = await tel.getByRole("heading", { name: "Bem-vindo de volta" }).waitFor({ timeout: 15_000 }).then(() => true, () => false)
-  check('o "Voltar" leva ao portão da conta de cá, e não ao princípio', noPortao)
+  await tel.getByRole("heading", { name: "Bem-vindo ao Orwell" }).waitFor({ timeout: 15_000 })
+  const temVoltar = await tel.getByRole("button", { name: "Voltar a uma conta deste aparelho" }).waitFor({ timeout: 10_000 }).then(() => true, () => false)
+  check('depois do "Voltar", a entrada tem "Voltar a uma conta deste aparelho"', temVoltar, temVoltar ? "" : (await tel.locator("body").innerText()).replace(/\s+/g, " ").slice(0, 200))
+  if (temVoltar) {
+    await tel.getByRole("button", { name: "Voltar a uma conta deste aparelho" }).click()
+    await Promise.all([
+      tel.waitForEvent("load", { timeout: 30_000 }),
+      tel.getByRole("dialog", { name: "Mudar de conta" }).getByRole("button", { name: /^(Carla|Conta sem nome)/ }).first().click(),
+    ])
+  } else {
+    // The attempt's empty account went with its vault (`abandonar`): the gate of Carla's account opens on reload.
+    await tel.reload({ waitUntil: "domcontentloaded" })
+  }
+  const noPortao = await tel.getByRole("heading", { name: /^Olá/ }).waitFor({ timeout: 30_000 }).then(() => true, () => false)
+  check('"Voltar a uma conta deste aparelho" leva ao portão da Carla', noPortao)
   await tel.locator('.gate-card input[type="password"]').first().fill(FRASE_CARLA)
   await tel.getByRole("button", { name: "Entrar", exact: true }).click()
   await dentro(tel)
@@ -325,29 +325,25 @@ try {
   await primeira.folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
   await pc.keyboard.press("Escape").catch(() => {})
 
-  // 3. The run that completes.
+  // 3. The run that completes. Carla was just open, so her vault on disk is read again.
   tel = await portaoNovo(ctxTel, tel)
+  const discoDaCarla = await bytesDoCofre(tel)
   await pc.goto(APP, { waitUntil: "domcontentloaded" })
   await dentro(pc)
   const segunda = await abrirCaixa(pc)
-  await ateAsPalavras(tel, segunda.link)
-  await segunda.folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await tel.getByRole("button", { name: "São as mesmas" }).click()
-  await segunda.folha.getByRole("button", { name: "São as mesmas" }).click()
-  const entrou = await tel.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 }).then(() => true, () => false)
-  check("o telemóvel recebeu o certificado, ligou-se e gravou a conta nova", entrou)
-  await tel.getByRole("button", { name: "Entrar", exact: true }).click()
+  await ateAsPalavras(tel, segunda.folha, segunda.link)
+  const entrou = await confirmarEAbrir(tel, segunda.folha, FRASE_NOVA).then(() => true, () => false)
+  check("o telemóvel recebeu o certificado, ligou-se e entrou na conta da Ana", entrou)
   await dentro(tel)
   await wait(1500)
-  const novo = await cofreDe(tel, FRASE_NOVA).catch(() => null)
-  check("o cofre no disco abre com a palavra-passe nova", novo !== null)
-  check("e é um cofre de aparelho: chave pública de conta, certificado, sem a privada", novo?.signingPrivateKey === "" && novo?.accountPublicKey?.length === 43 && novo?.deviceCert?.length === 86)
-  check("a palavra-passe da Carla já não abre nada: a conta dela saiu no fim", !(await abre(tel, FRASE_CARLA)))
+  check("o cofre da Carla continua no aparelho, byte a byte", (await bytesDoCofre(tel)) === discoDaCarla)
+  check("e a palavra-passe da Carla ainda o abre: nada foi apagado", await abre(tel, FRASE_CARLA))
 
   const erros = [...redePc, ...redeTel].filter((l) => l.startsWith("PAGEERROR"))
   check("nenhum erro de página nos dois browsers", erros.length === 0, erros[0]?.slice(0, 80) ?? "")
 } catch (erro) {
   check("o guião chegou ao fim", false, String(erro?.message ?? erro).split("\n")[0])
+  console.log(String(erro?.message ?? erro).split("\n").slice(0, 4).join(" "))
 }
 
 console.log("")

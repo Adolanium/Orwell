@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { bioVisivel } from "@enclave/client-core"
 import type { Profile } from "../../bridge.js"
 import type { ChatMessage, MediaItem } from "../../types.js"
 import { useMedia } from "../../hooks/useMedia.js"
@@ -149,7 +150,7 @@ export function ProfileBody({
             <strong>{posts.length}</strong>{" "}
             {posts.length === 1 ? strings.profile.postSingular : strings.profile.postPlural}
           </p>
-          {profile?.bio && <p className="profile-bio">{profile.bio}</p>}
+          {profile?.bio && <p className="profile-bio">{bioVisivel(profile.bio)}</p>}
           {profile?.email && <p className="profile-contact">{profile.email}</p>}
           {note && <p className="field-note">{note}</p>}
         </div>

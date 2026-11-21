@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { DatabaseSync } from "node:sqlite"
+import { medir, type RelogioDoArranque } from "./arranque.js"
 
 /**
  * Homeserver storage.
@@ -34,16 +35,32 @@ export interface StoredEvent {
  * third-party package with build scripts sitting underneath a server whose whole
  * value proposition is that you can audit what it does with your data.
  */
-export function openDatabase(path: string): DatabaseSync {
-  mkdirSync(dirname(path), { recursive: true })
-  const db = new DatabaseSync(path)
+export function openDatabase(path: string, relogio?: RelogioDoArranque): DatabaseSync {
+  const db = medir(relogio, "abrir-base", () => {
+    mkdirSync(dirname(path), { recursive: true })
+    const aberta = new DatabaseSync(path)
+    aberta.exec("PRAGMA journal_mode = WAL")
+    aberta.exec("PRAGMA foreign_keys = ON")
+    // Durability matters more than throughput here: a lost commit desynchronises
+    // an MLS group, which is far more disruptive than a slow write.
+    aberta.exec("PRAGMA synchronous = FULL")
+    return aberta
+  })
 
-  db.exec("PRAGMA journal_mode = WAL")
-  db.exec("PRAGMA foreign_keys = ON")
-  // Durability matters more than throughput here: a lost commit desynchronises
-  // an MLS group, which is far more disruptive than a slow write.
-  db.exec("PRAGMA synchronous = FULL")
+  medir(relogio, "esquema", () => criarEsquema(db))
+  medir(relogio, "migracoes", () => {
+    migrarKeyPackages(db)
+    migrarInvites(db)
+    migrarChannelActivity(db)
+    migrarChannelClaims(db)
+    criarIndicesParciaisDeEvents(db)
+  })
 
+  return db
+}
+
+/** Every table, for a new database; on an existing one, `IF NOT EXISTS` makes it a no-op. */
+function criarEsquema(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS accounts (
       address        TEXT PRIMARY KEY,
@@ -185,6 +202,20 @@ export function openDatabase(path: string): DatabaseSync {
     -- with a full scan (M5 of the 1.3.20 review).
     CREATE INDEX IF NOT EXISTS subscriptions_by_address ON subscriptions (address);
 
+    -- Accounts that unsubscribed from a channel and did not come back (P7, 1.3.26).
+    --
+    -- Only to tell, in the roster (channel.members), an account invited while
+    -- offline (a Welcome, no subscription yet) from one that joined and left (a
+    -- Welcome, no subscription, and this row). No time: just the fact, which the
+    -- server already knows while the Welcome exists. Deleted when the account
+    -- subscribes again or gets a new Welcome there, and by retention when no
+    -- Welcome for it is left (expireEvents).
+    CREATE TABLE IF NOT EXISTS canal_saidas (
+      channel TEXT NOT NULL,
+      address TEXT NOT NULL,
+      PRIMARY KEY (channel, address)
+    );
+
     -- Which *servers* a channel reaches. Federation routes on this, never on
     -- remote user addresses, so a peer never learns our membership list.
     CREATE TABLE IF NOT EXISTS channel_peers (
@@ -282,6 +313,19 @@ export function openDatabase(path: string): DatabaseSync {
       owner     TEXT NOT NULL,
       at_second INTEGER NOT NULL
     );
+
+    -- The rooms an account created inside a channel (1.3.26), for the cap per
+    -- account. A room is end-to-end encrypted; the app says it here with
+    -- room.claim, and room.release removes the row. The room id is the opaque
+    -- one the app drew. See Store.roomsCreatedBy.
+    CREATE TABLE IF NOT EXISTS rooms_created (
+      channel   TEXT NOT NULL,
+      room      TEXT NOT NULL,
+      owner     TEXT NOT NULL,
+      at_second INTEGER NOT NULL,
+      PRIMARY KEY (channel, room)
+    );
+    CREATE INDEX IF NOT EXISTS rooms_created_by_owner ON rooms_created (owner);
 
     -- O cartão de entrada da sala comum: um GroupInfo com iniciação externa.
     --
@@ -469,12 +513,33 @@ export function openDatabase(path: string): DatabaseSync {
       ate_second INTEGER
     );
   `)
+}
 
-  migrarKeyPackages(db)
-  migrarInvites(db)
-  migrarChannelActivity(db)
-
-  return db
+/**
+ * Two partial indexes on `events`, one for the Welcomes and one for the handshakes (1.3.26).
+ *
+ * `events` is almost all application ciphertext (in production on 20/11/2026: 1.6 GB,
+ * 99 % of rows `application`), and three queries only ever want the other two kinds:
+ * `pruneSupersededWelcomes` (at startup and hourly), `pendingWelcomes` (every login) and
+ * `inicializarEpochs` (startup). Without these they walked the whole table, and the
+ * prune walked a whole channel once per Welcome, reading every ciphertext on the way
+ * because `recipient` sits after it in the row. On a copy of that database the prune
+ * alone took 26.1 s of a 26.8 s startup on a laptop; on the VPS the 1.3.25 container
+ * started at 14:23:07 and opened its port at 14:24:34.
+ *
+ * Partial, so each index holds only its kind: a few thousand entries, not the 450 000
+ * application rows. `(recipient, channel, seq)` covers the prune and the login query;
+ * `(channel, seq)` gives `inicializarEpochs` the handshakes in the order it needs.
+ *
+ * On an existing database the first open builds them, one pass over the table that
+ * reads `kind` (stored before the ciphertext): 160 ms for both on a copy of the
+ * production database, on a laptop. Idempotent afterwards.
+ *
+ * What these indexes teach the operator: nothing the table did not already say.
+ */
+function criarIndicesParciaisDeEvents(db: DatabaseSync): void {
+  db.exec("CREATE INDEX IF NOT EXISTS events_welcomes ON events (recipient, channel, seq) WHERE kind = 'welcome'")
+  db.exec("CREATE INDEX IF NOT EXISTS events_handshakes ON events (channel, seq) WHERE kind = 'handshake'")
 }
 
 /**
@@ -555,6 +620,27 @@ function migrarChannelActivity(db: DatabaseSync): void {
   if (!colunas.some((coluna) => coluna.name === "seq_floor")) {
     db.exec("ALTER TABLE channel_activity ADD COLUMN seq_floor INTEGER")
   }
+}
+
+/**
+ * The `channel_claims.comunidade` column (1.3.26): 1 when the claim is for a
+ * channel (community) the person created, 0 when it is not, or not said (a
+ * direct message, the feed, the account's channel, or an app from before
+ * 1.3.26). NULL in rows from before the column: those are never counted
+ * against the cap on channels, because nothing says what they were. See
+ * `Store.comunidadesCriadasPor`.
+ *
+ * The same step as `migrarKeyPackages`: add the missing column without DEFAULT.
+ * The index by owner comes after, for the count.
+ *
+ * Idempotent: opening the same database twice does nothing the second time.
+ */
+function migrarChannelClaims(db: DatabaseSync): void {
+  const colunas = db.prepare("PRAGMA table_info(channel_claims)").all() as { name: string }[]
+  if (!colunas.some((coluna) => coluna.name === "comunidade")) {
+    db.exec("ALTER TABLE channel_claims ADD COLUMN comunidade INTEGER")
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS channel_claims_by_owner ON channel_claims (owner)")
 }
 
 export function currentMinute(): number {

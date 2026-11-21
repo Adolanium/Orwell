@@ -316,7 +316,8 @@ describe("uma chamada por conta", () => {
     // The automatic join (resynchronisation, rebuild, or any join of a 1.3.24): refused.
     primeiro.send({ t: "sfu.scope.join", channel: canal, scope: sala, ref: "auto" })
     const recusa = await primeiro.nextOf("sfu.error")
-    expect(recusa).toMatchObject({ code: "noutro-aparelho", ref: "auto" })
+    // In English (1.3.26, M5 of the 1.3.25 public review); the client reads the code.
+    expect(recusa).toMatchObject({ code: "noutro-aparelho", ref: "auto", message: "this account is in a call on another device" })
     await segundo.sync()
     expect(fechos(segundo)).toEqual([])
 

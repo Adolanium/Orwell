@@ -31,7 +31,7 @@ import { formatarBytes } from "../../lib/ficheiros.js"
 import { prefsDeMediaParaONucleo } from "../../lib/mediaPrefs.js"
 import { VERSAO_DA_APP } from "../../lib/versao.js"
 import { SeccaoDeSons } from "../../sons/SeccaoDeSons.js"
-import { Aparelhos } from "./Aparelhos.js"
+import { ContaESeguranca } from "./ContaESeguranca.js"
 import { InstalarActualizacoes } from "./InstalarActualizacoes.js"
 import { AvisosComAppFechada } from "./AvisosComAppFechada.js"
 import { AtalhosDeVoz } from "./AtalhosDeVoz.js"
@@ -292,6 +292,8 @@ export function SettingsScreen({
    * and the note says how much more (this device's originals and thumbnails).
    */
   const [incluirImagens, setIncluirImagens] = useState(false)
+  /** The account-file sheet, from Account and security or after a password change. */
+  const [folhaDoFicheiro, setFolhaDoFicheiro] = useState(false)
   const [bytesDasImagens, setBytesDasImagens] = useState<number | null>(null)
   useEffect(() => {
     if (seccao !== "aparelhos" || !bridge.media) return
@@ -330,7 +332,8 @@ export function SettingsScreen({
     if ("gravado" in exportado) {
       if (exportado.gravado) {
         if (address) void marcarFicheiroTratado(address)
-        toast(strings.settings.exported)
+        toast(strings.entrada.guardado)
+        setFolhaDoFicheiro(false)
       }
       return
     }
@@ -338,12 +341,13 @@ export function SettingsScreen({
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement("a")
     anchor.href = url
-    anchor.download = "conta.enclave"
+    anchor.download = strings.ficheiroDaConta.nomeDoFicheiro
     anchor.click()
     URL.revokeObjectURL(url)
-    // The account file went out: the one-time notice is not owed anymore.
+    // The account file went out: the banner inside the app goes.
     if (address) void marcarFicheiroTratado(address)
-    toast(strings.settings.exported)
+    toast(strings.entrada.guardado)
+    setFolhaDoFicheiro(false)
   }
 
   /**
@@ -875,7 +879,8 @@ export function SettingsScreen({
 
         {seccao === "aparelhos" && (
           <>
-            <Aparelhos />
+            {/* Everything about the account in one list (21/11/2026). See `ContaESeguranca`. */}
+            <ContaESeguranca podeGuardar={temChaveDeConta !== false} onGuardarFicheiro={() => setFolhaDoFicheiro(true)} />
 
             {/* How a new version installs: only in the packaged Windows app. */}
             <InstalarActualizacoes />
@@ -886,8 +891,16 @@ export function SettingsScreen({
               they used to have their own section that nobody connected to the
               other. The danger zone stays at the end, out of the way.
             */}
-            <section className="card settings-card">
-              <h2>{strings.settings.device}</h2>
+            {folhaDoFicheiro && (
+            <Modal className="sheet narrow" labelledBy="folha-do-ficheiro-titulo" onClose={() => setFolhaDoFicheiro(false)}>
+              <header className="sheet-header">
+                <h2 id="folha-do-ficheiro-titulo">{strings.entrada.guardarTitulo}</h2>
+                <Button variant="ghost" type="button" onClick={() => setFolhaDoFicheiro(false)}>
+                  {strings.common.close}
+                </Button>
+              </header>
+            <div className="sheet-body">
+              <p className="field-note">{strings.entrada.guardarTexto}</p>
               {/*
                 Export only exists where there is an account to export.
 
@@ -916,16 +929,11 @@ export function SettingsScreen({
                     {strings.settings.exportImagens}
                   </label>
                   {bytesDasImagens !== null && <p className="field-note">{strings.settings.exportImagensNota(formatarBytes(bytesDasImagens))}</p>}
-                  <Button variant="ghost" onClick={() => exportAccount()}>
-                    {strings.settings.exportAction}
+                  <Button variant="primary" onClick={() => exportAccount()}>
+                    {strings.entrada.guardarFicheiro}
                   </Button>
                 </>
               )}
-              {/* This stays: not an explanation of the button, but the fact that the user
-                  has no way to guess it from any label. The phrasing changed the
-                  day an account could have multiple devices: export does not add
-                  one, it moves the account elsewhere. */}
-              <p className="field-note warn">{strings.settings.importReplacesDevice}</p>
               {exportPassphrase !== null && (
                 /*
                   The text comes from the FIELD, and here is where it hurts most:
@@ -942,7 +950,7 @@ export function SettingsScreen({
                     exportAccount(frase)
                   }}
                 >
-                  <Field label={strings.settings.exportPassLabel}>
+                  <Field label={strings.entrada.palavraPasse}>
                     <input
                       type="password"
                       name="export-password"
@@ -953,11 +961,13 @@ export function SettingsScreen({
                     />
                   </Field>
                   <Button variant="primary" type="submit">
-                    {strings.settings.exportAction}
+                    {strings.entrada.guardarFicheiro}
                   </Button>
                 </form>
               )}
-            </section>
+            </div>
+            </Modal>
+            )}
 
             {/* The danger zone is a separate card, with pink title and solid button: it
                 lived at the end of the "This device" card, with just one line

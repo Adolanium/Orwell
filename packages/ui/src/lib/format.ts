@@ -642,6 +642,20 @@ export function chaveDoDia(at: number): string {
 }
 
 /**
+ * How many local calendar days lie between two timestamps: 23:50 and 00:10 the
+ * next morning is 1, 00:10 and 23:50 the same day is 0. Counted on the local
+ * calendar, so a daylight-saving day (23 or 25 hours) still counts as one.
+ * Never negative: a clock that went back reads as the same day.
+ */
+export function diasDeCalendario(desde: number, ate: number): number {
+  const a = new Date(desde)
+  const b = new Date(ate)
+  // Date.UTC on the LOCAL date parts: whole days, with no daylight-saving hour in between.
+  const dias = (Date.UTC(b.getFullYear(), b.getMonth(), b.getDate()) - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / 86_400_000
+  return Math.max(0, Math.round(dias))
+}
+
+/**
  * One formatter per locale and form, kept (1.3.20). Building an
  * `Intl.DateTimeFormat` costs far more than formatting with it, and every line
  * drawn asks for its full date (the hover on its time): in a profile of the

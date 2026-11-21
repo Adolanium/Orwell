@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url"
 import { chromium } from "playwright"
 import { FRASE } from "./ambiente.mjs"
 import { criarConta } from "./conta.mjs"
+import { appAberta } from "./separadores.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
@@ -327,7 +328,7 @@ try {
     check("a 390 px o ecrã do beta não rola na horizontal", await semRolagemHorizontal(page))
     await page.setViewportSize(LARGO)
     await page.getByRole("button", { name: "Criar conta nova" }).click()
-    await page.getByRole("heading", { name: "Já usas o Orwell noutro aparelho?" }).waitFor({ timeout: 30_000 })
+    await page.getByRole("heading", { name: "Bem-vindo ao Orwell" }).waitFor({ timeout: 30_000 })
     check('"Criar conta nova" abre o Setup', true)
     const restou = await page.evaluate(
       () =>
@@ -351,11 +352,11 @@ try {
   const primeira = await ctx.newPage()
   primeira.on("pageerror", (erro) => console.log("  !!  erro na página:", erro.message))
   await primeira.goto(APP, { waitUntil: "domcontentloaded" })
-  // Since 8.1 (phase 4 of 0.9) Setup asks first if there's already an account on another device; the screenshot is of creating an account, so "No".
-  await primeira.getByRole("heading", { name: "Já usas o Orwell noutro aparelho?" }).waitFor({ timeout: 60_000 })
-  await primeira.getByRole("button", { name: "Não, criar conta" }).click()
-  await primeira.getByPlaceholder("Como queres aparecer").waitFor({ timeout: 60_000 })
+  // 21/11/2026: "Bem-vindo ao Orwell" and the three ways in.
+  await primeira.getByRole("heading", { name: "Bem-vindo ao Orwell" }).waitFor({ timeout: 60_000 })
   await primeira.evaluate(() => document.fonts.ready)
+  await wait(300)
+  await retratar(primeira, "portao-entrada")
 
   const cartao = await estiloDoCartao(primeira)
   // 18 px: the radius of panels (`--painel-raio`), since 10/26/2026. Was 14.
@@ -366,47 +367,32 @@ try {
   const textoDoSetup = await primeira.locator(".gate-card").innerText()
   check("o portão não fala de cofre, chave, época nem MLS", !/cofre|chave|época|MLS/i.test(textoDoSetup), textoDoSetup.replace(/\s+/g, " ").slice(0, 160))
 
-  // Import: choose a file, wrong passphrase, error with code.
+  // The account file: a file that is not an account, refused with a code under the box.
   const ficheiro = join(dados, "conta.enclave")
   writeFileSync(ficheiro, JSON.stringify({ v: 1, estragado: true }))
-  await primeira.locator('.import-account input[type="file"]').setInputFiles(ficheiro)
-  const campoDoFicheiro = primeira.locator('input[name="import-password"]')
-  await campoDoFicheiro.waitFor({ timeout: 10_000 })
-  await campoDoFicheiro.fill("errada-de-proposito")
-  await primeira.getByRole("button", { name: "Importar", exact: true }).click()
-  await primeira.locator(".import-account .error").waitFor({ timeout: 30_000 })
-  const erro = await primeira.locator(".import-account .error").innerText()
-  check("o erro da importação traz o código", /^Erro \d{3}/.test(erro), erro.replace(/\s+/g, " "))
-  await primeira.locator(".import-account").scrollIntoViewIfNeeded()
+  await primeira.getByRole("button", { name: "Entrar com o ficheiro da conta" }).click()
+  await primeira.locator('.gate input[type="file"]').setInputFiles(ficheiro)
+  await primeira.locator(".gate-card .error").waitFor({ timeout: 30_000 })
+  const erro = await primeira.locator(".gate-card .error").first().innerText()
+  check("o erro do ficheiro traz o código", /^Erro \d{3}/.test(erro), erro.replace(/\s+/g, " "))
   await wait(200)
-  await retratar(primeira, "portao-importar")
+  await retratar(primeira, "portao-ficheiro")
+  await primeira.getByRole("button", { name: "Voltar" }).click()
 
-  // Emparelhar.
-  await primeira.reload({ waitUntil: "domcontentloaded" })
-  await primeira.getByRole("button", { name: "Emparelhar", exact: true }).click()
-  await primeira.getByRole("heading", { name: "Emparelhar este aparelho" }).waitFor({ timeout: 10_000 })
+  // Another device.
+  await primeira.getByRole("button", { name: "Entrar com outro aparelho" }).click()
+  await primeira.getByLabel("Ou cola o código").waitFor({ timeout: 10_000 })
   await wait(300)
   await retratar(primeira, "portao-emparelhar")
   await primeira.getByRole("button", { name: "Voltar" }).click()
 
-  // Create account: the password prompt, with a short passphrase error.
-  await primeira.getByPlaceholder("Como queres aparecer").fill("Vesna")
-  // The name step, before advancing: the field and "We don't ask for email..." below it, no gap in between.
-  await wait(250)
-  await retratar(primeira, "portao-nome")
-  const folgaDoNome = await primeira.evaluate(() => {
-    const campo = document.querySelector(".setup-pane input")?.getBoundingClientRect()
-    const promessa = document.querySelector(".setup-pane .setup-promise")?.getBoundingClientRect()
-    return campo && promessa ? Math.round(promessa.top - campo.bottom) : -1
-  })
-  check('no passo do nome, "Não pedimos email…" fica logo por baixo do campo', folgaDoNome >= 0 && folgaDoNome <= 32, `${folgaDoNome} px`)
-  await primeira.getByRole("button", { name: "Continuar" }).click()
-  const frase = primeira.locator('.gate-card input[type="password"]').first()
-  await frase.waitFor({ timeout: 10_000 })
-  await frase.fill("curta")
-  await primeira.getByRole("button", { name: "Continuar" }).click()
+  // Create account: one form, with a short password error.
+  await primeira.getByRole("button", { name: "Criar conta", exact: true }).click()
+  await primeira.locator('.gate input[autocomplete="nickname"]').fill("Vesna")
+  await primeira.locator('input[name="new-password"]').fill("curta")
+  await primeira.locator('input[name="confirm-password"]').fill("curta")
+  await primeira.locator(".gate form").getByRole("button", { name: "Criar conta", exact: true }).click()
   await primeira.locator(".gate-card .error").waitFor({ timeout: 5_000 })
-  await frase.focus()
   await wait(250)
   await retratar(primeira, "portao-criar")
   await primeira.reload({ waitUntil: "domcontentloaded" })
@@ -427,7 +413,7 @@ try {
   await primeira.close()
   const page = await ctx.newPage()
   await page.goto(APP, { waitUntil: "domcontentloaded" })
-  await page.getByRole("heading", { name: "Bem-vindo de volta" }).waitFor({ timeout: 60_000 })
+  await page.getByRole("heading", { name: /^Olá/ }).waitFor({ timeout: 60_000 })
   await page.evaluate(() => document.fonts.ready)
   const entrar = await page.locator(".gate-card").innerText()
   check('entrar diz "Entrar"', (await page.getByRole("button", { name: "Entrar", exact: true }).count()) === 1)
@@ -449,7 +435,8 @@ try {
   await retratar(page, "portao-390")
   await page.locator('input[name="password"]').fill(FRASE)
   await page.getByRole("button", { name: "Entrar", exact: true }).click()
-  await page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+  // At 390 px the app opens with the phone tabs, not the rail (option B).
+  await appAberta(page)
   check("com a palavra-passe certa, entra", true)
 
   check("nenhum pedido saiu de 127.0.0.1", fora.length === 0, fora.slice(0, 3).join(", "))

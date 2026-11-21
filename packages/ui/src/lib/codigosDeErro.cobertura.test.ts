@@ -56,6 +56,15 @@ function foraDoProduto(caminho: string): boolean {
  * No line number on purpose: the file changes, the reason does not.
  */
 const TOLERADAS: Readonly<Record<string, string>> = {
+  // Importing the account file (1.3.26): the constant comes from `passagem.ts`, where it is a literal with a code (765).
+  "packages/client-core/src/vault.ts::ERRO_FICHEIRO_SEM_CHAVE_DA_CONTA": "constante de `passagem.ts`, com código 765",
+  // One password on all devices (1.3.26): constants from `palavraPasseDaConta.ts`, literals with codes 140 and 141.
+  "packages/client-core/src/vault.ts::ERRO_NAO_E_A_PALAVRA_PASSE_DA_CONTA": "constante de `palavraPasseDaConta.ts`, com código 140",
+  "packages/client-core/src/vault.ts::ERRO_COFRE_POR_SELAR": "constante de `palavraPasseDaConta.ts`, com código 141",
+  "packages/client-core/src/vault.ts::ERRO_APARELHO_ATRASADO": "constant from `palavraPasseDaConta.ts`, with code 142",
+  "apps/client/src/main/system-auth.ts::ERRO_SISTEMA_NAO_CONFIRMOU": "constant from `palavraPasseDaConta.ts`, with code 143",
+  // The handover's only door out refusing a frame: an internal invariant, never reached by a sound build.
+  "packages/client-core/src/passagem.ts::the handover connection never sends this frame": "invariante interna da passagem; nenhum caminho a dispara",
   // The Aurora sheets read back for the tests (`styles/aurora.folhas.ts`): only the tests call it.
   "packages/ui/src/styles/aurora.folhas.ts::aurora.gen.css does not have the sheet asked for": "ajuda dos testes, nunca chega ao ecrã",
   // Vault file in one buffer (1.3.13): internal checks of the write. They never fire on a sound build; if one did, the write fails and `Session.#falhaAoGravar` sends it to the log.
@@ -114,6 +123,9 @@ const TOLERADAS: Readonly<Record<string, string>> = {
   "packages/client-core/src/session.ts::reason": "as razões do `#failPending`: 206, 208, 209",
   "packages/client-core/src/session.ts::evento.razao":
     "uma razão `PairFalha`, que a interface traduz por `translatePairingError` (`CHAVES_DO_EMPARELHAMENTO`)",
+  // The short-code pairing (1.3.26, `Session.pairAsHostByCode`): the same `PairFalha`.
+  "packages/client-core/src/session.ts::event.razao":
+    "a `PairFalha` reason, which the interface translates with `translatePairingError` (`CHAVES_DO_EMPARELHAMENTO`)",
   "packages/client-core/src/emparelhar.ts::razao":
     "uma razão `PairFalha`, que a interface traduz por `translatePairingError` (`CHAVES_DO_EMPARELHAMENTO`)",
   "packages/client-core/src/erros-do-browser.ts::chave": "é a chave da tabela dos erros do browser, que este teste verifica à parte",

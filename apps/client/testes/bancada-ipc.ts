@@ -12,6 +12,7 @@ import {
   type SessaoDeCanais,
 } from "../src/main/canais.js"
 import { embrulharErros } from "../src/main/envelope.js"
+import { CANAIS_DA_PERMISSAO_DE_MEDIA, criarPermissaoDeMedia, DEFINICOES_DE_PRIVACIDADE } from "../src/main/permissao-de-media.js"
 import { codigoDoErro } from "../../../packages/ui/src/lib/codigosDeErro.js"
 
 /**
@@ -348,6 +349,23 @@ const atalhosDaBancada = criarAtalhosGlobais({
   aoAccionar: (accao) => janelaDosAtalhos?.webContents.send(CANAIS_DE_ATALHOS.accionado, accao),
 })
 
+/**
+ * The macOS microphone and camera permission (1.3.26), with fake ports: the
+ * microphone granted, the camera refused, and a platform forced to macOS so the
+ * answer does not depend on the machine running the bench. What is measured is
+ * the channel names, the `video` argument crossing as a boolean, and the answer
+ * coming back cloned. The real `systemPreferences` needs a person to click.
+ */
+const enderecosAbertos: string[] = []
+const permissaoDaBancada = criarPermissaoDeMedia({
+  plataforma: "darwin",
+  ler: (tipo) => (tipo === "microphone" ? "granted" : "denied"),
+  pedir: async () => true,
+  abrir: async (endereco) => {
+    enderecosAbertos.push(endereco)
+  },
+})
+
 function registarPontes(): void {
   // With the envelope, like in the app: a request that breaks comes back as
   // `{ ok:false, chave, detalhe, nome }`, not as a rewritten exception.
@@ -394,6 +412,14 @@ function registarPontes(): void {
   ipcMain.handle(CANAIS_DE_ATALHOS.definir, embrulharErros((_evento, pedido: unknown) => atalhosDaBancada.definir(pedido)))
   ipcMain.handle(CANAIS_DE_ATALHOS.suspender, embrulharErros(() => ({ ok: true })))
   ipcMain.handle(CANAIS_DE_ATALHOS.abrirAcessibilidade, embrulharErros(() => ({ ok: false })))
+  ipcMain.handle(
+    CANAIS_DA_PERMISSAO_DE_MEDIA.pedir,
+    embrulharErros((_evento, video: unknown) => permissaoDaBancada.pedir(video)),
+  )
+  ipcMain.handle(
+    CANAIS_DA_PERMISSAO_DE_MEDIA.abrirDefinicoes,
+    embrulharErros((_evento, dispositivo: unknown) => permissaoDaBancada.abrirDefinicoes(dispositivo)),
+  )
 
   // The trace: what the session saw, so the renderer can compare arguments.
   ipcMain.handle(CANAL_DO_RASTO, () => [...feito])
@@ -1021,6 +1047,44 @@ async function medirAtalhos(janela: BrowserWindow): Promise<Prova[]> {
   return provas
 }
 
+/** The macOS media permission across the real `preload`. See `permissaoDaBancada`. */
+async function medirPermissaoDeMedia(janela: BrowserWindow): Promise<Prova[]> {
+  const cru = (await janela.webContents.executeJavaScript(`(async () => {
+    const p = window.enclaveHost.permissaoDeMedia
+    if (!p) return JSON.stringify({ falta: true })
+    return JSON.stringify({
+      chaves: Object.keys(p).sort(),
+      soVoz: await p.pedir(false),
+      comVideo: await p.pedir(true),
+      abrir: await p.abrirDefinicoes("microfone"),
+      estranho: await p.abrirDefinicoes("https://exemplo.pt"),
+    })
+  })()`)) as string
+  const lido = JSON.parse(cru) as Record<string, unknown>
+  return [
+    {
+      nome: "a permissão de media atravessa o contextBridge",
+      passou: JSON.stringify(lido["chaves"]) === JSON.stringify(["abrirDefinicoes", "pedir"]),
+      detalhe: JSON.stringify(lido["chaves"] ?? lido),
+    },
+    {
+      nome: "só voz pergunta pelo microfone; com vídeo, a câmara recusada volta com o nome",
+      passou:
+        JSON.stringify(lido["soVoz"]) === JSON.stringify({ recusado: null }) &&
+        JSON.stringify(lido["comVideo"]) === JSON.stringify({ recusado: "camara" }),
+      detalhe: `${JSON.stringify(lido["soVoz"])} ${JSON.stringify(lido["comVideo"])}`,
+    },
+    {
+      nome: "o painel abre pelo endereço constante, e um endereço do renderer é recusado",
+      passou:
+        JSON.stringify(lido["abrir"]) === JSON.stringify({ ok: true }) &&
+        JSON.stringify(lido["estranho"]) === JSON.stringify({ ok: false }) &&
+        JSON.stringify(enderecosAbertos) === JSON.stringify([DEFINICOES_DE_PRIVACIDADE.microfone]),
+      detalhe: `${JSON.stringify(lido["abrir"])} ${JSON.stringify(lido["estranho"])} ${JSON.stringify(enderecosAbertos)}`,
+    },
+  ]
+}
+
 async function correr(): Promise<void> {
   await app.whenReady()
   registarPontes()
@@ -1046,6 +1110,7 @@ async function correr(): Promise<void> {
     await medirOImpossivel(),
     ...(await medirOEnvelope()),
     ...(await medirAtalhos(janela)),
+    ...(await medirPermissaoDeMedia(janela)),
   ]
 
   const falhadas = provas.filter((prova) => !prova.passou)

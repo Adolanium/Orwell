@@ -3,6 +3,7 @@ import { FEDERATION_PATH, FederationEnvelope, PeerClaim, toBase64, type PeerClai
 import Fastify, { type FastifyInstance } from "fastify"
 import { join } from "node:path"
 import { CACHE_DO_JSON_S, VigiaDaCampanha } from "./apoio.js"
+import { medir, type RelogioDoArranque } from "./arranque.js"
 import { currentSecond, openDatabase } from "./db.js"
 import { ehSalaComum, loadOrCreatePushKey, loadOrCreateServerKey, type ServerConfig } from "./config.js"
 import { Federation } from "./federation.js"
@@ -44,8 +45,15 @@ export interface Enclave {
  */
 export const PROXIES_DE_CONFIANCA = "loopback, linklocal, uniquelocal"
 
-export async function buildServer(config: ServerConfig): Promise<Enclave> {
-  const db = openDatabase(config.databasePath)
+/** What `buildServer` takes besides the config. */
+export interface OpcoesDoServidor {
+  /** Writes one timing line per startup phase (1.3.26). `main.ts` passes one; tests do not. */
+  relogio?: RelogioDoArranque
+}
+
+export async function buildServer(config: ServerConfig, opcoes: OpcoesDoServidor = {}): Promise<Enclave> {
+  const { relogio } = opcoes
+  const db = openDatabase(config.databasePath, relogio)
   const store = new Store(db)
   // Before the gateway accepts the first frame: a commit for a channel whose
   // epoch is not known yet is accepted at any epoch. See
@@ -53,8 +61,8 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
   // Re-foundings in the history: counting starts from the latest one in every
   // channel except the common room, group channels included, which before this
   // deploy were recreated with the same name. See `Store.inicializarEpochs`.
-  store.inicializarEpochs((canal) => !ehSalaComum(config, canal))
-  const key = loadOrCreateServerKey(config.dataDir)
+  medir(relogio, "epochs", () => store.inicializarEpochs((canal) => !ehSalaComum(config, canal)))
+  const key = medir(relogio, "chave-do-servidor", () => loadOrCreateServerKey(config.dataDir))
 
   const gateway = new Gateway(store, config)
   gateway.attachChaveDoServidor(key)
@@ -101,6 +109,7 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
   let media: MotorDeMedia | undefined
   if (config.sfuPort > 0) {
     try {
+      const inicioDaMedia = performance.now()
       media = await MotorDeMedia.arrancar({
         porto: config.sfuPort,
         anunciarIp: config.sfuAnnouncedIp,
@@ -114,6 +123,7 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
             }
           : {}),
       })
+      relogio?.registar("media", performance.now() - inicioDaMedia)
       gateway.attachMedia(media)
     } catch (erro) {
       process.stderr.write(
@@ -123,6 +133,7 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
     }
   }
 
+  const inicioDoHttp = performance.now()
   const app = Fastify({
     // Request logging is off by default. An access log is a per-user, per-minute
     // activity record; on a privacy server that is a liability, not telemetry.
@@ -138,9 +149,12 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
   // and not a second number written down twice: they drifted once, and the
   // cost was every post with a photo in it vanishing between two people.
   await app.register(websocket, { options: { maxPayload: MAX_FRAME_BYTES } })
+  relogio?.registar("http", performance.now() - inicioDoHttp)
 
-  app.get("/_enclave/gateway", { websocket: true }, (socket) => {
-    gateway.accept(socket)
+  // `request.ip` is the requester behind the trusted proxies (`PROXIES_DE_CONFIANCA`). The gateway
+  // uses it once, for the per-network limit's HMAC keys, and does not keep it (1.3.26).
+  app.get("/_enclave/gateway", { websocket: true }, (socket, request) => {
+    gateway.accept(socket, request.ip)
   })
 
   /**
@@ -266,9 +280,10 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
   const pararDenuncias = registarDenuncias(app, { store, config, nonces })
   const pararBugs = registarBugs(app, { store, config, nonces })
 
-  // Supersedeen welcomes are dead weight that used to be re-delivered for
-  // ever; clear them at boot and hourly.
-  store.pruneSupersededWelcomes()
+  // Superseded welcomes are dead weight that used to be re-delivered for
+  // ever; clear them at boot and hourly. Milliseconds since 1.3.26 (it was most of
+  // the 1.3.25 startup): see `Store.SQL_DOS_WELCOMES_A_PODAR`.
+  medir(relogio, "welcomes", () => store.pruneSupersededWelcomes())
   const welcomeSweep = setInterval(() => store.pruneSupersededWelcomes(), 3_600_000)
   welcomeSweep.unref()
 
@@ -280,10 +295,10 @@ export async function buildServer(config: ServerConfig): Promise<Enclave> {
     store.varrerCofres(Math.floor(Date.now() / 60_000), diasDoCofre)
   }
   const cofreSweep = diasDoCofre > 0 ? setInterval(varrerCofres, 3_600_000) : undefined
-  if (cofreSweep) {
-    varrerCofres()
-    cofreSweep.unref()
-  }
+  medir(relogio, "cofres", () => {
+    if (cofreSweep) varrerCofres()
+  })
+  cofreSweep?.unref()
 
   /*
     Reserved media output, summed over all calls, every minute.

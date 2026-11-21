@@ -122,20 +122,6 @@ export const en: Traducao = {
   },
 
   ficheiroDaConta: {
-    titulo: "Save your account file",
-    texto:
-      "Orwell has no email and no phone number, so we can't send you a reset link. Your account lives on this device. If you lose the device, or clear the browser's data, the only way back in is this file. The file holds your account key, locked with your password. Without your password, nobody can use it, not even us. Keep it somewhere other than this device: a USB drive, a password manager, or another computer you trust.",
-    descarregar: "Download account file",
-    partilhar: "Share",
-    aDescarregar: "Preparing the file…",
-    guardei: "I saved the file somewhere safe.",
-    continuar: "Continue",
-    nota: 'Lost your device? On the sign-in screen, choose "Import account", pick this file and type your password.',
-    fraseLabel: "Password for the file",
-    fraseNota: "This account has no password. Choose one for the file only, 8 characters or more.",
-    aviso: "You haven't saved your account file yet",
-    fechar: "Close",
-    guardado: "Account file downloaded.",
     nomeDoFicheiro: "account.enclave",
   },
 
@@ -186,154 +172,170 @@ export const en: Traducao = {
   gate: {
     splashTitle: "Orwell",
     splashBody: "Opening…",
-    setupTitle: "Create account",
-    setupLead: "We ask for no email and no phone number. The account stays on this device.",
-    name: "Name",
-    namePlaceholder: "How you want to appear",
     server: "Server",
-    osKeychain: "Use the lock of this device",
-    devicePassphrase: "Password for this device",
-    passphrasePlaceholder: "At least 8 characters",
-    passphraseNote: "If you forget it, you cannot recover it.",
-    confirmPassphrase: "Confirm the password",
-    passphraseMismatch: "The two passwords are different.",
-    passphraseShort: "Type at least 8 characters.",
-    reveal: "Show",
-    conceal: "Hide",
     serverInvalid: "This server address is not valid.",
-    askInvite: "What is the invite code?",
-    askInviteLead: "This server only accepts new accounts with an invite code. The person who runs the server gives you the code.",
-    invitePlaceholder: "XXXX-XXXX-XXXX-XXXX",
-    inviteCode: "Invite code",
-    registoFechado: "This server does not accept new accounts.",
-    askName: "How do you want your name shown?",
-    askNameLead: "This is how you appear to the people you talk to. You can change the name later.",
-    askPhoto: "Do you want a profile picture?",
-    askPhotoLead: "It is the picture others see next to your name. You can change it later.",
-    choosePhoto: "Choose a picture",
-    removePhoto: "Remove",
-    skipPhoto: "Skip",
-    askPass: "What is the password going to be?",
-    askPassLead: "Choose a new password. Do not use one from another place.",
-    askPassKeychain: "How do you want to protect the account?",
-    askPassKeychainLead: "You can use the lock of the device. To use a password, clear the tick.",
-    askConfirm: "Confirm the password",
-    askConfirmLead: "Type it again.",
-    stepOf: (passo: number, total: number) => `Step ${passo} of ${total}`,
-    next: "Continue",
-    back: "Back",
+    /** The proof of work of a new account, before its first connection (1.3.26). */
+    aPrepararConta: (percentagem: number) => `Preparing the account… ${percentagem} %`,
     advanced: "Advanced options",
-    advancedNote: "The server of your account. If you do not know what it is, do not change it.",
-    creatingTitle: "Creating your account",
-    creatingLead: "Do not close this window.",
     vaultExists: "There is already an account on this device.",
-    vaultExistsBody:
-      "A new account deletes the account on this device. To start again, clear the data of this site in the browser.",
     goToUnlock: "Sign in to the account on this device",
-    warning: "If you lose this device or the password, you lose the account.",
-    creating: "creating…",
-    create: "Create account",
-    stepLabels: {
-      cofre: "Preparing the device…",
-      identidade: "Creating the account…",
-      ligacao: "Connecting to the server…",
-      perfil: "Saving the profile…",
-    },
-    stepNames: {
-      cofre: "Device",
-      identidade: "Account",
-      ligacao: "Connection",
-      perfil: "Profile",
-    },
-    importLead: "Do you have the account file (.enclave)? Import it here.",
     importImagensEmFalta: (n: number): string =>
       n === 1
         ? "The account is in. 1 image did not stay on this device. You can get it from another device."
         : `The account is in. ${n} images did not stay on this device. You can get them from another device.`,
-    importPick: "Import account",
-    importPassLabel: "File password",
-    importing: "Importing…",
-    importAction: "Import",
-    unlockTitle: "Welcome back",
-    unlockLead: "Type the password for this device.",
-    lostAccount: "Did you forget the password?",
-    lostAccountAction: "Create a new account.",
-    otherAccount: "Sign in with another account",
-    otherAccountTitle: "Sign in with another account",
-    otherAccountLead: "This device keeps one account only. Both ways first erase the account on this device.",
-    otherAccountImport: "Import an account file",
-    otherAccountPair: "Pair with the main device",
-    passphrase: "Password",
-    opening: "Opening…",
-    openingNote: "This can take a few seconds.",
-    memorizar: "Remember this session",
-    memorizarNota: "Next time, Orwell opens without asking for the password. Anyone using this unlocked device gets into your account.",
-    memorizarNotaIos: "On iPhone, seven days without opening Orwell can erase the session and the account on this device.",
     memorizarFalhou: "You are in, but the session could not be remembered on this device.",
     canalOficial: "Join the official Orwell channel",
-    revogadoSemFrase: "This account has no password on this device. To use Orwell here again, start over.",
-    comecarDeNovo: "Start over",
-    open: "Sign in",
-    joinLead: "Do you have an account on another device? Pair this device with it.",
-    joinAction: "Pair",
-    outroAparelhoPergunta: "Do you already use Orwell on another device?",
-    outroAparelhoLead: "One account is enough for all your devices. If you already have an account, pair this device with it.",
-    outroAparelhoSim: "Yes, pair this device",
-    outroAparelhoNao: "No, create an account",
+  },
+
+  /** The way in (21/11/2026): the approved mock-ups, word for word in Portuguese. See `pt.ts`. */
+  entrada: {
+    bemVindo: "Welcome to Orwell",
+    criarConta: "Create account",
+    comFicheiro: "Sign in with the account file",
+    comOutroAparelho: "Sign in with another device",
+    voltar: "Back",
+    nome: "Name",
+    palavraPasse: "Password",
+    palavraPasseOutraVez: "Type the password again",
+    minimo: "Minimum 8 characters.",
+    curta: "The password has fewer than 8 characters.",
+    diferentes: "The passwords are not the same.",
+    tenhoConvite: "I have an invite code",
+    codigoDeConvite: "Invite code",
+    aCriar: "Creating the account…",
+    versaoAntiga: "This version of Orwell is old. Update to create an account.",
+    actualizar: "Update",
+    guardarTitulo: "Save the account file",
+    guardarTexto: "You need it to sign in to your account on another device.",
+    guardarFicheiro: "Save the file",
+    aPrepararFicheiro: "Preparing the file…",
+    maisTarde: "Do it later",
+    faixa: "You have not saved the account file yet.",
+    faixaGuardar: "Save",
+    guardado: "Account file saved.",
+    escolherFicheiro: "Choose file",
+    arrastarOu: "Drag the file here or",
+    escolheO: "choose it",
+    trocar: "Change",
+    entrar: "Sign in",
+    aEntrar: "Signing in…",
+    ola: (nome: string): string => `Hello, ${nome}`,
+    olaSemNome: "Hello",
+    manterSessao: "Keep me signed in",
+    aAbrir: "Opening…",
+    esqueci: "I forgot my password",
+    outraConta: "Use another account",
+    esquecesteTitulo: "Did you forget your password?",
+    esquecesteTexto: "Sign in another way and choose a new password.",
+    removido: "This device left the account.",
+    voltarAConta: "Back to an account on this device",
+  },
+
+  /** Sign in with another device, on both sides (21/11/2026). See `pt.ts`. */
+  juntarAparelho: {
+    novoLead: "On the device that has your account, open Settings › Add a device.",
+    lerCamara: "Read the code with the camera",
+    colarCodigo: "Or paste the code",
+    continuar: "Continue",
+    codigoInvalido: "This is not a code to add a device.",
+    aLigar: "Connecting to the other device…",
+    palavrasTitulo: "Are the words the same?",
+    palavrasNoNovo: "Compare them with the screen of the other device.",
+    palavrasNaConta: "Compare them with the screen of the new device.",
+    sim: "Yes, add the device",
+    nao: "They are not the same",
+    confirmadoAqui: "Now confirm on the other device.",
+    aReceber: "Getting your conversations…",
+    estasDentro: "You are in",
+    palavraPasseDaConta: "Account password",
+    /* After Erro 140 (S4, 21/11/2026): the way out for a person who forgot the account password. */
+    forgotAccountPassword:
+      "Forgot the account password? Tap Cancel. On your other device, open Settings › Account and security › Change the password, and choose I forgot the current password. Then add this device again.",
+    abrir: "Open Orwell",
+    falhou: "The device was not added.",
+    titulo: "Add a device",
+    contaLead: "On the new device, choose Sign in with another device. Then read this code with its camera.",
+    copiarCodigo: "Copy the code",
+    codigoCopiado: "Code copied.",
+    aEspera: "Waiting for the new device…",
+    concluido: "The new device is in the account.",
+    qrAlt: "Code to read with the camera of the new device",
+    novoNaConta: "New device on your account",
+    fuiEu: "It was me",
+    remover: "Remove",
+  },
+
+  /** Settings › Account and security (21/11/2026). See `pt.ts`. */
+  contaESeguranca: {
+    titulo: "Account and security",
+    mudar: "Change the password",
+    guardarFicheiro: "Save the account file",
+    aparelhos: "Devices",
+    juntar: "Add a device",
+    actual: "Current password",
+    /* S4 (21/11/2026): a change proven by the open vault. */
+    forgotCurrent: "I forgot the current password",
+    forgotCurrentNote:
+      "This device is open, so it can change the password without the current one. Your other devices take the new password when they connect.",
+    nova: "New password",
+    novaOutraVez: "Type the new password again",
+    nota: "The account has one password on all its devices. The new one replaces it on all of them: devices that are off change when they connect. Account files you saved before still open with the old password.",
+    mudada: "Password changed. Your other devices take it when they connect. Save a new file now.",
+    guardarNovo: "Save a new account file",
   },
 
   pairing: {
-    joinTitle: "Pair this device",
     joinLead:
-      "On the main device, open Settings, Devices, Add device. Then read the code with the camera, or paste the link here.",
+      "On the device that has the other account, open Settings › Add a device. Then read the code with the camera, or paste the code here.",
     scan: "Read the code with the camera",
-    scanning: "Point the camera at the code on the main device.",
+    scanning: "Point the camera at the code on the other device.",
     stopScan: "Stop the camera",
-    cameraDenied: "The browser did not give access to the camera. Paste the link.",
-    cameraUnavailable: "This device has no camera available. Paste the link.",
-    pasteLabel: "Or paste the link",
+    cameraDenied: "The browser did not give access to the camera. Paste the code.",
+    cameraUnavailable: "This device has no camera. Paste the code.",
+    pasteLabel: "Or paste the code",
     pasteAction: "Continue",
-    linkInvalid: "This is not a pairing link.",
-    keyTitle: "Password for this device",
+    linkInvalid: "This is not a code to add a device.",
     keyLead: "Choose a password for this device.",
-    connecting: "Connecting to the main device…",
-    waitingHost: "Waiting for the main device…",
-    waitingGuest: "Waiting for the other device. Scan this code with its camera, or paste the link into it.",
-    sasTitle: "Are the words the same?",
-    sasLead: "Compare the six words on the two screens. If they are different, select \"They are not\".",
-    sasHistoricoAqui: "After pairing, this device receives the old conversations and files from the other device.",
-    sasHistoricoNoNovo: "After pairing, the new device receives the old conversations and files from this device.",
-    sasSame: "They are the same",
-    sasDifferent: "They are not",
-    sasConfirmedHere: "Confirmed here. Confirm on the other device too.",
-    joining: "Joining the account…",
+    connecting: "Connecting to the other device…",
+    waitingHost: "Waiting for the other device…",
+    sasLead: "Compare the words on the two screens.",
+    sasSame: "Yes, they are the same",
+    sasDifferent: "They are not the same",
+    sasConfirmedHere: "Now confirm on the other device.",
     receivingState: "Receiving your data…",
-    receivingStateLead: "The other device sends what you read, the archived conversations, the blocked people and the preferences.",
-    stateDeadline: (segundos: number): string => `This device joins in ${segundos} s, with or without the data.`,
     stateMissing: "Your data did not arrive in time. It arrives when the two devices are connected.",
     profileMissing: "Your profile did not arrive from the main device yet. It arrives when the two devices are connected.",
-    doneTitle: "This device now belongs to the account",
-    doneBody: "This device gets new messages now. The old conversations come from the other device while both are online.",
-    doneGuestNote: "You can manage devices from any of your devices.",
     doneHostBody: "The new device gets messages now. The old conversations go from here to it. Keep this device on until the history arrives.",
-    doneAction: "Enter",
-    hostTitle: "Add device",
-    hostLead: "On the other device, select \"Yes, pair this device\". Then scan this code with its camera, or paste the link into it.",
-    copyLink: "Copy link",
-    linkCopied: "link copied",
-    qrAlt: "Code to read with the other device's camera",
-    noAccountKey: "Add or remove devices on the main device of the account.",
+    noAccountKey: "Add or remove devices on another device of the account.",
     serverUnsupported: "This server cannot pair devices yet.",
     gateHasAccount: "This device already has an account. To pair, use a device without an account.",
     gateInvalid: "This pairing link cannot be read.",
     fromChat: "This link adds one of your devices. Open it only on the new device, never from a chat.",
-    failedTitle: "Pairing failed",
   },
 
   /* The names of the destinations. The boundary and its reason are written in
      the Portuguese, in `linguas/pt.ts`; the same holds here, with the same care
      the English terminology in `catalogo.test.ts` already has: the section is
      called Communities, the thing is still a channel, and "server" stays out. */
+  /**
+   * The short pairing code (1.3.26, mock-up `Emparelhar`): the NEW device shows
+   * "K7P · 4QM" and its QR; the device with the account reads the QR or types
+   * the code.
+   */
+  shortCode: {
+    newTitle: "Sign in with another device",
+    newLead: "On the device that has your account, open Settings › Add a device.",
+    orType: "or type the code",
+    lasts: "The code works one time, for 5 minutes.",
+    newCode: "New code",
+    showCode: "Show a code on this device",
+    qrAlt: "Code to read with the camera of the device that has the account",
+    hostTitle: "Add a device",
+    camera: "Camera",
+    typeLabel: "Or type the code",
+    continue: "Continue",
+    invalid: "Type the 6 characters of the code.",
+  },
   rail: {
     profile: "Me",
     chat: "Communities",
@@ -349,6 +351,24 @@ export const en: Traducao = {
     porLer: "Unread messages",
     chamada: "Call in progress",
     semLigacao: "No connection",
+  },
+
+  /* The phone layout (option B, 20/11/2026): four tabs at the bottom, and each
+     conversation pushed over its list. Why each sentence exists is in `linguas/pt.ts`. */
+  telemovel: {
+    separadores: "Main sections",
+    comunidades: "Communities",
+    mensagens: "Messages",
+    amigos: "Friends",
+    tu: "You",
+    voltar: "Back",
+    carril: "Your channels",
+    novaComunidade: "Create channel",
+    perfil: "Your profile",
+    mural: "Feed",
+    definicoes: "Settings",
+    mensagensPorLer: (quantas: number): string =>
+      quantas === 1 ? "1 unread conversation" : `${quantas} unread conversations`,
   },
 
   sidebar: {
@@ -374,6 +394,20 @@ export const en: Traducao = {
     aEntrarNoCanalOficial: "Joining the official Orwell channel…",
     noRoomsBefore: "You have no channels yet. Create one with the ",
     noRoomsAfter: " beside it.",
+    /**
+     * Why the "+" is grey when the account cannot create more channels
+     * (1.3.26): the tooltip of the blocked button, on hover, focus and tap
+     * (`BlockedButton`).
+     */
+    channelLimit: (quota: { maximo: number; contaNova: boolean }): string =>
+      quota.contaNova
+        ? "Your account is new. You can create 1 channel in the first 3 days. You can still join channels with a link."
+        : `You created ${quota.maximo} channels. One account can create no more. You can still join channels with a link.`,
+    /** Why "New room" is grey when the account cannot create more rooms (1.3.26). Same tooltip. */
+    roomLimit: (quota: { max: number; newAccount?: boolean | undefined }): string =>
+      quota.newAccount
+        ? `Your account is new. You can create ${quota.max} rooms in the first 3 days.`
+        : `You created ${quota.max} rooms. One account can create no more.`,
     addFriend: "Add friend",
     callPeople: (n: number): string => (n === 1 ? "1 person in a call, waiting for company" : `${n} people in a call`),
     /** The count and who they are. The whole reason is in the Portuguese sheet. */
@@ -557,16 +591,6 @@ export const en: Traducao = {
     searchReading: "reading…",
   },
 
-  primeirosPassos: {
-    titulo: "How to reach someone",
-    corpo: "To talk to someone, give your address, send a friend request or join with an invite link.",
-    copiar: "Copy your address",
-    copiado: "Address copied. Give it to a person. That person can add you.",
-    amigo: "Add a friend",
-    link: "Join with a link",
-    fechar: "Close",
-  },
-
   oficial: {
     selo: "official",
     seloTitle:
@@ -604,7 +628,17 @@ export const en: Traducao = {
     empty: "Nobody here yet.",
     inviteSomeone: "Invite…",
     openChannel: "Common channel. Any account on this server can join without an invitation and read.",
+    // P7 (1.3.26): not in the count, but not hidden either. They can read until a member removes them.
+    afastados: (n: number): string =>
+      n === 1
+        ? "1 more account still has the keys of this channel. The server says it left."
+        : `${n} more accounts still have the keys of this channel. The server says they left.`,
     verifyHint: (name: string): string => `Verify security with ${name}`,
+    /* The column while a channel's history syncs (21/11/2026). Approved text. */
+    syncingTitle: "Now syncing",
+    /** Calendar days since this device was last online with this account. Never said for 0. */
+    syncingAway: (days: number): string =>
+      days === 1 ? "You have not signed in for 1 day" : `You have not signed in for ${days} days`,
   },
 
   roles: {
@@ -923,6 +957,8 @@ export const en: Traducao = {
     soPalco: "Show only the stage",
     conversaDaSala: "Room chat",
     focoAria: (nome: string): string => `${nome}, in focus`,
+    /** The action on the notice of an incoming call in a direct conversation (21/11/2026): stops the ring on this device. */
+    declineRing: "Decline",
   },
 
   ecra: {
@@ -1184,14 +1220,19 @@ export const en: Traducao = {
   },
 
   sincronia: {
-    lugar: "You joined here. What was said before does not come to this device.",
+    lugar: "Chat history is syncing.",
     lugarData: (data: string): string => `You joined on ${data}.`,
     aReceber: "Receiving the channel…",
     historico: (feitas: number, total: number): string => `Getting the history: ${feitas} of ${total} messages.`,
     historicoMedia: (feitas: number, total: number): string => `Getting the files: ${feitas} of ${total}.`,
     historicoSemIrmao: "The main device does not answer. The older messages come when it is on.",
-    historicoParado: (faltam: number): string =>
-      `The main device stopped answering. ${faltam === 1 ? "1 older message is missing" : `${faltam} older messages are missing`}. They come when it is on.`,
+    /* A stopped transfer that will resume (20/11/2026). Approved text. */
+    historicoEmFalta: (faltam: number): string =>
+      faltam === 1
+        ? "1 message is missing on this device. Sync will resume in a moment."
+        : `${faltam} messages are missing on this device. Sync will resume in a moment.`,
+    /* The same, when the exact number is not known (a sibling before 1.3.26). Approved text. */
+    historicoEmFaltaSemNumero: "Some messages are missing on this device. Sync will resume in a moment.",
     historicoPerdidas: (perdidas: number): string =>
       perdidas === 1
         ? "1 older message did not come: the main device could not send it."
@@ -1252,6 +1293,17 @@ export const en: Traducao = {
       "The server restarted, and the old rooms and feeds do not exist now. Your account and your profile stay. Ask to be invited again.",
   },
 
+  /** A new account in its first days (1.3.26). See `anti-abuso.ts` in the protocol. */
+  contaNova: {
+    aviso: "Your account is new. Some features open in 24 h.",
+    avisoNaSala:
+      "Your account is new. Some features open in 24 h. In the common room, links show as plain text, and you cannot send images, files or GIFs.",
+    ritmo: (segundos: number) =>
+      `Your account is new. In the common room, you can send 3 messages, and then 1 message every ${segundos} seconds. The app sends your message soon.`,
+    naFila: "Joining the common room… Many people joined in the last hour. The app joins when there is space.",
+    anexosEscondidos: "Images, files and link cards are hidden. The account of the author is new.",
+  },
+
   notifCenter: {
     sucessao: (de: string, para: string): string => `${de} is now ${para}. The account ${de} says so.`,
     sucessaoAdicionar: (para: string): string => `Add ${para}?`,
@@ -1295,6 +1347,9 @@ export const en: Traducao = {
     mentionSemSala: (name: string): string => `${name} mentioned you`,
     roomAddedSemNome: "You were added to a channel",
     friendRequestClosed: (name: string): string => `Request from ${name}: answered`,
+    aparelhoNovo: "A new device joined the account.",
+    removerAparelho: "Remove",
+    aparelhoRemovido: "The device left the account.",
   },
 
   userMenu: {
@@ -1471,6 +1526,10 @@ export const en: Traducao = {
     namePlaceholder: "How you want to appear",
     bio: "Bio",
     bioNote: "Who you are, in a few lines. The status is what you do now.",
+    // The bio stops at 300 characters (1.3.26). An older bio can be longer.
+    bioMaximo: (max: number): string => `${max} characters at most.`,
+    bioAntigaCortada: (max: number): string =>
+      `Your bio has more than ${max} characters. Only the first ${max} show. Save to keep this text.`,
     email: "Email",
     optional: "optional",
     emailPlaceholder: "For contact outside Orwell",
@@ -1613,22 +1672,14 @@ export const en: Traducao = {
     sounds: "Sounds",
     soundVolume: "Sound volume",
     soundSample: "Listen",
-    device: "This device",
     zonaDePerigo: "Danger zone",
-    exportAction: "Export account",
-    exportPassLabel: "Password for the file",
-    exported: "account exported. The file is the account, keep it safe",
     exportImagens: "Include the images",
     exportImagensNota: (tamanho: string): string => `The file grows by ${tamanho}.`,
-    exportNeedsAccountKey: "Make the backup on the main device of the account.",
-    importReplacesDevice:
-      "Importing moves the account to this device. The old device can no longer use it. To use the account on two devices, select \"Add device\" on the main device and \"Yes, pair this device\" on the new one.",
-    devices: "Devices",
+    exportNeedsAccountKey: "Save the account file on another device of the account.",
     devicesLead: "The devices with this account. Each device has only the messages it got after it joined.",
     deviceAddedAt: (data: string): string => `device added on ${data}`,
     thisDevice: "this device",
     devicesUnknown: "Could not get the list of devices.",
-    addDevice: "Add device",
     revoke: "Revoke",
     revokeTitle: "Revoke this device?",
     revokeBody:
@@ -1674,14 +1725,16 @@ export const en: Traducao = {
     codigoFonte: "Source code",
     lockNow: "Sign out",
     lockNote: "Closes the vault and forgets the session on this device. The account stays, and comes back with the password.",
-    memorizarSessao: "Remember the session on this device",
+    memorizarSessao: "Keep me signed in on this device",
     memorizarSessaoNota: "With this on, Orwell opens without asking for the password. To be asked again, turn it off or sign out.",
     memorizarSessaoIndisponivel: "This device has nowhere safe to keep the session.",
-    sessaoNaoExpira: "With the session remembered, the session does not expire. To expire it, turn off \"Remember the session\".",
+    sessaoNaoExpira: "While you are kept signed in, the session does not expire. To expire it, turn off \"Keep me signed in\".",
     semPalavraPasse: "This account has no password on this device. To be able to sign out, set one.",
     definirPalavraPasse: "Set a password",
     definirPalavraPasseNota: "From now on, the account opens with this password on this device. With it, you can sign out. The account stays, and comes back with the password.",
     palavraPasseDefinida: "The account now has a password on this device.",
+    palavraPasseMudouNoutro:
+      "The account password changed on another device. Next time, open the account with the new password. Files saved before still open with the old one.",
     destroyAction: "Erase the account from this device",
     destroyTitle: "Erase the account?",
     destroyBody: "There is no copy on the server. The account is gone permanently.",
@@ -1692,14 +1745,8 @@ export const en: Traducao = {
     destroyConfirm: "Erase for ever",
     destroySteps:
       "Before it is deleted, the account leaves all channels.",
-    destroyStepsGate:
-      "With the account locked, it cannot leave the channels. Your name can stay in the member lists.",
-    destroyStepsImport:
-      "Importing erases the account on this device and puts the one from the file in its place. With the vault locked, the erased account does not leave its channels. Its name can stay visible there.",
     destroyStepsJoin:
       "Joining erases this account from this device. First, the account tells its contacts and channels, ends its friendships and leaves every channel. If pairing fails, nothing is erased.",
-    destroyStepsPair:
-      "Pairing puts the other account in place of this one. The app erases the account on this device only when the other account is in. If pairing fails, this account stays. With the vault locked, the erased account does not leave its channels. Its name can stay visible there.",
     destroyRetry: "Try again",
     somPorTipo: "One sound for each event",
     somTipos: {
@@ -1834,6 +1881,11 @@ export const en: Traducao = {
     leaveCall: "Leave the call",
     properties: "Properties",
     renameRoom: "Rename",
+    /* "Mover" on the phone (option B): the cascade that replaces dragging. */
+    mover: "Move",
+    moverParaCima: "Move up",
+    moverParaBaixo: "Move down",
+    moverParaCategoria: "To a category",
     renameRoomTitle: "Rename the room",
     closeRoom: "Close room",
     leave: "Leave the channel",
@@ -2070,8 +2122,6 @@ export const en: Traducao = {
     modoEndereco: "By address",
     modoLink: "By link",
     modoMeter: "Add now",
-    enderecoHint:
-      "The person gets the invitation in a private message. They join if they accept. They see messages from then on.",
     enderecoAccao: "Send invitation",
     meterHint:
       "The person joins now and does not have to accept. They see messages from now on, not earlier ones.",
@@ -2350,7 +2400,6 @@ export const en: Traducao = {
   },
   comoFunciona: {
     titulo: "How Orwell works",
-    link: "How it works",
     lead: "Six ideas about what happens inside Orwell. Each one has a drawing.",
     cartaoLead: "Six short ideas, each with a drawing. They show what the server knows about you, what stays only on your device, and why Orwell works this way.",
     ver: "See how it works",
@@ -2381,7 +2430,7 @@ export const en: Traducao = {
       resumo: "When you create the account, your device makes a key. Your address is a summary of that key, and the server knows only the summary.",
       mais: [
         "The key lives in the vault on the device. The password opens the vault and never leaves the device.",
-        "There is no \"forgot my password\". Nobody has the password but you. If you lose it, the vault stays closed forever.",
+        "Nobody has the password but you, not even the server. If you forget it, sign in again with another device of the account and choose a new one.",
         "The export file is the account. A person with the file and the password has the account. Keep it as you keep a passport.",
         "The server does not know you. It has no name, email, phone or photo. Your name and photo travel inside the envelopes, only to your friends.",
       ],
@@ -2441,12 +2490,12 @@ export const en: Traducao = {
       resumo: "Each device has its own key, and the account key signs it.",
       mais: [
         "All active devices of the account have the account key. Any of them adds and revokes devices. A removed device cannot do this.",
-        "To add a device, pair it. The secret goes from a screen to a camera, by QR or link, and never through the server. The two screens show six words. If they are the same, nobody got in the middle.",
-        "Importing the file on another machine does not add a device. It moves the account. To have two devices, pair them. Do not create another account.",
+        "To add a device, pair it. The secret goes from a screen to a camera, by QR or link, and never through the server. The two screens show three words. If they are the same, nobody got in the middle.",
+        "Importing the account file on another machine adds a device with its own key. The other devices keep working, and they show the new device. Pairing also adds a device. Do not create another account.",
         "Revoking a device stops it from reading from the next epoch. The device keeps what it already had until it connects again. Then it signs out and deletes its data.",
       ],
-      desenho: "The account key, on the main device, signs the keys of the other devices. Pairing goes through the server in a temporary vault that the server does not open. The two devices compare six words.",
-      principal: "main device",
+      desenho: "The account key signs the keys of the other devices. Pairing goes through the server in a temporary vault that the server does not open. The two devices compare three words.",
+      principal: "device with the account",
       chaveDaConta: "account key",
       chaveDoAparelho1: "key of device 1",
       soEste: "only this one exports, adds and revokes",
@@ -2457,7 +2506,7 @@ export const en: Traducao = {
       servidor: "server",
       cofreTemporario: "temporary vault, closed",
       segredo: "the secret goes by QR or link, from screen to camera, never through the server",
-      seisPalavras: "the two screens show six words: if they are the same, nobody got in the middle",
+      seisPalavras: "the two screens show three words: if they are the same, nobody got in the middle",
     },
     servidor: {
       titulo: "What the server sees",
@@ -2475,11 +2524,7 @@ export const en: Traducao = {
     },
   },
 
-  frasesDoMomento: {
-    conta: "Your account is a key on this device. Nobody can reset it. Keep your password safe.",
-    canal: "You see the conversation from now on. What was said before stays with the people who were there.",
-    entendi: "Got it",
-  },
+
   musica: {
     partilharAudio: "Share audio",
     partilharAudioAria: (aPartilhar: boolean): string =>
@@ -2530,6 +2575,8 @@ export const en: Traducao = {
     pararAria: "Stop sharing audio",
     tocarEsta: (nome: string): string => `Play ${nome}`,
     remover: (nome: string): string => `Remove ${nome} from the list`,
+    /* The phone's way to reorder the list (option B): a finger cannot drag. */
+    subir: (nome: string): string => `Move ${nome} up`,
     aTocar: (nome: string): string => `Playing: ${nome}`,
     emPausa: "Music paused",
     volumeLocal: "Volume for you",
@@ -2678,20 +2725,15 @@ export const en: Traducao = {
     ambos: "Sharing screen and music",
     musicaDe: (nome: string): string => `${nome} is playing music`,
   },
-  outraConta: {
-    lead: "Importing or pairing puts the other account in place of this one. First you choose the other account. The app erases the account on this device only after you confirm.",
-    pairKeyNote: "When you select Continue, the app asks you to confirm that it erases the account on this device. The app erases it only when the other account is in.",
-  },
   contas: {
     mudar: "Switch account",
     titulo: "Switch account",
-    lead: "Each account has its own vault on this device. The account you leave stays here, closed.",
+    lead: "The account you leave stays on this device, closed.",
     semNome: "Account with no name",
     abreSozinha: "Opens without asking for the password.",
     pedeFrase: "Asks for the password.",
     acrescentar: "Add another account",
     acrescentarNota: "You create, import or pair another account. This account stays on this device.",
-    voltar: "Go back to an account on this device",
     nenhumaOutra: "There is no other account on this device yet.",
   },
   juntar: {
@@ -2852,7 +2894,7 @@ export const errosEn: Record<string, FraseDeErro> = {
   "vault is locked": "The vault is locked.",
   "no vault to open": "There is no vault on this device.",
   "vault holds no identity": "The vault holds no identity.",
-  "wrong passphrase, or the vault is damaged": "Wrong password. If you are sure of it, the data on this device may be damaged.",
+  "wrong passphrase, or the vault is damaged": "Wrong password.",
   "this vault was written by a newer version of the app":
     "This vault was written by a newer version of the app. Update the app before you open it. Opening the vault with this version would erase what it cannot read.",
   "this vault is from the beta": "This vault is from a beta version. It does not open in this version.",
@@ -2863,6 +2905,12 @@ export const errosEn: Record<string, FraseDeErro> = {
   "this device cannot remember the session": "This device has nowhere safe to keep the session.",
   "this vault has no passphrase to remember": "This account has no password on this device. There is no session to remember.",
   "this vault already has a passphrase": "This account already has a password on this device.",
+  "the current passphrase is not right": "The current password is not correct.",
+  "this vault has no passphrase to change": "This account has no password on this device. Set a password first.",
+  "this is not the account password": "This is not the account password. Type the password that you use on the other devices.",
+  "the account password is missing": "Type the account password to finish.",
+  "sync this device before you change the password": "Sync this device before you change the password",
+  "the system did not confirm that it is you": "The system did not confirm that it is you. Try again.",
   "there is no such account on this device": "This account is no longer on this device.",
   "could not reach the homeserver": "Could not reach the server.",
   "the server did not take the log": "The server did not take the log. Copy it and paste it in the report.",
@@ -2878,10 +2926,40 @@ export const errosEn: Record<string, FraseDeErro> = {
   "the device clock is off": "The clock of this device is wrong. Set the time and try again.",
   "could not read the report inbox": "The server sent an answer we cannot read. Try again later.",
   "this server does not accept new accounts": "This server does not accept new accounts.",
+  "the account check did not pass": "The app could not prepare the account. Try again.",
+  "this network created many accounts today": "This network created many accounts today. Type an invite code, or paste an invite link.",
+  "this new account opened all the new channels it can today":
+    "Your account is new. You opened all the new channels you can today. Try again tomorrow.",
+  "this account created all the channels it can": (detalhe) => {
+    if (detalhe["convite"] === true) {
+      return "You cannot make a link for this channel. The person who created it has the maximum number of channels."
+    }
+    if (detalhe["contaNova"] === true) return "Your account is new. You can create 1 channel in the first 3 days."
+    const maximo = detalhe["maximo"]
+    return typeof maximo === "number"
+      ? `You created ${maximo} channels. One account can create no more.`
+      : "You created the maximum number of channels for one account."
+  },
+  "this account created all the rooms it can": (detalhe) => {
+    const max = detalhe["max"]
+    if (detalhe["newAccount"] === true && typeof max === "number") {
+      return `Your account is new. You can create ${max} rooms in the first 3 days.`
+    }
+    return typeof max === "number"
+      ? `You created ${max} rooms. One account can create no more. Delete a room to create a new one.`
+      : "You created the maximum number of rooms for one account. Delete a room to create a new one."
+  },
+  "the message could not be sent": "The message was not sent. Send it again.",
+  "this new account cannot send images, files or gifs in the common room yet":
+    "Your account is new. In the common room, you can send images, files and GIFs after 24 hours.",
+  "this new account added all the people it can today":
+    "Your account is new. You added all the people you can today. Try again tomorrow.",
+  "this new account must send a friend request first":
+    "Your account is new. Send a friend request first. When the person accepts, you can send messages.",
   "this server needs a registration invite":
-    "This server only accepts new accounts with an invite code. Type the code you received.",
+    "This server only accepts new accounts with an invite code.",
   "the registration invite is not valid":
-    "That invite code is not valid, was already used or expired. Ask the person who runs the server for another one.",
+    "This invite code is not valid, or it was already used.",
   "account-suspended": "Your account is suspended on this server. Read the reason and ask for a review.",
   "the server did not take the review request": "The server did not take the review request. Try again later.",
   "the report needs a note": "Write a note. The reason \"Other\" needs one.",
@@ -2991,6 +3069,8 @@ export const errosEn: Record<string, FraseDeErro> = {
   "the app sent a request this version does not read": "The app sent a request this version does not read. Close the app and open it again.",
   "this device is not receiving this channel":
     "You are not receiving new messages in this room. The app is asking for your place again.",
+  "no member online has the older messages":
+    "No other member is online now. Older messages come from them. Try again when a member is online.",
   "only a closed ticket can be deleted": "You can delete only a closed ticket. Close it first.",
   "you may not moderate in this channel": "Your role does not let you moderate this channel.",
   "the nickname is too long": (detalhe) => {
@@ -3060,6 +3140,13 @@ export const errosEn: Record<string, FraseDeErro> = {
   "the other device did not answer in time": "The other device did not answer in time.",
   "the certificate is not from this account": "The certificate that arrived is not from this account. Nothing was saved.",
   "the server refused the device list": "The server did not accept the device list. Nothing was added.",
+  /* The short pairing code (1.3.26). */
+  "the pairing code is not right": "The code is not right. Nothing was added. Make a new code on the new device and type it again.",
+  "this pairing code is wrong or expired": "This code is wrong, expired or used. Look at the code on the new device again.",
+  "the short pairing code expired": "The code expired. Make a new code.",
+  "that is not a pairing code": "Type the 6 characters of the code.",
+  "this server cannot pair with a short code": "This server cannot use short codes yet. On the device that has the account, open Settings › Add device, and read its code here.",
+  "this pairing code is for another server": "This code is for another server. Use a device with an account on that server.",
   "this account already has four devices": "This account already has four devices.",
 
   /* Phase 5 (20/10/2026): the end of «Error 900». */
@@ -3278,8 +3365,15 @@ export const errosEn: Record<string, FraseDeErro> = {
     Array.isArray(detalhe["channels"])
       ? `The device left the account, but it is still in ${detalhe["channels"].length} channels. Revoke again to finish.`
       : "The device left the account, but it is still in some channels. Revoke again to finish.",
-  "device-revoked": "This device was removed from the account on another device.",
-  "pairing-unfinished": "The pairing did not finish. Pair this device again.",
+  "device-revoked": "This device left the account.",
+  "pairing-unfinished": "This device did not finish joining the account. Sign in again.",
+  "this account file is from a device that left the account":
+    "This file no longer opens the account. Use a newer one.",
+  "this account is full, so the file cannot add a device":
+    "This account already has four devices. Remove one on another device and try again.",
+  "this account file cannot add a device":
+    "This file cannot add a device. Save a new file on another device of the account.",
+  "the server did not add this device to the account": "The server did not add this device to the account. Try again.",
   "account-channel-foreign":
     "The account channel had a device that is not of this account. This device left that channel. The state passes again when the channel is made again.",
   "this call server does not carry music": "This call server does not carry music yet. The call goes on without it.",
@@ -3294,6 +3388,10 @@ export const errosEn: Record<string, FraseDeErro> = {
   "this device cannot capture a sound source": "This browser does not let you capture the sound of a source. Use files or the desktop app.",
   "the system does not allow recording the sound":
     "macOS does not let the app record the sound. Open System Settings › Privacy & Security › Screen & System Audio Recording, turn on Orwell and open the app again.",
+  "the system does not allow the microphone":
+    "macOS does not let Orwell use the microphone. Open System Settings › Privacy & Security › Microphone, turn on Orwell and open the app again.",
+  "the system does not allow the camera":
+    "macOS does not let Orwell use the camera. Open System Settings › Privacy & Security › Camera, turn on Orwell and open the app again.",
 }
 
 /** Why the microphone or the camera did not open, by the name of the browser error. See `porqueNaoAbriu` in `pt.ts`. */

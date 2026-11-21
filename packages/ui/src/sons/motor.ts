@@ -19,7 +19,7 @@ import { caladoPelaPausa } from "./acontecimentos.js"
  * 2. **The main switch and the type switch.**
  * 3. **Never for own actions.** My message, my join. Exceptions are
  *    responses to a gesture, which do not arrive marked `deMim`: the mute
- *    sounds. Sending a message plays nothing (16/11/2026): it is an event of
+ *    sounds, and the nudge I send (21/11/2026, `tocarCotoveladaEnviada`). Sending a message plays nothing (16/11/2026): it is an event of
  *    my own account, like the same message arriving from my other devices.
  * 4. **"Busy" and "Invisible" silence everything**, except the two ringtones
  *    (incoming call and outgoing call), only if the person allowed it
@@ -68,6 +68,11 @@ export interface Acontecimento {
   sala?: string
   /** The system notification for this event already makes sound. */
   avisoComSom?: boolean
+  /**
+   * Sound only, never the vibration. For the echo of a gesture with the phone
+   * already in hand: the nudge I just sent (`tocarCotoveladaEnviada`).
+   */
+  semVibracao?: boolean
 }
 
 /** What preferences say, read at the moment of the event. */
@@ -389,13 +394,13 @@ export function criarMotor(opcoes: OpcoesDoMotor): Motor {
    */
   const toques = new Map<Toque, { canal: string; inicio: number; cancelar: () => void }>()
 
-  function emitir(tipo: TipoDeSom, estado: EstadoDoSom, factor = 1, canal?: string | null): boolean {
+  function emitir(tipo: TipoDeSom, estado: EstadoDoSom, factor = 1, canal?: string | null, vibrar = true): boolean {
     const tocou = saida.tocar(tipo, amplitudeDe(estado.volume) * factor)
     if (!tocou) return false
     ultimos.set(tipo, relogio.agora())
     if (canal && RAJADA_POR_CANAL_MS[tipo] !== undefined) ultimosPorCanal.set(`${tipo}|${canal}`, relogio.agora())
     const padrao = VIBRACAO[tipo]
-    if (estado.som.vibrar && padrao.length > 0) saida.vibrar(padrao)
+    if (vibrar && estado.som.vibrar && padrao.length > 0) saida.vibrar(padrao)
     return true
   }
 
@@ -467,7 +472,8 @@ export function criarMotor(opcoes: OpcoesDoMotor): Motor {
       const { motivo, estado } = avaliar(acontecimento)
       if (motivo !== "tocou") return motivo
       const factor = acontecimento.tipo === "mencao" && estaAVer(acontecimento, ambiente) ? MENCAO_A_VER : 1
-      return emitir(acontecimento.tipo, estado, factor, acontecimento.canal) ? "tocou" : "sem-audio"
+      const vibrar = acontecimento.semVibracao !== true
+      return emitir(acontecimento.tipo, estado, factor, acontecimento.canal, vibrar) ? "tocou" : "sem-audio"
     },
     tocarChamada(canal, opcoesDaChamada = {}) {
       return comecar("chamada", canal, opcoesDaChamada.deMim === true, opcoesDaChamada.repetir === true)

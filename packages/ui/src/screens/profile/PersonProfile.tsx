@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react"
+import { bioVisivel } from "@enclave/client-core"
 import { LinhaDoEstado } from "../../components/LinhaDoEstado.js"
 import type { ConnectionState, Profile } from "../../bridge.js"
 import type { ChatMessage } from "../../types.js"
@@ -357,7 +358,7 @@ export function PersonProfile({
                   </p>
                 )}
                 {profile?.statusText && <p className="profile-status">{profile.statusText}</p>}
-                {profile?.bio && <p className="profile-bio">{profile.bio}</p>}
+                {profile?.bio && <p className="profile-bio">{bioVisivel(profile.bio)}</p>}
                 {profile?.email && <p className="profile-contact">{profile.email}</p>}
                 {(profile?.donations.length ?? 0) > 0 && (
                   <ul className="pessoa-links">

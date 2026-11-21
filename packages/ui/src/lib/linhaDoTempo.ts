@@ -36,6 +36,8 @@ const FILTRO_DO_TIPO: Record<AppNotification["kind"], Exclude<FiltroDoSino, "tud
   "report-decision": null,
   // A role given to me: only in "All", it is none of the other four (12/11/2026).
   "role-given": null,
+  // A device joined the account (1.3.26): only in "All".
+  "device-new": null,
 }
 
 export function filtroDoTipo(kind: AppNotification["kind"]): Exclude<FiltroDoSino, "tudo"> | null {

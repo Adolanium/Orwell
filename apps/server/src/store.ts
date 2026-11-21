@@ -120,6 +120,14 @@ export interface PaginaDoCofre {
 const WELCOMES_GUARDADOS = 5
 
 /**
+ * The rounding of the `seq` floor (`Store.SEQ_FLOOR_STEP`). A module constant because
+ * a static initializer of `Store` that reads another static of `Store` breaks in the
+ * compiled output (`tsc` emits it before the class binding exists), while the tests,
+ * compiled by esbuild, pass.
+ */
+const PASSO_DO_PISO_DO_SEQ = 4096
+
+/**
  * Suspended right now (`suspensoes`): `activa` and the end still to come, or no end.
  * The `?` is the current second. The VPS script (`scripts/denuncias.mjs`) has the
  * same rule written by hand.
@@ -258,26 +266,54 @@ export class Store {
   entrarOuRegistar(
     address: string,
     signingKey: Uint8Array,
-    regra: { modo: ModoDeRegisto; convite: string | undefined },
-  ): "ok" | "address-taken" | "registo-fechado" | "convite-em-falta" | "convite-invalido" {
+    regra: {
+      modo: ModoDeRegisto
+      convite: string | undefined
+      /**
+       * The abuse brake for a NEW account (1.3.26, `anti-abuso.ts`). Called only
+       * when the address is not registered yet, inside the transaction, in this
+       * order: the network limit (a registration invite or a live community
+       * invite gets past it), then the proof of work (which spends its
+       * challenge), then the invite, then the row.
+       */
+      contaNova?: {
+        redeCheia: () => boolean
+        /** Over the network limit, without a registration invite: does a community invite let this account in? */
+        conviteDeComunidade?: () => boolean
+        prova: () => "ok" | "em-falta" | "invalida"
+        /** The account was created, and what let it past the network limit, if anything. */
+        aoCriar: (via: "convite-de-registo" | "convite-de-comunidade" | null) => void
+      }
+    },
+  ): "ok" | "address-taken" | "registo-fechado" | "convite-em-falta" | "convite-invalido" | "prova-em-falta" | "prova-invalida" | "rede-cheia" {
     return this.#transaction(() => {
       const existing = this.#db.prepare("SELECT signing_key FROM accounts WHERE address = ?").get(address) as
         | { signing_key: Uint8Array }
         | undefined
       if (existing) return equalBytes(signingKey, existing.signing_key) ? "ok" : "address-taken"
       if (regra.modo === "fechado") return "registo-fechado"
-      if (regra.modo === "convite") {
-        if (regra.convite === undefined || regra.convite.trim() === "") return "convite-em-falta"
+      const temConvite = regra.convite !== undefined && regra.convite.trim() !== ""
+      if (regra.modo === "convite" && !temConvite) return "convite-em-falta"
+      // Over the network limit, only an invite gets in. Before the proof, so the proof is not spent for nothing.
+      const pelaRede = regra.modo === "aberto" && regra.contaNova !== undefined && regra.contaNova.redeCheia()
+      const pelaComunidade = pelaRede && !temConvite && (regra.contaNova?.conviteDeComunidade?.() ?? false)
+      if (pelaRede && !temConvite && !pelaComunidade) return "rede-cheia"
+      const prova = regra.contaNova?.prova() ?? "ok"
+      if (prova === "em-falta") return "prova-em-falta"
+      if (prova === "invalida") return "prova-invalida"
+      const usaConvite = regra.modo === "convite" || (pelaRede && !pelaComunidade)
+      if (usaConvite) {
         const gasto = this.#db
           .prepare(
             "UPDATE registration_invites SET uses = uses + 1 WHERE code_hash = ? AND uses < max_uses AND expires_second > ?",
           )
-          .run(hashDoConviteDeRegisto(regra.convite), currentSecond())
+          .run(hashDoConviteDeRegisto(regra.convite as string), currentSecond())
         if (Number(gasto.changes) !== 1) return "convite-invalido"
       }
       this.#db
         .prepare("INSERT INTO accounts (address, signing_key, created_minute) VALUES (?, ?, ?)")
         .run(address, signingKey, currentMinute())
+      regra.contaNova?.aoCriar(usaConvite ? "convite-de-registo" : pelaComunidade ? "convite-de-comunidade" : null)
       return "ok"
     })
   }
@@ -675,6 +711,10 @@ export class Store {
           "INSERT INTO events (channel, seq, kind, ciphertext, recipient, received_minute) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .run(input.channel, seq, input.kind, input.ciphertext, input.recipient ?? null, minute)
+      // A new Welcome invites the account again, also one that had left (P7).
+      if (input.kind === "welcome" && input.recipient) {
+        this.#db.prepare("DELETE FROM canal_saidas WHERE channel = ? AND address = ?").run(input.channel, input.recipient)
+      }
 
       // Marks that this channel has been used; retention does not erase it. See
       // `channelNeverUsed`.
@@ -877,22 +917,34 @@ export class Store {
    * the cycle closed and takes the power to bury away from a single frame.
    */
   pruneSupersededWelcomes(): number {
-    const result = this.#db
-      .prepare(
-        `DELETE FROM events
-           WHERE kind = 'welcome' AND recipient IS NOT NULL
-             AND seq NOT IN (
-               SELECT seq FROM events recentes
-                WHERE recentes.recipient = events.recipient
-                  AND recentes.channel = events.channel
-                  AND recentes.kind = 'welcome'
-                ORDER BY recentes.seq DESC
-                LIMIT ${WELCOMES_GUARDADOS}
-             )`,
-      )
-      .run()
-    return Number(result.changes ?? 0)
+    return this.#transaction(() => {
+      const apagar = this.#db.prepare("DELETE FROM events WHERE channel = ? AND seq = ?")
+      let apagados = 0
+      for (const { channel, seq } of this.#db.prepare(Store.SQL_DOS_WELCOMES_A_PODAR).all() as { channel: string; seq: number }[]) {
+        apagados += Number(apagar.run(channel, seq).changes)
+      }
+      return apagados
+    })
   }
+
+  /**
+   * The Welcomes past the latest `WELCOMES_GUARDADOS` for each recipient and channel.
+   *
+   * Read from the `events_welcomes` partial index alone, in one pass (1.3.26). It was a
+   * `DELETE ... NOT IN (correlated subquery)` that, for every Welcome, walked the
+   * channel backwards by its primary key until it had seen five Welcomes for the same
+   * person, reading every ciphertext on the way. On the 1.6 GB production database that
+   * was most of the 1.3.25 startup, and it ran again every hour on the event loop. See
+   * `criarIndicesParciaisDeEvents` in `db.ts`. Public so a test can check its plan.
+   */
+  static readonly SQL_DOS_WELCOMES_A_PODAR = `
+    SELECT channel, seq FROM (
+      SELECT channel, seq,
+             ROW_NUMBER() OVER (PARTITION BY recipient, channel ORDER BY seq DESC) AS ordem
+        FROM events
+       WHERE kind = 'welcome' AND recipient IS NOT NULL
+    )
+    WHERE ordem > ${WELCOMES_GUARDADOS}`
 
   /**
    * Directed welcomes waiting for one address, across every channel.
@@ -1001,7 +1053,15 @@ export class Store {
     const cutoff = retentionDays <= 0 ? Number.MAX_SAFE_INTEGER : currentMinute() - retentionDays * 24 * 60
     return this.#transaction(() => {
       this.#guardarPisoDoSeq(cutoff)
-      return this.#db.prepare("DELETE FROM events WHERE received_minute < ?").run(cutoff).changes as number
+      const apagados = this.#db.prepare("DELETE FROM events WHERE received_minute < ?").run(cutoff).changes as number
+      // A departure only matters next to a Welcome for the same account (P7): none left, the row goes.
+      this.#db
+        .prepare(
+          `DELETE FROM canal_saidas WHERE NOT EXISTS (
+             SELECT 1 FROM events e WHERE e.channel = canal_saidas.channel AND e.recipient = canal_saidas.address AND e.kind = 'welcome')`,
+        )
+        .run()
+      return apagados
     })
   }
 
@@ -1014,19 +1074,34 @@ export class Store {
    * number of events the channel ever carried. The floor only grows.
    */
   #guardarPisoDoSeq(cutoff: number): void {
-    const passo = Store.SEQ_FLOOR_STEP
-    this.#db
-      .prepare(
-        `INSERT INTO channel_activity (channel, seq_floor)
-           SELECT channel, ((MAX(seq) + 1 + ${passo - 1}) / ${passo}) * ${passo}
-             FROM events WHERE true GROUP BY channel HAVING MAX(received_minute) < ?
-         ON CONFLICT (channel) DO UPDATE SET seq_floor = MAX(COALESCE(seq_floor, 0), excluded.seq_floor)`,
-      )
-      .run(cutoff)
+    this.#db.prepare(Store.SQL_DO_PISO_DO_SEQ).run(cutoff, cutoff)
   }
 
   /** The rounding of the `seq` floor. See `#guardarPisoDoSeq`. */
-  static readonly SEQ_FLOOR_STEP = 4096
+  static readonly SEQ_FLOOR_STEP = PASSO_DO_PISO_DO_SEQ
+
+  /**
+   * The query behind `#guardarPisoDoSeq` (1.3.26). Public so a test can check its plan.
+   *
+   * Only channels with something past the cutoff can be emptied, and those come from
+   * `events_by_age` (in steady state, a minute's worth of rows; `INDEXED BY` because
+   * without statistics the planner preferred walking the primary key for the
+   * `DISTINCT`). For each, the newest event is the one with the highest `seq`, a
+   * primary key lookup: `seq` and `received_minute` grow together, both assigned at
+   * append. This ran as a `GROUP BY channel` over the whole table, reading every
+   * ciphertext to reach `received_minute`, every minute: 2.4 s on a copy of the 1.6 GB
+   * production database on a laptop, with the event loop stopped. Now 0 ms. Checked
+   * against the old query on that copy at six cutoffs: the same channels and floors.
+   */
+  static readonly SQL_DO_PISO_DO_SEQ = `
+    INSERT INTO channel_activity (channel, seq_floor)
+      SELECT ultimo.channel, ((ultimo.seq + 1 + ${PASSO_DO_PISO_DO_SEQ - 1}) / ${PASSO_DO_PISO_DO_SEQ}) * ${PASSO_DO_PISO_DO_SEQ}
+        FROM (SELECT DISTINCT channel FROM events INDEXED BY events_by_age WHERE received_minute < ?) AS velho
+        JOIN events AS ultimo
+          ON ultimo.channel = velho.channel
+         AND ultimo.seq = (SELECT MAX(seq) FROM events AS m WHERE m.channel = velho.channel)
+       WHERE ultimo.received_minute < ?
+    ON CONFLICT (channel) DO UPDATE SET seq_floor = MAX(COALESCE(seq_floor, 0), excluded.seq_floor)`
 
   // ------------------------------------------------------------- web push
 
@@ -1128,16 +1203,39 @@ export class Store {
 
   subscribe(channel: string, address: string): void {
     this.#db.prepare("INSERT OR IGNORE INTO subscriptions (channel, address) VALUES (?, ?)").run(channel, address)
+    this.#db.prepare("DELETE FROM canal_saidas WHERE channel = ? AND address = ?").run(channel, address)
   }
 
   unsubscribe(channel: string, address: string): void {
     this.#db.prepare("DELETE FROM subscriptions WHERE channel = ? AND address = ?").run(channel, address)
+    // The account left (or one of its devices was dropped): see `convidadosPorEntrar`.
+    this.#db.prepare("INSERT OR IGNORE INTO canal_saidas (channel, address) VALUES (?, ?)").run(channel, address)
   }
 
   localSubscribers(channel: string): string[] {
     const rows = this.#db.prepare("SELECT address FROM subscriptions WHERE channel = ?").all(channel) as {
       address: string
     }[]
+    return rows.map((row) => row.address)
+  }
+
+  /**
+   * Accounts with a Welcome in this channel since `desdeMinuto` that are not subscribed.
+   *
+   * An account added while offline has a leaf in the tree and no subscription until
+   * its device opens the Welcome. The roster (`channel.members`) names it, so no
+   * member reads it as gone (P7). The `recipient` of a Welcome is the account. One
+   * that subscribed and then left is not invited: `canal_saidas` has it.
+   */
+  convidadosPorEntrar(channel: string, desdeMinuto: number): string[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT DISTINCT e.recipient AS address FROM events e
+         WHERE e.channel = ? AND e.kind = 'welcome' AND e.recipient IS NOT NULL AND e.received_minute >= ?
+           AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.channel = e.channel AND s.address = e.recipient)
+           AND NOT EXISTS (SELECT 1 FROM canal_saidas x WHERE x.channel = e.channel AND x.address = e.recipient)`,
+      )
+      .all(channel, desdeMinuto) as { address: string }[]
     return rows.map((row) => row.address)
   }
 
@@ -1285,7 +1383,13 @@ export class Store {
     return row !== undefined
   }
 
-  claimChannel(channel: string, owner: string): string {
+  /**
+   * `comunidade`: the claim is for a channel (community) the person asked to
+   * create (1.3.26, `channel.claim` with `comunidade`). A new claim records it
+   * (1 or 0). An existing claim of the same owner that is still unused takes
+   * the 1 too: a client may subscribe first and say it after.
+   */
+  claimChannel(channel: string, owner: string, comunidade = false): string {
     return this.#transaction(() => {
       const now = currentSecond()
       const row = this.#db.prepare("SELECT owner, at_second FROM channel_claims WHERE channel = ?").get(channel) as
@@ -1293,16 +1397,93 @@ export class Store {
         | undefined
 
       const caducou = now - (row?.at_second ?? now) >= Store.CLAIM_GRACE_SECONDS && this.channelNeverUsed(channel)
-      if (row && !caducou) return row.owner
+      if (row && !caducou) {
+        if (comunidade && row.owner === owner && this.channelNeverUsed(channel)) {
+          this.#db.prepare("UPDATE channel_claims SET comunidade = 1 WHERE channel = ?").run(channel)
+        }
+        return row.owner
+      }
 
       this.#db
         .prepare(
-          `INSERT INTO channel_claims (channel, owner, at_second) VALUES (?, ?, ?)
-           ON CONFLICT (channel) DO UPDATE SET owner = excluded.owner, at_second = excluded.at_second`,
+          `INSERT INTO channel_claims (channel, owner, at_second, comunidade) VALUES (?, ?, ?, ?)
+           ON CONFLICT (channel) DO UPDATE SET owner = excluded.owner, at_second = excluded.at_second, comunidade = excluded.comunidade`,
         )
-        .run(channel, owner, now)
+        .run(channel, owner, now, comunidade ? 1 : 0)
       return owner
     })
+  }
+
+  /**
+   * The channels this account created that still exist (1.3.26):
+   * claims marked as a community whose channel has a subscriber, or that are
+   * still being created (claimed in the grace period, never used). A channel
+   * all members left has no subscriber and frees its place; a claim from before
+   * the column (NULL) never counts. See `migrarChannelClaims`.
+   */
+  comunidadesCriadasPor(owner: string): number {
+    const row = this.#db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM channel_claims c
+           WHERE c.owner = ? AND c.comunidade = 1
+             AND (EXISTS (SELECT 1 FROM subscriptions s WHERE s.channel = c.channel)
+                  OR (c.at_second > ?
+                      AND NOT EXISTS (SELECT 1 FROM events e WHERE e.channel = c.channel)
+                      AND NOT EXISTS (SELECT 1 FROM channel_activity a WHERE a.channel = c.channel)))`,
+      )
+      .get(owner, currentSecond() - Store.CLAIM_GRACE_SECONDS) as { n: number }
+    return Number(row.n)
+  }
+
+  /**
+   * Whether the claim of this channel says it is a community: `true`, `false`
+   * (said it is not, or an app that did not say), or `null` (no claim, or one
+   * from before the column).
+   */
+  claimComunidade(channel: string): boolean | null {
+    const row = this.#db.prepare("SELECT comunidade FROM channel_claims WHERE channel = ?").get(channel) as
+      | { comunidade: number | null }
+      | undefined
+    if (row === undefined || row.comunidade === null) return null
+    return row.comunidade === 1
+  }
+
+  /**
+   * The rooms this account created that still exist (1.3.26): rows of
+   * `rooms_created` whose channel still has a subscriber. A deleted room
+   * (`room.release`) has no row; a channel all members left takes its rooms
+   * with it.
+   */
+  roomsCreatedBy(owner: string): number {
+    const row = this.#db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM rooms_created r
+           WHERE r.owner = ? AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.channel = r.channel)`,
+      )
+      .get(owner) as { n: number }
+    return Number(row.n)
+  }
+
+  /** Whether this room is already counted (for anyone). */
+  roomIsCounted(channel: string, room: string): boolean {
+    return this.#db.prepare("SELECT 1 AS ok FROM rooms_created WHERE channel = ? AND room = ?").get(channel, room) !== undefined
+  }
+
+  /** Count a new room for its creator. A room already counted keeps its first creator. */
+  countRoom(channel: string, room: string, owner: string): void {
+    this.#db
+      .prepare("INSERT INTO rooms_created (channel, room, owner, at_second) VALUES (?, ?, ?, ?) ON CONFLICT (channel, room) DO NOTHING")
+      .run(channel, room, owner, currentSecond())
+  }
+
+  /** A room was deleted: its place is free. */
+  releaseRoom(channel: string, room: string): void {
+    this.#db.prepare("DELETE FROM rooms_created WHERE channel = ? AND room = ?").run(channel, room)
+  }
+
+  /** Count this channel as a community of its founder from now on. See `invite.create` in the gateway. */
+  marcarComunidade(channel: string): void {
+    this.#db.prepare("UPDATE channel_claims SET comunidade = 1 WHERE channel = ?").run(channel)
   }
 
   /**
@@ -1591,6 +1772,34 @@ export class Store {
       | undefined
     if (!row || this.#conviteQueJaNaoVale(row)) return undefined
     return row.selo ?? undefined
+  }
+
+  /**
+   * The channel of a community invite that may let a new account past the
+   * network limit (1.3.26), or `undefined`.
+   *
+   * Real: the invite exists, has the key of the code proof (not a 0.9.x invite),
+   * and the proof checks. Still valid: not expired, uses left. And a real
+   * community: at least one account subscribed to the channel is older than
+   * `minutoAntigo` (72 hours). That last rule is because `invite.create` is
+   * open to any account for a channel it may open, so a fresh account could
+   * mint an unlimited invite into a fresh address of its own and use it for
+   * every next account. Nothing is spent: `invite.redeem` spends the use later.
+   */
+  canalDoConviteParaRegisto(codeHash: string, provaValida: (codeKey: string) => boolean, minutoAntigo: number): string | undefined {
+    const row = this.#db
+      .prepare("SELECT code_hash, channel, expires_at, max_uses, uses, code_key FROM invites WHERE code_hash = ?")
+      .get(codeHash) as
+      | { code_hash: string; channel: string; expires_at: number | null; max_uses: number | null; uses: number; code_key: string | null }
+      | undefined
+    if (!row || row.code_key === null || !provaValida(row.code_key)) return undefined
+    if (this.#conviteQueJaNaoVale(row)) return undefined
+    const antigo = this.#db
+      .prepare(
+        "SELECT 1 FROM subscriptions s JOIN accounts a ON a.address = s.address WHERE s.channel = ? AND a.created_minute <= ? LIMIT 1",
+      )
+      .get(row.channel, minutoAntigo)
+    return antigo ? row.channel : undefined
   }
 
   /** Deadline and uses, like in `redeemInvite`. An expired invite is deleted when found. */

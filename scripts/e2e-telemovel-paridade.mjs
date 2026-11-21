@@ -39,7 +39,9 @@ import { moradaDeSala } from "@enclave/protocol"
 import { chromium, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { irParaEmparelhar } from "./fase7-comum.mjs"
+import { appAberta, escolherComunidade, irParaDirectas, textoNoEcra } from "./separadores.mjs"
 import { levantarServidor } from "./frente-lenta.mjs"
+import { colarCodigo, confirmarEAbrir } from "./juntar-aparelho.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const argumento = (nome, omissao) => {
@@ -137,21 +139,21 @@ async function cofreDe(page) {
 }
 const corposNoCofre = (cofre, canal) => [...(cofre?.history?.[canal] ?? [])].map((e) => e.payload?.body).filter(Boolean)
 
-/** Open a channel by its name on the phone (drawer), and say whether `texto` shows. */
+/**
+ * Open a channel by its name on the phone (its face on the rail of
+ * communities, then its line: the conversation is pushed full screen), and
+ * say whether `texto` shows in it.
+ */
 async function abrirEVer(page, rotulo, texto) {
-  const gaveta = page.getByRole("button", { name: "Abrir o painel lateral" })
-  if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) !== "true") await gaveta.click({ timeout: 2_000 }).catch(() => {})
-  await page.locator(".channel-name", { hasText: rotulo }).first().click({ timeout: 2_000 }).catch(() => {})
-  if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click({ timeout: 2_000 }).catch(() => {})
-  return (await page.locator("body").innerText()).includes(texto)
+  await escolherComunidade(page, rotulo, { timeout: 2_000 }).catch(() => {})
+  await page.locator(".sidebar .channel-name", { hasText: rotulo }).first().click({ timeout: 2_000 }).catch(() => {})
+  return (await textoNoEcra(page)).includes(texto)
 }
+/** Open the direct chat from the Messages tab, and say whether `texto` shows in it. */
 async function abrirDirectaEVer(page, texto) {
-  await page.getByRole("button", { name: "Amigos", exact: true }).first().click({ timeout: 2_000 }).catch(() => {})
-  await page.evaluate(() => document.querySelector(".direct-open")?.click())
-  // At 390 px the conversation list is a drawer: close it, or it covers the input bar.
-  const gaveta = page.getByRole("button", { name: "Abrir o painel lateral" })
-  if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click({ timeout: 2_000 }).catch(() => {})
-  return (await page.locator("body").innerText()).includes(texto)
+  await irParaDirectas(page).catch(() => {})
+  await page.locator(".direct-open").first().click({ timeout: 2_000 }).catch(() => {})
+  return (await textoNoEcra(page)).includes(texto)
 }
 async function dizer(page, frase) {
   const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]')
@@ -230,8 +232,8 @@ try {
   // 2. Pairing, and the seconds until the phone shows the history.
   // ---------------------------------------------------------------------------
   await pc.getByRole("button", { name: "Configurações", exact: true }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await pc.getByRole("button", { name: "Acrescentar aparelho" }).click()
+  await pc.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await pc.getByRole("button", { name: "Juntar um aparelho" }).click()
   const folha = pc.locator(".sheet").first()
   await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
@@ -241,17 +243,7 @@ try {
   tel.on("pageerror", (e) => erros.push(`telemóvel: ${e.message}`))
   await tel.goto(APP, { waitUntil: "domcontentloaded" })
   await irParaEmparelhar(tel)
-  await tel.getByLabel("Ou cola o link").fill(link)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 10_000 })
-  const frases = tel.locator('.gate-card input[type="password"]')
-  await frases.nth(0).fill(FRASE)
-  await frases.nth(1).fill(FRASE)
-  const caixa = tel.locator('input[name="memorizar"]')
-  if (await caixa.count()) await caixa.setChecked(true)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
+  await colarCodigo(tel, folha, link)
   /*
     "Deixa este aparelho ligado" (16/11/2026): on the computer, in the sheet where
     the pairing ends, while the history goes to the phone. Watched from the yes to
@@ -266,13 +258,10 @@ try {
       await wait(100)
     }
   })()
-  await tel.getByRole("button", { name: "São as mesmas" }).click()
-  await folha.getByRole("button", { name: "São as mesmas" }).click()
+  await confirmarEAbrir(tel, folha, FRASE)
   const tPar = Date.now()
-  await tel.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 })
   // The sheet stays open on the computer: that is where "Keep this device on" shows.
-  await tel.getByRole("button", { name: "Entrar", exact: true }).click()
-  await tel.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+  await appAberta(tel, 90_000)
   const msDentro = Date.now() - tPar
 
   const msCanal = await ate(() => abrirEVer(tel, "canal 1", "1 antes no 1"), 600_000, 1_000)
@@ -323,7 +312,7 @@ try {
   if (MOTOR === "chromium") await (await ctxTel.newCDPSession(tel)).send("Emulation.setCPUThrottlingRate", { rate: 4 })
   const tAbre = Date.now()
   await tel.goto(APP, { waitUntil: "commit" })
-  await tel.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 120_000 })
+  await appAberta(tel, 120_000)
   const msApp = Date.now() - tAbre
   const msVelho = await ate(() => abrirEVer(tel, "canal 1", "1 antes no 1"), 60_000, 500)
   check("sem o computador, o telemóvel abre e mostra o histórico antigo", msVelho >= 0, `app em ${msApp} ms, histórico em ${msApp + Math.max(0, msVelho)} ms`)
@@ -344,7 +333,7 @@ try {
   // 5. Reload: still the same.
   // ---------------------------------------------------------------------------
   await tel.reload({ waitUntil: "commit" })
-  await tel.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 120_000 })
+  await appAberta(tel, 120_000)
   check("depois de recarregar, o histórico antigo continua", (await ate(() => abrirEVer(tel, "canal 1", "1 antes no 1"), 60_000, 500)) >= 0)
   check("e o que o telemóvel enviou também", (await ate(() => abrirEVer(tel, "canal 1", doTel), 60_000, 500)) >= 0)
   check("e a directa com a resposta do Bruno", (await ate(() => abrirDirectaEVer(tel, resposta), 60_000, 500)) >= 0)

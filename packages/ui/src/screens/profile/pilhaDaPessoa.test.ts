@@ -178,3 +178,86 @@ describe("a pilha das páginas de pessoa", () => {
     expect(vistas.at(-1)).toBeNull()
   })
 })
+
+/**
+ * The phone levels (option B, 20/11/2026): a conversation pushed over its
+ * list, and the members over the conversation. They live in the SAME history
+ * as the person pages, BELOW them, because two mirrors of one history fight
+ * over each `popstate`. The shell says how deep it is (`definirBase`); the
+ * browser back button tells it back (`aoMudarBase`).
+ */
+describe("os níveis do telemóvel, por baixo das páginas de pessoa", () => {
+  function montarComBase(): ReturnType<typeof historicoFalso> & {
+    pilha: ReturnType<typeof criarPilhaDaPessoa>
+    bases: number[]
+  } {
+    const falso = historicoFalso()
+    const bases: number[] = []
+    const pilha = criarPilhaDaPessoa({
+      historico: falso.historico,
+      janela: falso.janela as unknown as Window,
+      aoMudar: () => {},
+      aoMudarBase: (base) => bases.push(base),
+      sessao: "s1",
+    })
+    pilha.ligar()
+    return { ...falso, pilha, bases }
+  }
+
+  it("each level the shell adds is one history entry, and the back button takes one away", async () => {
+    const { pilha, entradas, indice, botao, bases } = montarComBase()
+    pilha.definirBase(1)
+    pilha.definirBase(2)
+    expect(entradas).toHaveLength(3)
+    expect(indice()).toBe(2)
+    await botao(-1)
+    expect(bases).toEqual([1])
+    expect(pilha.base()).toBe(1)
+    await botao(-1)
+    expect(bases).toEqual([1, 0])
+  })
+
+  it("the back arrow in the app lowers the level, and the history follows without telling the shell", async () => {
+    const { pilha, indice, assentar, bases } = montarComBase()
+    pilha.definirBase(1)
+    pilha.definirBase(0)
+    await assentar()
+    expect(indice()).toBe(0)
+    // The shell asked for it: it is not told again.
+    expect(bases).toEqual([])
+  })
+
+  it("a person page opens above the conversation, and back closes the page first", async () => {
+    const { pilha, botao, bases } = montarComBase()
+    pilha.definirBase(1)
+    pilha.abrir(ana)
+    await botao(-1)
+    expect(pilha.actual()).toBeNull()
+    expect(bases).toEqual([])
+    await botao(-1)
+    expect(bases).toEqual([0])
+  })
+
+  it("a new conversation opened while a page closes waits for that trip", async () => {
+    const { pilha, indice, entradas, assentar, botao, bases } = montarComBase()
+    pilha.abrir(ana)
+    // "Message" on the page: the page closes, a conversation opens.
+    pilha.fechar()
+    pilha.definirBase(1)
+    await assentar()
+    expect(indice()).toBe(1)
+    expect(entradas).toHaveLength(2)
+    expect(bases).toEqual([])
+    await botao(-1)
+    expect(bases).toEqual([0])
+  })
+
+  it("raising the level with a page open drops the page: it belonged to the old place", async () => {
+    const { pilha, indice, assentar } = montarComBase()
+    pilha.abrir(ana)
+    pilha.definirBase(1)
+    expect(pilha.actual()).toBeNull()
+    await assentar()
+    expect(indice()).toBe(1)
+  })
+})

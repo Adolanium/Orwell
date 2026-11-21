@@ -719,3 +719,29 @@ describe("MemberPanel — lista em janela", () => {
     expect(soma()).toBe(400 * ALTURA_DA_LINHA)
   })
 })
+
+/**
+ * P7 (1.3.26): accounts that still hold the keys but that the server says are gone.
+ *
+ * They leave the list and the count, so the count matches reality. They are not
+ * hidden: one line says how many can still read, because this panel answers
+ * "who can read this", and a server that lies about its roster must not be able
+ * to take a reader out of that answer in silence.
+ */
+describe("MemberPanel — contas afastadas", () => {
+  it("diz quantas contas ainda têm as chaves, fora da contagem", () => {
+    render(panel({ members: ["@ana:localhost:8448", "@bruno:localhost:8448"], afastados: 3 }))
+    expect(screen.getByText(strings.members.count(2))).toBeTruthy()
+    expect(screen.getByText(strings.members.afastados(3))).toBeTruthy()
+  })
+
+  it("sem contas afastadas, não há linha", () => {
+    render(panel({ members: ["@ana:localhost:8448"] }))
+    expect(document.querySelector(".members-afastados")).toBeNull()
+  })
+
+  it("em inglês primeiro, no singular e no plural", () => {
+    expect(en.members!.afastados!(1)).toBe("1 more account still has the keys of this channel. The server says it left.")
+    expect(en.members!.afastados!(2)).toBe("2 more accounts still have the keys of this channel. The server says they left.")
+  })
+})

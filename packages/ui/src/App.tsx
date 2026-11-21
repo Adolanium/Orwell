@@ -1,7 +1,10 @@
-import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { createContext, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { copiarTexto } from "./lib/copiar.js"
 import {
+  CHAVES_DA_RECUSA_DO_SISTEMA,
   dobrarReaccoes,
+  formatInviteLink,
+  HISTORY_PAGE_LINES,
   marcarArranque,
   nomeVisivel,
   parseInviteLink,
@@ -9,6 +12,7 @@ import {
   sameHomeserver,
   TECTOS_DO_ESTADO,
   votosAGuardar,
+  type DispositivoRecusado,
   type FichaDeReaccao,
   type Participant,
   type StoredChatMessage,
@@ -34,10 +38,13 @@ import { AvisosDoCarril, classeDoBotaoDoCarril, descricaoDoCarril, GlifoSemLigac
 import { useAmizade, estadoDaAmizade } from "./hooks/useAmizade.js"
 import { useLacosDeAmizade } from "./hooks/useLacosDeAmizade.js"
 import { useSucessoes } from "./hooks/useSucessoes.js"
+import { useCriarCanais } from "./hooks/useCriarCanais.js"
+import { useRoomQuota } from "./hooks/useRoomQuota.js"
 import { chaveDaOferta, escondidasPorSucessao, ofertasDeSucessao, type OfertaDeSucessao } from "./lib/sucessoes.js"
 import { useBloqueioAutomatico } from "./hooks/useBloqueioAutomatico.js"
 import { useChamadaEmSegundoPlano } from "./hooks/useChamadaEmSegundoPlano.js"
 import { useCotoveladaPorVer } from "./hooks/useCotoveladaPorVer.js"
+import { useNudgeShake } from "./hooks/useNudgeShake.js"
 import { ehPwaDoIos } from "./lib/plataforma.js"
 import { useMarcaDaVolta } from "./hooks/useMarcaDaVolta.js"
 import { useEstavel } from "./hooks/useEstavel.js"
@@ -136,10 +143,13 @@ import { LigacaoContext, type LigacaoDaFaixa } from "./components/ConnectionBann
 import { ToastProvider, useDispensarToast, useToast } from "./components/Toast.js"
 import { ConfirmarProvider, useConfirmar } from "./hooks/useConfirmar.js"
 import { Splash } from "./screens/gate/Splash.js"
+import { usePostLoginHold } from "./hooks/usePostLoginHold.js"
 import { GateError } from "./screens/gate/GateError.js"
 import { Setup } from "./screens/gate/Setup.js"
 import { Emparelhar } from "./screens/gate/Emparelhar.js"
-import { Unlock } from "./screens/gate/Unlock.js"
+import { AparelhoRemovido, Unlock } from "./screens/gate/Unlock.js"
+import { entrarNumaContaNova } from "./screens/gate/outraEntrada.js"
+import type { TelaDoSetup } from "./screens/gate/Setup.js"
 import { pagina } from "./screens/gate/MudarDeConta.js"
 import { ContaSuspensa } from "./screens/gate/ContaSuspensa.js"
 import { SaiuDeBeta } from "./screens/gate/SaiuDeBeta.js"
@@ -147,10 +157,11 @@ import { CallDock } from "./screens/call/CallDock.js"
 import { useEcraLargo } from "./hooks/useEcraLargo.js"
 import { ChannelSidebar, type PresenteNaVoz } from "./screens/chat/ChannelSidebar.js"
 import { ChatScreen } from "./screens/chat/ChatScreen.js"
-import { PrimeirosPassos } from "./screens/chat/PrimeirosPassos.js"
-import { marcarPrimeirosPassos, usePrimeirosPassos } from "./hooks/usePrimeirosPassos.js"
-import { AvisoDoFicheiroDaConta } from "./components/FicheiroDaConta.js"
-import { ficheiroPorTratar, marcarFicheiroTratado } from "./lib/ficheiroDaConta.js"
+import { FolhaDoFicheiroDaConta } from "./components/FicheiroDaConta.js"
+import { FaixaDoFicheiroContext } from "./components/FaixaDoFicheiro.js"
+import { activeAccountId, forgetAccountName, rememberAccountName } from "./lib/accountNames.js"
+import { CartaoDeAparelhoNovo } from "./components/CartaoDeAparelhoNovo.js"
+import { APARELHOS_MUDARAM, FICHEIRO_GUARDADO, ficheiroPorTratar, marcarFicheiroTratado } from "./lib/ficheiroDaConta.js"
 import { Social } from "./screens/social/Social.js"
 import { PeopleScreen } from "./screens/people/PeopleScreen.js"
 import { PeopleDestination } from "./screens/people/PeopleDestination.js"
@@ -160,6 +171,13 @@ import { itensDaConversa } from "./screens/people/menuDaConversa.js"
 import { PersonProfile } from "./screens/profile/PersonProfile.js"
 import { itensDaPessoa } from "./screens/profile/menuDaPessoa.js"
 import { idDaPublicacao, usePilhaDaPessoa } from "./screens/profile/pilhaDaPessoa.js"
+import { useTelemovel } from "./hooks/useTelemovel.js"
+import { lerRolagens, reporRolagens } from "./lib/rolagens.js"
+import { BarraDoTelemovel } from "./screens/telemovel/BarraDoTelemovel.js"
+import { BordaDeVoltar } from "./screens/telemovel/BordaDeVoltar.js"
+import { CarrilDeComunidades } from "./screens/telemovel/CarrilDeComunidades.js"
+import { MenuDoTu } from "./screens/telemovel/MenuDoTu.js"
+import { Separadores, type Separador } from "./screens/telemovel/Separadores.js"
 import { itensDoMicrofone, itensDoSom } from "./screens/profile/menuDeAudio.js"
 import { ProfileScreen, type CanalFundado } from "./screens/profile/ProfileScreen.js"
 import { VerifyModal } from "./screens/chat/VerifyModal.js"
@@ -206,7 +224,7 @@ import {
   SALA_VAZIA_MS,
   windowIsFocused,
 } from "./lib/sounds.js"
-import { motor } from "./sons/motor.js"
+import { motor, TOQUE_MAXIMO_MS } from "./sons/motor.js"
 import {
   comecaAChamar,
   criarVigiaDaQueda,
@@ -214,6 +232,7 @@ import {
   ERRO_DA_CHAMADA_QUE_CAIU,
   FIM_DA_TRANSMISSAO_MS,
   haOutraPessoa,
+  incomingRingStops,
   paraDeChamar,
 } from "./sons/chamada.js"
 import { caladaPeloSilencio, daPropriaConta, salaDaMensagem, somDaMensagem, somDaNotificacao, somDoCanal, somDoSilencio, tocaOToque } from "./sons/acontecimentos.js"
@@ -225,7 +244,7 @@ import { Prompt } from "./screens/overlays/Prompt.js"
 import { ExpelModal } from "./screens/chat/ExpelModal.js"
 import { DenunciarSheet } from "./screens/chat/DenunciarSheet.js"
 import { RoomPicker } from "./screens/overlays/RoomPicker.js"
-import { itensDaCategoria, itensDaPessoaEmVoz, itensDaSala, itensDoCanal } from "./screens/chat/menuItems.js"
+import { itemDeMover, itensDaCategoria, itensDaPessoaEmVoz, itensDaSala, itensDoCanal } from "./screens/chat/menuItems.js"
 import { mudarCategoria, osQueFicaramParaTras } from "./screens/chat/categorias.js"
 import { canalTemArvore } from "./screens/chat/arvoreDeSalas.js"
 import { largarAntesDe, largarNaCategoria } from "./screens/chat/reordenar.js"
@@ -256,14 +275,24 @@ export const INTERVALO_DO_PULSO_MS = 25_000
 /** The socket silence below which the pulse does not even ask (1.3.7). */
 export const SILENCIO_DO_PULSO_MS = 60_000
 
-/** How much of a channel's stored history is seeded into React state. */
-const MEMORY_PER_CHANNEL = 200
+/** From the key of a refusal by macOS back to its device, for the button in the alert. */
+const DISPOSITIVO_DA_RECUSA: Readonly<Record<string, DispositivoRecusado>> = Object.fromEntries(
+  Object.entries(CHAVES_DA_RECUSA_DO_SISTEMA).map(([dispositivo, chave]) => [chave, dispositivo as DispositivoRecusado]),
+)
+
+/**
+ * How much of a channel's stored history is seeded into React state: LINES of the
+ * conversation, with the state between them (history-last-100, 1.3.26): the same
+ * number the sync on joining brings (`HISTORY_PAGE_LINES`). It was 200 entries, and in
+ * a channel with a busy polls room 200 entries could be all votes.
+ */
+const MEMORY_PER_CHANNEL = HISTORY_PAGE_LINES
 /** Live appends trim beyond this, matching the vault's own per-channel cap.
  * Higher than the seed so paging older messages in is not undone by the next
  * arrival while someone is reading them. */
 const MEMORY_HARD_CAP = 400
-/** One click of "Load older". */
-const HISTORY_PAGE = 100
+/** One click of "Load older", in lines (history-last-100: the same page the members serve). */
+const HISTORY_PAGE = HISTORY_PAGE_LINES
 /** How long the message we jumped to stays highlighted. See `.message.destacada`. */
 const DESTAQUE_MS = 2600
 /**
@@ -655,6 +684,16 @@ export function App({
     setConviteCurtoAEspera(null)
     setConviteInvalido(false)
   }, [startupInvite])
+  /*
+    The invite waiting is also what lets a NEW account past the limit of new
+    accounts per network (1.3.26, Erro 234). The session keeps the link in
+    memory, and shows only a proof of it, at the first login of an account it
+    is registering. An existing account never sends it.
+  */
+  useEffect(() => {
+    const link = conviteAEspera ? formatInviteLink(conviteAEspera.server, conviteAEspera.channel, conviteAEspera.code) : conviteCurtoAEspera
+    bridge.session.definirConviteDeComunidade?.(link)?.catch(() => {})
+  }, [bridge, conviteAEspera, conviteCurtoAEspera])
   /** The resolved short link becomes an invite like any other, and follows their path. */
   const curtaResolvida = useCallback((convite: ConviteLido) => {
     setConviteCurtoAEspera(null)
@@ -709,7 +748,11 @@ export function App({
       vault: {
         ...bridge.vault,
         destroy: async () => {
+          // Read before: after the destroy another account may be the active one.
+          const accountId = await activeAccountId(bridge)
           const feito = await bridge.vault.destroy()
+          // The account left this device: its stored display name goes too. See `lib/accountNames.ts`.
+          forgetAccountName(accountId)
           // The reads and browser archive belonged to the account that ended. See `migrar`.
           esquecerEstadoDoBrowser()
           resolverConvite()
@@ -790,6 +833,8 @@ function Shell({
 }): React.JSX.Element {
   const bridge = useBridge()
   const [stage, setStage] = useState<Stage>("loading")
+  /** How many times the gate entered: each entry holds the opening a little. See `usePostLoginHold`. */
+  const [entrada, setEntrada] = useState(0)
   /**
    * This device was revoked from the account on another device (`device-revoked`).
    * The session already disconnected; the interface locks the vault and goes back
@@ -900,9 +945,43 @@ function Shell({
    * The person pages open, bottom to top, mirroring the browser history. See
    * `usePilhaDaPessoa`.
    */
-  const pilhaDaPessoa = usePilhaDaPessoa()
+  /**
+   * The browser back button took phone levels away (option B, 20/11/2026).
+   * A ref, because the stack is made once and the levels are decided below.
+   */
+  const voltarAteRef = useRef<(base: number) => void>(() => {})
+  const pilhaDaPessoa = usePilhaDaPessoa((base) => voltarAteRef.current(base))
   const fecharPessoa = pilhaDaPessoa.fechar
   const [view, mudarDeVista] = useState<View>("chat")
+  /**
+   * The phone layout (option B, 20/11/2026), and the state it adds.
+   *
+   * Four tabs at the bottom. Each tab is a list, and a conversation (or a
+   * screen of "Tu") is pushed over it. These are the levels the desktop does
+   * not have; `view`, `canal` and `directa` stay what they always were, and
+   * the tab is read from them (see `separador` below).
+   *
+   * Only `useTelemovel()` turns this on: at 841 px and up nothing here is read.
+   */
+  const telemovel = useTelemovel()
+  /** The last tab chosen by hand. Decides Messages or Friends when no conversation is open. */
+  const [separadorEscolhido, setSeparadorEscolhido] = useState<Separador>("comunidades")
+  /** Communities: the conversation of the open channel is pushed over the list. */
+  const [conversaNoTelemovel, setConversaNoTelemovel] = useState(false)
+  /** The conversation whose members are pushed over it. A key, so a new conversation starts closed. */
+  const [membrosDe, setMembrosDe] = useState<string | null>(null)
+  /** "Tu": the screen pushed over its list (Profile, Feed or Settings), and whether it is open. */
+  const [tuAberto, setTuAberto] = useState(false)
+  /** The screen "Tu" shows when its tab is chosen: the last one opened. */
+  const [ecraDoTu, setEcraDoTu] = useState<"perfil" | "social" | "config">("perfil")
+  /** Messages' open direct conversation, kept while Friends is on screen. */
+  const directaGuardada = useRef<string | null>(null)
+  /** Each tab's scroll positions, kept while another tab is on screen. */
+  const rolagens = useRef(new Map<Separador, Map<string, number>>())
+  const guardarRolagem = (deste: Separador): void => {
+    const raiz = document.querySelector(".app.telemovel")
+    if (raiz) rolagens.current.set(deste, lerRolagens(raiz))
+  }
   /**
    * Switching destination closes the person page.
    *
@@ -912,9 +991,20 @@ function Shell({
    * page on top of the new destination.
    */
   const setView = useCallback(
-    (vista: View) => {
+    (vista: View, origem?: "separador") => {
       fecharPessoa()
       mudarDeVista(vista)
+      /*
+        On the phone, a move to a destination that did not come from a tab is
+        a move to something IN it: a notification, a link, "Open channel" on a
+        page, a new channel. It pushes the conversation (or the screen of
+        "Tu") over the list. A tab shows the list. On a computer these
+        three states are never read.
+      */
+      if (origem === "separador") return
+      if (vista === "chat") setConversaNoTelemovel(true)
+      else if (vista === "pessoas") setSeparadorEscolhido("amigos")
+      else setTuAberto(true)
     },
     [fecharPessoa],
   )
@@ -929,6 +1019,81 @@ function Shell({
    * at each destination, instead of one blindly shared by both.
    */
   const active = view === "pessoas" ? directa : canal
+  /**
+   * The phone tab on screen, read from the destination: Communities is the
+   * channels, "Tu" is Profile, Feed and Settings. In Friends, an open direct
+   * conversation is Messages; with none, the last of the two chosen by hand.
+   */
+  const separador: Separador =
+    view === "chat"
+      ? "comunidades"
+      : view === "pessoas"
+        ? directa !== null || separadorEscolhido === "mensagens"
+          ? "mensagens"
+          : "amigos"
+        : "tu"
+  /** A conversation is pushed full screen over its list (phone only). */
+  const naConversa =
+    telemovel &&
+    ((separador === "comunidades" && conversaNoTelemovel && canal !== null) ||
+      (separador === "mensagens" && directa !== null))
+  const membrosNoTelemovel = naConversa && active !== null && membrosDe === active
+  /**
+   * How many screens sit over the list: 1 a conversation (or a screen of
+   * "Tu"), 2 the members over a conversation. Each one is a history entry,
+   * so the browser back button and the system back gesture go back one.
+   */
+  const profundidade = !telemovel
+    ? 0
+    : naConversa
+      ? membrosNoTelemovel
+        ? 2
+        : 1
+      : separador === "tu" && tuAberto
+        ? 1
+        : 0
+  /**
+   * The conversation on screen, for what reading marks as read. On the phone
+   * the list of a channel is not its conversation: the unread counts stay
+   * until the conversation is opened. On a computer this is `active`.
+   */
+  const activoNoEcra = telemovel && !naConversa ? null : active
+  /* The history follows the phone levels: one entry per pushed screen. See `definirBase`. */
+  const definirBase = pilhaDaPessoa.definirBase
+  useEffect(() => {
+    definirBase(profundidade)
+  }, [definirBase, profundidade])
+  /**
+   * Back on the phone, to `ate` screens over the list (option B, 20/11/2026).
+   *
+   * The same function for the back arrow, the swipe from the left edge, a tap
+   * on the open tab, and the browser back button (`voltarAteRef`, called by
+   * `usePilhaDaPessoa`). The history follows by itself: see the effect that
+   * calls `definirBase`.
+   */
+  const voltarAte = (ate: number): void => {
+    if (ate < 2) setMembrosDe(null)
+    if (ate >= 1) return
+    if (separador === "comunidades") setConversaNoTelemovel(false)
+    else if (separador === "mensagens") {
+      setDirecta(null)
+      directaGuardada.current = null
+    } else if (separador === "tu") setTuAberto(false)
+  }
+  voltarAteRef.current = voltarAte
+  const voltarNoTelemovel = (): void => voltarAte(profundidade - 1)
+
+  /* "Tu" opens on the last of its screens. */
+  useEffect(() => {
+    if (view === "perfil" || view === "social" || view === "config") setEcraDoTu(view)
+  }, [view])
+  /* A tab that comes back has its lists where they were. */
+  useLayoutEffect(() => {
+    if (!telemovel) return
+    const raiz = document.querySelector(".app.telemovel")
+    const lidas = rolagens.current.get(separador)
+    if (raiz && lidas) reporRolagens(raiz, lidas)
+  }, [telemovel, separador])
   const [profile, setProfile] = useState<Profile>({ displayName: "", donations: [] })
   const [editingProfile, setEditingProfile] = useState(false)
   const [connection, setConnection] = useState<ConnectionState>("offline")
@@ -1118,6 +1283,8 @@ function Shell({
   } | null>(null)
   const [members, setMembers] = useState<string[]>([])
   const [membersState, setMembersState] = useState<"loading" | "error" | "ready">("loading")
+  /** Accounts in the open channel with keys that the server says are gone (P7). */
+  const [membrosAfastados, setMembrosAfastados] = useState(0)
   /** Channel → people currently in a call there. */
   const [ringing, setRinging] = useState<Map<string, Map<string, number>>>(new Map())
   /** The social composer's unpublished post. Held here, like the chat drafts,
@@ -1151,8 +1318,6 @@ function Shell({
    * too early is a delay, showing it too late would be a lie.
    */
   const [commonRoom, setCommonRoom] = useState<string | null>(null)
-  /** The server already said which room is common, or that it has none. See `usePrimeirosPassos`. */
-  const [salaComumLida, setSalaComumLida] = useState(false)
   /** Who is seated in MY feed, read from its own key tree. The other half of
    * the circle: these people read me, whether or not I read them yet. */
   const [myFeedMembers, setMyFeedMembers] = useState<string[]>([])
@@ -1185,6 +1350,9 @@ function Shell({
     idsNoSino.current.delete(primeiro)
   }
   const [notifAt, setNotifAt] = useState<{ x: number; y: number } | null>(null)
+  /** The account's devices, read when the bell opens: "Remove" on a new-device entry only while it is here (1.3.26). */
+  const [aparelhosNaConta, setAparelhosNaConta] = useState<ReadonlySet<string> | undefined>(undefined)
+  const [aparelhoARemover, setAparelhoARemover] = useState<string | null>(null)
   /** Where the activity menu is anchored, when open. */
   const [activityMenu, setActivityMenu] = useState<{ x: number; y: number } | null>(null)
   /**
@@ -1591,6 +1759,17 @@ function Shell({
    * the bell.
    */
   const { latencia, comecar: comecarLatencia, parar: pararLatencia } = useLatencia(bridge)
+  /*
+    The phone has no hover, and the round trip time was measured only while the
+    mouse was over the account card. On the phone it is measured while the list
+    of "Tu" (where the card lives) is on screen.
+  */
+  const cartaoNoEcra = telemovel && separador === "tu" && !tuAberto
+  useEffect(() => {
+    if (!cartaoNoEcra) return
+    comecarLatencia()
+    return pararLatencia
+  }, [cartaoNoEcra, comecarLatencia, pararLatencia])
 
   /**
    * "There is a new version", asked once after entering.
@@ -1823,6 +2002,67 @@ function Shell({
    * In both cases the badge counts the same, the alert is muted, not the
    * information.
    */
+  const lerAparelhosDaConta = useCallback(() => {
+    void Promise.resolve()
+      .then(() => bridge.pairing?.devices())
+      .then((lista) => setAparelhosNaConta(lista ? new Set(lista.map((aparelho) => aparelho.deviceKey)) : undefined))
+      .catch(() => {})
+  }, [bridge])
+  // Only when the bell opens and it holds a new-device entry: one manifest read, not one per render.
+  const temAparelhoNovo = notifications.some((entry) => entry.kind === "device-new")
+  useEffect(() => {
+    if (notifAt !== null && temAparelhoNovo) lerAparelhosDaConta()
+  }, [notifAt, temAparelhoNovo, lerAparelhosDaConta])
+  /**
+   * "Remover" on the new-device card and in the bell. It asks first, as in
+   * Settings › Devices: a removed device erases its vault, and the button sits
+   * next to "Fui eu". Resolves `true` when the person confirmed.
+   */
+  // One question at a time: the card sits above the dialog's backdrop and can be tapped again.
+  const confirmingRemoval = useRef(false)
+  const removerAparelhoNovo = useCallback(
+    async (deviceKey: string): Promise<boolean> => {
+      const revogar = bridge.pairing?.revoke
+      if (!revogar || aparelhoARemover !== null || confirmingRemoval.current) return false
+      confirmingRemoval.current = true
+      let confirmed: boolean
+      try {
+        confirmed = await confirmar({
+          titulo: strings.settings.revokeTitle,
+          corpo: strings.settings.revokeBody,
+          verbo: strings.settings.revoke,
+          destructive: true,
+        })
+      } finally {
+        confirmingRemoval.current = false
+      }
+      if (!confirmed) return false
+      setAparelhoARemover(deviceKey)
+      void revogar(deviceKey)
+        .then(() => pushToast(strings.notifCenter.aparelhoRemovido))
+        .catch((erro: Error) => pushToast(traduzirErro(erro), "error"))
+        .finally(() => {
+          setAparelhoARemover(null)
+          lerAparelhosDaConta()
+        })
+      return true
+    },
+    [bridge, aparelhoARemover, confirmar, pushToast, lerAparelhosDaConta],
+  )
+
+  /**
+   * "Novo aparelho na tua conta", as a card in the corner (21/11/2026): the
+   * newest unread entry of a device this one did not add. "Fui eu" and "Remover"
+   * both mark it read; the bell keeps the record.
+   */
+  const cartaoDeAparelho = useMemo(
+    () =>
+      notifications
+        .filter((entry) => entry.kind === "device-new" && !entry.read && entry.aparelho)
+        .reduce<AppNotification | null>((maisNova, entry) => (maisNova === null || entry.at > maisNova.at ? entry : maisNova), null),
+    [notifications],
+  )
+
   const sinoAvisa = useSinoAvisa(
     unreadCountOf(notifications),
     // Pausing also mutes the swinging bell: it is an interruption, even without sound.
@@ -1892,6 +2132,8 @@ function Shell({
       if (isDirect(channel)) {
         setDirecta(channel)
         setView("pessoas")
+        // A direct conversation lives in Messages on the phone: back goes to that list.
+        setSeparadorEscolhido("mensagens")
         return
       }
       setCanal(channel)
@@ -2201,6 +2443,16 @@ function Shell({
         if (requestedChannel.current !== requested) return
         setMembersState("error")
       })
+    void Promise.resolve()
+      .then(() => bridge.channels.afastados?.(requested) ?? [])
+      .then(
+        (lista) => {
+          if (requestedChannel.current === requested) setMembrosAfastados(lista.length)
+        },
+        () => {
+          if (requestedChannel.current === requested) setMembrosAfastados(0)
+        },
+      )
   }, [active])
 
   /** The channel the member panel is currently asking about. */
@@ -2211,6 +2463,7 @@ function Shell({
   useEffect(() => {
     requestedChannel.current = active
     setMembers([])
+    setMembrosAfastados(0)
     setMembersState("loading")
   }, [active])
 
@@ -2311,6 +2564,13 @@ function Shell({
   const vigiaDasComunidades = useRef(criarVigiaDasComunidades())
   /** The private calls ringing, so the bell knows about missed ones. */
   const vigiaDasChamadas = useRef(criarVigiaDasChamadas())
+  /**
+   * The notice of the call ringing on this device (21/11/2026): who calls, with
+   * "Decline". Kept to take it away when the ring stops for any other reason.
+   */
+  const avisoDoToque = useRef<{ canal: string; texto: string } | null>(null)
+  /** Takes away an alert whose text is no longer true. Stable. */
+  const dispensarToast = useDispensarToast()
   /** Filled where the bell already exists (`pushNotification`). */
   const registarChamadaPerdidaRef = useRef<(perdida: ChamadaPerdida) => void>(() => {})
   /** The communities whose member snapshot was already requested. */
@@ -2596,6 +2856,24 @@ function Shell({
         read: false,
       })
     }
+    /*
+      A device this one did not add joined the account (1.3.26): maybe with the
+      account file. The bell keeps it, with the date it joined and "Remove". One
+      entry per device key. See `Session.#notarAparelhosDaConta`.
+    */
+    if (status.code === "device-new") {
+      const [chave, quando] = status.detail.split("|")
+      if (chave) {
+        const segundos = Number(quando)
+        pushNotification({
+          id: `aparelho:${chave}`,
+          kind: "device-new",
+          at: Number.isFinite(segundos) && segundos > 0 ? segundos * 1000 : Date.now(),
+          aparelho: chave,
+          read: false,
+        })
+      }
+    }
     if (status.code === "account-suspended") {
       contaSuspensaRef.current = true
       setAvisoDeSuspensao(status.aviso ?? null)
@@ -2625,16 +2903,21 @@ function Shell({
         .lock()
         .catch(() => {})
         .then(async () => {
-          if (!status.removido) return "unlock" as const
+          /*
+            "Este aparelho saiu da conta." (21/11/2026): its own screen, with the
+            file and another device. Without the proof the vault stays, locked,
+            and the two ways add an empty account next to it.
+          */
+          if (!status.removido) return "removido" as const
           await bridge.vault.destroy()
           const restantes = bridge.contas ? (await bridge.contas.listar().catch(() => null))?.contas : null
           if (restantes?.some((conta) => conta.temCofre)) {
             pagina.recarregar()
             return "loading" as const
           }
-          return "setup" as const
+          return "removido" as const
         })
-        .catch(() => "unlock" as const)
+        .catch(() => "removido" as const)
         .then((proximo) => setStage(proximo))
     }
     const decision = routeStatus(status, {
@@ -2649,6 +2932,8 @@ function Shell({
       detail: status.detail,
       outcome: decision.target === "log" ? decision.reason : decision.target,
     })
+    // "Este aparelho saiu da conta." is the screen itself (21/11/2026): no toast with the same sentence over it.
+    if (decision.target === "toast" && status.code === "device-revoked" && status.emparelhamentoPorAcabar !== true) return
     if (decision.target === "toast") {
       router.current.lastToastAt.set(decision.key, Date.now())
       // Codes with text in the catalog speak in the reader's language. See
@@ -3042,12 +3327,9 @@ function Shell({
           .commonRoom?.()
           .then((sala) => {
             setCommonRoom(sala)
-            setSalaComumLida(true)
             calarSalaComumUmaVez(sala)
           })
           .catch(() => {})
-        // A host without the question is a server without a common room, and that is already the answer.
-        if (!bridge.session.commonRoom) setSalaComumLida(true)
         refrescarCanais.current()
       }
     },
@@ -3261,6 +3543,16 @@ function Shell({
         const queda = vigiaDaQueda.current.chamadaCaiu()
         if (queda) motor.tocar({ tipo: queda })
       }
+      // macOS refused a device: the alert carries the button to its panel (1.3.26).
+      const recusado = DISPOSITIVO_DA_RECUSA[detail]
+      const privacidade = bridge.privacidadeDoSistema
+      if (recusado && privacidade) {
+        pushToast(translateError(detail, cause), "error", {
+          rotulo: strings.ecra.permissaoAbrir,
+          fazer: () => void privacidade.abrir(recusado).catch(() => {}),
+        })
+        return
+      }
       pushToast(translateError(detail, cause), "error")
     },
     /**
@@ -3307,7 +3599,26 @@ function Shell({
       // Only in a direct conversation, and repeats until answered (or 30 s). In a
       // voice room in a community it does not play: no one calls anyone, and the
       // room line already shows who entered. See `tocaOToque`.
-      if (ring && tocaOToque(event.channel)) motor.tocarChamada(event.channel, { repetir: true })
+      if (ring && tocaOToque(event.channel) && motor.tocarChamada(event.channel, { repetir: true }) === "tocou") {
+        /*
+          Who is calling, said in words (screen readers read the toast stack),
+          with "Decline" (21/11/2026). Declining stops the ring on this device
+          only: the call goes on, and the conversation still has the button to
+          join it. The notice lasts as long as the ring can.
+        */
+        const canal = event.channel
+        const texto = strings.sidebar.callingYou(notifyRef.current.nameFor(event.from))
+        if (avisoDoToque.current) dispensarToast(avisoDoToque.current.texto)
+        avisoDoToque.current = { canal, texto }
+        pushToast(texto, "info", {
+          rotulo: strings.call.declineRing,
+          fazer: () => {
+            avisoDoToque.current = null
+            motor.pararChamada(canal)
+          },
+          duracaoMs: TOQUE_MAXIMO_MS,
+        })
+      }
       /*
         The missed call: a direct conversation rang, and whoever called left
         without anyone answering. Answering is our address entering, from this
@@ -3413,6 +3724,27 @@ function Shell({
       })
     },
   })
+
+  /** The first screen of `Setup`: the three ways in, or the account file from "Este aparelho saiu da conta". */
+  const [telaDoSetup, setTelaDoSetup] = useState<TelaDoSetup>("entrada")
+
+  /**
+   * The two ways out of "Este aparelho saiu da conta". With no vault left, the
+   * screen opens here; with the locked vault still on disk, an empty account is
+   * added next to it first (`outraEntrada.ts`), and nothing is deleted.
+   */
+  const sairDoAparelhoRemovido = useCallback((intencao: "ficheiro" | "outro-aparelho") => {
+    void entrarNumaContaNova(bridge, intencao)
+      .then((onde) => {
+        if (onde !== "aqui") return
+        if (intencao === "outro-aparelho") setStage("emparelhar")
+        else {
+          setTelaDoSetup("ficheiro")
+          setStage("setup")
+        }
+      })
+      .catch((erro: Error) => pushToast(traduzirErro(erro), "error"))
+  }, [bridge])
 
   /** The line the gate shows when a pairing link comes to nothing. */
   const [avisoDeEmparelhamento, setAvisoDeEmparelhamento] = useState<string | null>(null)
@@ -3767,10 +4099,25 @@ function Shell({
         semeados.current.add(channel)
         if (entries.length === 0) continue
         hadStored.add(channel)
-        // Past the vault, the archived conversation (17/11/2026) also counts as older.
-        const arquivada = entries.length > MEMORY_PER_CHANNEL || (await bridge.channels.temConversaArquivada?.(channel).catch(() => false)) === true
-        older.set(channel, arquivada)
-        for (const entry of entries.slice(-MEMORY_PER_CHANNEL)) seeded.push(toChatMessage(channel, entry))
+        const { pagina, esgotou } = paginaDoCofre(
+          entries.map((entry) => toChatMessage(channel, entry)),
+          (message) => message.payload.t === "message",
+          MEMORY_PER_CHANNEL,
+        )
+        // Past the vault, the archived conversation (17/11/2026) and the members' past (history-last-100) also count as older.
+        const maisAntigas =
+          !esgotou ||
+          (await bridge.channels.temConversaArquivada?.(channel).catch(() => false)) === true ||
+          (await bridge.channels.hasOlderFromMembers?.(channel).catch(() => false)) === true
+        older.set(channel, maisAntigas)
+        seeded.push(...semVotosAMais(pagina, channel))
+        /*
+          The seeded lines can be many more entries (reactions, edits, the state between
+          them): what passes `MEMORY_PER_CHANNEL` raises the channel's bound, as a tap
+          of "load older" does, so the next arrivals do not cut the lines just seeded.
+        */
+        const amais = contaNoTecto(pagina) - MEMORY_PER_CHANNEL
+        if (amais > 0) carregadasAMao.current.set(channel, Math.max(carregadasAMao.current.get(channel) ?? 0, amais))
       } catch {
         // A channel whose history cannot be read simply starts empty.
       }
@@ -3812,7 +4159,7 @@ function Shell({
         // Erasing (removed with proof): `handleStatus` moves the stage when the vault is gone.
         if (aparelhoRemovidoRef.current) return
         setVezDoPortao((vez) => vez + 1)
-        setStage("unlock")
+        setStage("removido")
         return
       }
       // The connection failed because the account is suspended: stays in the notice, with the vault open.
@@ -3823,6 +4170,7 @@ function Shell({
       }
       setAddress(addr)
       setStage("ready")
+      setEntrada((vez) => vez + 1)
       marcarArranque("app")
       /*
         The first connection failed: the app opens with what the vault has, and the
@@ -4020,6 +4368,15 @@ function Shell({
         if (tem && cursorDoArquivo.current.get(canal) !== null) setOlderAvailable((current) => new Map(current).set(canal, true))
       })
       .catch(() => {})
+    // The members' past (history-last-100): a channel joined in this session has none in the vault.
+    if (!inicioDoAparelho.has(canal)) {
+      void bridge.channels
+        .hasOlderFromMembers?.(canal)
+        .then((tem) => {
+          if (tem) setOlderAvailable((current) => new Map(current).set(canal, true))
+        })
+        .catch(() => {})
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `olderAvailable` is read, not a trigger
   }, [active, lotesDoActivo, bridge])
 
@@ -4034,7 +4391,7 @@ function Shell({
    * comes in raises the channel's memory bound (`carregadasAMao`), so it stays.
    */
   const loadOlder = useCallback(
-    (channel: string, daConversa: (message: ChatMessage) => boolean) => {
+    (channel: string, daConversa: (message: ChatMessage) => boolean, room: string) => {
       const known = (): Set<string> => new Set(messagesRef.current.filter((message) => message.channel === channel).map(keyOf))
       const acrescentar = (page: ChatMessage[]): void => {
         if (page.length === 0) return
@@ -4048,11 +4405,28 @@ function Shell({
         setOlderAvailable((current) => new Map(current).set(channel, false))
         setInicioDoAparelho((actual) => new Set(actual).add(channel))
       }
+      /*
+        Past what this device holds, the next lines come from a member online
+        (history-last-100): the server's copy of what came before this device's place
+        never opens here (MLS spent those keys). They arrive as live messages, so the
+        channel's memory bound makes room for them first (`carregadasAMao`).
+      */
+      const fimDoCofre = async (): Promise<void> => {
+        const pedir = bridge.channels.loadOlderFromMembers
+        if (!pedir) return fimDoAparelho()
+        carregadasAMao.current.set(channel, (carregadasAMao.current.get(channel) ?? 0) + HISTORY_PAGE)
+        const { outcome } = await pedir(channel, room)
+        if (outcome === "end") return fimDoAparelho()
+        // The button stays: the next tap asks again.
+        setOlderAvailable((current) => new Map(current).set(channel, true))
+        if (outcome === "no-member") pushToast(traduzirErro(new Error("no member online has the older messages")), "error")
+        else if (outcome === "offline") pushToast(traduzirErro(new Error("no connection to the server")), "error")
+      }
       const doArquivo = async (): Promise<void> => {
         const ler = bridge.channels.conversaArquivada
         for (let pagina = 0; pagina < PAGINAS_DO_ARQUIVO_POR_TOQUE; pagina++) {
           const cursor = cursorDoArquivo.current.get(channel)
-          if (!ler || cursor === null) return fimDoAparelho()
+          if (!ler || cursor === null) return fimDoCofre()
           let novas: ChatMessage[]
           try {
             const { entradas, seguinte, falhou } = await ler(channel, cursor)
@@ -4069,7 +4443,14 @@ function Shell({
           }
           acrescentar(novas)
           const seguinte = cursorDoArquivo.current.get(channel)
-          if (seguinte === null) return fimDoAparelho()
+          // The archive ended: what it brought is this tap, and the next one asks the members.
+          if (seguinte === null) {
+            if (!novas.some(daConversa)) return fimDoCofre()
+            const membros = await bridge.channels.hasOlderFromMembers?.(channel).catch(() => false)
+            if (membros !== true) return fimDoAparelho()
+            setOlderAvailable((current) => new Map(current).set(channel, true))
+            return
+          }
           if (novas.some(daConversa)) {
             setOlderAvailable((current) => new Map(current).set(channel, true))
             return
@@ -4093,10 +4474,14 @@ function Shell({
             setOlderAvailable((current) => new Map(current).set(channel, true))
             return
           }
-          // The vault is exhausted with this page: the archive decides what comes next.
-          return bridge.channels.temConversaArquivada?.(channel).then((tem) => {
-            setOlderAvailable((current) => new Map(current).set(channel, tem && cursorDoArquivo.current.get(channel) !== null))
-            if (!tem) setInicioDoAparelho((actual) => new Set(actual).add(channel))
+          // The vault is exhausted with this page: the archive, then the members, decide what comes next.
+          return Promise.all([
+            bridge.channels.temConversaArquivada?.(channel).catch(() => false),
+            bridge.channels.hasOlderFromMembers?.(channel).catch(() => false),
+          ]).then(([tem, membros]) => {
+            const doArquivo = tem === true && cursorDoArquivo.current.get(channel) !== null
+            setOlderAvailable((current) => new Map(current).set(channel, doArquivo || membros === true))
+            if (!doArquivo && membros !== true) setInicioDoAparelho((actual) => new Set(actual).add(channel))
           })
         })
         .catch((error: Error) => pushToast(traduzirErro(error), "error"))
@@ -4200,6 +4585,12 @@ function Shell({
   const roomsFechadas = useMesmoValor(salasEmBruto.closed)
   const categoriasDeclaradas = useMesmoValor(salasEmBruto.categories)
   const refreshRooms = salasEmBruto.refresh
+  // The cap on rooms this account creates (1.3.26): read again when the open channel or its number of rooms changes.
+  const { quota: roomQuota, canCreate: canCreateRoom } = useRoomQuota(
+    bridge.session.roomQuota,
+    connection,
+    `${active ?? ""}|${salasDoCanal.length}`,
+  )
 
   /**
    * The deleted rooms of the open channel: their polls are gone for everyone
@@ -4920,8 +5311,11 @@ function Shell({
    * Whether this account may create polls in the open channel (`votacoes`, 1.3.21).
    * Without it, no entry to create one is drawn: not in the message box, not on the
    * polls page. Absent from the host means "yes", as before.
+   *
+   * Only in the open app, like `editaOCanal`: this runs on every render, and with the
+   * vault locked or going away (a removed device) the session has no identity to ask.
    */
-  const podeCriarVotacoes = active !== null && (bridge.channels.mayCreatePoll?.(active) ?? true)
+  const podeCriarVotacoes = stage === "ready" && active !== null && (bridge.channels.mayCreatePoll?.(active) ?? true)
 
   /**
    * Vote on a vote in the conversation.
@@ -5006,10 +5400,16 @@ function Shell({
     in the engine.
   */
   useEffect(() => {
+    const aviso = avisoDoToque.current
+    if (aviso && incomingRingStops(aviso.canal, callChannel, ringing.get(aviso.canal)?.keys() ?? [], address)) {
+      avisoDoToque.current = null
+      dispensarToast(aviso.texto)
+    }
     const aTocar = motor.chamadaATocar()
     if (aTocar === null) return
-    if (callChannel === aTocar || (ringing.get(aTocar)?.size ?? 0) === 0) motor.pararChamada(aTocar)
-  }, [callChannel, ringing])
+    // Answering on another device of the account is answering too (21/11/2026).
+    if (incomingRingStops(aTocar, callChannel, ringing.get(aTocar)?.keys() ?? [], address)) motor.pararChamada(aTocar)
+  }, [callChannel, ringing, address, dispensarToast])
   useEffect(() => () => motor.pararChamada(), [])
 
   /*
@@ -5146,6 +5546,45 @@ function Shell({
       refreshRooms()
       const paraTras = asQueFicaramParaTras(mudancas, resultados)
       if (paraTras.length > 0) pushToast(strings.rooms.categoryOrderPartial(paraTras.join(", ")), "error")
+    })
+  }
+
+  /**
+   * "Mover" for a room, on the phone: one step up or down inside its category,
+   * or to the end of another category. The same drops as the computer's drag
+   * (`arrumarSala`). Up: before the room above. Down: before the room two
+   * places below, or to the end of the category when it is the last step.
+   */
+  const moverDaSala = (room: string) => {
+    const grupo = roomGroups.find((candidato) => candidato.rooms.some((sala) => sala.room === room))
+    if (!grupo) return null
+    const salas = grupo.rooms
+    const onde = salas.findIndex((sala) => sala.room === room)
+    const acima = salas[onde - 1]
+    const doisAbaixo = salas[onde + 2]
+    return itemDeMover({
+      ...(acima ? { acima: () => arrumarSala(room, { antesDe: acima.room }) } : {}),
+      ...(onde < salas.length - 1
+        ? {
+            abaixo: () =>
+              arrumarSala(room, doisAbaixo ? { antesDe: doisAbaixo.room } : { categoria: grupo.category }),
+          }
+        : {}),
+      categorias: roomGroups
+        .filter((outro) => outro.category !== "" && outro.category !== grupo.category)
+        .map((outro) => ({ nome: outro.category, ir: () => arrumarSala(room, { categoria: outro.category }) })),
+    })
+  }
+  /** "Mover" for a category, on the phone: one place up or down (`arrumarCategoria`). */
+  const moverDaCategoria = (categoria: string) => {
+    if (!bridge.channels.setCategory) return null
+    const ordem = roomGroups.map((grupo) => grupo.category).filter((nome) => nome !== "")
+    const onde = ordem.indexOf(categoria)
+    const acima = ordem[onde - 1]
+    const abaixo = ordem[onde + 1]
+    return itemDeMover({
+      ...(acima !== undefined ? { acima: () => arrumarCategoria(categoria, acima) } : {}),
+      ...(abaixo !== undefined ? { abaixo: () => arrumarCategoria(categoria, abaixo) } : {}),
     })
   }
 
@@ -5492,7 +5931,7 @@ function Shell({
     dirigidas,
     marcaDe,
     read: darPorLido,
-  } = useUnreads(mensagensQueContam, active, address, prefsDaPresenca.silenciados)
+  } = useUnreads(mensagensQueContam, activoNoEcra, address, prefsDaPresenca.silenciados)
 
   useEffect(() => {
     document.title = unreadTotal > 0 ? `(${unreadTotal}) Orwell` : "Orwell"
@@ -5563,12 +6002,12 @@ function Shell({
         mensagensQueContam,
         lidasDosCanais,
         lidasPorSala,
-        { canal: active, sala: activeRoom },
+        { canal: activoNoEcra, sala: activeRoom },
         address,
-        (canal, etiqueta) => (canal === active ? salaDeLeitura(etiqueta) : etiqueta),
+        (canal, etiqueta) => (canal === activoNoEcra ? salaDeLeitura(etiqueta) : etiqueta),
         silenciados,
       ),
-    [mensagensQueContam, lidasDosCanais, lidasPorSala, active, activeRoom, address, salaDeLeitura, silenciados],
+    [mensagensQueContam, lidasDosCanais, lidasPorSala, activoNoEcra, activeRoom, address, salaDeLeitura, silenciados],
   ))
   /**
    * Having a room open means reading it, just as having the channel open reads
@@ -5583,26 +6022,27 @@ function Shell({
     a direct conversation too, so coming back to the same room is a new entry.
   */
   const conversaLida = useRef<string | null>(null)
-  const conversaAgora = active ? chaveDaConversa(active, activeRoom) : null
+  const conversaAgora = activoNoEcra ? chaveDaConversa(activoNoEcra, activeRoom) : null
   if (conversaAgora !== conversaLida.current) {
     conversaLida.current = conversaAgora
-    if (active && conversaAgora !== null && !isDirect(active) && !isFeed(active)) {
-      entrarNaConversa(conversaAgora, marcaDaSala(lerLidasPorSala(), lerEstadoDaConta().lidas, active, activeRoom))
+    if (activoNoEcra && conversaAgora !== null && !isDirect(activoNoEcra) && !isFeed(activoNoEcra)) {
+      entrarNaConversa(conversaAgora, marcaDaSala(lerLidasPorSala(), lerEstadoDaConta().lidas, activoNoEcra, activeRoom))
     }
   }
   useEffect(() => {
-    if (!active || isDirect(active) || isFeed(active)) return
+    // `activoNoEcra`: on the phone, a channel's list is not its conversation (see there).
+    if (!activoNoEcra || isDirect(activoNoEcra) || isFeed(activoNoEcra)) return
     let at = Date.now()
     for (const message of messages) {
-      if (message.channel !== active) continue
+      if (message.channel !== activoNoEcra) continue
       if (salaDeLeitura((message.payload as { room?: string }).room ?? "") !== activeRoom) continue
       at = Math.max(at, stampOf(message.payload))
     }
-    lerSala(active, activeRoom, at)
+    lerSala(activoNoEcra, activeRoom, at)
     // And in the account, for other devices (phase 1i). Only goes up, like the channel's.
-    const chave = chaveDaLidaDaSala(active, activeRoom)
+    const chave = chaveDaLidaDaSala(activoNoEcra, activeRoom)
     if (chave !== null) marcarLido(chave, at)
-  }, [active, activeRoom, messages, salaDeLeitura])
+  }, [activoNoEcra, activeRoom, messages, salaDeLeitura])
   /**
    * What the sidebar shows next to each channel: the sum of its rooms.
    *
@@ -5631,8 +6071,8 @@ function Shell({
    * This map is what the Friends column and its badge read.
    */
   const mencoesPorCanal = useMemo(
-    () => countUnreads(mensagensQueContam, lidasDosCanais, active, address, (message) => mencionaMe(message.payload.mentions, address)),
-    [mensagensQueContam, lidasDosCanais, active, address],
+    () => countUnreads(mensagensQueContam, lidasDosCanais, activoNoEcra, address, (message) => mencionaMe(message.payload.mentions, address)),
+    [mensagensQueContam, lidasDosCanais, activoNoEcra, address],
   )
   const comSilencio = useCallback(
     (contas: Map<string, number>): Map<string, number> => {
@@ -5918,6 +6358,10 @@ function Shell({
     () => channels.filter((channel) => !isFeed(channel) && !isDirect(channel)),
     [channels],
   )
+  // The cap on channels this account creates (1.3.26): the "+" goes, and a sentence says why.
+  const { quota: channelQuota, podeCriar: canCreateChannel } = useCriarCanais(bridge.session.criarCanais, connection, rooms.length)
+  // At the cap, the "+" stays, grey, and this is its tip (`BlockedButton`).
+  const channelCapTip = !canCreateChannel && channelQuota ? strings.sidebar.channelLimit(channelQuota) : undefined
 
   /**
    * A link to a message (`lib/ligacaoDaMensagem.ts`): open its channel and room,
@@ -6089,9 +6533,9 @@ function Shell({
     The "request sent" alert goes away when it stops being the news (1.3.6):
     when the direct chat opens, and when one of our requests gets an answer. It
     used to sit on top of the compose bar of the direct chat opened right after,
-    talking about a request already accepted.
+    talking about a request already accepted. (`dispensarToast` is declared
+    with the call ring's notice, further up: the ring's effect needs it first.)
   */
-  const dispensarToast = useDispensarToast()
   const directaAberta = active !== null && isDirect(active) ? active : null
   const pedidosNossos = friendships.sent.length
   const pedidosNossosAntes = useRef(pedidosNossos)
@@ -6203,43 +6647,67 @@ function Shell({
     return linhas
   }, [entradaAEspera, nomeDaEntradaAEspera, entradaComOutroNome, channels, convites, conhecidosOuFeitos, spaceMeta]))
 
-  /**
-   * The first friend or the first channel, which removes the first steps card. A direct conversation
-   * counts as a friend (only exists with someone on the other side); a channel counts if it is not
-   * a feed nor the common room, which everyone has without doing anything.
-   */
-  const temAlguem = useMemo(
-    () => channels.some((channel) => isDirect(channel) || (!isFeed(channel) && channel !== commonRoom)),
-    [channels, commonRoom],
-  )
-  const primeirosPassos = usePrimeirosPassos(address, temAlguem, salaComumLida && connection === "online")
   /*
-    The account-file notice, once per account and browser (16/11/2026). Accounts
-    created before the account-file step never saw it. Not on a paired device
-    without the account key: its file would not be the account (see
-    `exportNeedsAccountKey`).
+    "Ainda não guardaste o ficheiro da conta." (21/11/2026): the banner stays at
+    the top of every screen until a file is saved in this browser or the
+    account has a second device. It replaced the one-time notice, which closed
+    for good on the first "Close". Not on an old paired device without the
+    account key: its file would not be the account (see `exportNeedsAccountKey`).
   */
-  const [avisoDoFicheiro, setAvisoDoFicheiro] = useState(false)
+  const [ficheiroPorGuardar, setFicheiroPorGuardar] = useState(false)
+  const [folhaDoFicheiro, setFolhaDoFicheiro] = useState(false)
+  const [voltaDoFicheiro, setVoltaDoFicheiro] = useState(0)
+  /*
+    The display name, outside the vault, for "Olá, <name>" at the next sign-in
+    (21/11/2026): written once the account is open and whenever the name changes.
+    See `lib/accountNames.ts`.
+  */
+  useEffect(() => {
+    const name = profile.displayName.trim()
+    if (stage !== "ready" || name === "") return
+    let alive = true
+    void activeAccountId(bridge).then((accountId) => {
+      if (alive) rememberAccountName(accountId, name)
+    })
+    return () => {
+      alive = false
+    }
+  }, [stage, profile.displayName, bridge])
+  const aparelhosQueEntraram = notifications.filter((entry) => entry.kind === "device-new").length
+  useEffect(() => {
+    const outraVez = (): void => setVoltaDoFicheiro((volta) => volta + 1)
+    window.addEventListener(FICHEIRO_GUARDADO, outraVez)
+    window.addEventListener(APARELHOS_MUDARAM, outraVez)
+    return () => {
+      window.removeEventListener(FICHEIRO_GUARDADO, outraVez)
+      window.removeEventListener(APARELHOS_MUDARAM, outraVez)
+    }
+  }, [])
   useEffect(() => {
     // A host that cannot export has no file to offer.
-    if (stage !== "ready" || !address || typeof bridge.vault.export !== "function") return
+    if (stage !== "ready" || !address || typeof bridge.vault.export !== "function") {
+      setFicheiroPorGuardar(false)
+      return
+    }
     let vivo = true
     void (async () => {
-      if (!(await ficheiroPorTratar(address))) return
+      if (!(await ficheiroPorTratar(address))) return false
       const estado = await bridge.pairing?.status().catch(() => null)
-      if (estado?.temChaveDeConta === false) return
-      if (vivo) setAvisoDoFicheiro(true)
-    })()
+      if (estado?.temChaveDeConta === false) return false
+      const aparelhos = await bridge.pairing?.devices().catch(() => null)
+      return !(aparelhos && aparelhos.length >= 2)
+    })().then((mostrar) => {
+      if (vivo) setFicheiroPorGuardar(mostrar)
+    })
     return () => {
       vivo = false
     }
-  }, [stage, address, bridge])
-  const copiarOMeuEndereco = useCallback(() => {
-    if (!address) return
-    void copiarTexto(address)
-      .then(() => pushToast(strings.primeirosPassos.copiado))
-      .catch(() => pushToast(strings.common.copyFailed, "error"))
-  }, [address, pushToast])
+    // A device that joined elsewhere (`device-new`) is a second device too: count again at once.
+  }, [stage, address, bridge, voltaDoFicheiro, aparelhosQueEntraram])
+  const faixaDoFicheiro = useMemo(
+    () => (ficheiroPorGuardar ? { guardar: () => setFolhaDoFicheiro(true) } : null),
+    [ficheiroPorGuardar],
+  )
 
   /**
    * Cancelling is stopping waiting HERE, and we say it this way.
@@ -6352,6 +6820,8 @@ function Shell({
    * the vibration glyph, `AvisosDoCarril`), and says who sent it in words.
    */
   const cotoveladaPorVer = useCotoveladaPorVer(bridge, { eu: address, emAmigos: view === "pessoas", directaAberta: directa })
+  /** A nudge that arrives shakes whatever screen is open, on every device (21/11/2026). See `useNudgeShake`. */
+  const nudgeShaking = useNudgeShake(bridge)
   const toquePorVer = cotoveladaPorVer !== null
   /** Where the call on screen is attended: a direct one in Friends, the rest in Communities. */
   const chamadaEm = callChannel === null ? null : isDirect(callChannel) ? "pessoas" : "chat"
@@ -7799,6 +8269,8 @@ function Shell({
       // A room is a different place: the person's page moves out of the way.
       fecharPessoa()
       abrirSala(room)
+      // On the phone, a room tapped in the list pushes its conversation.
+      setConversaNoTelemovel(true)
     }),
     menuDaVoz: useEstavel((room: string, who: string, at: { x: number; y: number }) => setVozMenu({ room, address: who, at })),
     moverPessoa: useEstavel((who: string, room: string, de?: string) => moverPessoa(who, room, de)),
@@ -7847,11 +8319,40 @@ function Shell({
     guardarEstado: useEstavel((statusText: string) => guardarEstado(statusText)),
   }
 
-  if (stage !== "ready") {
+  /** The screen pushed over the list, for the swipe from the left edge. */
+  const ecraEmpurrado = useRef<HTMLDivElement>(null)
+  /* On the phone, what is under a pushed screen stays mounted (its scroll
+     stays) and out of reach. Before the gate's early return: it is a hook. */
+  useEffect(() => {
+    /* Also on a computer: a window that grows past 840 px with a conversation
+       pushed must give the column back its clicks. */
+    const coberta = telemovel && (profundidade > 0 || pessoa !== null)
+    for (const lista of document.querySelectorAll<HTMLElement>(
+      ".app :is(.carril-comunidades, .sidebar, .people-aside, .menu-do-tu)",
+    )) {
+      if (lista.inert !== coberta) lista.inert = coberta
+    }
+  })
+
+  /*
+    After the gate enters, the opening stays over the layout until the session
+    is online and `POST_LOGIN_EXTRA_MS` have passed, capped at
+    `POST_LOGIN_CAP_MS`. A hook, so before the early return.
+  */
+  const aSegurarAbertura = usePostLoginHold(entrada, connection === "online")
+
+  if (stage !== "ready" || aSegurarAbertura) {
+    // "ready" here only while the opening holds after entering.
+    const abertura = stage === "loading" || stage === "ready"
     // One line, and discreet: the gate remains the gate. It only says that the
     // link was read and that it was not lost because there was still no open account.
-    const avisoDoConvite = aparelhoRevogado
-      ? translateError(emparelhamentoPorAcabar ? "pairing-unfinished" : "device-revoked")
+    // The invite link the page opened with goes into the code field of "Criar conta" (1.3.26).
+    const conviteParaOCampo = conviteAEspera
+      ? formatInviteLink(conviteAEspera.server, conviteAEspera.channel, conviteAEspera.code)
+      : (conviteCurtoAEspera ?? "")
+    // The removed device has its own screen; only a pairing that never finished keeps the line.
+    const avisoDoConvite = aparelhoRevogado && emparelhamentoPorAcabar && stage !== "removido"
+      ? translateError("pairing-unfinished")
       : conviteInvalido
         ? strings.invite.gateInvalid
         : conviteAEspera || conviteCurtoAEspera
@@ -7859,24 +8360,28 @@ function Shell({
           : avisoDeEmparelhamento
     return (
       <>
-        {avisoDoConvite && stage !== "loading" && (
+        {avisoDoConvite && !abertura && (
           <p className="gate-convite" role="status">
             {avisoDoConvite}
           </p>
         )}
-        {stage === "loading" ? (
+        {abertura ? (
           <Splash />
         ) : stage === "error" ? (
           <GateError detail={bootError} onRetry={checkVault} />
         ) : stage === "setup" ? (
           <Setup
-            onDone={(addr) => {
-              // Only whoever creates the account here sees the first steps. See `usePrimeirosPassos`.
-              // The flag first: the card reads it when the shell opens.
-              void marcarPrimeirosPassos(addr).finally(() => enter(addr))
-            }}
+            key={telaDoSetup}
+            telaInicial={telaDoSetup}
+            conviteInicial={conviteParaOCampo}
+            onDone={(addr) => enter(addr)}
             onUnlockInstead={() => setStage("unlock")}
             onJoinInstead={() => setStage("emparelhar")}
+          />
+        ) : stage === "removido" ? (
+          <AparelhoRemovido
+            onFicheiro={() => sairDoAparelhoRemovido("ficheiro")}
+            onOutroAparelho={() => sairDoAparelhoRemovido("outro-aparelho")}
           />
         ) : stage === "suspensa" ? (
           <ContaSuspensa
@@ -7917,17 +8422,28 @@ function Shell({
             }}
             onBack={() => {
               emparelhamentoDeArranque?.forget()
-              setStage("setup")
+              /*
+                A pairing left in an account added by "Usar outra conta" removes its
+                empty vault, and that account leaves the list: the one from before is
+                active again. Reload into it, as switching account does.
+              */
+              void bridge.vault
+                .status()
+                .then(({ exists }) => {
+                  if (exists) pagina.recarregar()
+                  else {
+                    setTelaDoSetup("entrada")
+                    setStage("setup")
+                  }
+                })
+                .catch(() => {
+                  setTelaDoSetup("entrada")
+                  setStage("setup")
+                })
             }}
           />
         ) : (
-          <Unlock
-            key={vezDoPortao}
-            onDone={enter}
-            onLigacaoFalhou={anotarLigacaoFalhada}
-            onStartOver={checkVault}
-            semTentativaSilenciosa={aparelhoRevogado}
-          />
+          <Unlock key={vezDoPortao} onDone={enter} onLigacaoFalhou={anotarLigacaoFalhada} />
         )}
       </>
     )
@@ -8093,20 +8609,19 @@ function Shell({
   const ecraDaConversa = (
     <ChatScreen
       active={active}
+      /* The phone (option B): the back arrow in the header, and the members as a
+         pushed screen with its own history entry. Absent on a computer. */
+      {...(telemovel
+        ? {
+            onVoltar: voltarNoTelemovel,
+            membrosAbertos: membrosNoTelemovel,
+            onMembrosAbertos: (abertos: boolean) => setMembrosDe(abertos ? active : null),
+          }
+        : {})}
       /* The ones the room was already showing by presence: the call panel draws them
          "connecting" until the media arrives, instead of hiding them.
          See `aLigar` in ChatScreen. */
       presentesNaSala={naSalaDaChamada}
-      primeirosPassos={
-        primeirosPassos.visivel ? (
-          <PrimeirosPassos
-            onCopiarEndereco={copiarOMeuEndereco}
-            onAdicionarAmigo={() => setPrompt("amigo")}
-            onEntrarComLink={() => setPrompt("link")}
-            onFechar={primeirosPassos.fechar}
-          />
-        ) : undefined
-      }
       callChannel={callChannel}
       /* Screen sharing is a role power (12/11/2026). Read on each render, like the
          read-only bar: a role given mid-call frees the button without reload. An
@@ -8141,6 +8656,7 @@ function Shell({
       cameraOff={cameraOff}
       onToggleCamera={alternarCamara}
       members={membrosDaSalaAberta}
+      membrosAfastados={membrosAfastados}
       membersState={membersState}
       onRetryMembers={retryMembers}
       directory={directory}
@@ -8160,6 +8676,7 @@ function Shell({
       onDraftChange={setDraft}
       activeRoom={activeRoom}
       onPrompt={setPrompt}
+      canCreateChannel={canCreateChannel}
       /* The single sheet for inviting, with this conversation's channel filled in. The
          member header and footer open it the same way. */
       onConvidar={(modo) => {
@@ -8173,6 +8690,7 @@ function Shell({
         loadOlder(
           active,
           (message) => message.payload.t === "message" && salaDeLeitura((message.payload as { room?: string }).room ?? "") === activeRoom,
+          activeRoom,
         )
       }
       labelFor={labelFor}
@@ -8339,6 +8857,83 @@ function Shell({
    * distinction the rail button would keep opening a bar that in Friends is no longer drawn, a button that leads nowhere, which is exactly what
    * this product does not do.
    */
+
+  /**
+   * A tab, by hand. Each tab keeps its own stack: the open conversation of
+   * Communities, the direct conversation of Messages, the screen of "Tu".
+   * Tapping the open tab again goes back to its list.
+   */
+  const escolherSeparador = (seguinte: Separador): void => {
+    guardarRolagem(separador)
+    if (seguinte === separador) {
+      fecharPessoa()
+      voltarAte(0)
+      return
+    }
+    setSeparadorEscolhido(seguinte)
+    if (seguinte === "comunidades") setView("chat", "separador")
+    else if (seguinte === "tu") setView(ecraDoTu, "separador")
+    else {
+      setView("pessoas", "separador")
+      if (seguinte === "amigos") {
+        // The open direct conversation waits in Messages, for the way back.
+        if (directa !== null) directaGuardada.current = directa
+        setDirecta(null)
+      } else if (directa === null && directaGuardada.current !== null) {
+        setDirecta(directaGuardada.current)
+        directaGuardada.current = null
+      }
+    }
+  }
+
+  /**
+   * The notices of the four tabs: the rail's notices, sorted by where each
+   * thing is handled on the phone. Direct conversations (and their nudges and
+   * calls) are in Messages; friend requests in Friends; the bell and the
+   * comments on my posts in "Tu".
+   */
+  const avisosDosSeparadores = {
+    comunidades: { quantas: mencoesEmCanais, porLer: porLerEmCanais > 0, chamada: chamadaEm === "chat" },
+    mensagens: {
+      quantas: porDestino.contactos,
+      toque: avisosDosAmigos.toque,
+      chamada: chamadaEm === "pessoas",
+    },
+    amigos: { quantas: openRequests.length },
+    tu: { quantas: comentariosNoMural + unreadCountOf(notificacoesVisiveis) + ofertas.length },
+  }
+  /** One community's notices on the phone rail: the same shapes as the main rail. */
+  const avisosDaComunidade = (canalDaLista: string): { quantas: number; porLer: boolean; chamada: boolean } => {
+    let quantas = 0
+    for (const conta of porLerPorSala.get(canalDaLista)?.values() ?? []) quantas += conta.mencoes
+    return {
+      quantas,
+      porLer: (porLerNosCanais.get(canalDaLista) ?? 0) > 0,
+      chamada: callChannel === canalDaLista || (ringing.get(canalDaLista)?.size ?? 0) > 0,
+    }
+  }
+  /** A pushed screen: the edge that swipes back, and the motion it enters with. */
+  const empurrado = (conteudo: React.ReactNode, barra?: React.ReactNode): React.JSX.Element => (
+    <div className="ecra-empurrado" ref={ecraEmpurrado}>
+      <BordaDeVoltar alvo={ecraEmpurrado} onVoltar={voltarNoTelemovel} />
+      {barra}
+      {conteudo}
+    </div>
+  )
+  const nomesDoTu: Record<"perfil" | "social" | "config", string> = {
+    perfil: strings.telemovel.perfil,
+    social: strings.telemovel.mural,
+    config: strings.telemovel.definicoes,
+  }
+  /** A screen of "Tu" on the phone: pushed over its list, with the bar back. On a computer, as it is. */
+  const noTu = (ecra: React.JSX.Element): React.JSX.Element =>
+    telemovel && (view === "perfil" || view === "social" || view === "config")
+      ? empurrado(ecra, <BarraDoTelemovel titulo={nomesDoTu[view]} onVoltar={voltarNoTelemovel} />)
+      : ecra
+
+  /** The bar of tabs: on a list, never over a conversation or a person's page. */
+  const mostrarSeparadores = telemovel && !naConversa && !pessoa
+
   const gavetaAberta = view === "pessoas" ? listaAberta : sidebarOpen
   const alternarGaveta = (): void => {
     if (view === "pessoas") setListaAberta((aberta) => !aberta)
@@ -8402,11 +8997,19 @@ function Shell({
     // from here. See `LigacaoContext`. Left the rest indented as is, so the diff
     // shows only this.
     <LigacaoContext.Provider value={ligacaoDaFaixa}>
+    <FaixaDoFicheiroContext.Provider value={faixaDoFicheiro}>
     <ErrorBoundary bridge={bridge} connection={connection}>
       {/* Without the channel bar the grid has two columns instead of three: auto
           placement fills them in order, and the destination would end up in the
           236px column with the `1fr` one empty next to it. See `.app.sem-barra`. */}
-      <div className={`${view === "pessoas" ? "app sem-barra" : "app"}${soPalco && painelDaChamadaNoEcra ? " so-palco" : ""}`}>
+      <div
+        className={`${view === "pessoas" ? "app sem-barra" : "app"}${soPalco && painelDaChamadaNoEcra ? " so-palco" : ""}${telemovel ? " telemovel" : ""}${nudgeShaking ? " buzzing" : ""}`}
+        /* The phone layout reads these: which tab, how many screens over its list,
+           and whether the bar of tabs is on screen. See `styles/telemovel.css`. */
+        data-separador={telemovel ? separador : undefined}
+        data-profundidade={telemovel ? profundidade : undefined}
+        data-separadores={telemovel ? (mostrarSeparadores ? "sim" : "nao") : undefined}
+      >
         <nav className="rail">
           {/* The connection dropped after being online: the mark fades and takes
               an amber seal with "!" (20/11/2026). Not before the first
@@ -8504,7 +9107,7 @@ function Shell({
             And only where the drawer exists: in Friends there is no channel
             bar, and a veil over the screen with nothing behind it is a locked
             app. Friends has its own veil, inside the destination. */}
-        {sidebarOpen && view !== "pessoas" && (
+        {sidebarOpen && view !== "pessoas" && !telemovel && (
           <div className="drawer-scrim" aria-hidden="true" onMouseDown={() => setSidebarOpen(false)} />
         )}
 
@@ -8516,10 +9119,31 @@ function Shell({
           twice. The code that lists Friends conversations is `FriendsAside`,
           which was already there.
           */}
-        {view !== "pessoas" && (
+        {/* The phone: the 72 px rail of communities, at the left of the chosen one's channels. */}
+        {telemovel && view === "chat" && (
+          <CarrilDeComunidades
+            comunidades={rooms}
+            activa={canal}
+            labelFor={labelFor}
+            iconFor={iconFor}
+            oficialFor={oficialFor}
+            avisosDe={avisosDaComunidade}
+            onEscolher={setCanal}
+            onMenu={barra.menuDoCanal}
+            onNova={canCreateChannel ? () => setPrompt("channel") : undefined}
+            novaBloqueada={channelCapTip}
+          />
+        )}
+        {/* The phone: the list of "Tu", under the screen it pushes. */}
+        {telemovel && separador === "tu" && (
+          <MenuDoTu cartao={cartaoDaConta} comentarios={comentariosNoMural} onAbrir={(ecra) => setView(ecra)} />
+        )}
+        {view !== "pessoas" && (!telemovel || view === "chat") && (
         <ChannelSidebar
           view={view}
-          rooms={rooms}
+          /* On the phone, only the community chosen on the rail: its line (with the
+             community menu) and its channels under it. */
+          rooms={telemovel ? (canal !== null && rooms.includes(canal) ? [canal] : []) : rooms}
           aEsperaDeEntrada={esperaDaBarra}
           labelFor={labelFor}
           iconFor={iconFor}
@@ -8544,8 +9168,9 @@ function Shell({
           voicePresence={presencaNaVozDaBarra}
           onRoomMenu={barra.menuDaSala}
           {...(editaOCanal ? { onCategoryMenu: barra.menuDaCategoria } : {})}
-          onNewRoom={editaOCanal ? barra.novaSala : undefined}
-          onNewRoomInCategory={editaOCanal ? barra.novaSalaNaCategoria : undefined}
+          onNewRoom={editaOCanal && canCreateRoom ? barra.novaSala : undefined}
+          onNewRoomInCategory={editaOCanal && canCreateRoom ? barra.novaSalaNaCategoria : undefined}
+          {...(editaOCanal && !canCreateRoom && roomQuota ? { roomCapTip: strings.sidebar.roomLimit(roomQuota) } : {})}
           presenceForChannel={presenceForChannel}
           presenceHint={presenceHint}
           active={active}
@@ -8562,7 +9187,7 @@ function Shell({
           profile={profile}
           address={address}
           connection={connection}
-          open={sidebarOpen}
+          open={telemovel ? false : sidebarOpen}
           onClose={barra.fechar}
           seccaoConfig={seccaoConfig}
           onSeccaoConfig={setSeccaoConfig}
@@ -8585,6 +9210,7 @@ function Shell({
           latencia={latencia}
           onLatenciaHover={barra.latencia}
           onPrompt={setPrompt}
+          channelCapTip={channelCapTip}
           onSaveStatus={barra.guardarEstado}
           pedidoDeEstado={pedidoDeEstado}
           /* The call goes into the panel at the column foot (P1): the side dock is
@@ -8601,7 +9227,9 @@ function Shell({
           wrapper did not exist; `none` takes them out without unmounting them.
           */}
         <div className="vista-guardada" style={{ display: pessoa ? "none" : "contents" }}>
-        {view === "perfil" ? (
+        {/* The phone: "Tu" shows its list until a screen is pushed over it (`noTu`). */}
+        {telemovel && separador === "tu" && !tuAberto ? null : view === "perfil" ? (
+          noTu(
           <ProfileScreen
             profile={profile}
             address={address}
@@ -8622,8 +9250,9 @@ function Shell({
               setCanal(canal)
               setView("chat")
             }}
-          />
+          />)
         ) : view === "config" ? (
+          noTu(
           <SettingsScreen
             seccao={seccaoConfig}
             /* On the phone the screen itself shows the list of sections (1.3.6). */
@@ -8645,7 +9274,7 @@ function Shell({
             bloqueados={amizade.bloqueados}
             nomeDe={nameFor}
             {...(amizade.podeBloquear ? { onDesbloquear: amizade.desbloquear } : {})}
-          />
+          />)
         ) : view === "pessoas" ? (
           /**
            * Friends: the conversation column, the top banner, and the body.
@@ -8700,7 +9329,7 @@ function Shell({
             }}
           >
             {directa !== null ? (
-              ecraDaConversa
+              telemovel ? empurrado(ecraDaConversa) : ecraDaConversa
             ) : (
               <PeopleScreen
                 directory={directory}
@@ -8727,6 +9356,34 @@ function Shell({
               />
             )}
           </PeopleDestination>
+        ) : view === "chat" && telemovel ? (
+          naConversa ? (
+            empurrado(
+              <SemVotoContext.Provider value={semVoto}>
+                {escolhaNoEcra && active ? (
+                  <EscolherSalaDeVotacoes
+                    salas={salasDeVotacoes}
+                    podeCriar={bridge.channels.mayEdit?.(active) ?? false}
+                    onAbrir={(room) => {
+                      setActiveRooms((actual) => ({ ...actual, [active]: room }))
+                      setEscolhaDeVotacoes(null)
+                    }}
+                    onCriar={() => {
+                      setEscolhaDeVotacoes(null)
+                      setNovaSalaEm(active)
+                    }}
+                    onVoltar={() => setEscolhaDeVotacoes(null)}
+                  />
+                ) : (
+                  (ecraDasVotacoes ?? ecraDosTickets ?? ecraDaConversa)
+                )}
+              </SemVotoContext.Provider>,
+              /* The polls and tickets rooms have no header with a way back: this bar is it. */
+              (escolhaNoEcra || ecraDasVotacoes || ecraDosTickets) && active ? (
+                <BarraDoTelemovel titulo={salaAberta?.name ?? labelFor(active)} contexto={labelFor(active)} onVoltar={voltarNoTelemovel} />
+              ) : undefined,
+            )
+          ) : null
         ) : view === "chat" ? (
           escolhaNoEcra && active ? (
             <EscolherSalaDeVotacoes
@@ -8747,6 +9404,7 @@ function Shell({
             <SemVotoContext.Provider value={semVoto}>{ecraDasVotacoes ?? ecraDosTickets ?? ecraDaConversa}</SemVotoContext.Provider>
           )
         ) : (
+          noTu(
           <Social
             feed={feed}
             /* Likes and comments are tallied from the feed, not the home. */
@@ -8764,7 +9422,7 @@ function Shell({
             onUserMenu={(who, at, channel) => setUserMenu({ address: who, channel, at })}
             onOpenProfile={openProfile}
             circleSize={friends.size}
-          />
+          />)
         )}
         </div>
 
@@ -8891,6 +9549,11 @@ function Shell({
             )
           })()}
 
+        {/* The phone: the four tabs at the bottom, only on a list (option B). */}
+        {mostrarSeparadores && (
+          <Separadores actual={separador} avisos={avisosDosSeparadores} onEscolher={escolherSeparador} />
+        )}
+
         {/* The channel menu. What you can do comes from your roles, and what you cannot does not appear grayed out: it does not appear at all. See `itensDoCanal`. A direct conversation has its own menu, the same one it has in Friends. */}
         {menu && (
           <ContextMenu
@@ -8929,7 +9592,8 @@ function Shell({
                       marcarLido: () => darPorLido(menu.channel),
                       propriedades: () => setPropriedades(menu.channel),
                       votacoes: () => abrirVotacoes(menu.channel),
-                      novaSala: () => setNovaSalaEm(menu.channel),
+                      // The room cap (1.3.26): no "New room" at the cap.
+                      ...(canCreateRoom ? { novaSala: () => setNovaSalaEm(menu.channel) } : {}),
                       // Own sheet: creating a category and creating something to file are
                       // two separate gestures. See `NewCategory`.
                       novaCategoria: () => setNovaCategoriaEm(menu.channel),
@@ -9038,6 +9702,9 @@ function Shell({
             busy={amizade.respondendo}
             onAcceptRequest={amizade.aceitar}
             onDeclineRequest={amizade.recusar}
+            aparelhosNaConta={aparelhosNaConta}
+            aparelhoARemover={aparelhoARemover}
+            onRemoverAparelho={bridge.pairing?.revoke ? removerAparelhoNovo : undefined}
             onOpen={openNotification}
             onMarkAllRead={() => setNotifications((current) => markAllRead(current))}
             onClose={() => setNotifAt(null)}
@@ -9093,7 +9760,30 @@ function Shell({
         )}
 
 
-        {avisoDoFicheiro && address && <AvisoDoFicheiroDaConta address={address} onFechar={() => setAvisoDoFicheiro(false)} />}
+        {cartaoDeAparelho && (
+          <CartaoDeAparelhoNovo
+            quando={cartaoDeAparelho.at}
+            aRemover={aparelhoARemover === cartaoDeAparelho.aparelho}
+            onFuiEu={() => setNotifications((current) => markRead(current, cartaoDeAparelho.id))}
+            onRemover={
+              bridge.pairing?.revoke && cartaoDeAparelho.aparelho
+                ? () => {
+                    // The card stays until the person confirms: "Cancel" leaves it as it was.
+                    void removerAparelhoNovo(cartaoDeAparelho.aparelho!).then((confirmed) => {
+                      if (confirmed) setNotifications((current) => markRead(current, cartaoDeAparelho.id))
+                    })
+                  }
+                : undefined
+            }
+          />
+        )}
+        {folhaDoFicheiro && address && (
+          <FolhaDoFicheiroDaConta
+            address={address}
+            onGuardado={() => setFolhaDoFicheiro(false)}
+            onFechar={() => setFolhaDoFicheiro(false)}
+          />
+        )}
 
         {verifying && (
           <VerifyModal
@@ -9346,6 +10036,8 @@ function Shell({
                 items={itensDaSala({
                   sala,
                   podeOrganizar: bridge.channels.mayEdit?.(active) ?? false,
+                  /* The phone: the order without dragging (`itemDeMover`). */
+                  mover: telemovel ? moverDaSala(sala.room) : null,
                   silencio: {
                     silenciado: silenciados.includes(chaveDoSilencio(active, sala.room)),
                     alternar: () => alternarSilencio(chaveDoSilencio(active, sala.room)),
@@ -9421,6 +10113,8 @@ function Shell({
             onClose={() => setCategoriaMenu(null)}
             items={itensDaCategoria({
               podeOrganizar: bridge.channels.mayEdit?.(active) ?? false,
+              /* The phone: the order without dragging (`itemDeMover`). */
+              mover: telemovel ? moverDaCategoria(categoriaMenu.category) : null,
               accoes: {
                 criarSala: () => abrirNovaSalaNaCategoria(categoriaMenu.category),
                 renomear: () => setARenomear({ tipo: "categoria", canal: active, categoria: categoriaMenu.category }),
@@ -9716,6 +10410,7 @@ function Shell({
         />
     </div>
     </ErrorBoundary>
+    </FaixaDoFicheiroContext.Provider>
     </LigacaoContext.Provider>
   )
 }

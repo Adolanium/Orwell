@@ -75,8 +75,13 @@ export interface MenuItem {
   submenu?: MenuItem[]
 }
 
-/** Below this the cascade opens as a sheet, not to the side. See `submenu`. */
-const LARGURA_DA_FOLHA = 600
+/**
+ * At this width and below, the menu is a sheet at the bottom of the screen,
+ * and so is the cascade. The phone breakpoint (`useTelemovel`, 840 px): on a
+ * phone the menu at the finger covered the line it was about, and long menus
+ * went past the bottom edge. A phone shows the full menu (20/11/2026). The entries are the same array, in the same order.
+ */
+const LARGURA_DA_FOLHA = 840
 
 const ehEstreito = (): boolean => typeof window !== "undefined" && window.innerWidth <= LARGURA_DA_FOLHA
 
@@ -276,14 +281,17 @@ export function ContextMenu({
   const [posicaoDaEscada, setPosicaoDaEscada] = useState<{ x: number; y: number } | null>(null)
   const [estreito, setEstreito] = useState(ehEstreito)
 
+  /** The whole menu is a sheet: chosen when it opens. A rotation closes it (see below). */
+  const [emFolha] = useState(ehEstreito)
+
   useEffect(() => {
     const box = menu.current?.getBoundingClientRect()
-    if (!box) return
+    if (!box || emFolha) return
     setPosition({
       x: Math.min(at.x, window.innerWidth - box.width - 8),
       y: Math.min(at.y, window.innerHeight - box.height - 8),
     })
-  }, [at.x, at.y])
+  }, [at.x, at.y, emFolha])
 
   useEffect(() => {
     // Capture phase, so a click that also triggers something else still
@@ -392,12 +400,15 @@ export function ContextMenu({
 
   return (
     <>
+      {/* The veil behind the sheet. A tap on it closes the menu (the
+          `pointerdown` outside, above) and does not reach the line below. */}
+      {emFolha && <div className="context-veu" aria-hidden="true" />}
       {!folha && (
         <div
           ref={menu}
-          className="context-menu"
+          className={emFolha ? "context-menu context-folha context-folha-inteira" : "context-menu"}
           role="menu"
-          style={{ left: position.x, top: position.y }}
+          style={emFolha ? undefined : { left: position.x, top: position.y }}
           onKeyDown={(event) => {
             if (event.key === "ArrowDown") {
               event.preventDefault()

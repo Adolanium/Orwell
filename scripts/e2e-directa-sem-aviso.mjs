@@ -232,7 +232,7 @@ const amostrar = (page, ms) =>
           const main = document.querySelector(".main")
           if (main) {
             const estilo = getComputedStyle(main)
-            amostras.push({ t: performance.now(), transform: estilo.transform, fundo: estilo.backgroundColor, sombra: estilo.boxShadow, aAbanar: main.classList.contains("buzzing") })
+            amostras.push({ t: performance.now(), transform: estilo.transform, fundo: estilo.backgroundColor, sombra: estilo.boxShadow, aAbanar: main.classList.contains("buzzing") || (document.querySelector(".app")?.classList.contains("buzzing") ?? false) })
           }
           if (performance.now() < fim) requestAnimationFrame(passo)
           else resolve(amostras)
@@ -379,7 +379,12 @@ async function correr(motor) {
   check(`[${motor}] e o eco dela é o abanão normal, mais curto`, daAna.duracao > 400 && daAna.duracao < 1_200, `${daAna.duracao} ms`)
   await b.screenshot({ path: join(dados, `bruno-${motor}.png`) }).catch(() => {})
 
-  // On a phone width the button leaves the line (the menu entry stays), and the line still fits.
+  /*
+    On a phone width the button stays in the line, and the line still fits.
+    Until 1.3.25 it left the line at 480 px and less; since the phone layout
+    (1.3.26, option B, `telemovel.css`) it stays there, because the "+" menu
+    has no nudge and a phone had no other way to send one.
+  */
   await a.setViewportSize({ width: 390, height: 844 })
   await espera(800)
   const naLinhaEstreita = await a.evaluate(() => {
@@ -387,7 +392,7 @@ async function correr(motor) {
     const linha = document.querySelector(".composer-line")
     return { visivel: botao ? getComputedStyle(botao).display !== "none" : false, transborda: linha ? linha.scrollWidth > linha.clientWidth + 1 : null }
   })
-  check(`[${motor}] a 390 px o botão sai da linha e a linha não transborda`, !naLinhaEstreita.visivel && naLinhaEstreita.transborda === false, JSON.stringify(naLinhaEstreita))
+  check(`[${motor}] a 390 px o botão fica na linha e a linha não transborda`, naLinhaEstreita.visivel && naLinhaEstreita.transborda === false, JSON.stringify(naLinhaEstreita))
   await a.setViewportSize(CONTEXTO.viewport)
   await espera(800)
 

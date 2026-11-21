@@ -67,14 +67,21 @@ describe("sala comum: reentrada por cartão de quem já tem subscrição duráve
       tree still had this device's leaf).
     */
     const frase = "frase-passe-de-teste"
-    const cofreDoBrowser = new Vault(new CofreEmMemoria())
+    const discoDoBrowser = new CofreEmMemoria()
+    const cofreDoBrowser = new Vault(discoDoBrowser)
     await cofreDoBrowser.create(frase)
     const browser = new Session(cofreDoBrowser)
     const { address } = await browser.createIdentity(servidor.casa)
     // Joining the common room is opt-in since 12/11/2026: these accounts ticked the box.
     await browser.escolherSalaComum(true)
     await cofreDoBrowser.gravarAdiada()
-    const ficheiroDeConta = await cofreDoBrowser.exportVault()
+    /*
+      A copy of the vault as it was on disk, the same device key. Since 1.3.26 an
+      import makes a new device (`devolverComoAparelhoNovo`), so this copies the
+      bytes the way a 1.3.25 import did: the server path below still serves a
+      vault that 1.3.25 imported.
+    */
+    const copiaDoCofre = discoDoBrowser.bytes!.slice()
     await browser.connect()
     abertas.push({ nome: "paptira (browser)", session: browser, vault: cofreDoBrowser, backend: new CofreEmMemoria(), address, avisos: [] })
     await ate(() => browser.channels.includes(sala), "a paptira entra pelo cartão no browser")
@@ -90,7 +97,7 @@ describe("sala comum: reentrada por cartão de quem já tem subscrição duráve
     // room in `connection.channels` (it has no group for it to subscribe to).
     const backend = new CofreEmMemoria()
     const cofreDaApp = new Vault(backend)
-    await cofreDaApp.importVault(ficheiroDeConta, frase)
+    backend.bytes = copiaDoCofre
     await cofreDaApp.unlock(frase)
     const app = new Session(cofreDaApp)
     const paptira: ContaDeTeste = { nome: "paptira (app)", session: app, vault: cofreDaApp, backend, address, avisos: [] }

@@ -17,6 +17,7 @@
 import { chromium } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { alvo, alvoApp } from "./ambiente.mjs"
+import { abrirNoTu, irPara, noTelemovel, voltarAConversa } from "./separadores.mjs"
 
 /*
   The address comes from `ambiente.mjs`, as in sister scripts, not assembled here.
@@ -75,7 +76,14 @@ const enderecoDe = (page) =>
 
 /** Navigate to a destination. The rail is always there, at any width. */
 async function ir(page, destino) {
-  await page.getByRole("button", { name: destino, exact: true }).click({ force: true })
+  // On a phone (option B) there is no rail: the four tabs, and Eu, Feed and Settings live in "Tu".
+  if (await noTelemovel(page)) {
+    if (destino === "Comunidades") await irPara(page, "comunidades")
+    else if (destino === "Amigos") await irPara(page, "amigos")
+    else await abrirNoTu(page, destino === "Eu" ? "O teu perfil" : destino)
+  } else {
+    await page.getByRole("button", { name: destino, exact: true }).click({ force: true })
+  }
   await page.waitForTimeout(700)
 }
 
@@ -276,42 +284,19 @@ await A.page.setViewportSize({ width: 390, height: 844 })
 await A.page.waitForTimeout(800)
 await percorrer(A.page, 390, marca)
 
-console.log("\n----- as gavetas, a 390 px -----")
-await ir(A.page, "Amigos")
-/** The veil, at a point to the right of the drawer: in the middle of the screen the drawer catches the mouse. */
-const fecharPeloVeu = async () => {
-  await A.page.locator(".people-scrim").click({ position: { x: 320, y: 700 } })
-  await A.page.waitForTimeout(700)
-}
-const pega = A.page.locator(".people-bar-conversas")
-if (await pega.count()) {
-  await pega.click({ force: true })
-  await A.page.waitForTimeout(700)
-  const m = await medir(A.page)
-  console.log(`pela faixa: gaveta visível=${m.peopleAside?.visivel} largura=${m.peopleAside?.largura} transbordo=${m.transbordo}`)
-  await fecharPeloVeu()
-  console.log(`pelo véu: gaveta visível=${(await medir(A.page)).peopleAside?.visivel}`)
-} else {
-  console.log("pela faixa: não há botão (só aparece com conversas na lista)")
-}
-const menu = A.page.locator(".rail-btn.rail-menu")
-await menu.click({ force: true })
-await A.page.waitForTimeout(700)
-const apos = await medir(A.page)
-console.log(
-  `pelo carril, em Amigos: barra=${apos.sidebar ? apos.sidebar.visivel : "(não existe)"}` +
-    ` gaveta visível=${apos.peopleAside?.visivel} largura=${apos.peopleAside?.largura} transbordo=${apos.transbordo}`,
-)
-console.log(`   controlos da conta, com a gaveta aberta: ${JSON.stringify(await controlos(A.page))}`)
-await menu.click({ force: true })
-await A.page.waitForTimeout(700)
-console.log(`pelo carril outra vez: gaveta visível=${(await medir(A.page)).peopleAside?.visivel}`)
-
-await ir(A.page, "Comunidades")
-await menu.click({ force: true })
-await A.page.waitForTimeout(700)
+// Since option B (20/11/2026) there are no drawers at 390 px: each list is a tab.
+console.log("\n----- os separadores, a 390 px -----")
+await irPara(A.page, "amigos")
+const amigos = await medir(A.page)
+console.log(`em Amigos: conversas visíveis=${amigos.peopleAside?.visivel} transbordo=${amigos.transbordo}`)
+await irPara(A.page, "mensagens")
+const mensagens = await medir(A.page)
+console.log(`em Mensagens: conversas visíveis=${mensagens.peopleAside?.visivel} largura=${mensagens.peopleAside?.largura} transbordo=${mensagens.transbordo}`)
+await irPara(A.page, "tu")
+console.log(`   controlos da conta, no separador Tu: ${JSON.stringify(await controlos(A.page))}`)
+await irPara(A.page, "comunidades")
 const canais = await medir(A.page)
-console.log(`pelo carril, em Conversas: barra visível=${canais.sidebar?.visivel} largura=${canais.sidebar?.largura} transbordo=${canais.transbordo}`)
+console.log(`em Comunidades: barra visível=${canais.sidebar?.visivel} largura=${canais.sidebar?.largura} transbordo=${canais.transbordo}`)
 
 console.log("\n----- o selo, a 390 px -----")
 console.log(`barra, nome curto     ${JSON.stringify(await folgaDoSelo(A.page, ".channel-row .channel-name", ".channel-row .selo-oficial"))}`)
@@ -320,6 +305,8 @@ await A.page.waitForTimeout(200)
 console.log(`barra, nome comprido  ${JSON.stringify(await folgaDoSelo(A.page, ".channel-row .channel-name", ".channel-row .selo-oficial"))}`)
 await A.page.keyboard.press("Escape")
 await A.page.waitForTimeout(500)
+// The header is the pushed conversation's, on the phone: push it again from the list.
+await voltarAConversa(A.page)
 console.log(`cabeçalho, nome curto ${JSON.stringify(await folgaDoSelo(A.page, ".topbar h1", ".topbar .selo-oficial"))}`)
 
 await A.ctx.close()

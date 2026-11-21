@@ -1,4 +1,4 @@
-import { Session, Vault } from "@enclave/client-core"
+import { Session, TECTOS_DOS_ANEXOS, Vault } from "@enclave/client-core"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import {
   ate,
@@ -111,7 +111,19 @@ describe("pedir uma imagem a quem a tem e está ligado", () => {
     // The phone away (the page suspended): nobody has it, and the answer is honest.
     telemovel.session.disconnect()
     await ate(() => telemovel.session.connection === "offline", "o telemóvel desligado")
-    expect(await recarregada.pedirAnexo(canal, id, 0)).toMatchObject({ ok: false, motivo: "ninguem" })
+    /*
+      "Nobody" is the answer after the sheets asked stayed silent for
+      `TECTOS_DOS_ANEXOS.esperaMs` each (30 s): two of them, a minute of the test
+      spent waiting. Five seconds of silence prove the same "nobody"; the
+      request that must succeed, below, has the full 30 s again.
+    */
+    const espera = TECTOS_DOS_ANEXOS.esperaMs
+    TECTOS_DOS_ANEXOS.esperaMs = 5_000
+    try {
+      expect(await recarregada.pedirAnexo(canal, id, 0)).toMatchObject({ ok: false, motivo: "ninguem" })
+    } finally {
+      TECTOS_DOS_ANEXOS.esperaMs = espera
+    }
 
     // The phone comes back (the page wakes up and connects), and the image arrives through it.
     await telemovel.session.connect()

@@ -5,13 +5,14 @@ import type { EnclaveBridge } from "../bridge.js"
 import { FICHEIRO_DA_CONTA_KEY, ficheiroPorTratar } from "../lib/ficheiroDaConta.js"
 import { strings } from "../strings.js"
 import { ToastProvider } from "./Toast.js"
-import { AvisoDoFicheiroDaConta, PassoDoFicheiroDaConta } from "./FicheiroDaConta.js"
+import { FolhaDoFicheiroDaConta, GuardarFicheiroDaConta } from "./FicheiroDaConta.js"
 
 /**
- * The account file right after the account is created, and the one-time notice
- * (16/11/2026). "Continue" only after the file went out AND the box is ticked; a
- * keychain vault asks a password for the file first; the share sheet where the
- * browser has one.
+ * The account file right after the account is created, and the sheet the banner
+ * inside the app opens (21/11/2026, mock-up `Main`). One button, "Guardar o
+ * ficheiro", which shares where the browser shares files and downloads
+ * elsewhere; "Fazer mais tarde" goes on without counting as saved; a keychain
+ * vault asks a password for the file first.
  */
 
 const ENDERECO = "@ana:orwell.test"
@@ -55,97 +56,95 @@ function passo(onContinuar = vi.fn()): typeof onContinuar {
   render(
     <ToastProvider>
       <BridgeContext.Provider value={ponte()}>
-        <PassoDoFicheiroDaConta address={ENDERECO} onContinuar={onContinuar} />
+        <GuardarFicheiroDaConta address={ENDERECO} onContinuar={onContinuar} />
       </BridgeContext.Provider>
     </ToastProvider>,
   )
   return onContinuar
 }
 
-const continuar = (): HTMLButtonElement => screen.getByRole("button", { name: strings.ficheiroDaConta.continuar }) as HTMLButtonElement
-const descarregar = (): HTMLButtonElement => screen.getByRole("button", { name: strings.ficheiroDaConta.descarregar }) as HTMLButtonElement
+const botao = (): HTMLButtonElement => screen.getByRole("button", { name: strings.entrada.guardarFicheiro }) as HTMLButtonElement
 
-describe("o passo do ficheiro da conta", () => {
-  it("diz o que é o ficheiro, e Continuar só depois de descarregar E marcar a caixa", async () => {
+describe("Guarda o ficheiro da conta, logo depois de criar", () => {
+  it("o título, uma frase, o botão e Fazer mais tarde", async () => {
+    passo()
+    expect(screen.getByRole("heading", { name: strings.entrada.guardarTitulo })).toBeTruthy()
+    expect(screen.getByText(strings.entrada.guardarTexto)).toBeTruthy()
+    expect(screen.getByRole("button", { name: strings.entrada.maisTarde })).toBeTruthy()
+    await waitFor(() => expect(botao().disabled).toBe(false))
+  })
+
+  it("Guardar descarrega o ficheiro, marca-o como guardado e segue", async () => {
     const onContinuar = passo()
-    expect(screen.getByRole("heading", { name: strings.ficheiroDaConta.titulo })).toBeTruthy()
-    expect(screen.getByText(strings.ficheiroDaConta.texto)).toBeTruthy()
-    expect(screen.getByText(strings.ficheiroDaConta.nota)).toBeTruthy()
-    expect(continuar().disabled).toBe(true)
-    // The box alone is not enough.
-    fireEvent.click(screen.getByRole("checkbox", { name: strings.ficheiroDaConta.guardei }))
-    expect(continuar().disabled).toBe(true)
-    await waitFor(() => expect(descarregar().disabled).toBe(false))
-    fireEvent.click(descarregar())
-    await waitFor(() => expect(descargas).toEqual([strings.ficheiroDaConta.nomeDoFicheiro]))
-    expect(continuar().disabled).toBe(false)
-    // The download alone is not enough either.
-    fireEvent.click(screen.getByRole("checkbox", { name: strings.ficheiroDaConta.guardei }))
-    expect(continuar().disabled).toBe(true)
-    fireEvent.click(screen.getByRole("checkbox", { name: strings.ficheiroDaConta.guardei }))
-    fireEvent.click(continuar())
-    expect(onContinuar).toHaveBeenCalledTimes(1)
-    // One export, made before the tap; the notice is no longer owed.
-    expect(exportar).toHaveBeenCalledTimes(1)
-    expect(exportar).toHaveBeenCalledWith(undefined)
-    await waitFor(async () => expect(await ficheiroPorTratar(ENDERECO)).toBe(false))
+    await waitFor(() => expect(botao().disabled).toBe(false))
+    fireEvent.click(botao())
+    await waitFor(() => expect(onContinuar).toHaveBeenCalledOnce())
+    expect(descargas).toEqual([strings.ficheiroDaConta.nomeDoFicheiro])
+    expect(await ficheiroPorTratar(ENDERECO)).toBe(false)
+    expect(localStorage.getItem(FICHEIRO_DA_CONTA_KEY)).not.toContain("ana")
+  })
+
+  it("Fazer mais tarde segue sem marcar: a faixa dentro da app fica", async () => {
+    const onContinuar = passo()
+    fireEvent.click(screen.getByRole("button", { name: strings.entrada.maisTarde }))
+    expect(onContinuar).toHaveBeenCalledOnce()
+    expect(await ficheiroPorTratar(ENDERECO)).toBe(true)
   })
 
   it("um cofre guardado pelo sistema pede antes uma palavra-passe só para o ficheiro", async () => {
     proteccao = "os"
-    passo()
-    const campo = (await screen.findByLabelText(strings.ficheiroDaConta.fraseLabel)) as HTMLInputElement
-    expect(descarregar().disabled).toBe(true)
-    fireEvent.change(campo, { target: { value: "curta" } })
-    expect(descarregar().disabled).toBe(true)
+    const onContinuar = passo()
+    const campo = await screen.findByLabelText(strings.entrada.palavraPasse)
+    expect(botao().disabled).toBe(true)
     fireEvent.change(campo, { target: { value: "frase-do-ficheiro" } })
-    fireEvent.click(descarregar())
-    await waitFor(() => expect(descargas).toHaveLength(1))
+    fireEvent.click(botao())
+    await waitFor(() => expect(onContinuar).toHaveBeenCalledOnce())
     expect(exportar).toHaveBeenCalledWith("frase-do-ficheiro")
   })
 
-  it("onde o browser partilha ficheiros (iPhone), Partilhar abre a folha e também conta", async () => {
-    const partilha = vi.fn(async (_dados: ShareData) => {})
-    Object.defineProperty(navigator, "canShare", { configurable: true, value: () => true })
-    Object.defineProperty(navigator, "share", { configurable: true, value: partilha })
-    passo()
-    const botao = await screen.findByRole("button", { name: strings.ficheiroDaConta.partilhar })
-    fireEvent.click(botao)
-    await waitFor(() => expect(partilha).toHaveBeenCalledTimes(1))
-    const ficheiro = (partilha.mock.calls[0]![0].files ?? [])[0]!
-    expect(ficheiro.name).toBe(strings.ficheiroDaConta.nomeDoFicheiro)
-    fireEvent.click(screen.getByRole("checkbox", { name: strings.ficheiroDaConta.guardei }))
-    await waitFor(() => expect(continuar().disabled).toBe(false))
+  it("onde o browser partilha ficheiros (iPhone), o mesmo botão abre a folha de partilha", async () => {
+    const partilhar = vi.fn(async () => {})
+    Object.assign(navigator, { share: partilhar, canShare: () => true })
+    const onContinuar = passo()
+    await waitFor(() => expect(exportar).toHaveBeenCalled())
+    await waitFor(() => expect(botao().disabled).toBe(false))
+    fireEvent.click(botao())
+    await waitFor(() => expect(onContinuar).toHaveBeenCalledOnce())
+    expect(partilhar).toHaveBeenCalledOnce()
+    expect(descargas).toEqual([])
   })
 
   it("fechar a folha de partilha não conta como guardado", async () => {
-    const fechada = Object.assign(new Error("closed"), { name: "AbortError" })
-    Object.defineProperty(navigator, "canShare", { configurable: true, value: () => true })
-    Object.defineProperty(navigator, "share", { configurable: true, value: vi.fn(async () => Promise.reject(fechada)) })
-    passo()
-    fireEvent.click(await screen.findByRole("button", { name: strings.ficheiroDaConta.partilhar }))
-    fireEvent.click(screen.getByRole("checkbox", { name: strings.ficheiroDaConta.guardei }))
+    const erro = Object.assign(new Error("cancelado"), { name: "AbortError" })
+    Object.assign(navigator, { share: vi.fn(async () => Promise.reject(erro)), canShare: () => true })
+    const onContinuar = passo()
+    await waitFor(() => expect(exportar).toHaveBeenCalled())
+    await waitFor(() => expect(botao().disabled).toBe(false))
+    fireEvent.click(botao())
     await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(continuar().disabled).toBe(true)
+    expect(onContinuar).not.toHaveBeenCalled()
+    expect(await ficheiroPorTratar(ENDERECO)).toBe(true)
   })
 })
 
-describe("o aviso único nas contas que já existem", () => {
-  it("tem o mesmo botão, fecha-se, e fechar conta como visto", async () => {
-    expect(await ficheiroPorTratar(ENDERECO)).toBe(true)
+describe("a folha da faixa", () => {
+  it("fechar não conta como guardado; guardar conta", async () => {
+    const onGuardado = vi.fn()
     const onFechar = vi.fn()
     render(
       <ToastProvider>
         <BridgeContext.Provider value={ponte()}>
-          <AvisoDoFicheiroDaConta address={ENDERECO} onFechar={onFechar} />
+          <FolhaDoFicheiroDaConta address={ENDERECO} onGuardado={onGuardado} onFechar={onFechar} />
         </BridgeContext.Provider>
       </ToastProvider>,
     )
-    expect(screen.getByRole("heading", { name: strings.ficheiroDaConta.aviso })).toBeTruthy()
-    expect(screen.getByRole("button", { name: strings.ficheiroDaConta.descarregar })).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: strings.ficheiroDaConta.fechar }))
-    expect(onFechar).toHaveBeenCalled()
-    await waitFor(async () => expect(await ficheiroPorTratar(ENDERECO)).toBe(false))
-    expect(localStorage.getItem(FICHEIRO_DA_CONTA_KEY)).not.toContain("ana")
+    expect(screen.getByRole("heading", { name: strings.entrada.guardarTitulo })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: strings.common.close }))
+    expect(onFechar).toHaveBeenCalledOnce()
+    expect(await ficheiroPorTratar(ENDERECO)).toBe(true)
+    await waitFor(() => expect(botao().disabled).toBe(false))
+    fireEvent.click(botao())
+    await waitFor(() => expect(onGuardado).toHaveBeenCalledOnce())
+    expect(await ficheiroPorTratar(ENDERECO)).toBe(false)
   })
 })

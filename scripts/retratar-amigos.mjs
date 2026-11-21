@@ -9,6 +9,7 @@ import { chromium } from "playwright"
 import { mkdirSync } from "node:fs"
 import { criarConta } from "./conta.mjs"
 import { comLingua } from "./ambiente.mjs"
+import { irPara } from "./separadores.mjs"
 
 const WEB = comLingua(`http://127.0.0.1:${process.argv[2] ?? "5199"}`)
 const SERVIDOR = process.argv[3] ?? "localhost:8452"
@@ -67,12 +68,13 @@ console.log(`${SAIDA}/selo-linha-1280.png`)
 
 await A.page.setViewportSize({ width: 390, height: 844 })
 await A.page.waitForTimeout(800)
-await A.page.getByRole("button", { name: "Amigos", exact: true }).click({ force: true })
+// At 390 px Friends is a tab, and the conversation list (the old drawer) is the Messages tab.
+await irPara(A.page, "amigos")
 await A.page.waitForTimeout(800)
 await retrato("amigos-390")
-await A.page.locator(".rail-btn.rail-menu").click({ force: true })
+await irPara(A.page, "mensagens")
 await A.page.waitForTimeout(800)
-await retrato("amigos-390-gaveta")
+await retrato("mensagens-390")
 
 await A.ctx.close()
 await B.ctx.close()

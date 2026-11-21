@@ -13,6 +13,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { criarConta } from "./conta.mjs"
 import { comLingua } from "./ambiente.mjs"
+import { irPara, profundidade } from "./separadores.mjs"
 
 const WEB = comLingua(`http://127.0.0.1:${process.argv[2] ?? "5199"}`)
 const SERVIDOR = process.argv[3] ?? "localhost:8461"
@@ -261,25 +262,27 @@ check(
   transbordo.doc <= transbordo.win + 1,
   `scrollWidth=${transbordo.doc} innerWidth=${transbordo.win}`,
 )
-// The column becomes a drawer: hidden, reachable by the banner's handle.
-const colunaEstreita = await A.page.locator(".people-aside").boundingBox()
-const pega = A.page.locator(".people-bar-conversas")
-check("a 390px a coluna sai do caminho", colunaEstreita === null || colunaEstreita.x < 0, JSON.stringify(colunaEstreita))
-check("a 390px há uma pega para as conversas na faixa", (await pega.count()) === 1 && (await pega.isVisible()))
-await pega.click()
+// Since option B (20/11/2026) the phone has tabs: the conversation list is the
+// Messages tab (no more drawer nor handle), and Friends shows only Friends.
+await irPara(A.page, "amigos")
 await A.page.waitForTimeout(700)
-const gaveta = await A.page.locator(".people-aside.open").count()
-check("a pega abre a gaveta das conversas", gaveta === 1)
-const caixaGaveta = await A.page.locator(".people-aside").boundingBox()
+const colunaEstreita = await A.page.locator(".people-aside").boundingBox()
+check("a 390px, em Amigos, a coluna das conversas sai do caminho", colunaEstreita === null || colunaEstreita.width === 0, JSON.stringify(colunaEstreita))
+await irPara(A.page, "mensagens")
+await A.page.waitForTimeout(700)
+const caixaLista = await A.page.locator(".people-aside").boundingBox()
 check(
-  "a gaveta aberta cabe no ecrã",
-  caixaGaveta && caixaGaveta.x >= 0 && caixaGaveta.x + caixaGaveta.width <= 391,
-  JSON.stringify(caixaGaveta),
+  "o separador Mensagens mostra as conversas, a caber no ecrã",
+  caixaLista !== null && caixaLista.x >= 0 && caixaLista.x + caixaLista.width <= 391 && (await A.page.locator(".people-aside .direct-row").count()) > 0,
+  JSON.stringify(caixaLista),
 )
-// Picking a chat closes the drawer, like the channel bar does.
+// Picking a chat pushes it full screen over the list, like a channel.
 await A.page.locator(".people-aside .direct-row .direct-open").first().click()
 await A.page.waitForTimeout(700)
-check("escolher uma conversa fecha a gaveta", (await A.page.locator(".people-aside.open").count()) === 0)
+check(
+  "escolher uma conversa empurra-a em ecrã inteiro",
+  (await A.page.locator(".ecra-empurrado").count()) === 1 && (await profundidade(A.page)) === 1,
+)
 const transbordoDepois = await A.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
 check("e continua sem transbordo depois de abrir a conversa", transbordoDepois)
 

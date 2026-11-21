@@ -1,6 +1,7 @@
 import type { Session } from "../session.js"
 import { CadeiaMontada, cadeiaDisponivel, MEDIDAS_VAZIAS, type EstadoDoMotor } from "./cadeia.js"
 import { DB_MINIMO } from "./processador-de-voz.js"
+import { RecusaDoSistema } from "../recusa-do-sistema.js"
 import {
   configuracaoPara,
   ehEtapa,
@@ -261,7 +262,8 @@ export class ControloDeVoz {
       await this.#garantirCadeiaFora()
     } catch (causa) {
       this.#medidor = false
-      if ((causa as Error)?.message === "audio-preview-unavailable") throw causa
+      // The system refusal already carries its own key and remedy.
+      if ((causa as Error)?.message === "audio-preview-unavailable" || causa instanceof RecusaDoSistema) throw causa
       const nome = String((causa as Error)?.name ?? "")
       if (nome === "NotAllowedError" || nome === "SecurityError") throw new Error("audio-meter-denied", { cause: { nome } })
       throw new Error("audio-meter-failed", {
@@ -299,7 +301,7 @@ export class ControloDeVoz {
     } catch (causa) {
       this.#previa = false
       this.#emitir()
-      if ((causa as Error)?.message === "audio-preview-unavailable") throw causa
+      if ((causa as Error)?.message === "audio-preview-unavailable" || causa instanceof RecusaDoSistema) throw causa
       throw new Error("audio-preview-failed", {
         cause: { nome: String((causa as Error)?.name ?? ""), mensagem: String((causa as Error)?.message ?? causa) },
       })

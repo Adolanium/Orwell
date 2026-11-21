@@ -222,3 +222,56 @@ describe("um escritor sem ficha (separador com o código de antes)", () => {
     expect((idb.dados.get("dono") as { ultimo: string }).ultimo.startsWith("p1-")).toBe(true)
   })
 })
+
+/**
+ * Resuming after a suspend (the iOS back-forward cache, 21/11/2026).
+ *
+ * The suspended tab sealed its backend and released the lock. Back in view, with
+ * the lock again, it may write again ONLY if no one else owned or wrote the vault
+ * in the meantime: the record still names it, and the vault is what it left.
+ * Otherwise its memory is stale and the page reloads.
+ */
+describe("resuming ownership after a suspend", () => {
+  it("nobody else touched the vault: the seal lifts and writes pass again", async () => {
+    const backend = new BrowserVaultBackend()
+    await backend.assumirPosse("a")
+    await backend.write(bytes(1))
+    backend.selar()
+    await expect(backend.write(bytes(2))).rejects.toThrow(RECUSA_DE_ESCRITA)
+    expect(await backend.retomarPosse("a")).toBe(true)
+    await backend.write(bytes(3))
+    expect(gravado()).toBe(3)
+  })
+
+  it("another tab claimed the record meanwhile: refuses, and stays sealed", async () => {
+    const antigo = new BrowserVaultBackend()
+    const novo = new BrowserVaultBackend()
+    await antigo.assumirPosse("a")
+    await antigo.write(bytes(1))
+    antigo.selar()
+    await novo.assumirPosse("b")
+    expect(await antigo.retomarPosse("a")).toBe(false)
+    await expect(antigo.write(bytes(9))).rejects.toThrow(RECUSA_DE_ESCRITA)
+    expect(gravado()).toBe(1)
+  })
+
+  it("a writer without a record (old code) changed the vault meanwhile: refuses", async () => {
+    const dono = new BrowserVaultBackend()
+    await dono.assumirPosse("a")
+    await dono.write(bytes(1))
+    dono.selar()
+    await new BrowserVaultBackend().write(bytes(40))
+    expect(await dono.retomarPosse("a")).toBe(false)
+    expect(gravado()).toBe(40)
+  })
+
+  it("a backend that never claimed a record, or claimed another id, refuses", async () => {
+    const semFicha = new BrowserVaultBackend()
+    semFicha.selar()
+    expect(await semFicha.retomarPosse("a")).toBe(false)
+    const outro = new BrowserVaultBackend()
+    await outro.assumirPosse("a")
+    outro.selar()
+    expect(await outro.retomarPosse("z")).toBe(false)
+  })
+})

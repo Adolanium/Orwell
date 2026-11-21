@@ -38,7 +38,7 @@ import { fraseDoCampo } from "../gate/fraseDoCampo.js"
  * The "delete" confirmation is asked before starting, as in other deletions
  * (`DeleteAccount`). Closing the sheet before step 2 changed nothing.
  */
-type Passo = "explicar" | "link" | "chave" | "emparelhar" | "avisar" | "apagar"
+type Passo = "explicar" | "link" | "emparelhar" | "password" | "avisar" | "apagar"
 
 type Fase =
   | { que: "a-ligar" }
@@ -65,8 +65,11 @@ export function JuntarContas({ onClose, onDone }: { onClose: () => void; onDone:
   // Account > Session > "Set password".
   const useOs = false
   const [erroDaChave, setErroDaChave] = useState<string | null>(null)
-  /** The new key phrase, waiting for the "delete" confirmation. */
-  const [aApagar, setAApagar] = useState<string | null>(null)
+  /** "apagar" asked, at the start: the pairing begins only after it. */
+  const [aApagar, setAApagar] = useState(false)
+  /** The main account sent its password record ("conta"), or not ("nova"): see `Session.joinCheckPassword`. */
+  const [passwordKind, setPasswordKind] = useState<"conta" | "nova">("conta")
+  const [checking, setChecking] = useState(false)
   /** The phrase that step 3 uses. In a ref: the `certificate` event arrives outside render. */
   const frase = useRef<string | null>(null)
   /** Step 2 has started: from here on, closing does not cancel anything. */
@@ -113,7 +116,10 @@ export function JuntarContas({ onClose, onDone }: { onClose: () => void; onDone:
           setFase({ que: "estado" })
           return
         case "certificado":
-          void avisarEApagarRef.current()
+          // One password on every device (1.3.26): the main account's password first, then the goodbye.
+          setPasswordKind(evento.palavraPasse ?? "nova")
+          setErroDaChave(null)
+          setPasso("password")
           return
         case "falhou":
           setFase({ que: "falhou", razao: translatePairingError(evento.razao), trancado: false })
@@ -139,23 +145,33 @@ export function JuntarContas({ onClose, onDone }: { onClose: () => void; onDone:
     setErroDoLink(null)
     setLink(texto.trim())
     setALer(false)
-    setPasso("chave")
+    setAApagar(true)
   }
 
   /** Same as `Pair`: read the FIELDS, which the manager may have filled. */
-  const pedirApagar = (formulario: HTMLFormElement | null): void => {
-    const escrita = fraseDoCampo(formulario, "new-password", passphrase)
-    const confirmacao = fraseDoCampo(formulario, "confirm-password", confirm)
-    if (!useOs) {
-      if (escrita.length < 8) return setErroDaChave(strings.gate.passphraseShort)
-      if (escrita !== confirmacao) return setErroDaChave(strings.gate.passphraseMismatch)
-    }
+  /**
+   * The main account's password, checked before step 2 (which leaves the channels
+   * and has no way back). A wrong one is Error 140 by the field, and the step stays.
+   */
+  const confirmPassword = (formulario: HTMLFormElement | null): void => {
+    if (checking) return
+    const written = fraseDoCampo(formulario, passwordKind === "conta" ? "current-password" : "new-password", passphrase)
+    if (passwordKind === "nova") {
+      if (written.length < 8) return setErroDaChave(strings.entrada.curta)
+      if (written !== fraseDoCampo(formulario, "confirm-password", confirm)) return setErroDaChave(strings.entrada.diferentes)
+    } else if (written.length === 0) return
     setErroDaChave(null)
-    setAApagar(escrita)
+    setChecking(true)
+    void Promise.resolve(pairing?.joinCheckPassword?.(written))
+      .then(() => {
+        frase.current = useOs ? null : written
+        void avisarEApagarRef.current()
+      })
+      .catch((erro: Error) => setErroDaChave(traduzirErro(erro)))
+      .finally(() => setChecking(false))
   }
 
-  const iniciar = (escrita: string): void => {
-    frase.current = useOs ? null : escrita
+  const iniciar = (): void => {
     setPasso("emparelhar")
     setFase({ que: "a-ligar" })
     if (!pairing?.juntar) {
@@ -218,7 +234,7 @@ export function JuntarContas({ onClose, onDone }: { onClose: () => void; onDone:
             <p className="field-note">{strings.juntar.passos}</p>
             <div className="setup-actions">
               <Button variant="ghost" type="button" onClick={onClose}>
-                {strings.gate.back}
+                {strings.entrada.voltar}
               </Button>
               <Button variant="primary" type="button" onClick={() => setPasso("link")}>
                 {strings.juntar.comecar}
@@ -264,7 +280,7 @@ export function JuntarContas({ onClose, onDone }: { onClose: () => void; onDone:
               )}
               <div className="setup-actions">
                 <Button variant="ghost" type="button" onClick={() => setPasso("explicar")}>
-                  {strings.gate.back}
+                  {strings.entrada.voltar}
                 </Button>
                 <Button variant="primary" type="submit" disabled={link.trim().length === 0}>
                   {strings.pairing.pasteAction}
@@ -274,57 +290,56 @@ export function JuntarContas({ onClose, onDone }: { onClose: () => void; onDone:
           </>
         )}
 
-        {passo === "chave" && (
+        {passo === "password" && (
           <form
+            className="entrada-formulario"
             onSubmit={(event) => {
               event.preventDefault()
-              pedirApagar(event.currentTarget)
+              confirmPassword(event.currentTarget)
             }}
           >
-            <p className="gate-lead">{strings.pairing.keyLead}</p>
-            {!useOs && (
-              <>
-                <CampoDeIdentidade />
-                <Field label={strings.gate.devicePassphrase}>
-                  <input
-                    type="password"
-                    name="new-password"
-                    value={passphrase}
-                    autoFocus
-                    autoComplete="new-password"
-                    placeholder={strings.gate.passphrasePlaceholder}
-                    onChange={(event) => {
-                      setPassphrase(event.target.value)
-                      setErroDaChave(null)
-                    }}
-                  />
-                </Field>
-                <Field label={strings.gate.confirmPassphrase}>
-                  <input
-                    type="password"
-                    name="confirm-password"
-                    value={confirm}
-                    autoComplete="new-password"
-                    onChange={(event) => {
-                      setConfirm(event.target.value)
-                      setErroDaChave(null)
-                    }}
-                  />
-                </Field>
-              </>
+            {/* The same name that the gate asks the manager to fill. See `CampoDeIdentidade`. */}
+            <CampoDeIdentidade />
+            <Field label={strings.juntarAparelho.palavraPasseDaConta}>
+              <input
+                type="password"
+                name={passwordKind === "conta" ? "current-password" : "new-password"}
+                autoComplete={passwordKind === "conta" ? "current-password" : "new-password"}
+                value={passphrase}
+                autoFocus
+                disabled={checking}
+                aria-invalid={erroDaChave ? true : undefined}
+                onChange={(event) => {
+                  setPassphrase(event.target.value)
+                  setErroDaChave(null)
+                }}
+              />
+            </Field>
+            {passwordKind === "nova" && (
+              <Field label={strings.entrada.palavraPasseOutraVez}>
+                <input
+                  type="password"
+                  name="confirm-password"
+                  value={confirm}
+                  autoComplete="new-password"
+                  disabled={checking}
+                  onChange={(event) => {
+                    setConfirm(event.target.value)
+                    setErroDaChave(null)
+                  }}
+                />
+              </Field>
             )}
-            {erroDaChave && (
+            {erroDaChave ? (
               <p className="error" role="alert">
-                {erroDaChave}
+                <TextoDeErro texto={erroDaChave} />
               </p>
+            ) : (
+              passwordKind === "nova" && <p className="field-note">{strings.entrada.minimo}</p>
             )}
-            <p className="field-note warn">{strings.settings.destroyStepsJoin}</p>
             <div className="setup-actions">
-              <Button variant="ghost" type="button" onClick={() => setPasso("link")}>
-                {strings.gate.back}
-              </Button>
-              <Button variant="primary" type="submit">
-                {strings.gate.next}
+              <Button variant="primary" type="submit" disabled={checking}>
+                {strings.juntarAparelho.continuar}
               </Button>
             </div>
           </form>
@@ -401,7 +416,7 @@ export function JuntarContas({ onClose, onDone }: { onClose: () => void; onDone:
               ) : (
                 <>
                   <Button variant="ghost" type="button" onClick={onClose}>
-                    {strings.gate.back}
+                    {strings.entrada.voltar}
                   </Button>
                   <Button variant="primary" type="button" onClick={tentarDeNovo}>
                     {strings.common.retry}
@@ -413,15 +428,14 @@ export function JuntarContas({ onClose, onDone }: { onClose: () => void; onDone:
         )}
       </div>
 
-      {aApagar !== null && (
+      {aApagar && (
         <ApagarConta
           porta="juntar"
-          onClose={() => setAApagar(null)}
+          onClose={() => setAApagar(false)}
           fazer={async () => {
-            // The "delete" is authorization; the act is step 3, after the certificate.
-            const escrita = aApagar
-            setAApagar(null)
-            iniciar(escrita)
+            // The "delete" is authorization; the act is step 3, after the certificate and the password.
+            setAApagar(false)
+            iniciar()
           }}
         />
       )}

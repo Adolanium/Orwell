@@ -1,6 +1,8 @@
 import { corpoDaRespostaAoConvite, corpoDoActoDoTicket } from "./actosEmTexto.js"
 import { marcarArranque, medirRecuperacao } from "./marcasDeArranque.js"
 import { lugaresDoHistorico, proximoPedidoDeLugar } from "./lugaresDoAparelhoNovo.js"
+import { fazerPassagem, type PedidoDePassagem, type ResultadoDaPassagem } from "./passagem.js"
+import { venceAPalavraPasse } from "./palavraPasseDaConta.js"
 import { PedidosDeLugar, REGRAS_DOS_PEDIDOS, SURDEZ_AVISADA_MS, surdezAvisada, type RegrasDosPedidos } from "./surdez.js"
 import { confirmarPagina, lerPagina, selarPaginas, type PaginaEmCurso } from "./armazem/conversaArquivada.js"
 import {
@@ -22,6 +24,7 @@ import {
   importSession,
   joinChannelComExtensoes,
   joinChannelExternally,
+  leafDeclares,
   leafIndexOf,
   leavesOf,
   memberAccountKey,
@@ -48,7 +51,9 @@ import {
   CAPACIDADE_ESTREIA_DA_DIRECTA,
   CAPACIDADE_LIGACOES_CURTAS,
   CAPACIDADE_SINAL_EFEMERO,
+  CAPACIDADE_SINAL_PARA,
   eCodigoCurto,
+  EXTENSAO_PERFIS_A_PEDIDO,
   lerRetrato,
   verifyDeviceChain,
 } from "@enclave/protocol"
@@ -82,6 +87,7 @@ import { enviarBug } from "./bugs.js"
 import type { DadosDoPush } from "./push.js"
 import { escolherFundador, montarRetrato, ordemDeAplicacao, perfisParaRelatar, type RetratoMontado } from "./retrato.js"
 import { HistoricoEntreAparelhos, type DesfechoDoIrmao, type EventoDoHistorico, type PortaDoHistorico } from "./historico/historico.js"
+import { HistoricoDosMembros, leSala, type EstatisticasDosMembros, type LoadOlderResult, type PortaDosMembros } from "./historico/membros.js"
 import { PassagemDaChaveDaConta } from "./chaveDaConta.js"
 import {
   itemApagado,
@@ -105,6 +111,8 @@ import {
   parseServerName,
   safetyNumber,
   signWithDevice,
+  assinarPedidoDeLugar,
+  ProvasDosPedidosDeLugar,
   toBase64,
   foldFriendTies,
   friendsOfTies,
@@ -171,9 +179,13 @@ import {
   CAPACIDADE_BUNDLE,
   CAPACIDADE_WEB_PUSH,
   CAPACIDADE_EMPARELHAMENTO,
+  CAPABILITY_PAIRING_PAKE,
+  normalizePairingCode,
+  type AccountIdentity,
   CAPACIDADE_REVOGACAO,
   CAPACIDADE_SFU,
   CAPACIDADE_SFU_FOTOGRAMA_CHAVE,
+  CAPACIDADE_MEMBROS_DO_CANAL,
   APARELHOS_POR_CONTA,
   PAIR_SECRET_BYTES,
   aparelhosDoManifestoSeguinte,
@@ -183,6 +195,7 @@ import {
   verifyDeviceManifest,
   type DeviceManifest,
   type DeviceManifestWire,
+  type PalavraPasseDaConta,
   type FonteDeMedia,
   PROTOCOL_VERSION,
   TICKET_STATES,
@@ -209,6 +222,7 @@ import {
   FICHAS_MAX,
   chaveDaProvaDoConvite,
   provarCodigoDoConvite,
+  provarConviteNoRegisto,
   selarNomeDoConvite,
   abrirSeloDoConvite,
   CAPACIDADE_SELO_DO_CONVITE,
@@ -222,6 +236,29 @@ import {
   CODIGOS_DE_RECUSA_DO_REGISTO,
   type ModoDeRegisto,
 } from "@enclave/protocol"
+// The probe of a new account says when the server refuses this app's version (21/11/2026).
+import { CODIGO_VERSAO_ANTIGA } from "@enclave/protocol"
+// The abuse brake, part 2 (1.3.26). A separate import, so it does not clash with another branch.
+import {
+  CAPABILITY_ROOM_LIMIT,
+  CAPACIDADE_LIMITE_DE_CANAIS,
+  CAPACIDADE_LIMITES_DE_CONTA_NOVA,
+  CAPACIDADE_MANIFESTO_AO_VIVO,
+  CAPACIDADE_PROVA_DE_TRABALHO,
+  CODIGO_PROVA_EM_FALTA,
+  CODIGO_PROVA_INVALIDA,
+  CODIGO_REDE_COM_MUITAS_CONTAS,
+  faseDaContaNova,
+  resolverProvaDeTrabalho,
+  RECUSA_DE_LIMITE_DE_CANAIS,
+  REFUSAL_ROOM_LIMIT,
+  type ContaNova,
+  type CriarCanais,
+  type RoomQuota,
+  type DesafioDeTrabalho,
+  type FilaDaSalaComum,
+  type ProvaDeTrabalho,
+} from "@enclave/protocol"
 import { ticketsOf, type Ticket } from "./tickets.js"
 import {
   fichaDoCanal as fichaNoCofre,
@@ -231,6 +268,7 @@ import {
 } from "./tipoDoCanal.js"
 import { APELIDO_MAX, apelidoDaMensagem, apelidosDoCanal, esquecerApelidos, registarApelido, type RegistoDeApelido } from "./apelidos.js"
 import { contarGrafemas, NOME_MAX } from "./nomeDeApresentacao.js"
+import { cortarBio } from "./biografia.js"
 import { chaveDoEvento, dobrarReaccoes, porOrdemDoServidor, venceCarimbo } from "./dobras.js"
 import { comoNoEcra, lerVoto, semMarcaDoFio, semPollNoEcra, votacaoGuardada } from "./votos.js"
 import {
@@ -431,7 +469,37 @@ const CAPACIDADE_UM_COMMIT_POR_EPOCA = "commit-per-epoch"
 /*
   `envio-recusado` (S6): this client reads the rejection of a send for rate limit (`channel.rejected` with `rate-limited`) and retries the send. See `#aoRecusaPorRitmo`.
   */
-const GARANTIAS_DO_CLIENTE = ["commit-after-echo", CAPACIDADE_SINAL_EFEMERO, CAPACIDADE_ENVIO_RECUSADO, CAPACIDADE_HISTORICO_RECUSADO]
+/** What `#sondarHello` answers when the server refuses this app's version. */
+const VERSAO_ANTIGA_NA_SONDAGEM = "versao-antiga" as const
+
+const GARANTIAS_DO_CLIENTE = [
+  "commit-after-echo",
+  CAPACIDADE_SINAL_EFEMERO,
+  CAPACIDADE_ENVIO_RECUSADO,
+  CAPACIDADE_HISTORICO_RECUSADO,
+  // 1.3.26: this client solves the proof of work, and understands the new-account refusals.
+  CAPACIDADE_PROVA_DE_TRABALHO,
+  CAPACIDADE_LIMITES_DE_CONTA_NOVA,
+  // 1.3.26: this client says which new channel is a community, and reads a refused invite.
+  CAPACIDADE_LIMITE_DE_CANAIS,
+  // 1.3.26: this client tells the server when it creates and deletes a room.
+  CAPABILITY_ROOM_LIMIT,
+  // 1.3.26: this client reads its account's new manifest, sent unasked (the new-device notice).
+  CAPACIDADE_MANIFESTO_AO_VIVO,
+]
+
+/** Finds a nonce for a proof-of-work challenge. The hosts give one that runs in a worker. See `prova-worker.ts`. */
+export type ResolverDaProva = (desafio: DesafioDeTrabalho, aoProgresso?: (fraccao: number) => void) => Promise<ProvaDeTrabalho>
+
+/** The sentences of the new-account refusals (1.3.26). Keys of the interface's error catalog. */
+export const ERRO_CONTA_NOVA_PESSOAS = "this new account added all the people it can today"
+export const ERRO_CONTA_NOVA_CANAIS = "this new account opened all the new channels it can today"
+export const ERRO_CONTA_NOVA_ANEXOS = "this new account cannot send images, files or gifs in the common room yet"
+export const ERRO_CONTA_NOVA_DIRECTA = "this new account must send a friend request first"
+/** The account created all the channels it may (1.3.26). The `cause` has `maximo` and `contaNova`. */
+export const ERRO_LIMITE_DE_CANAIS = "this account created all the channels it can"
+/** The account created all the rooms (inside channels) it may (1.3.26). The `cause` has `max` and `newAccount`. */
+export const ERROR_ROOM_LIMIT = "this account created all the rooms it can"
 
 /** How many reconnections to wait for an event before calling it lost. */
 const TENTATIVAS_POR_BURACO = 3
@@ -686,12 +754,15 @@ export type RepairOutcome = SeatOutcome | "cooldown" | "device-unreachable"
  * attempts and three seconds' wait, was the cost of having it in the manifest.
  */
 export class AparelhoSemChaves extends Error {
-  constructor(address: string) {
+  /** The devices the claim named and the server had no key package for (1.3.26). Empty when unknown. */
+  readonly aparelhos: readonly string[]
+  constructor(address: string, aparelhos: readonly string[] = []) {
     // Same key as the case where the account has no keys: for the reader, what to
     // do is the same (the person opens the app). The address goes in `cause`, never
     // in the message.
     super("that person has no invite keys", { cause: { address, aparelho: true } })
     this.name = "AparelhoSemChaves"
+    this.aparelhos = aparelhos
   }
 }
 
@@ -838,9 +909,45 @@ export function contasSemPerfil(
   return [...contas].filter((conta) => conta !== eu && (directory[conta] === undefined || directory[conta].parcial === true)).sort()
 }
 
+/**
+ * Whether a channel that grew still needs our whole profile resent (1.3.26). Pure,
+ * so each case proves itself without a network. See `#perfilPorReenviar`.
+ *
+ * Decided by LEAF, not by account: a 1.3.25 device added to an account that was
+ * already here needs the resend as much as a new account does.
+ *
+ * @param publicada the version of our profile last published in this channel, if any.
+ * @param aparelhosDitos the device keys of the other leaves when it went out (our own
+ *   leaf left out); absent in a vault from before 1.3.26.
+ * @param folhas every other leaf of the tree now: its account, its device key, and
+ *   whether it declares `EXTENSAO_PERFIS_A_PEDIDO` (it asks for the profiles it lacks).
+ *   A new leaf gets the resend when it does not ask, and when it is a device of ours:
+ *   our sibling's own sends are how the other members first hear it (`transmitters`),
+ *   and pairing is rare.
+ */
+export function perfilPorReenviar(canal: {
+  eu: string
+  versao: number
+  publicada: number | undefined
+  aparelhosDitos: readonly string[] | undefined
+  folhas: readonly { conta: string; aparelho: string; pedeOsPerfis: boolean }[]
+}): boolean {
+  if (canal.publicada !== canal.versao || canal.aparelhosDitos === undefined) return true
+  const ditos = new Set(canal.aparelhosDitos)
+  return canal.folhas.some((folha) => !ditos.has(folha.aparelho) && (folha.conta === canal.eu || !folha.pedeOsPerfis))
+}
+
 export function podeResponderAPedidoDePerfis(pedido: {
   eu: string
   contas: readonly string[]
+  /** A leaf that joined since our profile went out and does not ask for profiles (1.3.26): someone new, by device. */
+  folhaNovaSemPedido?: boolean
+  /**
+   * The account that asked (1.3.26). One that our profile never reached here, a
+   * newcomer whose resend we skipped on purpose, is answered past the daily cap:
+   * the answer goes out forced and records it in `ditas`, so it is answered once.
+   */
+  quemPede?: string
   ditas: readonly string[] | undefined
   ultimaResposta: number | undefined
   agora: number
@@ -849,8 +956,12 @@ export function podeResponderAPedidoDePerfis(pedido: {
   lidoAntesDaLigacao: number | undefined
 }): boolean {
   if (!pedido.aoVivo && pedido.seq >= 0 && pedido.seq <= (pedido.lidoAntesDaLigacao ?? -1)) return false
-  if (pedido.ultimaResposta !== undefined && pedido.agora - pedido.ultimaResposta < Session.PERFIS_DADOS_MS) return false
   const ditas = new Set(pedido.ditas ?? [])
+  const recemChegado =
+    pedido.quemPede !== undefined && pedido.quemPede !== pedido.eu && pedido.ditas !== undefined && !ditas.has(pedido.quemPede) && pedido.contas.includes(pedido.quemPede)
+  if (recemChegado) return true
+  if (pedido.ultimaResposta !== undefined && pedido.agora - pedido.ultimaResposta < Session.PERFIS_DADOS_MS) return false
+  if (pedido.folhaNovaSemPedido === true) return true
   return pedido.contas.some((conta) => conta !== pedido.eu && !ditas.has(conta))
 }
 
@@ -964,6 +1075,8 @@ interface ChegadaDoPedido {
   epoca: bigint | undefined
   /** The asker's leaf (`#folhaDoAparelho`), when the server named the device. */
   folha: string | undefined
+  /** The named device signed the request, and the proof was fresh (1.3.26). See `#provaDoPedido`. */
+  provado: boolean
 }
 
 /** A slot to request, with request spacing. See `lugaresPorPedir` in the vault. */
@@ -1033,6 +1146,15 @@ function limitarMarcasDeLido(lidas: Readonly<Record<string, number>>): Record<st
   const saida: Record<string, number> = {}
   for (const [channel, at] of Object.entries(lidas)) saida[channel] = limitarMarcaDeLido(at, agora)
   return saida
+}
+
+/** The server of an address, or `null` for one that does not parse. */
+function servidorDe(address: string): string | null {
+  try {
+    return parseAddress(address).server
+  } catch {
+    return null
+  }
 }
 
 export function estaRemovido(group: GroupSession): boolean {
@@ -1350,6 +1472,40 @@ export function formatPairLink(server: string, segredo: Uint8Array): string {
 }
 
 /**
+ * Build the QR link of a short code (1.3.26):
+ * `https://<server>/app/emparelhar#code=K7P4QM`.
+ *
+ * The same path as the QR link, in the fragment for the same reason. An older
+ * app that reads it refuses it (`parsePairLink` wants 43 characters of
+ * secret), which is right: this QR is read by the device WITH the account.
+ */
+export function formatPairCodeLink(server: string, code: string): string {
+  const scheme = isLoopbackHost(server) ? "http" : "https"
+  return `${scheme}://${server}${PAIR_PATH}#code=${code}`
+}
+
+/**
+ * What the device with the account typed or read: a short code, or the QR
+ * link of one. `null` for anything else. A typed code names no server: it is
+ * this account's.
+ */
+export function parsePairCode(text: string): { server: string | null; code: string } | null {
+  const trimmed = text.trim()
+  if (trimmed.length > MAX_INVITE_LINK) return null
+  const web = /^(https?):\/\/([^/?#]+)([^?#]*)#code=([^#]*)$/i.exec(trimmed)
+  if (web) {
+    const [, scheme, rawHost, path, fragment] = web
+    const server = hostOf(rawHost)
+    if (!scheme || !server || path !== PAIR_PATH) return null
+    if (scheme.toLowerCase() === "http" && !isLoopbackHost(server)) return null
+    const code = normalizePairingCode(fragment ?? "")
+    return code ? { server, code } : null
+  }
+  const code = normalizePairingCode(trimmed)
+  return code ? { server: null, code } : null
+}
+
+/**
  * Parse a pairing link, in either of its two forms:
  *
  *   https://<server>/app/emparelhar#<segredo>     what is shown today
@@ -1539,6 +1695,17 @@ export const MAX_SEALED_BYTES = 11 * 1024 * 1024
 
 /** A stable, machine-readable name for a status, for coalescing and the log. */
 export type StatusCode =
+  /**
+   * The common room held a message of a new account (1.3.26): one message every
+   * N seconds there. The `detail` is N. The message goes out by itself.
+   */
+  | "new-account-slow"
+  /** A new-account rule refused a send (1.3.26). The `detail` is the error key. */
+  | "new-account-refused"
+  /** The common room is at its ceiling of joins per hour, and this account waits in the queue (1.3.26). The `detail` is the place. */
+  | "common-room-queued"
+  /** This account is in its first 24 hours (1.3.26): "Some features open in 24 h". Once per session. */
+  | "new-account"
   /** An admin removed the channel (`space.removed`). The `detail` carries the name after the key. */
   | "channel-deleted"
   /** The vault identity is before the server's account cutoff. */
@@ -1647,10 +1814,25 @@ export type StatusCode =
   | "account-suspended"
   /** A device paired before 1.3.16 received the account private key from a sibling. See `chaveDaConta.ts`. */
   | "account-key-received"
+  /**
+   * A device key showed up in this account's manifest that this device did not
+   * pair and had not seen (1.3.26): someone added a device, maybe with the account
+   * file. `detail` is "deviceKey|addedAt" (seconds). The interface puts it in the
+   * bell with "Remove". See `#notarAparelhosDaConta`.
+   */
+  | "device-new"
+  /** The account password changed on another device, and this vault now opens with the new one (1.3.26). */
+  | "account-password-changed"
 
 export type SessionEvents = {
   message: ReceivedMessage
   epoch: { channel: string; epoch: string }
+  /**
+   * The list `membrosVisiveis` gives for this channel changed without an epoch:
+   * the server roster arrived, and an account the tree still has is gone (P7).
+   * The interface reads the members again, as on `epoch`.
+   */
+  members: { channel: string }
   status: {
     detail: string
     level?: "info" | "error"
@@ -1924,8 +2106,41 @@ export class Session extends Emitter<SessionEvents> {
   #registoDoServidor: ModoDeRegisto | undefined
   /** The registration invite code for a new account, sent in `auth.finish`. See `definirConviteDeRegisto`. */
   #conviteDeRegisto: string | null = null
+  /**
+   * The community invite a NEW account presents at its first login, over the
+   * network limit (1.3.26): the server and the code of the link. See
+   * `definirConviteDeComunidade`. Memory only.
+   */
+  #conviteDeComunidade: { server: string; code: string } | null = null
   /** The `code` of the registration refusal this connection got, read when `auth.ok` does not come. */
   #recusaDoRegisto: string | null = null
+  /** The proof of work prepared for a new account, sent in `auth.finish` (1.3.26). See `prepararContaNova`. */
+  #provaDeTrabalho: ProvaDeTrabalho | null = null
+  /**
+   * This session made the identity and the server has not taken it yet: the
+   * first connection registers a NEW account, and solves the proof itself if
+   * none was prepared. Also set after a refusal for want of a proof. Memory only.
+   */
+  #contaPorRegistar = false
+  readonly #resolverProva: ResolverDaProva
+  /** What `auth.ok` said about this account's first 72 hours, or `null`. See `contaNova`. */
+  #contaNova: ContaNova | null = null
+  /** The last count of channels this account created, and its cap (1.3.26). See `criarCanais`. */
+  #criarCanais: CriarCanais | null = null
+  /** The last count of rooms this account created, and its cap (1.3.26). See `roomQuota`. */
+  #roomQuota: RoomQuota | null = null
+  /** Channels whose first rooms are being created now: those rooms do not count (1.3.26). */
+  readonly #roomsBeingBorn = new Set<string>()
+  /** The new-account notice went out in this session. */
+  #avisouContaNova = false
+  /** Channels waiting after a new-account rate refusal, until when. Only those wait. See `#aoRecusaPorRitmo`. */
+  readonly #pausaDoCanal = new Map<string, number>()
+  /** The common room's queue, while this account waits in it. See `filaDaSalaComum`. */
+  #filaDaSalaComum: FilaDaSalaComum | null = null
+  /** When the account answered for by the server stops being new, by address (`account.age.result.novaAte`). Per connection. */
+  readonly #novasAte = new Map<string, number | null>()
+  /** Accounts the server refused to hand key packages for, because this account is new. Read by `#reclamarPacotes`. */
+  readonly #pessoasRecusadas = new Set<string>()
   /** How many days the server keeps events, stated in `hello.ok`; `undefined` on a server before this. */
   #serverRetentionDays: number | undefined
   /** Announce this connection to channel-mates? Set before connecting, so an
@@ -2039,10 +2254,17 @@ export class Session extends Emitter<SessionEvents> {
       miniaturista?: Miniaturista | null
       /** Opens media blobs off this thread. See `ArmazemDeMedia.decifrador`. */
       decifradorDeMedia?: ArmazemDeMedia["decifrador"]
+      /**
+       * Solves the proof of work when the connection has to (a new account
+       * without a prepared proof). Absent: on this thread, yielding between
+       * batches (`resolverProvaDeTrabalho`). See `prepararContaNova`.
+       */
+      resolverProva?: ResolverDaProva
     } = {},
   ) {
     super()
     this.#versaoDaApp = opcoes.versaoDaApp
+    this.#resolverProva = opcoes.resolverProva ?? ((desafio, aoProgresso) => resolverProvaDeTrabalho(desafio, aoProgresso ? { aoProgresso } : {}))
     vault.aoSerializar = (contents) => {
       this.#escreverGruposAdiados(contents)
       // Full archive pages go to the store now, and leave the vault once the store has them.
@@ -2519,6 +2741,8 @@ export class Session extends Emitter<SessionEvents> {
       contents.identityCreatedAtMinute = Math.floor(Date.now() / 60_000)
     })
     this.#identity = identity
+    // The server learns of it at the first connection, which registers it (1.3.26: with a proof of work).
+    this.#contaPorRegistar = true
     return identity
   }
 
@@ -2828,6 +3052,7 @@ export class Session extends Emitter<SessionEvents> {
       // Ages and the pinned key are per connection: a server that rotated its key,
       // or answered nothing on the last one, is asked again.
       this.#idades.clear()
+      this.#novasAte.clear()
       this.#chavesFixadas.clear()
       this.#serverRetentionDays = hello.retentionDays
       this.#commonRoom = this.#acceptCommonRoom(hello.commonRoom)
@@ -2860,22 +3085,45 @@ export class Session extends Emitter<SessionEvents> {
     if (challenge.t !== "auth.challenge") throw new Error("the server refused the login")
 
     /*
-      Device possession (`auth.finish` in the protocol). A vault freshly imported
-      asks for the next generation, and the server closes the copy left on the
-      device that exported it; others present the generation they have, and the
-      copy left behind gets rejected as revoked.
+      Device possession (`auth.finish` in the protocol). Every device presents the
+      generation it has. Since 1.3.26 an import makes a new device and never writes
+      `assumirPosse` (`devolverComoAparelhoNovo` in the vault); a vault imported by
+      1.3.25 that never connected still carries one, and asks for it once.
     */
     const { posseDoAparelho, assumirPosse } = this.vault.contents
+    /*
+      The proof of work for a NEW account (1.3.26). The gate prepares it before
+      connecting (`prepararContaNova`, in a worker); without one, an account this
+      session just made solves the challenge of this `hello.ok` here. An account
+      that already exists never solves anything, and the server ignores a proof
+      it does not need.
+    */
+    const desafio = hello.t === "hello.ok" ? hello.provaDeTrabalho : undefined
+    let prova = this.#provaDeTrabalho
+    if (prova === null && this.#contaPorRegistar && desafio) {
+      prova = await this.#resolverProva(desafio)
+    }
     this.#send({
       t: "auth.finish",
       signature: toBase64(signWithDevice(identity, fromBase64(challenge.nonce))),
       ...(posseDoAparelho !== undefined ? { posse: posseDoAparelho } : {}),
       ...(assumirPosse ? { assumirPosse } : {}),
       ...(this.#conviteDeRegisto !== null ? { conviteDeRegisto: this.#conviteDeRegisto } : {}),
+      ...(prova !== null ? { provaDeTrabalho: prova } : {}),
+      ...this.#conviteDeComunidadeNoRegisto(identity.address),
     })
     const ok = await this.#await("auth.ok")
     if (ok.t !== "auth.ok") throw new Error(fraseDaRecusaDoRegisto(this.#recusaDoRegisto) ?? "the server refused the login")
     this.#autenticado = true
+    // Registered, or it already was: a proof is spent once, and the next connection needs none.
+    this.#provaDeTrabalho = null
+    this.#contaPorRegistar = false
+    this.#contaNova = ok.contaNova ?? null
+    // Once per session, in the first day: "Your account is new. Some features open in 24 h."
+    if (this.faseDaContaNova === "24h" && !this.#avisouContaNova) {
+      this.#avisouContaNova = true
+      this.emit("status", { detail: String(this.#contaNova?.ate24h ?? 0), level: "info", code: "new-account", route: "toast" })
+    }
     // A server that doesn't know the possession doesn't answer `possession`: the
     // request stays pending for a server that does know it.
     if (ok.posse !== undefined && (ok.posse !== posseDoAparelho || assumirPosse)) {
@@ -2893,6 +3141,7 @@ export class Session extends Emitter<SessionEvents> {
     // presence announcement — so invisibility never flickers on reconnect.
     if (!this.#visible) this.#send({ t: "presence.set", visible: false })
     this.#setConnection("online", identity.address)
+    this.#markOnline()
     // The seat requests that could not leave while offline (P3). See `adiantar`.
     this.#pedidosDeLugar.adiantar()
     marcarArranque("auth-ok")
@@ -2958,6 +3207,8 @@ export class Session extends Emitter<SessionEvents> {
     this.#anti.aoLigar([...this.#groups.keys()])
     // And the history across devices: a plan midway continues here.
     this.#historico.aoLigar()
+    // And the channels' past from other members (D2): after the server and the siblings.
+    this.#historicoDosMembros.aoLigar()
     // A device paired before 1.3.16 asks for the account key until it has it (`chaveDaConta.ts`).
     this.#passagemDaChave.aoLigar()
     if (restored.length > 0) {
@@ -3240,6 +3491,8 @@ export class Session extends Emitter<SessionEvents> {
     } else {
       await this.publishProfile()
     }
+    // An edit that a close cut before it went out (1.3.26): the channels just got it above, our other devices now.
+    await this.publicarPerfilPendente().catch(() => {})
     marcarArranque("perfil")
 
     /**
@@ -3281,6 +3534,7 @@ export class Session extends Emitter<SessionEvents> {
     void this.#assentarAparelhosEmFalta().catch(() => {})
     // Account state (phase 5): the account channel, this device's announcement, and
     // what remains unsent while there is no connection.
+    this.#accountPasswordSent = false
     void this.#estadoAoLigar().catch(() => {})
     this.#rearmarSaidas()
     // A pending list (the cap on retries) tries again on each connection: recovery
@@ -3334,6 +3588,7 @@ export class Session extends Emitter<SessionEvents> {
     // And anti-entropy requests in flight (S4): responses came on this connection.
     this.#antiEntropia?.aoDesligar()
     this.#historicoDosIrmaos?.aoDesligar()
+    this.#membrosDoPassado?.aoDesligar()
     this.#passagemDaChaveDaConta?.aoDesligar()
     this.#chavesProntas = false
     // And the grace of exits: grace is counted with a connection, because the
@@ -3399,6 +3654,20 @@ export class Session extends Emitter<SessionEvents> {
    * reconnect. The host seals the vault (`apps/web/src/bridge.ts`); this is
    * the client half, so refusals and prompts live in one place.
    */
+  /**
+   * Undo `pararDeEscrever`, for a web tab resumed from the back-forward cache
+   * (21/11/2026). The host calls it only after checking that this tab still owns
+   * the vault and nobody wrote it meanwhile (`BrowserVaultBackend.retomarPosse`).
+   * Does not connect: the host does. `false` if the media store cannot resume,
+   * and then nothing changed.
+   */
+  retomarEscrita(): boolean {
+    if (this.#escreve) return true
+    if (!this.#armazem.retomar()) return false
+    this.#escreve = true
+    return true
+  }
+
   pararDeEscrever(): void {
     this.#escreve = false
     // The store too (Ruling R17): a tab without ownership neither writes nor deletes blobs.
@@ -3433,12 +3702,25 @@ export class Session extends Emitter<SessionEvents> {
     for (const quem of esperavamPelaLista) quem.reject(new Error("the session ended"))
     this.#desarmarSincronia()
     this.#desarmarCaixa()
+    /*
+      A profile edit still waiting does not go out from a closed session: the vault
+      keeps `perfilPorPublicar`, and the next connection sends it. Whoever closes on
+      purpose calls `publicarPerfilPendente` first.
+    */
+    if (this.#publicacaoDoPerfil !== undefined) {
+      clearTimeout(this.#publicacaoDoPerfil)
+      this.#publicacaoDoPerfil = undefined
+    }
+    // The profile requests waiting their retry: the next connection asks again.
+    for (const temporizador of this.#perfisAPedirTimer.values()) clearTimeout(temporizador)
+    this.#perfisAPedirTimer.clear()
     if (this.#pedidoDePerfisNaSalaComum !== null) {
       clearTimeout(this.#pedidoDePerfisNaSalaComum)
       this.#pedidoDePerfisNaSalaComum = null
     }
     this.#antiEntropia?.aoDesligar()
     this.#historicoDosIrmaos?.aoDesligar()
+    this.#membrosDoPassado?.aoDesligar()
     this.#passagemDaChaveDaConta?.aoDesligar()
     this.#pararRevezamentos()
     this.#chavesProntas = false
@@ -3454,6 +3736,8 @@ export class Session extends Emitter<SessionEvents> {
       locked or destroyed, and over work this line already handled.
       */
     this.#cancelarFlushAdiado()
+    // The last moment online goes in this write: the next opening counts days from it.
+    if (this.#connection === "online" && this.#markOnline()) this.#memoriaPorGravar = true
     // The flush's encryption happens synchronously, so even a `lock()` on the
     // next line cannot race it; the catch is for a vault already locked.
     void this.flush().catch(() => {})
@@ -3473,6 +3757,18 @@ export class Session extends Emitter<SessionEvents> {
    * from the vault via `restore()`.
    */
   reset(): void {
+    // The next unlock reads the last moment online again (see `previousOnlineAt`).
+    this.#previousOnlineAt = undefined
+    // The profile requests (1.3.26): channel ids and member addresses of this account stay with it.
+    for (const temporizador of this.#perfisAPedirTimer.values()) clearTimeout(temporizador)
+    this.#perfisAPedirTimer.clear()
+    this.#perfisAPedir.clear()
+    this.#perfisPedidosDesde.clear()
+    // And who asked us for profiles, and what we answered (N-N4).
+    this.#perfisRepublicadosAPedido.clear()
+    this.#respostaF10PorCrescimento.clear()
+    this.#respostasF10PorConta.clear()
+    this.#antiEntropia?.esquecerPedidosDePerfis()
     // The media store: this opening's background work does not carry over to the next.
     if (this.#recolhaTimer !== undefined) clearTimeout(this.#recolhaTimer)
     this.#recolhaTimer = undefined
@@ -3491,6 +3787,8 @@ export class Session extends Emitter<SessionEvents> {
     // And anti-entropy requests in flight (S4): responses came on this connection.
     this.#antiEntropia?.aoDesligar()
     this.#historicoDosIrmaos?.aoDesligar()
+    this.#historicoDosIrmaos?.esquecerSessao()
+    this.#membrosDoPassado?.aoDesligar()
     this.#passagemDaChaveDaConta?.aoDesligar()
     this.#chavesProntas = false
     for (const relogio of this.#saidasPorConfirmar.values()) clearTimeout(relogio)
@@ -3598,6 +3896,7 @@ export class Session extends Emitter<SessionEvents> {
     this.#recuperacoes.clear()
     this.#avisarRecuperacao()
     this.#crescidosNaRecuperacao.clear()
+    this.#f10NoFimDaRecuperacao.clear()
     this.#entradaExternaPorConfirmar.clear()
     this.#pendingAuthority = []
     this.#pendingRooms = []
@@ -3949,22 +4248,32 @@ export class Session extends Emitter<SessionEvents> {
      * `upsertRoom` below fails with "you are not a member", and their `catch`
      * turned a channel that was not created into silent success.
      */
+    // A new channel the person asked for counts against the account's cap
+    // (1.3.26). Before the group exists, so a refusal leaves nothing behind.
+    if (!this.#groups.has(channel) && channel !== this.#commonRoom) await this.#reclamarComunidade(channel)
     try {
       await this.createSpaceChannel(channel, nome)
     } catch (erro) {
       if (!this.#groups.has(channel)) throw erro
     }
     let posicao = 0
-    for (const inicial of salas) {
-      posicao += 100
-      // A room that never gets published does not undo the channel, and the channel
-      // is what the user asked for. Same choice as in `room.created`.
-      await this.upsertRoom(channel, {
-        room: newRoomId(inicial.kind),
-        name: inicial.name,
-        kind: inicial.kind,
-        position: posicao,
-      }).catch(() => {})
+    // The rooms a channel is born with are part of the channel, not rooms the
+    // person created: they do not count against the cap on rooms (1.3.26).
+    this.#roomsBeingBorn.add(channel)
+    try {
+      for (const inicial of salas) {
+        posicao += 100
+        // A room that never gets published does not undo the channel, and the channel
+        // is what the user asked for. Same choice as in `room.created`.
+        await this.upsertRoom(channel, {
+          room: newRoomId(inicial.kind),
+          name: inicial.name,
+          kind: inicial.kind,
+          position: posicao,
+        }).catch(() => {})
+      }
+    } finally {
+      this.#roomsBeingBorn.delete(channel)
     }
   }
 
@@ -4127,6 +4436,10 @@ What was left behind:
     this.#entradaExternaPorConfirmar.delete(channel)
     this.#orfaos.delete(channel)
     this.#memberCounts.delete(channel)
+    // The server roster and the sweep brake describe this life of the channel only (P7).
+    this.#rosters.delete(channel)
+    this.#rosterPedidoEm.delete(channel)
+    this.#varridoEm.delete(channel)
     const saida = this.#saidasPorConfirmar.get(channel)
     if (saida) clearTimeout(saida)
     this.#saidasPorConfirmar.delete(channel)
@@ -4176,6 +4489,9 @@ What was left behind:
         if (contents.pendingCommits) delete contents.pendingCommits[channel]
         // Forgetting a channel is ceasing to want it: you do not ask for a place in it.
         if (contents.lugaresPorPedir) delete contents.lugaresPorPedir[channel]
+        // And who got our profile there, by account and by device (third review, N3-N6).
+        if (contents.perfilPublicadoPara) delete contents.perfilPublicadoPara[channel]
+        if (contents.perfilPublicadoParaAparelhos) delete contents.perfilPublicadoParaAparelhos[channel]
       })
     }
 
@@ -5167,6 +5483,93 @@ What was left behind:
   }
 
   /**
+   * Key packages this session claimed and no accepted commit used (layer A, 21/11/2026),
+   * by `address|device`. Memory only.
+   *
+   * Members answering the same seat at once each claim a package of the device, one
+   * commit wins the epoch, and the others are refused (`stale-epoch`). The loser's retry
+   * finds the device seated and commits nothing, and its package, spent on the server,
+   * was used by no one. In production that burned more than a hundred packages of one
+   * device in four hours. The next seat of that device, from here, uses the kept one.
+   *
+   * A package that went in a refused commit is safe to use again: the refused commit was
+   * never saved and its Welcome never left. Kept for `PACOTE_POR_GASTAR_MS` only: a device
+   * whose ring resets drops the private halves of its old packages, and a Welcome to one of
+   * those cannot be opened.
+   */
+  readonly #pacotesPorGastar = new Map<string, { pacote: PacotesReclamados["pacotes"][number]; manifesto: DeviceManifest | null; em: number }>()
+  static PACOTE_POR_GASTAR_MS = 10 * 60_000
+  static readonly PACOTES_POR_GASTAR_MAXIMO = 512
+
+  /** How many unspent key packages of `address` this session keeps. For tests and diagnostics. */
+  pacotesPorGastar(address: string): number {
+    this.#esquecerPacotesVelhos()
+    let n = 0
+    for (const chave of this.#pacotesPorGastar.keys()) if (chave.startsWith(`${address}|`)) n += 1
+    return n
+  }
+
+  #esquecerPacotesVelhos(agora = Date.now()): void {
+    for (const [chave, guardado] of this.#pacotesPorGastar) {
+      if (agora - guardado.em > Session.PACOTE_POR_GASTAR_MS) this.#pacotesPorGastar.delete(chave)
+    }
+  }
+
+  /**
+   * A removal before a seat, with packages already claimed: refused for epoch on every
+   * try, nothing went out with them, so they are kept for the next repair (layer A).
+   */
+  async #guardandoSeRecusado<T>(address: string, reclamados: PacotesReclamados, trabalho: () => Promise<T>): Promise<T> {
+    try {
+      return await trabalho()
+    } catch (erro) {
+      if (erro instanceof CommitRecusado) this.#guardarPorGastar(address, reclamados.manifesto, reclamados.pacotes)
+      throw erro
+    }
+  }
+
+  /** Keep claimed packages no accepted commit used. */
+  #guardarPorGastar(address: string, manifesto: DeviceManifest | null, pacotes: PacotesReclamados["pacotes"]): void {
+    const agora = Date.now()
+    for (const pacote of pacotes) {
+      const chave = `${address}|${pacote.deviceKey}`
+      this.#pacotesPorGastar.delete(chave)
+      this.#pacotesPorGastar.set(chave, { pacote, manifesto, em: agora })
+    }
+    while (this.#pacotesPorGastar.size > Session.PACOTES_POR_GASTAR_MAXIMO) {
+      const primeiro = this.#pacotesPorGastar.keys().next().value
+      if (primeiro === undefined) break
+      this.#pacotesPorGastar.delete(primeiro)
+    }
+  }
+
+  /**
+   * The kept packages for these devices (all the account's, when `pedidos` is undefined:
+   * the manifest's, or whatever is kept for a single-device account without one). Taken
+   * out of the keep. `null` unless every wanted device has one: a partial set would seat
+   * only some, and the claim covers them all anyway.
+   */
+  #tirarPorGastar(address: string, pedidos: string[] | undefined, manifestoPrevio: DeviceManifest | null): PacotesReclamados | null {
+    this.#esquecerPacotesVelhos()
+    const queridos =
+      pedidos ??
+      (manifestoPrevio !== null
+        ? manifestoPrevio.devices.map((d) => toBase64(d.deviceKey))
+        : [...this.#pacotesPorGastar.keys()].filter((c) => c.startsWith(`${address}|`)).map((c) => c.slice(address.length + 1)))
+    if (queridos.length === 0) return null
+    const achados: { pacote: PacotesReclamados["pacotes"][number]; manifesto: DeviceManifest | null }[] = []
+    for (const device of queridos) {
+      const guardado = this.#pacotesPorGastar.get(`${address}|${device}`)
+      // Revoked since it was kept, or out of the manifest now: claim afresh.
+      if (!guardado || estaRevogado(this.vault.contents, address, device)) return null
+      if (manifestoPrevio !== null && !manifestoPrevio.devices.some((d) => toBase64(d.deviceKey) === device)) return null
+      achados.push(guardado)
+    }
+    for (const device of queridos) this.#pacotesPorGastar.delete(`${address}|${device}`)
+    return { manifesto: manifestoPrevio ?? achados[0]?.manifesto ?? null, pacotes: achados.map((a) => a.pacote) }
+  }
+
+  /**
    * Claim the key packages of an account without committing anything.
    *
    * Separated from `#invite` so that `#reseat` can know whether there is room to give BEFORE
@@ -5175,10 +5578,19 @@ What was left behind:
    * that `#invite` always paid when the commit failed after the claim.
    */
   async #reclamarPacotes(address: string, pedidos: string[] | undefined, manifestoPrevio: DeviceManifest | null): Promise<PacotesReclamados> {
+    // Kept from a commit that lost its epoch: no claim, no package spent (layer A).
+    const guardados = this.#tirarPorGastar(address, pedidos, manifestoPrevio)
+    if (guardados) return guardados
     // A short retry, because "no key packages" is often just a race: someone
     // who connected a moment ago is still publishing their pool while we are
     // already claiming from it. Three attempts over ~3 s turns that race into
     // a non-event; a genuinely depleted pool still fails, honestly.
+    //
+    // Not with `pedidos` (1.3.26): the devices are named, they are already in the
+    // manifest and in the tree, and the server answered for each. The race above is a
+    // first publication; a named device at 0 is one that is offline, and three tries
+    // were three claims and three log lines on the server for the same answer. Its
+    // top-up comes with `keypackage.low` at its next login, and the seat request after.
     let claimed = null as Extract<ServerFrame, { t: "keypackage.claimed" }> | null
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 1500))
@@ -5193,9 +5605,14 @@ What was left behind:
       if (reply.t !== "keypackage.claimed" || reply.address !== address) continue
       claimed = reply
       if (claimed.keyPackage) break
+      // A new account's limit does not lift in three seconds: no second try.
+      if (claimed.recusa === "conta-nova") break
+      if (pedidos !== undefined) break
     }
     if (!claimed?.keyPackage) {
-      if (pedidos !== undefined) throw new AparelhoSemChaves(address)
+      // The server refused because this account is new (1.3.26): not a pool to wait for.
+      if (claimed?.recusa === "conta-nova") throw new Error(ERRO_CONTA_NOVA_PESSOAS, { cause: { address } })
+      if (pedidos !== undefined) throw new AparelhoSemChaves(address, pedidos)
       throw new Error("that person has no invite keys", { cause: { address } })
     }
 
@@ -5275,7 +5692,11 @@ What was left behind:
       */
     // If the snapshot was with the Welcome and carries all that the cascade would carry (phase 1 of 1.1).
     let estadoNoRetrato = false
-    const commitou = await this.#commitar(channel, async (atual, tentativa) => {
+    // The devices whose packages went in the last commit built: on acceptance, the rest stay unspent (layer A).
+    let usados = new Set<string>()
+    let commitou = false
+    try {
+      commitou = await this.#commitar(channel, async (atual, tentativa) => {
       /**
        * Reread HERE INSIDE, not what was read at the top of the method.
        *
@@ -5324,8 +5745,16 @@ What was left behind:
       }
       // The same key package on a second try is safe: the refused commit
       // was never saved, and its Welcome never left.
+      usados = new Set(novos.map((p) => p.deviceKey))
       return { commit: result.commit, session: result.session, welcome: { bytes: result.welcome, recipient: address } }
-    })
+      })
+    } catch (erro) {
+      // Refused for epoch on every try: nothing went out with these packages. Keep them all.
+      if (erro instanceof CommitRecusado) this.#guardarPorGastar(address, manifesto, pacotes)
+      throw erro
+    }
+    // Packages no accepted commit used: all of them when another member seated the person first.
+    this.#guardarPorGastar(address, manifesto, commitou ? pacotes.filter((p) => !usados.has(p.deviceKey)) : pacotes)
     // Outside the queue: the republishes that this triggers call `send`, which goes back to the
     // queue. See the same note in `#unseat`.
     if (commitou) this.#announceLocalEpoch(channel, estadoNoRetrato ? "entregue" : undefined)
@@ -5439,8 +5868,30 @@ What was left behind:
     if (payload.t === "message" && payload.poll !== undefined && !this.mayCreatePoll(channel)) {
       throw new Error("you may not create polls in this channel", { cause: { channel } })
     }
+    // What a new account may not send yet (1.3.26). The server holds the line on what it can see; this says it in words.
+    this.#recusarPelaContaNova(channel, payload)
     if (this.#reterNoSurdo(channel, payload)) return
     await this.#sendPayload(channel, this.#comMencoesConferidas(channel, this.identity.address, payload), opcoes.daPessoa === true)
+  }
+
+  /**
+   * The new-account rules this client applies on its own (1.3.26):
+   *  - in the first 72 hours, a message to someone who is not a friend (in a
+   *    direct) waits for friendship: the server cannot see who is a friend, so
+   *    only the app can hold this one. The friend request itself goes out;
+   *  - in the first 24 hours, no images, files or GIFs in the common room. The
+   *    server refuses large messages there too; this says why before sending.
+   */
+  #recusarPelaContaNova(channel: string, payload: Payload): void {
+    const fase = this.faseDaContaNova
+    if (fase === null) return
+    if ((payload.t === "message" || payload.t === "post") && this.#eDirecta(channel)) {
+      const par = this.#parDoCanal(channel)
+      if (par && this.friendTies().get(par)?.link !== "amigos") throw new Error(ERRO_CONTA_NOVA_DIRECTA, { cause: { channel } })
+    }
+    if (fase === "24h" && channel === this.#commonRoom && payload.t === "message" && payload.attachments.length > 0) {
+      throw new Error(ERRO_CONTA_NOVA_ANEXOS, { cause: { channel } })
+    }
   }
 
   /**
@@ -5523,7 +5974,7 @@ What was left behind:
         const emCurso: { envio: Promise<Enviado>; soltar: (erro?: unknown) => void; payload: Payload }[] = []
         for (const payload of preparados) {
           if (this.#porRepetir.has(channel)) break
-          const vez = this.#vezSemEspera("envios")
+          const vez = this.#vezSemEspera("envios", channel)
           if (vez !== VEZ_LIVRE) {
             vez?.largar()
             break
@@ -5740,7 +6191,7 @@ What was left behind:
       */
       for (;;) {
         await this.#drenarRepeticoes(channel, vida)
-        const vez = await this.#esperarVez("envios", vida)
+        const vez = await this.#esperarVez("envios", vida, channel)
         if (!this.#porRepetir.has(channel)) return this.#cifrarEEnviar(channel, payload, vez, vida, null)
         vez.largar()
       }
@@ -6132,9 +6583,11 @@ What was left behind:
    * another send inflight in slow mode). Sync: whoever gets it has it in hand
    * before yielding the turn.
    */
-  #vezSemEspera(balde: BaldeDeEnvio): VezDeEnvio | null {
+  #vezSemEspera(balde: BaldeDeEnvio, channel?: string): VezDeEnvio | null {
     const estado = this.#ritmo[balde]
     if (estado.pausadoAte > Date.now()) return null
+    // A channel held by a new-account refusal (1.3.26). See `#aoRecusaPorRitmo`.
+    if (channel !== undefined && (this.#pausaDoCanal.get(channel) ?? 0) > Date.now()) return null
     if (!estado.lento) return VEZ_LIVRE
     if (estado.emVoo) return null
     let libertar!: () => void
@@ -6167,13 +6620,14 @@ What was left behind:
    * refusal in the meantime was not respected. And stops if the session
    * switched accounts while waiting (`#vida`).
    */
-  async #esperarVez(balde: BaldeDeEnvio, vida: number): Promise<VezDeEnvio> {
+  async #esperarVez(balde: BaldeDeEnvio, vida: number, channel?: string): Promise<VezDeEnvio> {
     for (;;) {
       if (vida !== this.#vida) throw new Error("the session ended")
-      const vez = this.#vezSemEspera(balde)
+      const vez = this.#vezSemEspera(balde, channel)
       if (vez) return vez
       const estado = this.#ritmo[balde]
-      const espera = estado.pausadoAte - Date.now()
+      const doCanal = channel !== undefined ? (this.#pausaDoCanal.get(channel) ?? 0) - Date.now() : 0
+      const espera = Math.max(estado.pausadoAte - Date.now(), doCanal)
       if (espera > 0) await new Promise((resolve) => setTimeout(resolve, espera))
       else if (estado.emVoo) await estado.emVoo.libertada
     }
@@ -6242,7 +6696,7 @@ What was left behind:
       const primeira = this.#porRepetir.get(channel)?.[0]
       if (!primeira) return
       const balde: BaldeDeEnvio = primeira.tipo === "welcome" ? "handshake" : "envios"
-      const vez = await this.#esperarVez(balde, vida)
+      const vez = await this.#esperarVez(balde, vida, balde === "envios" ? channel : undefined)
       // Check again: while waiting, a lower-order one may have arrived.
       const fila = this.#porRepetir.get(channel)
       const entrada = fila?.[0]
@@ -6303,27 +6757,46 @@ What was left behind:
    * vault or the screen. The echo marker leaves: the echo of these bytes never
    * comes.
    */
-  #aoRecusaPorRitmo(channel: string, ref: string | undefined, retryAfterMs: number | undefined): void {
+  #aoRecusaPorRitmo(channel: string, ref: string | undefined, retryAfterMs: number | undefined, soNesteCanal = false): void {
     const balde: BaldeDeEnvio = ref !== undefined && this.#refsDeHandshake.has(ref) ? "handshake" : "envios"
     const espera =
       Math.min(Math.max(retryAfterMs ?? 1_000, 50), 60_000) + Math.floor(Math.random() * Session.VARIACAO_DO_RITMO_MS)
     const agora = Date.now()
-    const estado = this.#ritmo[balde]
-    const jaParado = estado.pausadoAte > agora
-    estado.pausadoAte = Math.max(estado.pausadoAte, agora + espera)
-    estado.lento = true
-    if (balde === "envios") {
-      this.#recusasSeguidas += 1
-      this.#maiorSerieDeRecusas = Math.max(this.#maiorSerieDeRecusas, this.#recusasSeguidas)
-    }
-    if (!jaParado) {
-      this.emit("status", {
-        detail: `${channel}: o servidor recusou envios por ritmo; repetem-se daqui a ${espera} ms`,
-        level: "info",
-        code: "send-rate-limited",
-        route: "log",
-        channel,
-      })
+    if (soNesteCanal) {
+      /*
+        The common room's limit for a new account (1.3.26): only this channel
+        waits. The account's other channels keep their pace; the bucket's pause
+        and slow mode are for the account's own cap, and stay untouched.
+      */
+      const jaParado = (this.#pausaDoCanal.get(channel) ?? 0) > agora
+      this.#pausaDoCanal.set(channel, Math.max(this.#pausaDoCanal.get(channel) ?? 0, agora + espera))
+      if (!jaParado) {
+        this.emit("status", {
+          detail: String(this.#contaNova?.[this.faseDaContaNova === "72h" ? "intervaloAte72hS" : "intervaloAte24hS"] ?? Math.ceil(espera / 1000)),
+          level: "info",
+          code: "new-account-slow",
+          route: "toast",
+          channel,
+        })
+      }
+    } else {
+      const estado = this.#ritmo[balde]
+      const jaParado = estado.pausadoAte > agora
+      estado.pausadoAte = Math.max(estado.pausadoAte, agora + espera)
+      estado.lento = true
+      if (balde === "envios") {
+        this.#recusasSeguidas += 1
+        this.#maiorSerieDeRecusas = Math.max(this.#maiorSerieDeRecusas, this.#recusasSeguidas)
+      }
+      if (!jaParado) {
+        this.emit("status", {
+          detail: `${channel}: o servidor recusou envios por ritmo; repetem-se daqui a ${espera} ms`,
+          level: "info",
+          code: "send-rate-limited",
+          route: "log",
+          channel,
+        })
+      }
     }
     if (ref === undefined) return
     this.#refsDeHandshake.delete(ref)
@@ -8144,6 +8617,12 @@ What was left behind:
       throw new Error("only a voice room can be the afk room", { cause: { channel } })
     }
     const afk = next.afk && !next.closed && !next.removed ? SalaAfk.parse(next.afk) : undefined
+    // The cap on rooms (1.3.26): a room this person creates is told to the server
+    // first; a deleted one frees its place after. Not the default room, the common
+    // room, nor the rooms a channel is born with.
+    const existed = this.vault.contents.channelRooms[channel]?.[next.room] !== undefined
+    const countable = next.room !== "" && channel !== this.#commonRoom && !this.#roomsBeingBorn.has(channel)
+    if (countable && !existed && !next.removed) await this.#claimRoom(channel, next.room)
     await this.send(channel, {
       t: "channel.meta",
       room: next.room,
@@ -8158,6 +8637,9 @@ What was left behind:
       ...(perms !== undefined ? { perms } : {}),
       updatedAt: this.#carimboSeguinte(this.vault.contents.channelRooms[channel]?.[next.room]?.at),
     })
+    if (countable && next.removed && this.#serverCapabilities.includes(CAPABILITY_ROOM_LIMIT)) {
+      this.#send({ t: "room.release", channel, room: next.room })
+    }
     /*
       At most one AFK room per channel, and marking one unmarks the others.
 
@@ -9287,6 +9769,19 @@ What was left behind:
   #ultimaArrumacaoSeq = new Map<string, number>()
   #ultimoCrescimentoSeq = new Map<string, number>()
 
+  /**
+   * The channel's growth so far, as a key for the profile caps (third security
+   * review, N3-S1): it moves only when someone new joins (`#noteMembership`, on our
+   * commits and on others'). An empty commit, a removal or a key rotation leaves it,
+   * so they no longer open a new slot. The epoch did, and any member can move it.
+   */
+  #marcaDoCrescimento(channel: string): string {
+    return String(this.#crescimentos.get(channel) ?? 0)
+  }
+
+  /** How many times each channel grew while this session watched it. Memory only. See `#marcaDoCrescimento`. */
+  readonly #crescimentos = new Map<string, number>()
+
   /** Stop turn-takings waiting: the connection ended, and the next join asks for them again. */
   #pararRevezamentos(): void {
     for (const relogio of this.#revezamentos.values()) clearTimeout(relogio)
@@ -9900,7 +10395,28 @@ What was left behind:
       const grupo = this.#groups.get(channel)
       if (!grupo) continue
       const contas = new Set([...memberAddresses(grupo.state.ratchetTree).values()].map(String))
-      const semNome = contasSemPerfil(contas, this.identity.address, this.vault.contents.directory)
+      const emFalta = contasSemPerfil(contas, this.identity.address, this.vault.contents.directory)
+      if (emFalta.length === 0) continue
+      /*
+        The `pp` request first (1.3.26): one relay with the latest signed profile
+        of each person, and only the owner of a missing portrait sends it whole.
+        F10 makes every member publish theirs whole, so it only covers what `pp`
+        did not heal in `PP_ANTES_DO_F10_MS`: members of 1.3.25 and older, which
+        do not answer `pp` outside the common room.
+
+        And at once when nobody could answer `pp` now (security review S1): an
+        ephemeral signal reaches only live leaves, and a newcomer whose sessions
+        never overlap with the others' would wait for ever. F10 is stored, and
+        whoever comes later reads it in their recovery.
+      */
+      const ninguemResponde = !this.#anti.haQuemResponda(channel)
+      this.pedirPerfisDe(channel, emFalta)
+      const agora = Date.now()
+      const semNome = emFalta.filter((conta) => {
+        if (ninguemResponde) return true
+        const desde = this.#perfisPedidosDesde.get(`${channel}|${conta}`)
+        return desde !== undefined && agora - desde >= Session.PP_ANTES_DO_F10_MS
+      })
       if (semNome.length === 0) continue
       // Once per each new nameless account in this channel, not every ten minutes:
       // see `perfisPedidos` in the vault.
@@ -9940,12 +10456,21 @@ What was left behind:
    */
   #responderAPedidoDePerfis(channel: string, sender: string, seq: number, aoVivo: boolean): void {
     if (!this.vault.unlocked || sender === this.identity.address || this.#bloqueadoAqui(channel, sender)) return
+    // Never in the common room (third review, N3-N6): no honest client sends F10 there, and the join resend covers newcomers.
+    if (channel === this.#commonRoom) return
     const grupo = this.#groups.get(channel)
     if (!grupo) return
     const agora = Date.now()
+    // A leaf that joined since our profile went out and does not ask for profiles (1.3.26): a 1.3.25 device of an account already here.
+    const aparelhosDitos = this.vault.contents.perfilPublicadoParaAparelhos?.[channel]
+    const ditos = new Set(aparelhosDitos ?? [])
+    const folhaNovaSemPedido =
+      aparelhosDitos !== undefined && this.#folhasDosOutros(grupo.state.ratchetTree).some((folha) => !ditos.has(folha.aparelho) && !folha.pedeOsPerfis)
     const responde = podeResponderAPedidoDePerfis({
       eu: this.identity.address,
       contas: [...memberAddresses(grupo.state.ratchetTree).values()].map(String),
+      folhaNovaSemPedido,
+      quemPede: sender,
       ditas: this.vault.contents.perfilPublicadoPara?.[channel],
       ultimaResposta: this.vault.contents.perfisDadosEm?.[channel],
       agora,
@@ -9954,6 +10479,23 @@ What was left behind:
       lidoAntesDaLigacao: this.#lastSeqAntesDaLigacao[channel],
     })
     if (!responde) return
+    /*
+      Idempotent before anything goes out (second security review, N-B1). The
+      newcomer path skips the daily cap, and `perfilPublicadoPara` only changes
+      after the send: twenty F10 signals read in one catch-up, or one per device of
+      a newcomer, were twenty forced publishes. Now:
+      - one answer per channel and membership (`#marcaDoCrescimento`): the publish
+        reaches every newcomer in the tree at once, and an empty commit does not
+        open another (third review, N3-S1);
+      - during a catch-up, one at its end, whatever joined meanwhile (N3-S2), as
+        `#crescidosNaRecuperacao` does for the join resend;
+      - one per channel and requesting account every `PEDIDO_DE_PERFIS_MS`;
+      - and the requester goes into `perfilPublicadoPara` now, not when the send is
+        acknowledged, so the newcomer path does not open again for it.
+    */
+    const marca = this.#marcaDoCrescimento(channel)
+    if (this.#respostaF10PorCrescimento.get(channel) === marca) return
+    if (!this.#podeAgora(this.#respostasF10PorConta, `${channel}|${sender}`, Session.PEDIDO_DE_PERFIS_MS)) return
     this.vault.contents.perfisDadosEm = maisRecentes(
       { ...this.vault.contents.perfisDadosEm, [channel]: agora },
       Session.CAPACIDADES_POR_CANAL,
@@ -9961,8 +10503,34 @@ What was left behind:
     )
     this.#memoriaPorGravar = true
     this.#gravarJa()
+    /*
+      In a catch-up: answered once at its end. The requester is not written into
+      `perfilPublicadoPara` yet: if the catch-up is cut, nothing went out, and the
+      record would say otherwise. The set already makes it one answer.
+    */
+    if (!aoVivo && this.#recuperacoes.has(channel)) {
+      this.#f10NoFimDaRecuperacao.add(channel)
+      return
+    }
+    const ditas = this.vault.contents.perfilPublicadoPara?.[channel]
+    if (ditas !== undefined && !ditas.includes(sender)) {
+      this.vault.contents.perfilPublicadoPara = { ...this.vault.contents.perfilPublicadoPara, [channel]: [...ditas, sender].sort() }
+    }
+    this.#responderF10Agora(channel)
+  }
+
+  /** The F10 answer itself: one forced publish, marked for this membership. */
+  #responderF10Agora(channel: string): void {
+    this.#respostaF10PorCrescimento.set(channel, this.#marcaDoCrescimento(channel))
     void this.publishProfile([channel], true).catch(() => {})
   }
+
+  /** The membership of each channel where an F10 answer already went out (N-B1, N3-S1). Memory only. */
+  readonly #respostaF10PorCrescimento = new Map<string, string>()
+  /** Channels whose F10 requests read in a catch-up are answered once, at its end (N3-S2). Memory only. */
+  readonly #f10NoFimDaRecuperacao = new Set<string>()
+  /** When each `canal|account` last got an F10 answer from us (N-B1). Memory only. */
+  readonly #respostasF10PorConta = new Map<string, number>()
 
   /** The `lastSeq` of each channel when this connection started. See `#responderAPedidoDePerfis`. */
   #lastSeqAntesDaLigacao: Record<string, number> = {}
@@ -9984,9 +10552,11 @@ What was left behind:
       1h). "online" is the absence of state, and "invisible" does not publish: being
       invisible means not being announced. An unknown value drops.
     */
-    const { activity, ...resto } = next
+    const { activity, bio, ...resto } = next
     const profile: StoredProfile = {
       ...resto,
+      // A bio stops at 300 graphemes (`biografia.ts`); the vault keeps what is sent.
+      ...(bio !== undefined ? { bio: cortarBio(bio) } : {}),
       ...(activity === "ocupado" || activity === "ausente" ? { activity } : {}),
       updatedAt: Date.now(),
     }
@@ -9995,11 +10565,75 @@ What was left behind:
       contents.profile = profile
       // The new portrait goes to the store; one already there stays by the `avatarRef` that came.
       this.#absorverPerfilProprio(contents)
+      // Not out yet: the next opening sends it if this one closes first. See `publicarPerfilPendente`.
+      contents.perfilPorPublicar = profile.updatedAt
     })
+    /*
+      On disk and on this screen now; on the wire only when the edits stop
+      (1.3.26). A name and then a portrait used to be two whole profiles in every
+      channel, each kept 30 days and downloaded by every device catching up. Now
+      the edits within `ESPERA_PARA_PUBLICAR_O_PERFIL_MS` of each other go out as
+      ONE version, once per channel.
+    */
+    this.#armarPublicacaoDoPerfil()
+  }
+
+  /**
+   * How long after the last edit our profile goes out (1.3.26). Static for tests.
+   * See `updateProfile`.
+   */
+  static ESPERA_PARA_PUBLICAR_O_PERFIL_MS = 5_000
+
+  #publicacaoDoPerfil: ReturnType<typeof setTimeout> | undefined
+
+  #armarPublicacaoDoPerfil(): void {
+    if (this.#publicacaoDoPerfil !== undefined) clearTimeout(this.#publicacaoDoPerfil)
+    this.#publicacaoDoPerfil = setTimeout(() => {
+      this.#publicacaoDoPerfil = undefined
+      void this.publicarPerfilPendente().catch(() => {})
+    }, Session.ESPERA_PARA_PUBLICAR_O_PERFIL_MS)
+  }
+
+  /** Whether an edit of our profile is still waiting to go out (`perfilPorPublicar`). */
+  get perfilPorPublicar(): boolean {
+    return this.vault.unlocked && this.vault.contents.perfilPorPublicar !== undefined
+  }
+
+  /**
+   * Publish now the profile edit still waiting (1.3.26): to every channel, once
+   * per channel, and to our other devices. The bridges call it before closing,
+   * locking or giving the vault away; the connection calls it on opening, so an
+   * edit cut by a close goes out the next time, because the vault says it never
+   * went (`perfilPorPublicar`). Only the device that writes the vault does it:
+   * a tab without ownership is disconnected, and its timer goes with it.
+   */
+  async publicarPerfilPendente(): Promise<void> {
+    if (this.#publicacaoDoPerfil !== undefined) {
+      clearTimeout(this.#publicacaoDoPerfil)
+      this.#publicacaoDoPerfil = undefined
+    }
+    if (!this.vault.unlocked || !this.#escreve || this.#connection !== "online") return
+    const pendente = this.vault.contents.perfilPorPublicar
+    if (pendente === undefined) return
+    const profile = this.profile
     await this.publishProfile()
     // And to other devices on the account, so they show the same (phase 1e). Without
-    // a name it does not go: an empty profile would erase the main one.
+    // a name it does not go: an empty profile would erase the main one. A failure
+    // leaves `estadoPorEnviar`, and the next connection sends the whole state.
     if (profile.displayName) this.#enviarEstado(this.#payloadDoPerfil(profile))
+    /*
+      Cleared even when every channel send failed, on purpose: `publishProfile`
+      does not throw, and the channels need no flag of their own. Each channel
+      where the send failed keeps an older `publishedProfileAt` (it is written only
+      after a send succeeds), so `publishProfile()` at the next connection sends this
+      version there. Our other devices get it through `estadoPorEnviar`, which a
+      failed state send sets. See `session.profile-debounce.rede.test.ts`.
+    */
+    if (this.vault.unlocked && this.vault.contents.perfilPorPublicar === pendente) {
+      delete this.vault.contents.perfilPorPublicar
+      this.#memoriaPorGravar = true
+      this.#agendarGravacao()
+    }
   }
 
   /**
@@ -10032,7 +10666,8 @@ What was left behind:
       // on its own device. Away is "online".
       ...(profile.activity === "ocupado" || profile.activity === "ausente" ? { activity: profile.activity } : {}),
       ...(profile.statusText ? { statusText: profile.statusText } : {}),
-      ...(profile.bio ? { bio: profile.bio } : {}),
+      // Cut here, the one place every profile payload is built: an old bio of up to 1000 never goes out longer than 300.
+      ...(profile.bio ? { bio: cortarBio(profile.bio) } : {}),
       ...(profile.email ? { email: profile.email } : {}),
       ...(this.#retratoParaOPerfil(profile) ?? {}),
     }
@@ -10148,6 +10783,13 @@ What was left behind:
         const grupo = this.#groups.get(channel)
         const contas = grupo ? [...new Set([...memberAddresses(grupo.state.ratchetTree).values()].map(String))].sort() : []
         /*
+          Not in the common room or a direct, where `#perfilPorReenviar` never reads
+          it (second security review, N-N2): 400 device keys rewritten with every
+          vault write after a publish there, for nothing.
+        */
+        const guardaAparelhos = channel !== this.#commonRoom && !this.#eDirecta(channel)
+        const aparelhos = grupo && guardaAparelhos ? this.#folhasDosOutros(grupo.state.ratchetTree).map((folha) => folha.aparelho).sort() : []
+        /*
           Deferred (hotfix 1.3.13): it rides the next write. Lost in a crash, it
           costs one more publish of the same profile at the next connection,
           which the receivers already take as a repeat.
@@ -10158,6 +10800,8 @@ What was left behind:
             // F10: the accounts that received it, so a profile request only answers when
             // there is someone new. See `#responderAPedidoDePerfis`.
             contents.perfilPublicadoPara = { ...contents.perfilPublicadoPara, [channel]: contas }
+            // And every other leaf there, by device key (1.3.26). See `perfilPorReenviar`.
+            if (guardaAparelhos) contents.perfilPublicadoParaAparelhos = { ...contents.perfilPublicadoParaAparelhos, [channel]: aparelhos }
           })
           .catch(() => {})
       } catch {
@@ -10249,6 +10893,11 @@ What was left behind:
       ...(selo ? { selo } : {}),
     })
     const criado = await this.#await("invite.created")
+    // The founder of this channel created all the channels it may, and this one was
+    // not counted yet (1.3.26). No invite was made.
+    if (criado.t === "invite.created" && criado.recusa === RECUSA_DE_LIMITE_DE_CANAIS) {
+      throw new Error(ERRO_LIMITE_DE_CANAIS, { cause: { channel, convite: true } })
+    }
 
     // Remember what we minted. This list is the only thing that distinguishes a
     // genuine invitation from one a stranger registered for a channel they are
@@ -10752,8 +11401,10 @@ What was left behind:
     siteName?: string
     image?: string
   }> {
+    // The answer pairs by address, not by arrival: two previews in flight answer in the
+    // order their pages do, and pairing by arrival gave one video the other's thumbnail.
     this.#send({ t: "link.preview", url })
-    const frame = await this.#await("link.preview.result", 20_000)
+    const frame = await this.#await("link.preview.result", 20_000, url)
     if (frame.t !== "link.preview.result" || !frame.ok) throw new Error("could not read the page")
     return {
       ...(frame.title === undefined ? {} : { title: frame.title }),
@@ -10993,6 +11644,34 @@ What was left behind:
   }
 
   /**
+   * The community invite link (long or short) that a NEW account presents at
+   * its first login (1.3.26). Over the limit of new accounts per network
+   * (Erro 234), a live invite of a real community lets the account in, as a
+   * registration invite does. The gate, or the web host when the page opened
+   * by an invite link, sets it before `connect()`; `null` takes it away.
+   *
+   * Only the proof that we hold the link goes out (`provarConviteNoRegisto`),
+   * never the code, and only for an account this session is registering: an
+   * account that exists never tells the server which invite it holds before
+   * `invite.redeem`. Returns whether the link was read. Memory only.
+   */
+  definirConviteDeComunidade(link: string | null): boolean {
+    const lida = link === null ? null : (parseInviteLink(link) ?? parseShortInviteLink(link))
+    this.#conviteDeComunidade = lida ? { server: lida.server, code: lida.code } : null
+    return lida !== null
+  }
+
+  /** The `conviteDeComunidade` field of `auth.finish`, or nothing. See `definirConviteDeComunidade`. */
+  #conviteDeComunidadeNoRegisto(address: string): { conviteDeComunidade?: { codeHash: string; prova: string } } {
+    const convite = this.#conviteDeComunidade
+    if (convite === null || !this.#contaPorRegistar) return {}
+    // An invite from another server has no row here: sending its proof would tell our server about it for nothing.
+    if (!sameHomeserver(convite.server, homeserverOf(this.identity))) return {}
+    const codeHash = toBase64(sha256(new TextEncoder().encode(convite.code)))
+    return { conviteDeComunidade: { codeHash, prova: provarConviteNoRegisto(convite.code, { codeHash, address }) } }
+  }
+
+  /**
    * Ask a server who may create an account there, before there is an account
    * (1.3.25). The gate asks it before it makes the vault, so a `fechado` server
    * is said in words before anything is written, and a `convite` one gets its
@@ -11001,7 +11680,167 @@ What was left behind:
    * refused the version, no answer in `prazoMs`): the gate then goes on as before,
    * and the refusal at the first login says the same thing.
    */
-  sondarRegisto(servidor: string, prazoMs = 5000): Promise<ModoDeRegisto | null> {
+  async sondarRegisto(servidor: string, prazoMs = 5000): Promise<ModoDeRegisto | "versao-antiga" | null> {
+    const hello = await this.#sondarHello(servidor, prazoMs)
+    if (hello === VERSAO_ANTIGA_NA_SONDAGEM) return "versao-antiga"
+    return hello === null ? null : (hello.registo ?? "aberto")
+  }
+
+  /**
+   * The proof-of-work challenge a server gives a new account (1.3.26), asked
+   * on its own socket like `sondarRegisto`. `null`: the server asks for none,
+   * or could not be asked.
+   */
+  async desafioDeRegisto(servidor: string = homeserverOf(this.identity), prazoMs = 5000): Promise<DesafioDeTrabalho | null> {
+    const hello = await this.#sondarHello(servidor, prazoMs)
+    return hello === null || hello === VERSAO_ANTIGA_NA_SONDAGEM ? null : (hello.provaDeTrabalho ?? null)
+  }
+
+  /** The proof the next `auth.finish` carries, for a new account. `null` takes it away. Memory only. */
+  definirProvaDeTrabalho(prova: ProvaDeTrabalho | null): void {
+    this.#provaDeTrabalho = prova
+  }
+
+  /**
+   * Prepare a NEW account before its first connection (1.3.26): ask the
+   * account's server for a challenge, solve it, and keep the proof for
+   * `auth.finish`. About 3 seconds on an average phone; more during a spike.
+   * `resolver` runs it off the main thread (a Web Worker); `aoProgresso` gets
+   * 0 to 1. Returns `false` when the server asks for no proof (or could not be
+   * asked): the connection then goes on as before.
+   */
+  async prepararContaNova(
+    opcoes: { aoProgresso?: (fraccao: number) => void; resolver?: ResolverDaProva } = {},
+  ): Promise<boolean> {
+    const desafio = await this.desafioDeRegisto()
+    if (desafio === null) return false
+    const prova = await (opcoes.resolver ?? this.#resolverProva)(desafio, opcoes.aoProgresso)
+    this.#provaDeTrabalho = prova
+    return true
+  }
+
+  /**
+   * What the server said about this account's first 72 hours at the last
+   * login (1.3.26), or `null` when no limit applies. See `ContaNova`.
+   */
+  get contaNova(): ContaNova | null {
+    return this.#contaNova
+  }
+
+  /**
+   * The channels this account created and its cap (1.3.26), asked
+   * from the server now. `null`: the server has no cap for this account, or is
+   * from before 1.3.26, or did not answer; the interface then shows "Create
+   * channel", and the server still decides.
+   */
+  async criarCanais(): Promise<CriarCanais | null> {
+    if (!this.#serverCapabilities.includes(CAPACIDADE_LIMITE_DE_CANAIS)) return null
+    try {
+      this.#send({ t: "channel.quota" })
+      const resposta = await this.#await("channel.quota.result")
+      if (resposta.t !== "channel.quota.result") return this.#criarCanais
+      this.#criarCanais = resposta.criarCanais
+    } catch {
+      // No answer: the last count, if any.
+    }
+    return this.#criarCanais
+  }
+
+  /**
+   * The rooms this account created and its cap (1.3.26), asked from the server
+   * now. `null`: no cap for this account, a server from before 1.3.26, or no
+   * answer; the interface then shows the "+" of "Create room".
+   */
+  async roomQuota(): Promise<RoomQuota | null> {
+    if (!this.#serverCapabilities.includes(CAPABILITY_ROOM_LIMIT)) return null
+    try {
+      this.#send({ t: "channel.quota" })
+      const answer = await this.#await("channel.quota.result")
+      if (answer.t === "channel.quota.result") this.#roomQuota = answer.rooms ?? null
+    } catch {
+      // No answer: the last count, if any.
+    }
+    return this.#roomQuota
+  }
+
+  /**
+   * Tell the server about a room before it is published (1.3.26). Throws the
+   * cap's error when the server refuses. A server from before 1.3.26 is not asked.
+   */
+  async #claimRoom(channel: string, room: string): Promise<void> {
+    if (!this.#serverCapabilities.includes(CAPABILITY_ROOM_LIMIT)) return
+    let answer: ServerFrame
+    try {
+      this.#send({ t: "room.claim", channel, room })
+      answer = await this.#await("room.claim.result", undefined, `${channel}|${room}`)
+    } catch {
+      // No answer: publish as before.
+      return
+    }
+    if (answer.t !== "room.claim.result" || answer.channel !== channel || answer.room !== room) return
+    if (answer.rooms) this.#roomQuota = answer.rooms
+    if (!answer.ok && answer.refusal === REFUSAL_ROOM_LIMIT) {
+      throw new Error(ERROR_ROOM_LIMIT, { cause: { channel, max: answer.rooms?.max, newAccount: answer.rooms?.newAccount === true } })
+    }
+  }
+
+  /**
+   * Say to the server that this new channel is a community, before it exists
+   * (1.3.26). Throws the cap's error when the server refuses. A server from
+   * before 1.3.26 is not asked: it counts nothing.
+   */
+  async #reclamarComunidade(channel: string): Promise<void> {
+    if (!this.#serverCapabilities.includes(CAPACIDADE_LIMITE_DE_CANAIS)) return
+    let resposta: ServerFrame
+    try {
+      this.#send({ t: "channel.claim", channel, comunidade: true })
+      resposta = await this.#await("channel.claim.result", undefined, channel)
+    } catch {
+      // No answer: create as before; the server still checks on `channel.subscribe`.
+      return
+    }
+    if (resposta.t !== "channel.claim.result" || resposta.channel !== channel) return
+    if (resposta.criarCanais) this.#criarCanais = resposta.criarCanais
+    if (resposta.recusa === RECUSA_DE_LIMITE_DE_CANAIS) {
+      throw new Error(ERRO_LIMITE_DE_CANAIS, {
+        cause: { channel, maximo: resposta.criarCanais?.maximo, contaNova: resposta.criarCanais?.contaNova ?? false },
+      })
+    }
+    if (resposta.recusa === "conta-nova") throw new Error(ERRO_CONTA_NOVA_CANAIS, { cause: { channel } })
+  }
+
+  /** Where this account is in its first days now: `24h`, `72h`, or `null`. */
+  get faseDaContaNova(): "24h" | "72h" | null {
+    return faseDaContaNova(this.#contaNova, Date.now())
+  }
+
+  /** The common room's queue, while this account waits to join it (1.3.26). `null` otherwise. */
+  get filaDaSalaComum(): FilaDaSalaComum | null {
+    return this.#filaDaSalaComum
+  }
+
+  /**
+   * Until when an account of this server counts as new for the common room's
+   * links (1.3.26): the end of its first day, from its server, or `null` when
+   * it is not new or that is not known. The interface shows a new account's
+   * links as plain text there. Asked once per account per connection, with the
+   * account's age.
+   */
+  async autorNovoAte(address: string): Promise<number | null> {
+    try {
+      await this.idadeDaConta(address)
+    } catch {
+      return null
+    }
+    const ate = this.#novasAte.get(address) ?? null
+    return ate !== null && ate > Date.now() ? ate : null
+  }
+
+  /** A `hello` and nothing else, on its own socket, closed at once. The `hello.ok`, or `null`. */
+  #sondarHello(
+    servidor: string,
+    prazoMs: number,
+  ): Promise<Extract<ServerFrame, { t: "hello.ok" }> | typeof VERSAO_ANTIGA_NA_SONDAGEM | null> {
     return new Promise((resolve) => {
       let socket: WebSocket
       try {
@@ -11011,7 +11850,7 @@ What was left behind:
         return
       }
       let acabou = false
-      const acabar = (modo: ModoDeRegisto | null): void => {
+      const acabar = (hello: Extract<ServerFrame, { t: "hello.ok" }> | typeof VERSAO_ANTIGA_NA_SONDAGEM | null): void => {
         if (acabou) return
         acabou = true
         clearTimeout(prazo)
@@ -11020,7 +11859,7 @@ What was left behind:
         } catch {
           // Already closed.
         }
-        resolve(modo)
+        resolve(hello)
       }
       const prazo = setTimeout(() => acabar(null), prazoMs)
       socket.addEventListener("open", () => {
@@ -11036,7 +11875,10 @@ What was left behind:
       socket.addEventListener("message", (event) => {
         try {
           const frame = JSON.parse(String(event.data)) as ServerFrame
-          acabar(frame.t === "hello.ok" ? (frame.registo ?? "aberto") : null)
+          // The server refuses this app's version before anything else (21/11/2026):
+          // the gate says so before the vault exists, instead of Error 206 halfway.
+          if (frame.t === "error" && frame.code === CODIGO_VERSAO_ANTIGA) acabar(VERSAO_ANTIGA_NA_SONDAGEM)
+          else acabar(frame.t === "hello.ok" ? frame : null)
         } catch {
           acabar(null)
         }
@@ -11141,6 +11983,8 @@ What was left behind:
     this.#send({ t: "account.age.get", address })
     const resposta = await this.#await("account.age.result", 10_000, address).catch(() => null)
     if (resposta === null || resposta.t !== "account.age.result" || resposta.address !== address) return "sem-resposta"
+    // The first day of the account, for the common room's links (1.3.26). Its own server says it, unsigned.
+    this.#novasAte.set(address, resposta.novaAte ?? null)
     if (!resposta.atestacao || !resposta.chave) return null
     const servidor = address.slice(address.indexOf(":") + 1)
     const fixada = this.#chavesFixadas.get(servidor) ?? resposta.chave
@@ -11528,7 +12372,29 @@ What was left behind:
       formatPairLink,
       (frame) => this.#send(frame),
       (evento) => this.emit("pair", evento),
-      {
+      this.#hostHooks(identity),
+    )
+    this.#anfitriao = anfitriao
+    return new Promise((resolve, reject) => {
+      const desligar = this.on("pair", (evento) => {
+        if (evento.fase === "aguarda") {
+          desligar()
+          resolve({ pairId: evento.pairId, link: evento.link })
+        } else if (evento.fase === "falhou") {
+          desligar()
+          reject(new Error(evento.razao))
+        }
+      })
+      anfitriao.abrir()
+    })
+  }
+
+  /**
+   * The hooks of the side with the account, the same for a QR and a short
+   * code: room in the manifest, publishing, seating, the snapshot.
+   */
+  #hostHooks(identity: AccountIdentity): ConstructorParameters<typeof AnfitriaoDeEmparelhamento>[5] {
+    return {
         confirmarEspaco: async () => {
           const leitura = await this.#lerManifesto(identity.address, 10_000)
           if (!leitura.lido) throw new Error("manifesto")
@@ -11558,6 +12424,15 @@ What was left behind:
             manifest that counts.
           */
           const nova = toBase64(deviceKey)
+          // Paired here: the new-device notice is not for this device (`#notarAparelhosDaConta`).
+          this.#aparelhosAvisados.add(nova)
+          /*
+            Only to a list that exists: a first list made of this key alone would
+            announce the account's other devices. Not awaited: a whole-vault write
+            here delayed the rest of the pairing (the account channel seat), and the
+            in-memory set already keeps this session quiet.
+          */
+          if (this.vault.contents.aparelhosConhecidos !== undefined) void this.#conhecerAparelhos([nova]).catch(() => {})
           const jaLa = (manifesto: DeviceManifest | null): boolean =>
             manifesto?.devices.some((device) => toBase64(device.deviceKey) === nova) === true
           if (!jaLa(leitura.manifesto)) {
@@ -11580,25 +12455,58 @@ What was left behind:
         },
         // The snapshot of the account state, behind the certificate (phase 5).
         estado: () => this.#estadoParaEmparelhar(),
+        // The account password record, for the new device to ask for the account password (1.3.26).
+        palavraPasse: () => this.vault.palavraPasseDaConta(),
         capacidades: (deviceKey, capacidades) => {
           if (capacidades.includes(CAPACIDADE_ESTADO_DA_CONTA)) {
             this.#notarAparelhoComEstado(deviceKey, capacidades.includes(CAPACIDADE_CHAVE_DE_CONTA))
           }
         },
-      },
+      }
+  }
+
+  /**
+   * Add a device by the short code it shows (1.3.26): the side with the
+   * account, after the person typed "K7P · 4QM" or read the new device's QR.
+   *
+   * Resolves when the server found the box (`ligado`); CPace, the words and
+   * the rest come through the `pair` event, as with `emparelharComoAnfitriao`.
+   * Throws "that is not a pairing code" before anything goes to the
+   * server, "this pairing code is for another server" for a QR of another
+   * server, and "this server cannot pair with a short code" when this server
+   * does not announce `pairing-pake`.
+   */
+  async pairAsHostByCode(text: string): Promise<void> {
+    const identity = this.identity
+    if (!temChaveDeConta(identity)) throw new Error("this device has no account key")
+    const parsed = parsePairCode(text)
+    if (!parsed) throw new Error("that is not a pairing code")
+    if (parsed.server !== null && !sameHomeserver(parsed.server, homeserverOf(identity))) throw new Error("this pairing code is for another server")
+    if (!this.#serverCapabilities.includes(CAPABILITY_PAIRING_PAKE)) throw new Error("this server cannot pair with a short code")
+    if (this.#connection !== "online") throw new Error("no connection to the server")
+    await this.#aquecerRetratoProprio().catch(() => {})
+    this.#anfitriao?.cancelar()
+    const host = new AnfitriaoDeEmparelhamento(
+      identity,
+      homeserverOf(identity),
+      formatPairLink,
+      (frame) => this.#send(frame),
+      (event) => this.emit("pair", event),
+      this.#hostHooks(identity),
+      { code: parsed.code },
     )
-    this.#anfitriao = anfitriao
+    this.#anfitriao = host
     return new Promise((resolve, reject) => {
-      const desligar = this.on("pair", (evento) => {
-        if (evento.fase === "aguarda") {
-          desligar()
-          resolve({ pairId: evento.pairId, link: evento.link })
-        } else if (evento.fase === "falhou") {
-          desligar()
-          reject(new Error(evento.razao))
+      const unsubscribe = this.on("pair", (event) => {
+        if (event.fase === "ligado") {
+          unsubscribe()
+          resolve()
+        } else if (event.fase === "falhou") {
+          unsubscribe()
+          reject(new Error(event.razao))
         }
       })
-      anfitriao.abrir()
+      host.abrir()
     })
   }
 
@@ -11624,7 +12532,32 @@ What was left behind:
       throw new Error("this vault already holds an account")
     }
     this.#convidado?.cancelar()
-    const convidado = new ConvidadoDeEmparelhamento(lido, gatewayUrlDe, sameHomeserver, (evento) => {
+    this.#startGuest(lido)
+  }
+
+  /**
+   * Join THIS device to an account by a short code (1.3.26): the new device
+   * side. It draws the code, opens the box on `servidor` and says
+   * `{ fase: "code", code, link }` for the screen to show. The person types
+   * the code on the device with the account; from there it is
+   * `emparelharComoConvidado`: words, certificate, vault.
+   *
+   * `servidor` is the server this new device would use for an account
+   * (`defaultServer` at the gate). A typed code finds its box only on the
+   * account's own server; the QR carries the server.
+   */
+  pairAsGuestByCode(server: string): void {
+    const contents = this.vault.contents
+    if (contents.signingPrivateKey || contents.accountPublicKey) {
+      throw new Error("this vault already holds an account")
+    }
+    this.#convidado?.cancelar()
+    this.#startGuest({ server, byCode: { formatLink: formatPairCodeLink } })
+  }
+
+  /** The guest side, QR or short code: the vault is written before the interface hears `certificado`. */
+  #startGuest(link: ConstructorParameters<typeof ConvidadoDeEmparelhamento>[0]): void {
+    const convidado = new ConvidadoDeEmparelhamento(link, gatewayUrlDe, sameHomeserver, (evento) => {
       if (evento.fase === "certificado") {
         // The vault writes BEFORE the interface hears the event, so whoever hears it
         // can load the identity right after.
@@ -11646,7 +12579,11 @@ What was left behind:
               }
             }),
           )
-          .then(() => this.emit("pair", evento))
+          .then(() => {
+            // The account password, asked for after pairing (1.3.26): see `selarAposEmparelhar`.
+            this.#palavraPasseAPedir = convidado.palavraPasseRecebida
+            this.emit("pair", { ...evento, palavraPasse: this.#palavraPasseAPedir ? "conta" : "nova" })
+          })
           .catch(() => this.emit("pair", { fase: "falhou", razao: "sem-ligacao" }))
         return
       }
@@ -11654,6 +12591,74 @@ What was left behind:
     })
     this.#convidado = convidado
     convidado.ligar(this.#versaoDaApp)
+  }
+
+  /** The account password record the host sent at pairing, until `selarAposEmparelhar` uses it. Memory only. */
+  #palavraPasseAPedir: PalavraPasseDaConta | null = null
+
+  /**
+   * After pairing (1.3.26): the temporary vault takes the ACCOUNT password.
+   *
+   * With the host's record, the typed password must be the account's (it derives
+   * the record's key with the record's salt), or this throws
+   * `ERRO_NAO_E_A_PALAVRA_PASSE_DA_CONTA` and nothing changes: the person types
+   * again. Without one (a host before 1.3.26, or one with no password), the
+   * typed password becomes this device's, as before.
+   */
+  async selarAposEmparelhar(frase: string): Promise<void> {
+    const registo = this.#palavraPasseAPedir
+    if (registo) await this.vault.selarComPalavraPasseDaConta(frase, registo)
+    else await this.vault.selarComPalavraPasseNova(frase)
+    this.#palavraPasseAPedir = null
+  }
+
+  /**
+   * "Change password" (1.3.26): this device's vault first, in one write, and then
+   * the new record to the account channel, so every device of the account adopts
+   * it (`#aoPalavraPasseDaConta`), a device that is off when it comes back. The
+   * first change in an account is its migration: its password becomes the
+   * account's. A send that fails stays pending (`estadoPorEnviar`) and goes in the
+   * next full state.
+   */
+  async mudarPalavraPasse(actual: string, nova: string): Promise<void> {
+    // The next version is read inside the vault's key queue, after any record adopted meanwhile.
+    await this.vault.mudarPalavraPasse(actual, nova, { versao: (current) => current + 1 })
+    const registo = this.vault.palavraPasseDaConta()
+    // Without an account channel yet, the device that joins later gets it in the full state (`#enviarEstadoCompleto`).
+    if (registo) this.#enviarEstado({ t: "estado.fichas", fichas: {}, palavraPasse: registo })
+  }
+
+  /**
+   * "I forgot the current password" (S4): the same as `mudarPalavraPasse`, proven
+   * by the open vault instead of the current password. The bridge asks the
+   * system first where it can. See `Vault.changePasswordWithOpenVault`.
+   */
+  async changePasswordWithOpenVault(nova: string): Promise<void> {
+    await this.vault.changePasswordWithOpenVault(nova, { versao: (current) => current + 1 })
+    const registo = this.vault.palavraPasseDaConta()
+    if (registo) this.#enviarEstado({ t: "estado.fichas", fichas: {}, palavraPasse: registo })
+  }
+
+  /**
+   * A sibling sent the account password record (1.3.26). Adopted when it beats
+   * the one this vault has (`venceAPalavraPasse`): the vault is sealed with its
+   * key, and the next unlock asks for the new password. The person is told once.
+   */
+  async #aoPalavraPasseDaConta(registo: PalavraPasseDaConta): Promise<void> {
+    // A record with version 0 is a device's own password, never a change: it only travels at pairing.
+    if (registo.versao < 1) return
+    // The vault runs this check inside its key queue: `actual` is the record after every change before it.
+    const adoptado = await this.vault.adoptarPalavraPasseDaConta(registo, {
+      onlyIf: (actual) =>
+        !(actual !== null && actual.sal === registo.sal && actual.chave === registo.chave) && venceAPalavraPasse(registo, actual),
+    })
+    if (!adoptado) return
+    this.emit("status", {
+      detail: `account password version ${registo.versao}`,
+      level: "info",
+      code: "account-password-changed",
+      route: "toast",
+    })
   }
 
   /** The person confirmed the six words on this screen, whichever side. */
@@ -11691,7 +12696,7 @@ What was left behind:
    * account". Memory only: until step 3 the vault is still the secondary one,
    * entire.
    */
-  #juntar: { cofre: CofreDeAparelho; secundaria: string } | null = null
+  #juntar: { cofre: CofreDeAparelho; secundaria: string; accountPassword: PalavraPasseDaConta | null } | null = null
 
   /**
    * "Join another account", step 1: pair THIS device with the main account,
@@ -11744,13 +12749,29 @@ What was left behind:
             this.emit("pair", { fase: "falhou", razao: "mesma-conta" })
             return
           }
-          this.#juntar = { cofre: resultado, secundaria }
-          this.emit("pair", evento)
+          // The main account's password record, when it sent one: step 3 checks the password against it.
+          const accountPassword = convidado.palavraPasseRecebida
+          this.#juntar = { cofre: resultado, secundaria, accountPassword }
+          this.emit("pair", { ...evento, palavraPasse: accountPassword ? "conta" : "nova" })
         })
         .catch(() => this.emit("pair", { fase: "falhou", razao: "sem-ligacao" }))
     })
     this.#convidado = convidado
     convidado.ligar(this.#versaoDaApp)
+  }
+
+  /**
+   * "Join another account" (1.3.26, one password on every device): check the
+   * main account's password BEFORE step 2, which leaves the channels and cannot
+   * be undone. With the main account's record the password must be that one
+   * (Error 140); with none, any password of 8 characters or more becomes the
+   * account's. Returns which of the two it was.
+   */
+  async joinCheckPassword(passphrase: string): Promise<{ accountPassword: boolean }> {
+    const juntar = this.#juntar
+    if (!juntar) throw new Error("there is no account to join")
+    if (juntar.accountPassword) await this.vault.verifyAccountPassword(passphrase, juntar.accountPassword)
+    return { accountPassword: juntar.accountPassword !== null }
   }
 
   /** The main account this device paired with to join, or none. */
@@ -11839,7 +12860,13 @@ What was left behind:
     const juntar = this.#juntar
     if (!juntar) throw new Error("there is no account to join")
     this.#exigirCaixaAberta()
-    const { cofre, secundaria } = juntar
+    const { cofre, secundaria, accountPassword } = juntar
+    /*
+      One password on every device (1.3.26): with the main account's record, the
+      typed password must be the account's. Checked before anything changes, so a
+      wrong one (Error 140) leaves this account as it is, and the person types again.
+    */
+    if (accountPassword && passphrase !== null) await this.vault.verifyAccountPassword(passphrase, accountPassword)
     this.disconnect()
     try {
       /*
@@ -11864,6 +12891,8 @@ What was left behind:
           this.#absorverPerfilProprio(contents)
         }
       })
+      // The vault takes the account's own key and salt: the account password opens it, as on its other devices.
+      if (accountPassword) await this.vault.adoptarPalavraPasseDaConta(accountPassword)
       this.loadIdentity()
       await this.connect()
       await this.vault.confirmarProvisorio()
@@ -12139,7 +13168,69 @@ What was left behind:
       })
       return null
     }
+    if (this.#identity !== null && address === this.#identity.address) await this.#notarAparelhosDaConta(verificado.manifest)
     return verificado.manifest
+  }
+
+  /** The new-device notices already given in this session, so two reads at once do not give two. */
+  readonly #aparelhosAvisados = new Set<string>()
+
+  /** The most keys `aparelhosConhecidos` keeps: revoked keys never come back, and the newest stay. */
+  static readonly APARELHOS_CONHECIDOS_MAX = 64
+
+  /**
+   * The new-device notice (1.3.26): a key in our own manifest that this device
+   * did not pair and had not seen is a device someone added, maybe with the
+   * account file, which needs nothing but the file and its password. The
+   * person sees it in the bell, with the date and "Remove" (`revokeDevice`).
+   * This is the detection the threat model counts on (`docs/THREAT-MODEL.md`,
+   * "Importing the account file"): there is no quarantine.
+   *
+   * The first read on a device (an older vault, an imported or paired one) only
+   * learns the list, in silence: it has nothing to compare with.
+   */
+  async #notarAparelhosDaConta(manifesto: DeviceManifest): Promise<void> {
+    const proprio = toBase64(this.identity.deviceSigningPublicKey)
+    const conhecidos = this.vault.contents.aparelhosConhecidos
+    const vistos = new Set(conhecidos ?? [])
+    const novos =
+      conhecidos === undefined
+        ? []
+        : manifesto.devices.filter((device) => {
+            const chave = toBase64(device.deviceKey)
+            return chave !== proprio && !vistos.has(chave) && !this.#aparelhosAvisados.has(chave)
+          })
+    const chaves = manifesto.devices.map((device) => toBase64(device.deviceKey))
+    if (conhecidos !== undefined && chaves.every((chave) => vistos.has(chave))) return
+    for (const device of novos) this.#aparelhosAvisados.add(toBase64(device.deviceKey))
+    await this.#conhecerAparelhos(chaves)
+    for (const device of novos) {
+      this.emit("status", {
+        detail: `${toBase64(device.deviceKey)}|${device.addedAt}`,
+        level: "info",
+        code: "device-new",
+        route: "log",
+      })
+    }
+  }
+
+  /** Add these keys to the ones this device knows (`aparelhosConhecidos`), newest last, capped. */
+  async #conhecerAparelhos(chaves: readonly string[]): Promise<void> {
+    await this.vault.update((contents) => {
+      const juntos = [...(contents.aparelhosConhecidos ?? []).filter((chave) => !chaves.includes(chave)), ...chaves]
+      contents.aparelhosConhecidos = juntos.slice(-Session.APARELHOS_CONHECIDOS_MAX)
+    })
+  }
+
+  /**
+   * The handover of an imported account file (1.3.26): one short connection with
+   * the file's device key, only to add the new device key to the manifest. See
+   * `passagem.ts`, and `Vault.importVault`, which calls this through its
+   * `passagem` option before writing anything. Does not use this session's
+   * socket or identity: the bridges call it with the session reset.
+   */
+  passagemDoImportar(pedido: PedidoDePassagem): Promise<ResultadoDaPassagem> {
+    return fazerPassagem(pedido, { url: gatewayUrlDe(pedido.homeserver), versao: this.#versaoDaApp })
   }
 
   /**
@@ -12700,6 +13791,13 @@ What was left behind:
     }
     // The open reports, for the sibling that joined after them.
     payloads.push(...payloadsDasDenuncias(denunciasParaOsIrmaos(c)))
+    // The account password record, after the first change (1.3.26): for the sibling that joined after it, or missed it.
+    const palavraPasse = this.vault.palavraPasseDaConta()
+    if (palavraPasse && palavraPasse.versao >= 1) {
+      payloads.push({ t: "estado.fichas", fichas: {}, palavraPasse })
+      // It counts as this connection's send (`#sendAccountPasswordOnce`).
+      if (this.#connection === "online") this.#accountPasswordSent = true
+    }
     try {
       for (const payload of payloads) await this.send(canal, payload)
       if (c.estadoPorEnviar) {
@@ -12770,6 +13868,13 @@ What was left behind:
           are tokens accepted: the account itself says so. The first from each
           channel stays, as always.
         */
+        // The account password record (1.3.26): its own write, after this merge's.
+        if (payload.palavraPasse) {
+          const registo = payload.palavraPasse
+          void this.#aoPalavraPasseDaConta(registo).catch((erro: Error) =>
+            this.emit("status", { detail: `account password: ${erro.message}`, level: "error", code: "event-failed", route: "log" }),
+          )
+        }
         let novas = false
         for (const [canal, ficha] of Object.entries(payload.fichas)) if (registarFicha(c, canal, ficha)) novas = true
         if (payload.segredoDoMural && !c.segredoDoMural) {
@@ -13022,6 +14127,26 @@ What was left behind:
     // Those left out (no key, or has it but isn't the creator) announce themselves.
     if (!this.#groups.has(this.canalDaConta)) await this.#anunciarAparelho().catch(() => {})
     if (this.vault.contents.estadoPorEnviar && this.#groups.has(this.canalDaConta)) await this.#enviarEstadoCompleto()
+    this.#sendAccountPasswordOnce()
+  }
+
+  /** The account password record went out on this connection (S1). Reset on each connection. */
+  #accountPasswordSent = false
+
+  /**
+   * The account password record, once per connection, after the account-channel
+   * seat (S1, review of 21/11/2026). A record sent only at the change and in the
+   * full state missed three siblings: a 1.3.25 one that acked the event before
+   * its update, one off for more than the event retention, and one that dropped
+   * an older version than its own. Each of them takes it the next time this
+   * device connects. Only after the first change (`versao >= 1`).
+   */
+  #sendAccountPasswordOnce(): void {
+    if (this.#accountPasswordSent || !this.vault.unlocked || !this.#groups.has(this.canalDaConta)) return
+    const palavraPasse = this.vault.palavraPasseDaConta()
+    if (!palavraPasse || palavraPasse.versao < 1) return
+    this.#accountPasswordSent = true
+    this.#enviarEstado({ t: "estado.fichas", fichas: {}, palavraPasse })
   }
 
   /** When each device was last invited to the account channel. Memory only. */
@@ -13223,7 +14348,7 @@ What was left behind:
    *
    * Waits for proof of life from siblings (`PROVA_DE_VIDA_MS`). With a device of the manifest missing, it only seats it. Otherwise it removes only leaves that did not signal in the current epoch and invites them again. Once a minute: a leaf with a dead Welcome requests a seat now and then, and it cannot cost a repair every time.
    */
-  async #repararCanalDaConta(device?: string): Promise<void> {
+  async #repararCanalDaConta(device?: string, provado = false): Promise<void> {
     const agora = Date.now()
     // Once a minute per device that asks, when the server names it (1.3.25); for the whole account channel without the name.
     const travao = device ?? ""
@@ -13244,16 +14369,18 @@ What was left behind:
       rule stays: the deaf leaf may be the device with the account key, of any age (I5).
     */
     // And only the leaf of the device that asked, when the server names it (1.3.25, `#soQuemPediu`).
-    const mortas = (await this.#haLugarPorDar(grupo, eu)) ? [] : this.#soQuemPediu(this.#folhasMortas(canal, grupo, eu), device, grupo, eu)
+    const mortas = (await this.#haLugarPorDar(grupo, eu)) ? [] : this.#soQuemPediu(this.#folhasMortas(canal, grupo, eu), device, provado, grupo, eu)
     if (mortas !== null && mortas.length > 0) {
       const manifesto = await this.#manifestoPara(eu)
       if (manifesto !== null) {
         const reclamados = await this.#reclamarPacotes(eu, mortas, manifesto)
         // Only the leaves with a package to come back with (I1 of the 1.3.20 review).
-        await this.#unseat(
-          canal,
-          eu,
-          reclamados.pacotes.map((p) => p.deviceKey),
+        await this.#guardandoSeRecusado(eu, reclamados, () =>
+          this.#unseat(
+            canal,
+            eu,
+            reclamados.pacotes.map((p) => p.deviceKey),
+          ),
         )
         await this.#seatInvite(canal, eu, reclamados)
       }
@@ -13285,7 +14412,7 @@ What was left behind:
    * a minute per channel. Tests: `session.welcome-morto-volta-a-sentar.rede`,
    * `session.irmao-desligado-fica.rede`.
    */
-  async #repararAparelhosDaConta(channel: string, device?: string): Promise<void> {
+  async #repararAparelhosDaConta(channel: string, device?: string, provado = false): Promise<void> {
     // The common room has its own way in (the card, `#entrarComCartao`, and admission).
     if (channel === this.#commonRoom) return
     const agora = Date.now()
@@ -13347,20 +14474,26 @@ What was left behind:
       )
       const vistos = this.vault.contents.aparelhoVistoNoCanal?.[channel] ?? {}
       // And only the device that asked, when the server names it (1.3.25, `#soQuemPediu`).
-      const mortas = (this.#soQuemPediu(this.#folhasMortas(channel, atual, eu), device, atual, eu) ?? []).filter(
+      const mortas = (this.#soQuemPediu(this.#folhasMortas(channel, atual, eu), device, provado, atual, eu) ?? []).filter(
         (aparelho) => vistos[aparelho] === undefined && novos.has(aparelho),
       )
       if (mortas.length === 0) return
       const reclamados = await this.#reclamarPacotes(eu, mortas, manifesto)
       // Only the leaves with a package to come back with (I1). An epoch that moved
       // while we committed is a sibling's repair: give up, do not unseat its seat.
-      const removeu = await this.#unseat(
-        channel,
-        eu,
-        reclamados.pacotes.map((p) => p.deviceKey),
-        { desistirSeAEpocaMexer: true },
+      const removeu = await this.#guardandoSeRecusado(eu, reclamados, () =>
+        this.#unseat(
+          channel,
+          eu,
+          reclamados.pacotes.map((p) => p.deviceKey),
+          { desistirSeAEpocaMexer: true },
+        ),
       )
-      if (!removeu) return
+      if (!removeu) {
+        // Nothing went out with them: kept for the next repair (layer A).
+        this.#guardarPorGastar(eu, reclamados.manifesto, reclamados.pacotes)
+        return
+      }
       await this.#seatInvite(channel, eu, reclamados)
     } catch (erro) {
       // No keys now: the device asks again after its top-up, and the brake is a minute.
@@ -13501,7 +14634,7 @@ What was left behind:
    *
    * **And it is claim, not admit.** Admitting before removing was what is refused in `PersonProfile`, admission refuses those already in the tree, so it forced two leaves for the same person, and half the messages encrypted to a seat they cannot open. Claiming does not touch the tree: it spends a package on the server, and that is the only cost if removal fails next.
    */
-  async #reseat(channel: string, address: string, device?: string): Promise<void> {
+  async #reseat(channel: string, address: string, device?: string, provado = false): Promise<void> {
     const grupo = this.#groups.get(channel)
     if (!grupo) throw new Error("not a member of this channel", { cause: { channel } })
     /*
@@ -13520,9 +14653,11 @@ What was left behind:
       account with no leaf at all (a newcomer to the common room) takes the path
       below, as before.
     */
-    const pediu = this.#soQuemPediu(this.#folhasMortas(channel, grupo, address), device, grupo, address)
+    const pediu = this.#soQuemPediu(this.#folhasMortas(channel, grupo, address), device, provado, grupo, address)
     const temFolhas = leavesOf(grupo.state.ratchetTree, address as UserAddress).length > 0
     if (device !== undefined && pediu !== null && (pediu.length > 0 || temFolhas)) {
+      // A named leaf that looks alive, with no proof from the device (1.3.26, I2): nothing to do.
+      if (pediu.length === 0 && this.#temFolha(grupo, address, device)) return
       const manifesto = await this.#manifestoPara(address)
       if (manifesto !== null) {
         if (pediu.length === 0) {
@@ -13530,10 +14665,12 @@ What was left behind:
           return
         }
         const reclamados = await this.#reclamarPacotes(address, pediu, manifesto)
-        await this.#unseat(
-          channel,
-          address,
-          reclamados.pacotes.map((p) => p.deviceKey),
+        await this.#guardandoSeRecusado(address, reclamados, () =>
+          this.#unseat(
+            channel,
+            address,
+            reclamados.pacotes.map((p) => p.deviceKey),
+          ),
         )
         await this.#seatInvite(channel, address, reclamados)
         return
@@ -13553,10 +14690,12 @@ What was left behind:
           a sibling whose reserve is empty stays where it is, rather than out of the
           channel with no Welcome.
         */
-        await this.#unseat(
-          channel,
-          address,
-          reclamados.pacotes.map((p) => p.deviceKey),
+        await this.#guardandoSeRecusado(address, reclamados, () =>
+          this.#unseat(
+            channel,
+            address,
+            reclamados.pacotes.map((p) => p.deviceKey),
+          ),
         )
         await this.#seatInvite(channel, address, reclamados)
         return
@@ -13567,7 +14706,7 @@ What was left behind:
       */
     const reclamados = await this.#reclamarPacotes(address, undefined, await this.#manifestoPara(address))
     // The removal is `#unseat`, which already saves before the commit goes out and does nothing when there is no leaf to remove. The same thing was written here, and two copies of an invariant this heavy is one too many.
-    await this.#unseat(channel, address)
+    await this.#guardandoSeRecusado(address, reclamados, () => this.#unseat(channel, address))
     await this.#seatInvite(channel, address, reclamados)
   }
 
@@ -13691,7 +14830,7 @@ What was left behind:
    * turn comes round — whether the epoch has already moved. If it has, someone
    * ahead in the queue has already seated them and there is nothing left to do.
    */
-  async #answerRejoin(channel: string, address: string, device?: string): Promise<void> {
+  async #answerRejoin(channel: string, address: string, device?: string, provado = false): Promise<void> {
     // One admission at a time PER CHANNEL. `#umaDeCadaVez` already serialized, but per person: two nearly simultaneous requests both entered here, read the same tree, and both committed over the same epoch. MLS accepts one; the other Welcome describes a group no one else has, and the person who gets it is alone in a room with the right name. Measured symptom: two requests, one usable invite.
     //
     // Queued per channel, never merged (1.3.25). Merged, a request that came while an
@@ -13711,6 +14850,7 @@ What was left behind:
       em: Date.now(),
       epoca: grupo ? epochOf(grupo) : undefined,
       folha: grupo && device !== undefined ? this.#folhaDoAparelho(grupo, address, device) : undefined,
+      provado,
     }
     const quem = `${channel}|${address}|${device ?? ""}`
     const ficha = (this.#pedidoMaisRecente.get(quem) ?? 0) + 1
@@ -13779,15 +14919,45 @@ What was left behind:
    * (1.3.25): only that device's, if it has a leaf here. A sibling that is merely
    * offline never leaves for another device's request (C1 of the 1.3.20 review).
    *
-   * Also when the leaf looks alive here: the device itself says its seat stopped
-   * working. A healthy phone asking for its seat in the account channel answers the
-   * PC's state deltas, and with the rule "only without proof of life" it was never
-   * repaired (the `.rede` of 1.3.25). Without the name, or with a leaf without a
-   * device key, `mortas` as it is: the old rule.
+   * Also when the leaf looks alive here, but only with `provado` (1.3.26, I2 of the
+   * 1.3.25 public review): the device signed the request (`#provaDoPedido`), so the
+   * device itself says its seat stopped working. A healthy phone asking for its seat
+   * in the account channel answers the PC's state deltas, and with the rule "only
+   * without proof of life" it was never repaired (the `.rede` of 1.3.25). The name
+   * alone comes from the server, and a lying server named a healthy device and its
+   * siblings took it out once a minute. Without the proof, the named leaf leaves only
+   * when it has no proof of life in the epoch (`mortas`); a leaf that looks alive gives
+   * `[]`, like a device with no leaf, and the callers tell the two apart by the tree.
+   * Without the name, or with a leaf without a device key, `mortas` as it is: the old rule.
    */
-  #soQuemPediu(mortas: string[] | null, device: string | undefined, grupo: GroupSession, address: string): string[] | null {
+  #soQuemPediu(mortas: string[] | null, device: string | undefined, provado: boolean, grupo: GroupSession, address: string): string[] | null {
     if (device === undefined || mortas === null) return mortas
-    return this.#temFolha(grupo, address, device) ? [device] : []
+    if (!this.#temFolha(grupo, address, device)) return []
+    return provado || mortas.includes(device) ? [device] : []
+  }
+
+  /** What this device accepted of the seat requests' proofs, to refuse a replay. See `pedido-de-lugar.ts`. */
+  readonly #provasDosPedidos = new ProvasDosPedidosDeLugar()
+
+  /**
+   * Whether a `channel.rejoin` carries the named device's own signature (1.3.26).
+   *
+   * The key is read from the named leaf of `address` in our tree, whose credential
+   * chain to the account MLS already checked: the server can name any device, but
+   * cannot sign for one. A device with no leaf here has nothing to verify against,
+   * and needs no proof: that path only seats it, and takes nobody out.
+   */
+  #provaDoPedido(frame: Extract<ServerFrame, { t: "channel.rejoin" }>): boolean {
+    if (frame.device === undefined || frame.prova === undefined) return false
+    const grupo = this.#groups.get(frame.channel)
+    if (!grupo || !this.#temFolha(grupo, frame.address, frame.device)) return false
+    let chave: Uint8Array
+    try {
+      chave = fromBase64(frame.device)
+    } catch {
+      return false
+    }
+    return this.#provasDosPedidos.aceitar(frame.prova, frame.channel, frame.address, chave)
   }
 
   /** Whether `device` has a leaf of `address` in this group. */
@@ -13808,6 +14978,7 @@ What was left behind:
       em: Date.now(),
       epoca: epochOf(group),
       folha: device !== undefined ? this.#folhaDoAparelho(group, address, device) : undefined,
+      provado: false,
     }
     if (address === this.identity.address) {
       // The echo of our own request, named by the server (1.3.25): nothing to repair.
@@ -13821,10 +14992,10 @@ What was left behind:
           this.#lugaresPedidosPorMim.delete(channel)
           return
         }
-        await this.#repararCanalDaConta(device)
+        await this.#repararCanalDaConta(device, desde.provado)
         return
       }
-      await this.#repararAparelhosDaConta(channel, device)
+      await this.#repararAparelhosDaConta(channel, device, desde.provado)
       return
     }
     // A new seat in a personal channel to someone who blocked is a seat given. See `block`.
@@ -13903,7 +15074,7 @@ What was left behind:
      * and forty-five: both within the window, both discarded silently. The
      * first one that could be served was more than ninety seconds later.
      */
-    await this.#reseat(channel, address, device)
+    await this.#reseat(channel, address, device, desde.provado)
     this.#rejoinAnswered.set(key, Date.now())
     /*
       The caller lost what was said to the dead leaf, and a reseat does not
@@ -14101,7 +15272,20 @@ What was left behind:
     // echo of it arrives as `channel.rejoin`. See `#provarVida`.
     this.#lugaresPedidosPorMim.set(channel, Date.now())
     try {
-      this.#send({ t: "channel.rejoin.request", channel })
+      /*
+        Signed with this device's key (1.3.26): the proof that this device asks, which
+        the server forwards and cannot make. See `pedido-de-lugar.ts`. An older server
+        drops the field, and the members fall back to the proof of life.
+      */
+      const identidade = this.identity
+      const prova = assinarPedidoDeLugar(
+        identidade.deviceSigningPrivateKey,
+        identidade.deviceSigningPublicKey,
+        channel,
+        identidade.address,
+        Date.now(),
+      )
+      this.#send({ t: "channel.rejoin.request", channel, prova })
     } catch {
       // Offline. The deafness detector asks again on the next connect.
     }
@@ -14222,6 +15406,7 @@ What was left behind:
       emitir: (evento) => {
         if (evento.inicial && evento.total > 0) this.#lugaresDoHistorico()
         this.emit("historico", evento)
+        this.#notarPassado()
       },
       agora: () => Date.now(),
       armazem: {
@@ -14248,6 +15433,155 @@ What was left behind:
       },
       outroSinal: (aberto, remetente, epoca) => this.#passagemDaChave.aoSinalAberto(aberto, remetente, epoca),
     }
+  }
+
+  // ------------------------------- a channel's past, from other members (D2)
+  //
+  // Bridge only. Rules are in `historico/membros.ts`.
+
+  #membrosDoPassado: HistoricoDosMembros | null = null
+
+  /**
+   * Off, this device answers no request for a channel's past: it is silent,
+   * like a client before D2. For tests and diagnostics. On by default.
+   */
+  historicoDosMembrosLigado = true
+
+  get #historicoDosMembros(): HistoricoDosMembros {
+    this.#membrosDoPassado ??= new HistoricoDosMembros(this.#portaDosMembros())
+    return this.#membrosDoPassado
+  }
+
+  /** For tests and diagnostics: what the channel's past moved this session. */
+  get estatisticasDosMembros(): EstatisticasDosMembros {
+    return this.#historicoDosMembros.estatisticas
+  }
+
+  /** Check every channel's past now, without waiting for the clock. */
+  pedirHistoricoDosMembros(): void {
+    this.#historicoDosMembros.pedirAgora()
+  }
+
+  /**
+   * "Load older" past what this device holds (history-last-100): the next lines of
+   * the channel's past, of `room` when given, from a member online (D2). The sync on
+   * joining brings only the newest `linesOnJoin` lines; the rest comes this way, one
+   * page at a time. What comes goes in as `message` events, like any arrival.
+   *
+   * Never throws: `no-member` says no member online answered, `offline` that there
+   * is no connection, `end` that the past is complete on this device.
+   */
+  loadOlderFromMembers(channel: string, room?: string): Promise<LoadOlderResult> {
+    if (!this.vault.unlocked || this.#identity === null) return Promise.resolve({ outcome: "offline", lines: 0 })
+    return this.#historicoDosMembros.loadOlder(channel, room).catch((): LoadOlderResult => ({ outcome: "no-member", lines: 0 }))
+  }
+
+  /** Whether "Load older" may still bring past from the members (D2): see `HistoricoDosMembros.hasOlder`. */
+  hasOlderFromMembers(channel: string): boolean {
+    if (!this.vault.unlocked || this.#identity === null) return false
+    return this.#portaDosMembros().canais().includes(channel) && this.#historicoDosMembros.hasOlder(channel)
+  }
+
+  /**
+   * The lines of conversation (`message`) this device holds in a channel: the vault,
+   * what waits for an archive page, and the archive pages. Inherited entries (pairing)
+   * are not on screen and do not count.
+   */
+  #linhasGuardadas(canal: string): number {
+    const contents = this.vault.contents
+    const linhas = (lista: readonly StoredChatMessage[] | undefined): number =>
+      (lista ?? []).reduce((n, entrada) => (entrada.payload.t === "message" && !entrada.herdado ? n + 1 : n), 0)
+    const arquivadas = (contents.arquivoDaConversa?.[canal] ?? []).reduce((n, pagina) => n + pagina.n, 0)
+    return linhas(contents.history[canal]) + linhas(contents.porArquivar?.[canal]) + arquivadas
+  }
+
+  #portaDosMembros(): PortaDosMembros {
+    const grupo = (canal: string): GroupSession | undefined => this.#groups.get(canal)
+    return {
+      eu: () => this.#quemRelata(),
+      conteudo: () => (this.vault.unlocked && this.#identity !== null ? this.vault.contents : null),
+      canais: () =>
+        [...this.#groups.keys()].filter((canal) => {
+          const g = grupo(canal)
+          return canal !== this.canalDaConta && g !== undefined && !estaRemovido(g) && !this.#eDirecta(canal)
+        }),
+      lugar: (canal) => {
+        // Without the seat, the anti-entropy floor would move with what comes in (`#lugarParaSincronia`).
+        if (this.vault.contents.seatSince?.[canal] === undefined) return null
+        return this.lugarEm(canal)?.seq ?? null
+      },
+      folhas: (canal) => {
+        const g = grupo(canal)
+        if (!g) return []
+        const arvore = g.state.ratchetTree
+        const folhas = []
+        for (const [indice, address] of memberAddresses(arvore)) {
+          const chave = deviceKeyAtLeaf(arvore, indice)
+          if (chave) folhas.push({ indice, address: String(address), aparelho: toBase64(chave) })
+        }
+        return folhas
+      },
+      viva: (canal, folha) => this.#anti.folhaViva(folha),
+      derivarChave: async (canal) => {
+        const g = grupo(canal)
+        return g ? derivarChaveDoSinal(g, canal) : null
+      },
+      podeSinalizar: () => this.#connection === "online" && this.#serverCapabilities.includes(CAPACIDADE_SINAL_EFEMERO),
+      gastar: (canal, caracteres) =>
+        this.#anti.gastarSinalDosMembros(canal, caracteres, this.#serverCapabilities.includes(CAPACIDADE_SINAL_PARA)),
+      mudou: () => this.#notarPassado(),
+      // `para` only for a server that routes by it: an older one would drop it anyway, and broadcast.
+      enviarSinal: (canal, sinal, ref, para) =>
+        this.#send({ t: "channel.sinal", channel: canal, sinal, ref, ...(this.#serverCapabilities.includes(CAPACIDADE_SINAL_PARA) ? { para } : {}) }),
+      arcaACorrer: () => {
+        const plano = this.vault.unlocked ? this.vault.contents.historico?.plano : undefined
+        return plano !== undefined && plano.parado === undefined
+      },
+      responde: () => this.historicoDosMembrosLigado,
+      bloqueado: (canal, autor) => autor !== this.identity.address && this.#bloqueadoAqui(canal, autor),
+      podeLerSala: (canal, quem, sala) => this.#podeLerSala(canal, quem, sala),
+      salasRestritas: (canal) => this.#salasRestritas(canal),
+      lines: (canal) => this.#linhasGuardadas(canal),
+      itens: (canal) => this.#anti.itensDoPassado(canal),
+      relatar: (canal, itens) => this.#anti.relatarDoPassado(canal, itens),
+      receber: (canal, itens, lugar) => this.#anti.aplicarDoPassado(canal, itens, lugar),
+      gravar: (mudar) => {
+        if (!this.vault.unlocked) return
+        mudar(this.vault.contents)
+        this.#memoriaPorGravar = true
+        this.#agendarGravacao()
+      },
+      agora: () => Date.now(),
+    }
+  }
+
+  /**
+   * Whether `quem` may read this room, for the channel's past (D2): the
+   * category the room is in has no roles, or `quem` is the founder, an admin,
+   * manages the channel (`renomear`, the same exception the interface makes,
+   * see `categoriaVisivel`), or has one of the category's roles. By the rules
+   * THIS device knows; what the requester says about itself is never asked.
+   */
+  #podeLerSala(canal: string, quem: string, sala: string): boolean {
+    const entrada = this.vault.contents.channelRooms[canal]?.[sala]
+    const categoria = entrada ? this.#categoriaDaSala(canal, (entrada.payload as { category?: unknown }).category, entrada.at) : null
+    const roles = categoria ? (this.vault.contents.channelCategories?.[canal]?.[categoria]?.payload as { roles?: unknown } | undefined)?.roles : undefined
+    const rolesDaCategoria = Array.isArray(roles) ? (roles as unknown[]) : undefined
+    // The founder, admins and who manages the channel are only computed for a restricted category.
+    const restrita = rolesDaCategoria !== undefined && rolesDaCategoria.length > 0
+    const papeis = restrita ? this.rolesFor(canal, quem) : []
+    const privilegiado =
+      restrita &&
+      (this.#fundadorConhecido(canal) === quem || papeis.includes(ADMIN_ROLE) || this.permissoesEm(canal, quem).includes("renomear"))
+    return leSala({ sala, categoria, rolesDaCategoria, restritas: this.#salasRestritas(canal), privilegiado, papeis })
+  }
+
+  /** The channel has a live category restricted to roles. */
+  #salasRestritas(canal: string): boolean {
+    return Object.values(this.vault.contents.channelCategories?.[canal] ?? {}).some((entrada) => {
+      const p = entrada.payload as { roles?: unknown; removed?: unknown }
+      return p.removed !== true && Array.isArray(p.roles) && p.roles.length > 0
+    })
   }
 
   // --------------------------------- the account key to a paired device (1.3.16)
@@ -14751,6 +16085,10 @@ What was left behind:
         await this.send(canal, { t: "typing", until: 0, relatos })
       },
       // Live only by construction: an ephemeral signal never comes back in a recovery.
+      sinalDosMembros: (canal, from, aberto, epoca) => void this.#historicoDosMembros.aoSinalAberto(canal, from, aberto, epoca),
+      // Poll items follow the room's permissions, by the D2 rule (21/11/2026). See `#paraQuemPede` in `sincronia/pedido.ts`.
+      podeLerSala: (canal, quem, sala) => this.#podeLerSala(canal, quem, sala),
+      salasRestritas: (canal) => this.#salasRestritas(canal),
       aoEscrever: (canal, de, sala, ate) => {
         if (de === this.identity.address || ate <= Date.now()) return
         this.emit("typing", { channel: canal, from: de as UserAddress, room: sala, until: ate })
@@ -14775,17 +16113,38 @@ What was left behind:
       esperarVideo: (canal, anexo) => this.#videos.esperar(canal, [anexo]),
       aoMudar: (canal) => {
         if (canal === this.canalDaConta || !this.#groups.has(canal)) return
-        this.emit("sincronia", this.#anti.estadoDoCanal(canal))
+        this.emit("sincronia", this.#estadoDaSincroniaDe(canal))
       },
-      // Profiles to third parties, only in the common room (3/11/2026). See `#pedirPerfisNaSalaComum`.
-      perfisATerceiros: (canal) => canal === this.#commonRoom,
+      /*
+        Profiles to third parties (3/11/2026), in every channel since 1.3.26: the
+        newcomer pulls the latest signed version of each person instead of every
+        member resending theirs whole. Never in the account channel, which is state,
+        not people. See `#pedirPerfisNaSalaComum` and `pedirPerfisDe`.
+      */
+      perfisATerceiros: (canal) => canal !== this.canalDaConta,
       perfisParaRelatar: (canal, contas) => perfisParaRelatar(this.vault.contents, canal, contas, this.identity.address),
+      // A portrait may be asked for (`r`) anywhere but the common room and the account channel (1.3.26).
+      retratosAPedido: (canal) => canal !== this.#commonRoom && canal !== this.canalDaConta,
+      versaoDoMeuPerfil: () => this.profile.updatedAt,
+      folhaPedeOsPerfis: (canal, folha) => {
+        const g = grupo(canal)
+        return g !== undefined && leafDeclares(g.state.ratchetTree, folha.indice, EXTENSAO_PERFIS_A_PEDIDO)
+      },
       // Once per requester and channel every ten minutes: one per channel blocked the next newcomer of a wave of joins.
       republicarPerfil: (canal, quem) => {
+        /*
+          At most once per channel, membership and version every ten minutes,
+          whoever asks, with or without `r` (1.3.26; security reviews N-S1, N3-S1).
+          The whole profile reaches every member the first time; a second request
+          in that window is a modified client or the version already in flight. By
+          membership (`#marcaDoCrescimento`), so a newcomer of a later join in a
+          wave is not held back, and an empty commit does not open a new slot.
+        */
         if (!this.#podeAgora(this.#perfisRepublicadosAPedido, `${canal}|${quem}`, Session.PEDIDO_DE_PERFIS_MS)) return
+        if (!this.#podeAgora(this.#perfisRepublicadosAPedido, `${canal}|${this.#marcaDoCrescimento(canal)}|${this.profile.updatedAt}`, Session.PEDIDO_DE_PERFIS_MS)) return
         void this.publishProfile([canal], true).catch(() => {})
       },
-      aoPerfisRelatados: (_canal, perfis) => {
+      aoPerfisRelatados: (canal, perfis) => {
         // Without the portrait bytes it is `parcial`, like the Welcome portrait: has the name, missing the photo.
         const leves = perfis.filter((perfil) => perfil.leve)
         if (leves.length > 0 && this.vault.unlocked) {
@@ -14795,6 +16154,15 @@ What was left behind:
           }
           this.#memoriaPorGravar = true
           this.#agendarGravacao()
+          /*
+            And the portraits, from their owners (1.3.26): outside the common room
+            the members no longer resend whole profiles when the channel grows, so
+            the request asks each owner for the portrait the relay could not carry.
+          */
+          this.pedirPerfisDe(
+            canal,
+            leves.map(({ autor }) => autor),
+          )
         }
         this.emit("perfis", { enderecos: perfis.map((perfil) => perfil.autor) })
       },
@@ -14857,51 +16225,100 @@ What was left behind:
   #pedidoDePerfisNaSalaComum: ReturnType<typeof setTimeout> | null = null
 
   /**
-   * Ask for the names of these accounts in the common room, because someone
-   * needs them now: the full member list opened, a mention, a message on screen
-   * (12/11/2026). Accounts with a name already, or not members, are left out.
+   * Ask for the names of these accounts in a channel (the common room until 1.3.25),
+   * because someone needs them now: the full member list opened, a mention, a message
+   * on screen (12/11/2026), or this device just joined. Accounts with a name already,
+   * or not members, are left out.
    * What the request cap holds back (one request a minute per channel) goes in
    * the next one, together with whatever else was asked for meanwhile.
    */
   pedirPerfisDe(channel: string, contas: readonly string[]): void {
-    const sala = this.#commonRoom
-    if (!sala || channel !== sala || !this.vault.unlocked || !this.#groups.has(sala)) return
+    if (channel === this.canalDaConta || !this.vault.unlocked || !this.#groups.has(channel)) return
     const eu = this.identity.address
-    const membros = new Set(this.membersOf(sala).map(String))
+    const membros = new Set(this.membersOf(channel).map(String))
     const diretorio = this.vault.contents.directory
+    /*
+      Any channel since 1.3.26, not only the common room. Outside it, a profile we
+      hold without the portrait (`parcial`) is asked for too, flagged (`r` in the
+      request): its owner sends the whole profile, once, instead of every member
+      resending theirs when the channel grows. In the common room only the names,
+      as before: a wave of joins asking for every portrait is what 12/11 removed.
+    */
+    const comRetrato = channel !== this.#commonRoom
+    let fila = this.#perfisAPedir.get(channel)
     for (const conta of contas) {
-      if (conta !== eu && membros.has(conta) && !diretorio[conta]?.payload["displayName"]) this.#perfisAPedir.add(conta)
+      if (conta === eu || !membros.has(conta)) continue
+      const guardado = diretorio[conta]
+      const semNome = !guardado?.payload["displayName"]
+      if (!semNome && !(comRetrato && guardado?.parcial === true)) continue
+      fila ??= new Map()
+      fila.set(conta, !semNome)
+      this.#perfisAPedir.set(channel, fila)
+      if (!this.#perfisPedidosDesde.has(`${channel}|${conta}`)) this.#perfisPedidosDesde.set(`${channel}|${conta}`, Date.now())
     }
-    this.#pedirPerfisAPedir()
+    this.#pedirPerfisAPedir(channel)
   }
 
-  #pedirPerfisAPedir(): void {
-    const sala = this.#commonRoom
-    if (!sala || this.#perfisAPedir.size === 0 || this.#perfisAPedirTimer !== null) return
+  #pedirPerfisAPedir(channel: string): void {
+    const fila = this.#perfisAPedir.get(channel)
+    if (!fila || fila.size === 0 || this.#perfisAPedirTimer.has(channel)) return
     if (this.#connection !== "online") return
     // Asked for in the last minutes (or shown nameless by a relay): the answer
     // came or is on its way. They leave the queue, so it never spins on them.
-    const elegiveis = new Set(this.#anti.contasPorPedir(sala, [...this.#perfisAPedir]))
-    for (const conta of this.#perfisAPedir) if (!elegiveis.has(conta)) this.#perfisAPedir.delete(conta)
-    if (this.#perfisAPedir.size === 0) return
-    const contas = [...this.#perfisAPedir].slice(0, PERFIS_POR_PEDIDO)
+    const elegiveis = new Set(this.#anti.contasPorPedir(channel, [...fila.keys()]))
+    for (const conta of fila.keys()) if (!elegiveis.has(conta)) fila.delete(conta)
+    if (fila.size === 0) {
+      this.#perfisAPedir.delete(channel)
+      return
+    }
+    const contas = [...fila.keys()].slice(0, PERFIS_POR_PEDIDO)
+    const semRetrato = contas.filter((conta) => fila.get(conta) === true)
     void this.#anti
-      .pedirPerfis(sala, contas)
+      .pedirPerfis(channel, contas, semRetrato)
       .catch(() => false)
       .then((saiu) => {
-        if (saiu) for (const conta of contas) this.#perfisAPedir.delete(conta)
-        if (this.#perfisAPedir.size === 0 || this.#perfisAPedirTimer !== null) return
+        if (saiu) for (const conta of contas) fila.delete(conta)
+        if (fila.size === 0) this.#perfisAPedir.delete(channel)
+        if (fila.size === 0 || this.#perfisAPedirTimer.has(channel)) return
         // Held back by the cap (or nobody alive to answer): try again when it allows.
-        this.#perfisAPedirTimer = setTimeout(() => {
-          this.#perfisAPedirTimer = null
-          this.#pedirPerfisAPedir()
-        }, Session.REPETIR_PEDIDO_DE_PERFIS_MS)
+        this.#perfisAPedirTimer.set(
+          channel,
+          setTimeout(() => {
+            this.#perfisAPedirTimer.delete(channel)
+            this.#pedirPerfisAPedir(channel)
+          }, Session.REPETIR_PEDIDO_DE_PERFIS_MS),
+        )
       })
   }
 
-  /** Accounts whose names someone needs, still to ask for. Memory only. */
-  readonly #perfisAPedir = new Set<string>()
-  #perfisAPedirTimer: ReturnType<typeof setTimeout> | null = null
+  /** Per channel, the accounts whose profiles someone needs, still to ask for (`true`: only the portrait is missing). Memory only. */
+  readonly #perfisAPedir = new Map<string, Map<string, boolean>>()
+  readonly #perfisAPedirTimer = new Map<string, ReturnType<typeof setTimeout>>()
+  /**
+   * When each `canal|conta` was first asked for by `pp` on this connection. The F10
+   * fallback (`#pedirPerfisEmFalta`) only covers accounts that `pp` did not heal in
+   * `PP_ANTES_DO_F10_MS`: a channel of 1.3.25 members never answers `pp` outside the
+   * common room. Memory only.
+   */
+  readonly #perfisPedidosDesde = new Map<string, number>()
+  /**
+   * How many profile-request entries this session holds in memory, its own and the
+   * anti-entropy's. `reset` brings it to zero (N7, N-N4). For tests and diagnostics.
+   */
+  get pedidosDePerfisEmMemoria(): number {
+    return (
+      this.#perfisAPedir.size +
+      this.#perfisAPedirTimer.size +
+      this.#perfisPedidosDesde.size +
+      this.#perfisRepublicadosAPedido.size +
+      this.#respostaF10PorCrescimento.size +
+      this.#respostasF10PorConta.size +
+      (this.#antiEntropia?.pedidosDePerfisEmMemoria ?? 0)
+    )
+  }
+
+  /** How long `pp` has to heal an account before F10 asks everyone. Static for tests. */
+  static PP_ANTES_DO_F10_MS = 2 * 60_000
   /** The request cap in anti-entropy is one a minute per channel. Static for tests. */
   static REPETIR_PEDIDO_DE_PERFIS_MS = 61_000
 
@@ -15665,9 +17082,77 @@ What was left behind:
     return (this.vault.contents as unknown as CofreDaSincronia).sincronia?.lugares?.[channel] ?? null
   }
 
+  /**
+   * The last time this device was online with this account BEFORE this opening
+   * (ms since epoch), or `null` when it never was (a new device, or a vault
+   * from before 1.3.26). For the members column while a history syncs: "You
+   * haven't logged in X days". See `VaultContents.lastOnlineAt`.
+   */
+  previousOnlineAt(): number | null {
+    this.#capturePreviousOnlineAt()
+    return this.#previousOnlineAt ?? null
+  }
+
+  /**
+   * The value from before this opening, read once and kept until `reset`.
+   * `undefined`: not read yet. Read only from an open vault.
+   */
+  #previousOnlineAt: number | null | undefined = undefined
+
+  #capturePreviousOnlineAt(): void {
+    if (this.#previousOnlineAt !== undefined || !this.vault.unlocked) return
+    const valor = this.vault.contents.lastOnlineAt
+    this.#previousOnlineAt = typeof valor === "number" && Number.isFinite(valor) && valor > 0 ? valor : null
+  }
+
+  /**
+   * This device is online with this account now. Changes memory only: it
+   * reaches disk with the next vault write. Says whether it could mark.
+   */
+  #markOnline(): boolean {
+    if (!this.vault.unlocked) return false
+    this.#capturePreviousOnlineAt()
+    this.vault.contents.lastOnlineAt = Date.now()
+    return true
+  }
+
   /** The sync state of each channel (except the account one), for Diagnostics. */
   estadoDaSincronia(): SincroniaDoCanal[] {
-    return this.channels.filter((canal) => canal !== this.canalDaConta).map((canal) => this.#anti.estadoDoCanal(canal))
+    return this.channels.filter((canal) => canal !== this.canalDaConta).map((canal) => this.#estadoDaSincroniaDe(canal))
+  }
+
+  /** The sync state of a channel, with whether its past is arriving now (`passado`). */
+  #estadoDaSincroniaDe(canal: string): SincroniaDoCanal {
+    return { ...this.#anti.estadoDoCanal(canal), passado: this.#canaisComPassado().has(canal) }
+  }
+
+  /**
+   * The channels whose past is arriving now: from a member (D2), or from a
+   * sibling device, while the account history has a plan running with the
+   * channel still open in it.
+   */
+  #canaisComPassado(): Set<string> {
+    const canais = new Set<string>(this.#membrosDoPassado?.canaisATrazer() ?? [])
+    const plano = this.vault.unlocked ? this.vault.contents.historico?.plano : undefined
+    if (plano && plano.parado === undefined) {
+      for (const [canal, estado] of Object.entries(plano.canais)) if (!estado.fim) canais.add(canal)
+    }
+    return canais
+  }
+
+  /** The channels with a past arriving, as last told to the interface. */
+  #passadoDito = new Set<string>()
+
+  /** Tell the interface the channels whose "syncing" state changed. Cheap when nothing changed. */
+  #notarPassado(): void {
+    const agora = this.#canaisComPassado()
+    const mudaram = [...agora].filter((canal) => !this.#passadoDito.has(canal))
+    for (const canal of this.#passadoDito) if (!agora.has(canal)) mudaram.push(canal)
+    this.#passadoDito = agora
+    for (const canal of mudaram) {
+      if (canal === this.canalDaConta || !this.#groups.has(canal)) continue
+      this.emit("sincronia", this.#estadoDaSincroniaDe(canal))
+    }
   }
 
   /**
@@ -15982,6 +17467,18 @@ What was left behind:
     if (address === this.identity.address || this.#connection !== "online") return
     // Anti-entropy (S4) has its own caps; the repair below is what has the ten-minute throttle.
     void this.#anti.aoVerOnline(address, [...this.#groups.keys()]).catch(() => {})
+    /*
+      The deaf channels where this person sits ask for their seat soon (1.3.26): now
+      there is someone to answer. Before, a direct with the peer offline waited up to
+      half an hour after the peer came online, and a peer who stayed five minutes never
+      heard it. Not behind the ten-minute throttle below: `adiantar` keeps its own floor
+      (the first wait after the last request), so a flickering presence asks no faster.
+    */
+    const surdosComEle = this.#pedidosDeLugar.ativos().filter((canal) => {
+      const grupo = this.#groups.get(canal)
+      return grupo !== undefined && leavesOf(grupo.state.ratchetTree, address as UserAddress).length > 0
+    })
+    if (surdosComEle.length > 0) this.#pedidosDeLugar.adiantar(surdosComEle)
     if (!this.#podeAgora(this.#presencasReparadas, address, REPARAR_PAR_MS)) return
     void this.#reconciliarAmizades(address).catch(() => {})
     this.#pedirLugares(address)
@@ -16086,6 +17583,19 @@ What was left behind:
     const eu = this.identity.address
     const meuAparelho = toBase64(this.identity.deviceSigningPublicKey)
     const canais = soCanal !== undefined ? [soCanal] : [...this.#groups.keys()]
+    /*
+      Devices the server had no key package for in this pass (1.3.26). Their pool is
+      the same for every channel, like in `#assentarAparelho`: a channel missing only
+      these does not claim again, it waits `SEM_CHAVES_VOLTA_MS` with the first one.
+      Before, the pass claimed (three times) in each channel, and a device offline at
+      0 keys cost about fourteen empty claims every twenty minutes.
+    */
+    const semChaves = new Set<string>()
+    const travarSemChaves = async (chaveDoTravao: string): Promise<void> => {
+      await this.vault.update((contents) => {
+        contents.repairAttempts[`${eu}|${chaveDoTravao}`] = Date.now() - ASSENTO_PROPRIO_MS + Session.SEM_CHAVES_VOLTA_MS
+      })
+    }
     for (const canal of canais) {
       if (canal === this.#commonRoom) continue
       // The account channel only takes devices that announced themselves: it's
@@ -16106,6 +17616,14 @@ What was left behind:
       if (!semTravao && !mayRepair(this.vault.contents.repairAttempts, eu, chaveDoTravao, Date.now(), ASSENTO_PROPRIO_MS)) continue
       try {
         if (!(await this.#haLugarPorDar(grupo, eu))) continue
+        if (semChaves.size > 0) {
+          const manifesto = await this.#manifestoPara(eu)
+          const faltam = manifesto === null ? [] : this.#faltam(grupo.state.ratchetTree, eu, manifesto)
+          if (faltam.length > 0 && faltam.every((aparelho) => semChaves.has(aparelho))) {
+            await travarSemChaves(chaveDoTravao)
+            continue
+          }
+        }
         /*
           Among devices of the same account, the turn goes by device key order,
           like in `#honrarSaidaAgora`: who's first seats and the others, seeing the
@@ -16141,9 +17659,8 @@ What was left behind:
             the pass `SEM_CHAVES_VOLTA_MS` from now, not at the end of the brake.
           */
           if (erro instanceof AparelhoSemChaves) {
-            await this.vault.update((contents) => {
-              contents.repairAttempts[`${eu}|${chaveDoTravao}`] = Date.now() - ASSENTO_PROPRIO_MS + Session.SEM_CHAVES_VOLTA_MS
-            })
+            await travarSemChaves(chaveDoTravao)
+            for (const aparelho of erro.aparelhos) semChaves.add(aparelho)
           }
           throw erro
         }
@@ -17958,12 +19475,23 @@ What was left behind:
     return meus.some((entrada) => entrada.payload.t === "friend.remove" && entrada.seq > (ultimoAceite?.seq ?? -1))
   }
 
+  /** Past how many keys `#podeAgora` drops the expired ones. Static for tests. */
+  static MARCAS_MAX = 256
+
   /** If an action blocked by `key` can run now, and marks it if it can. */
   #podeAgora(marcas: Map<string, number>, chave: string, intervaloMs: number): boolean {
     const agora = Date.now()
     const ultima = marcas.get(chave)
     if (ultima !== undefined && agora - ultima < intervaloMs) return false
     marcas.set(chave, agora)
+    /*
+      A map that only grows is a leak over a long session (third review, N3-N2):
+      past 256 keys, the expired ones go. An expired key and a missing one answer
+      the same, so nothing changes but the memory.
+    */
+    if (marcas.size > Session.MARCAS_MAX) {
+      for (const [outra, em] of marcas) if (agora - em >= intervaloMs) marcas.delete(outra)
+    }
     return true
   }
 
@@ -18498,11 +20026,13 @@ What was left behind:
     let resposta: ServerFrame
     try {
       this.#send({ t: "channel.claim", channel })
-      resposta = await this.#await("channel.claim.result")
+      resposta = await this.#await("channel.claim.result", undefined, channel)
     } catch {
       return
     }
     if (resposta.t !== "channel.claim.result" || resposta.channel !== channel) return
+    // The server refused a new channel because this account is new (1.3.26).
+    if (resposta.recusa === "conta-nova") throw new Error(ERRO_CONTA_NOVA_CANAIS, { cause: { channel } })
     // The debut is ours (or our other device's, which has the same address):
     // we create it. An already used channel with our debut is a lost state, and
     // `createSpaceChannel` handles it as it always has.
@@ -18734,7 +20264,12 @@ What was left behind:
           if (this.#cartaoAdiado && channel === this.#commonRoom) this.#agendarCartao(channel)
           // Whoever entered while we were away: once, now, in the epoch of now.
           // See the growth in `#applyEvent`. Off the path that `connect()` waits for.
-          if (this.#connection === "online" && this.#crescidosNaRecuperacao.delete(channel)) this.#dizerAQuemEntrou(channel, false)
+          if (this.#connection === "online") {
+            // And the F10 requests read in it, answered once, in the epoch of now (N3-S2).
+            const f10 = this.#f10NoFimDaRecuperacao.delete(channel)
+            if (this.#crescidosNaRecuperacao.delete(channel)) this.#dizerAQuemEntrou(channel, false, f10)
+            else if (f10) this.#responderF10Agora(channel)
+          }
         }
         this.#avisarRecuperacao()
       }
@@ -20565,12 +22100,16 @@ What was left behind:
     for (const recebida of this.#pendingSucessoes) if (registarSucessao(contents, recebida)) sucessoesMudaram = true
     this.#pendingSucessoes = []
     if (sucessoesMudaram) queueMicrotask(() => this.#avisarSucessoes())
+    const comNome: string[] = []
     for (const { address, at, payload } of this.#pendingDirectory) {
       const antes = contents.directory[address]?.at
       upsertDirectory(contents, address, this.#absorver(contents, payload), at)
       this.#fichaDoMuralQueChegou(contents, address)
       this.#perfilQueMudou(contents, address, antes)
+      if (typeof payload.displayName === "string" && payload.displayName.trim() !== "") comNome.push(address)
     }
+    // A name that arrived is no longer one to wait ten minutes for: see `esquecerPedidos`.
+    if (comNome.length > 0) this.#anti.esquecerPedidos(comNome)
     this.#pendingDirectory = []
     for (const { channel, address, u, autoria, mural } of this.#pendingAutoriasDosPerfis) {
       const doCanal = contents.autoriasDosPerfis?.[channel] ?? {}
@@ -21250,7 +22789,7 @@ What was left behind:
     this.#send({ t: "channel.claim", channel: sala })
     let resposta
     try {
-      resposta = await this.#await("channel.claim.result")
+      resposta = await this.#await("channel.claim.result", undefined, sala)
     } catch {
       // Older server, or connection dropping. The next connection tries.
       return
@@ -21303,6 +22842,20 @@ What was left behind:
     try {
       const recibo = await this.#await("channel.rejoin.sent")
       if (recibo.t === "channel.rejoin.sent") ouviram = recibo.ouviram
+      /*
+        The room is at its ceiling of joins per hour (1.3.26): this account waits
+        in the queue, and asks again when the server says, not on the usual
+        back-off. The person reads "Joining the common room".
+      */
+      if (recibo.t === "channel.rejoin.sent" && recibo.fila) {
+        const primeira = this.#filaDaSalaComum === null
+        this.#filaDaSalaComum = recibo.fila
+        this.#esperaDaFila = recibo.fila.esperaMs
+        if (primeira) {
+          this.emit("status", { detail: String(recibo.fila.posicao), level: "info", code: "common-room-queued", route: "toast", channel: sala })
+        }
+        return
+      }
     } catch {
       // Older server, or connection dropping. Without a receipt, the old text stays, and the retry remains scheduled anyway.
     }
@@ -21396,7 +22949,16 @@ What was left behind:
         const nosso: CommitNosso = { commit: entrada.commit, base: epochOf(entrada.session) - 1n, session: entrada.session }
         const seq = await this.#publicarCommit(sala, nosso, false)
         await this.#persistGroup(sala, entrada.session)
+        const jaTinhaLugar = this.vault.contents.seatSince?.[sala] !== undefined
         this.vault.contents.seatSince = { ...this.vault.contents.seatSince, [sala]: seq }
+        /*
+          The place too (21/11/2026), as a Welcome writes it: the "You joined here" marker
+          and the place the members' history counts from (`lugarEm`). Entering by the card
+          wrote only `seatSince`, and the place stayed empty. Only on a first entry, like the
+          Welcome path: an old member back by the card did not join here. The echo has no
+          server time, so now.
+        */
+        if (!jaTinhaLugar) this.#guardarLugar(sala, seq, Date.now())
         /*
           And the epoch of the seat, which here is the line that stops a false positive we measured: a frame another member encrypted in the epoch BEFORE this commit and the server numbered after it has `seq` above our seat and epoch below ours. It was never ours. See `#epocaAoLigar`.
           */
@@ -21418,7 +22980,7 @@ What was left behind:
         */
       if (!this.#serverCapabilities.includes(CAPACIDADE_UM_COMMIT_POR_EPOCA)) this.#entradaExternaPorConfirmar.set(sala, 0)
       this.#pararDeInsistir()
-      this.#announceLocalEpoch(sala)
+      this.#announceLocalEpoch(sala, undefined, true)
       this.emit("channels", { channels: this.channels })
       this.emit("status", {
         detail: `entrou em ${sala} (evento ${lugar})`,
@@ -21472,6 +23034,16 @@ What was left behind:
     if (this.#cartaoPublicadoNaEpoca === epoca) return
     this.#cartaoPublicadoNaEpoca = epoca
     this.#send({ t: "channel.groupinfo.put", channel: canal, info: toBase64(await publishableGroupInfo(grupo)) })
+    /*
+      The room has a card now: this device just put one. What `hello.ok` said at
+      connection time is old news from here on (20/11/2026). A member that came in
+      by a Welcome still had "no card" from its `hello.ok`, and its old join
+      retry, firing 15 s later inside the room (`#ensureCommonRoomAgora`),
+      published another card for whatever epoch the room had reached: one per
+      member who came in that way, the whole tree each time. Whoever joins next
+      by the card publishes the next one (`#entrarComCartao`).
+    */
+    this.#salaComumTemCartao = true
   }
 
   /** A blank was not posted because we are behind. See `#publicarCartao`. */
@@ -21537,10 +23109,15 @@ What was left behind:
    */
   #insistirNaSalaComum(): void {
     if (this.#salaComumTimer) return
-    const espera = Math.min(
-      Session.REJOIN_RETRY_MS * 2 ** this.#salaComumTentativas,
-      Session.REJOIN_RETRY_CEILING_MS,
-    )
+    // In the queue (1.3.26), the server says when: that keeps the place.
+    const daFila = this.#esperaDaFila
+    this.#esperaDaFila = null
+    const espera =
+      daFila ??
+      Math.min(
+        Session.REJOIN_RETRY_MS * 2 ** this.#salaComumTentativas,
+        Session.REJOIN_RETRY_CEILING_MS,
+      )
     this.#salaComumTentativas += 1
     this.#salaComumTimer = setTimeout(() => {
       this.#salaComumTimer = null
@@ -21549,7 +23126,13 @@ What was left behind:
     }, espera)
   }
 
+  /** The wait the common room's queue asked for, used once by the next `#insistirNaSalaComum`. */
+  #esperaDaFila: number | null = null
+
   #pararDeInsistir(): void {
+    // Inside (or giving up): no longer in the queue.
+    this.#filaDaSalaComum = null
+    this.#esperaDaFila = null
     this.#salaComumTentativas = 0
     if (this.#salaComumTimer) {
       clearTimeout(this.#salaComumTimer)
@@ -21973,6 +23556,18 @@ None of this touches the deafness counter: whoever reads it is the next
             until: result.payload.until,
           })
         }
+        /*
+          A device signal is a seat that seals to this channel, like any payload
+          (`#recordPayload`), 1.3.26. Every member sends one when the channel grows
+          (`#dizerAQuemEntrou`), and it is now the newcomer's proof that a silent
+          member is alive: the whole profile no longer goes to a newcomer that asks
+          for it (`#perfilPorReenviar`), and without proof `seat` would re-seat them.
+        */
+        if (result.payload.capacidades && !hasTransmitted(this.vault.contents, channel, result.sender)) {
+          this.#pendingTransmitters.push({ channel, address: result.sender })
+          this.#memoriaPorGravar = true
+          this.#agendarGravacao()
+        }
         return
       }
       if (result.payload.t === "buzz") {
@@ -22201,9 +23796,65 @@ None of this touches the deafness counter: whoever reads it is the next
   }
 
   /**
+   * Whether a channel that grew still needs our whole profile resent here (1.3.26).
+   *
+   * The resend went out to every channel that grew, from every member: ~124 KB with
+   * the portrait, an MLS message the server keeps 30 days and that every device
+   * catching up downloads, for a profile that did not change. A newcomer whose leaf
+   * declares `EXTENSAO_PERFIS_A_PEDIDO` asks for what it lacks instead (`pp`, in
+   * any channel) and gets the latest signed version of each person, so the resend
+   * only goes when:
+   *
+   * - our current version never went out here (then it is not a resend);
+   * - we do not know who got it (`perfilPublicadoPara`, absent in an old vault);
+   * - or an account that was not there when it went out has a leaf that does not
+   *   declare the extension: 1.3.25 and older, which never ask outside the common room.
+   *
+   * The skipped newcomers stay out of `perfilPublicadoPara` on purpose: F10 still
+   * answers them (`#responderAPedidoDePerfis`) if `pp` cannot heal them.
+   */
+  #perfilPorReenviar(channel: string): boolean {
+    const grupo = this.#groups.get(channel)
+    /*
+      A direct always gets it: no device signal goes there on growth
+      (`#anunciarReenvio`), so the profile is the peer's only proof that our seat
+      is alive, and a direct grows rarely.
+    */
+    if (!this.vault.unlocked || !grupo || this.#eDirecta(channel)) return true
+    /*
+      And the common room keeps its resend as in 1.3.25: none on live growth
+      (`#dizerAQuemEntrou`), forced at the end of a catch-up. No device signal goes
+      there either (`#anunciarReenvio`), so this resend is the newcomer's only proof
+      that a silent member is alive, and `seat` (the "add now" repair) re-seats a
+      member it never heard.
+    */
+    if (channel === this.#commonRoom) return true
+    return perfilPorReenviar({
+      eu: this.identity.address,
+      versao: this.profile.updatedAt,
+      publicada: this.vault.contents.publishedProfileAt[channel],
+      aparelhosDitos: this.vault.contents.perfilPublicadoParaAparelhos?.[channel],
+      folhas: this.#folhasDosOutros(grupo.state.ratchetTree),
+    })
+  }
+
+  /** Every leaf of the tree but ours: account, device key, and whether it asks for profiles (`EXTENSAO_PERFIS_A_PEDIDO`). */
+  #folhasDosOutros(arvore: GroupSession["state"]["ratchetTree"]): { conta: string; aparelho: string; pedeOsPerfis: boolean }[] {
+    const meu = toBase64(this.identity.deviceSigningPublicKey)
+    const folhas: { conta: string; aparelho: string; pedeOsPerfis: boolean }[] = []
+    for (const [folha, conta] of memberAddresses(arvore)) {
+      const chave = deviceKeyAtLeaf(arvore, folha)
+      if (!chave || toBase64(chave) === meu) continue
+      folhas.push({ conta: String(conta), aparelho: toBase64(chave), pedeOsPerfis: leafDeclares(arvore, folha, EXTENSAO_PERFIS_A_PEDIDO) })
+    }
+    return folhas
+  }
+
+  /**
    * What we tell a newcomer to a channel: the profile, the authority, the rooms and the roles, forwarding and what is ours. Send and forget.
    */
-  #dizerAQuemEntrou(channel: string, aoVivo: boolean): void {
+  /** `f10`: F10 requests were read in the catch-up that ends here; the forced profile answers them too (N3-S2). */
+  #dizerAQuemEntrou(channel: string, aoVivo: boolean, f10 = false): void {
     /*
       Not in the common room (12/11/2026). There every online member republished
       its profile on every join: one join cost one send per online member, and
@@ -22216,7 +23867,11 @@ None of this touches the deafness counter: whoever reads it is the next
     */
     // Only the LIVE growth skips it. Coming back after joins (the end of a recovery) says it once
     // per connection, not once per join: whoever joined while we were away has no other way to hear it.
-    if (channel !== this.#commonRoom || !aoVivo) void this.publishProfile([channel], true).catch(() => {})
+    // Forced only for a newcomer that will not ask for it (1.3.26): see `#perfilPorReenviar`.
+    if (channel !== this.#commonRoom || !aoVivo) {
+      if (f10) this.#respostaF10PorCrescimento.set(channel, this.#marcaDoCrescimento(channel))
+      void this.publishProfile([channel], f10 || this.#perfilPorReenviar(channel)).catch(() => {})
+    }
     /*
       The authority and the rooms: once per join, never once per admin (hotfix 1.3.12).
       Every admin device that saw the channel grow said them again, so one join cost
@@ -22386,7 +24041,7 @@ None of this touches the deafness counter: whoever reads it is the next
    *   `"entregue"` on the side of the inviter, when the portrait went complete and all new leaves read it; `"recebido"` on the side of the newcomer and they applied it.
    *   On `"entregue"` skip republishing authority, rooms and our profile (they already went). On `"recebido"` skip authority, rooms and turn-taking: someone who just joined only repeated to others what they already have (before 1.1 they had nothing and repeated nothing). The profile of the newcomer goes out the same way: the others do not have it.
    */
-  #announceLocalEpoch(channel: string, retrato?: "entregue" | "recebido"): void {
+  #announceLocalEpoch(channel: string, retrato?: "entregue" | "recebido", entramos = false): void {
     const group = this.#groups.get(channel)
     if (!group) return
     if (channel === this.feedChannel) this.#outroEventoNoFeed()
@@ -22426,7 +24081,14 @@ None of this touches the deafness counter: whoever reads it is the next
         // What they saw in the name's place was the `shortAddress`, the first word of the address. Words like that look like nicknames, and that is why the symptom came back as "the name does not match" instead of "there is no name": nobody suspects "bebobbus". It is pinned down by `fundador.test.ts`.
         //
         // Deliberately last: authority is the guard and goes first on the wire, the name is cosmetic and can wait one tick.
-        .then(() => (retrato === "entregue" ? undefined : this.publishProfile([channel], true)))
+        /*
+          Forced when WE just joined (a reseat included: our first send there is how
+          the others hear our seat is alive), or for a newcomer that will not ask
+          for it (1.3.26): see `#perfilPorReenviar`.
+        */
+        .then(() =>
+          retrato === "entregue" ? undefined : this.publishProfile([channel], entramos || this.#perfilPorReenviar(channel)),
+        )
         .catch(() => {})
         // The newcomer learns that we deduplicate forwarding (§4.6).
         .then(() => this.#anunciarReenvio(channel))
@@ -22452,7 +24114,22 @@ None of this touches the deafness counter: whoever reads it is the next
     const agora = [...memberAddresses(group.state.ratchetTree).values()]
     const antes = this.#memberCounts.get(channel)
     this.#memberCounts.set(channel, { folhas: agora.length, enderecos: new Set<string>(agora) })
-    return chegouAlguemNovo(antes, agora)
+    // Who comes back after leaving is no longer someone who left: the sweep
+    // (`#varrerSaidas`) must never remove them on the old request (P7).
+    const honradas = this.vault.unlocked ? this.vault.contents.saidasHonradas : undefined
+    if (antes !== undefined && honradas !== undefined) {
+      const voltaram = [...new Set(agora)].filter((quem) => !antes.enderecos.has(quem) && honradas[`${channel}|${quem}`] !== undefined)
+      if (voltaram.length > 0) {
+        void this.vault
+          .update((contents) => {
+            for (const quem of voltaram) delete contents.saidasHonradas?.[`${channel}|${quem}`]
+          })
+          .catch(() => {})
+      }
+    }
+    const cresceu = chegouAlguemNovo(antes, agora)
+    if (cresceu) this.#crescimentos.set(channel, (this.#crescimentos.get(channel) ?? 0) + 1)
+    return cresceu
   }
 
   // --------------------------------------------------------------- inbound
@@ -22503,12 +24180,50 @@ None of this touches the deafness counter: whoever reads it is the next
               : // By `codeHash`, for the same reason. See `nomeDoConvite`.
                 frame.t === "invite.selo.result"
                 ? `${frame.t}|${frame.codeHash}`
-                : frame.t
+                : // By address: the server fetches each preview on its own and answers when the
+                  // page does, and refuses one over its cap at once. See `previewLink`.
+                  frame.t === "link.preview.result"
+                  ? `${frame.t}|${frame.url}`
+                  : // By channel (and room): a claim answered late, or after its wait gave up,
+                    // used to resolve the next claim of another channel (1.3.26 review, note 5).
+                    frame.t === "channel.claim.result"
+                    ? `${frame.t}|${frame.channel}`
+                    : frame.t === "room.claim.result"
+                      ? `${frame.t}|${frame.channel}|${frame.room}`
+                      : frame.t
     const queue = this.#pending.get(chave)
     if (queue && queue.length > 0) {
       const waiter = queue.shift() as (frame: ServerFrame) => void
       if (queue.length === 0) this.#pending.delete(chave)
       waiter(frame)
+      return
+    }
+
+    /*
+      A manifest nobody asked for: the server sends our account's new one when
+      another of its connections publishes it (`CAPACIDADE_MANIFESTO_AO_VIVO`).
+      Verified like any read; another account's is not ours to take unasked.
+    */
+    if (frame.t === "manifest.result") {
+      const eu = this.#identity?.address
+      const meu = this.#identity !== null ? toBase64(this.#identity.deviceSigningPublicKey) : ""
+      // A list without this device is a removal: its proof comes with `device-revoked`, and noting it here first would spoil that proof.
+      const comigo = frame.manifest?.devices.some((device) => device.deviceKey === meu) === true
+      /*
+        And only when it brings a key this device does not know: the push exists for
+        the new-device notice. A list with nothing new (the pairing this device just
+        did, a removal) changes nothing here, not even a vault write: those writes
+        in the middle of a pairing pushed the account channel seat back.
+      */
+      const conhecidos = this.vault.unlocked ? this.vault.contents.aparelhosConhecidos : undefined
+      const trazNovo =
+        conhecidos !== undefined &&
+        frame.manifest?.devices.some((device) => !conhecidos.includes(device.deviceKey) && !this.#aparelhosAvisados.has(device.deviceKey)) === true
+      if (eu !== undefined && frame.address === eu && frame.manifest !== null && comigo && trazNovo && this.vault.unlocked) {
+        const manifesto = await this.#verificarManifesto(eu, frame.manifest)
+        // The guards' short memory sees the new list now, not in five minutes.
+        if (manifesto !== null) this.#lembrarManifestoLido(eu, manifesto)
+      }
       return
     }
 
@@ -22541,6 +24256,13 @@ None of this touches the deafness counter: whoever reads it is the next
         shows; the status goes to the log only, so the person does not get it twice.
       */
       this.#recusaDoRegisto = frame.code
+      // A proof that did not pass is spent or stale: the next try solves a new one (1.3.26).
+      if (frame.code === CODIGO_PROVA_EM_FALTA || frame.code === CODIGO_PROVA_INVALIDA) {
+        this.#provaDeTrabalho = null
+        this.#contaPorRegistar = true
+      }
+      // Over the network limit the account is new by definition: the next try may bring a community invite.
+      if (frame.code === CODIGO_REDE_COM_MUITAS_CONTAS) this.#contaPorRegistar = true
       this.emit("status", { detail: `${frame.code}: ${frame.message}`, level: "error", code: "server-error", route: "log" })
       this.disconnect()
       return
@@ -22612,7 +24334,30 @@ None of this touches the deafness counter: whoever reads it is the next
     }
 
     if (frame.t === "channel.rejected" && frame.reason === "rate-limited") {
-      this.#aoRecusaPorRitmo(frame.channel, frame.ref, frame.retryAfterMs)
+      this.#aoRecusaPorRitmo(frame.channel, frame.ref, frame.retryAfterMs, frame.contaNova === true)
+      return
+    }
+    if (frame.t === "channel.rejected" && frame.reason === "conta-nova") {
+      /*
+        A new-account rule refused it (1.3.26), and waiting does not help: in the
+        common room, a first-day account sent something too large for text; or
+        the account opened all the new channels it may today. Whoever waits for
+        this send learns why, and the person reads it.
+      */
+      const mensagem = frame.channel === this.#commonRoom ? ERRO_CONTA_NOVA_ANEXOS : ERRO_CONTA_NOVA_CANAIS
+      const espera = frame.ref !== undefined ? this.#confirmacoes.get(frame.ref) : undefined
+      if (frame.ref !== undefined) {
+        this.#ownRefs.delete(frame.ref)
+        this.#libertarVezDe(frame.ref)
+      }
+      if (espera) {
+        espera.reject(
+          frame.channel === this.#commonRoom
+            ? new Error(ERRO_CONTA_NOVA_ANEXOS, { cause: { channel: frame.channel } })
+            : new Error(ERRO_CONTA_NOVA_CANAIS, { cause: { channel: frame.channel } }),
+        )
+      }
+      this.emit("status", { detail: mensagem, level: "error", code: "new-account-refused", route: "toast", channel: frame.channel })
       return
     }
     // Another refusal of our send: it was not accepted, but got a reply. Slow mode moves to the next (S6); slow mode stays.
@@ -22692,13 +24437,18 @@ None of this touches the deafness counter: whoever reads it is the next
       // Somebody in a channel we hold says their seat stopped working. Give
       // them a new one — but only if nobody closer to the front of the queue
       // does it first. See `#answerRejoin`.
-      void this.#answerRejoin(frame.channel, frame.address, frame.device).catch((erro: unknown) => {
+      void this.#answerRejoin(frame.channel, frame.address, frame.device, this.#provaDoPedido(frame)).catch((erro: unknown) => {
         // Silently swallowed until 12/9/2026, and the shared room repair was failing
         // with no one knowing why: a `removeMembers` throwing due to a missing patch
         // on the server. No one expects this, so the place to report it is diagnostics
         // without the full address of the caller.
         this.#falhaDeLugar(frame.channel, "reentrada", erro)
       })
+      return
+    }
+
+    if (frame.t === "channel.members") {
+      this.#recebiRoster(frame)
       return
     }
 
@@ -23163,7 +24913,7 @@ None of this touches the deafness counter: whoever reads it is the next
         // of this channel until the next connection (see `#comRecuperacaoPorFazer`).
         await this.#comRecuperacaoPorFazer([channel], async () => {
           this.#send({ t: "channel.subscribe", channels: [channel] })
-          this.#announceLocalEpoch(channel, retratoAplicado ? "recebido" : undefined)
+          this.#announceLocalEpoch(channel, retratoAplicado ? "recebido" : undefined, true)
           this.emit("channels", { channels: this.channels })
           this.emit("status", {
             detail: readopted ? `${channel}: ligação restabelecida com chaves novas` : `entrou em ${channel}`,
@@ -23189,6 +24939,18 @@ None of this touches the deafness counter: whoever reads it is the next
         // (entry is growth), for peers to merge.
         if (channel === this.canalDaConta) return
         await this.publishProfile([channel])
+        /*
+          And asks for the profiles the Welcome portrait did not bring (1.3.26): the
+          members no longer resend theirs whole to a newcomer that declares
+          `EXTENSAO_PERFIS_A_PEDIDO` (`#perfilPorReenviar`). Who has a name and a
+          portrait already is left out of the request.
+
+          The common room keeps its own rule of 12/11/2026 (58e8f363, second
+          security review N-N1): only the nameless members who are online, by
+          `#pedirPerfisNaSalaComum`; the others when someone needs them.
+        */
+        if (channel === this.#commonRoom) this.#pedirPerfisNaSalaComum()
+        else this.pedirPerfisDe(channel, this.membersOf(channel).map(String))
         // The one who entered states their summary, and the others respond with theirs (S4).
         void this.#anti.aoWelcome(channel).catch(() => {})
         // A peer joining a direct channel repeats their last friendship action:
@@ -23634,6 +25396,7 @@ None of this touches the deafness counter: whoever reads it is the next
 
     try {
       await this.vault.update((contents) => {
+        if (this.#connection === "online") this.#markOnline()
         this.#drainRecords(contents)
         this.#escreverGrupos(contents, pending)
         if (commitsSujos) this.#escreverPorConfirmar(contents)
@@ -23767,6 +25530,192 @@ None of this touches the deafness counter: whoever reads it is the next
     // with the same React `key`, and the footer said "2 people" for one. Who
     // wants leaves has `memberAddresses` and `leavesOf`.
     return [...memberAccounts(group.state.ratchetTree).keys()].sort()
+  }
+
+  // ------------------------------------------------- the count the app shows (P7)
+
+  /** How long a server roster stays good when the epoch does not move. Static for tests. */
+  static ROSTER_VALIDADE_MS = 10 * 60_000
+  /**
+   * The shortest time between two roster requests for the same channel. Static for tests.
+   *
+   * The common room roster is about 35 KB (735 accounts on 20/11/2026), and its epoch
+   * moves often. Every two minutes at most, for 400 connected people, is under
+   * 120 KB/s for the server, and the count is never more than two minutes old.
+   */
+  static ROSTER_INTERVALO_MS = 2 * 60_000
+  /** The shortest time between two sweeps of the same channel by this device. Static for tests. */
+  static VARREDURA_INTERVALO_MS = 60 * 60_000
+  /** The most accounts one sweep commit removes. */
+  static VARREDURA_LOTE = 16
+  /** Only the first online members by address try the sweep; the others never do. */
+  static VARREDURA_VEZES = 3
+
+  /**
+   * The last server roster per channel, the epoch it was read in, and the accounts the
+   * tree had when it arrived (`arvore`). See `membrosVisiveis` and `#afastados`.
+   */
+  #rosters = new Map<string, { contas: Set<string>; convidados: Set<string>; arvore: Set<string>; em: number; epoca: string }>()
+  /** When this device last asked for a channel's roster. */
+  #rosterPedidoEm = new Map<string, number>()
+  /** When this device last tried a sweep in a channel. See `#varrerSaidas`. */
+  #varridoEm = new Map<string, number>()
+
+  /**
+   * The people of a channel as the app shows them: the count and the People list.
+   *
+   * The tree (`membersOf`), minus the accounts of this server that the server
+   * roster says are gone: not subscribed, not connected to the channel, and no
+   * recent Welcome. That
+   * is the leaf of an account that stopped tracking the channel and that nobody
+   * removed: in the common room on 20/11/2026, 765 accounts in the tree and 735
+   * subscribed (P7). The report was "the number of users in a community does not
+   * match".
+   *
+   * Why the tree still decides, and the server only takes away: the server cannot
+   * add a reader here, because an account must hold a leaf to be counted. It can
+   * hide one by lying about the roster, so those accounts are not dropped in
+   * silence: `membrosAfastados` names them, and the panel says how many hold keys.
+   *
+   * Without the roster (an old server, a channel hosted elsewhere, no answer yet)
+   * it is the tree, as before. Asks for the roster when it is old.
+   */
+  membrosVisiveis(channel: string): UserAddress[] {
+    this.#pedirRosterSeVencido(channel)
+    return this.#visiveis(channel)
+  }
+
+  /**
+   * The accounts that hold a leaf in this channel but that the server says are gone.
+   *
+   * They still have the keys of the next epochs until a member removes their leaf.
+   * Empty without a roster. See `membrosVisiveis`.
+   */
+  membrosAfastados(channel: string): UserAddress[] {
+    return this.#afastados(channel)
+  }
+
+  /** If this device has a server roster for this channel. For tests and diagnostics. */
+  rosterConhecido(channel: string): boolean {
+    return this.#rosters.has(channel)
+  }
+
+  #visiveis(channel: string): UserAddress[] {
+    const afastados = new Set<string>(this.#afastados(channel))
+    if (afastados.size === 0) return this.membersOf(channel)
+    return this.membersOf(channel).filter((conta) => !afastados.has(conta))
+  }
+
+  #afastados(channel: string): UserAddress[] {
+    const roster = this.#rosters.get(channel)
+    if (!roster) return []
+    const casa = servidorDe(channel)
+    if (casa === null) return []
+    return this.membersOf(channel).filter(
+      (conta) =>
+        conta !== this.identity.address &&
+        !roster.contas.has(conta) &&
+        !roster.convidados.has(conta) &&
+        // Only who the tree had when the roster came. An account seated after it is
+        // not in it yet, and must not vanish from the count until the next roster.
+        roster.arvore.has(conta) &&
+        // An account of another server is never in our roster. Unknown is not gone.
+        servidorDe(conta) === casa,
+    )
+  }
+
+  #pedirRosterSeVencido(channel: string): void {
+    if (!this.#serverCapabilities.includes(CAPACIDADE_MEMBROS_DO_CANAL)) return
+    if (this.#connection !== "online") return
+    const group = this.#groups.get(channel)
+    if (!group) return
+    const agora = Date.now()
+    if (agora - (this.#rosterPedidoEm.get(channel) ?? -Infinity) < Session.ROSTER_INTERVALO_MS) return
+    const roster = this.#rosters.get(channel)
+    if (roster && roster.epoca === epochOf(group).toString() && agora - roster.em < Session.ROSTER_VALIDADE_MS) return
+    this.#rosterPedidoEm.set(channel, agora)
+    try {
+      this.#send({ t: "channel.members.get", channel })
+    } catch {
+      // Offline between the check and the send: the next read asks again.
+    }
+  }
+
+  #recebiRoster(frame: Extract<ServerFrame, { t: "channel.members" }>): void {
+    const channel = frame.channel
+    const group = this.#groups.get(channel)
+    if (!group) return
+    const antes = this.#visiveis(channel).join("|")
+    if (frame.contas === undefined) {
+      // The server does not know: the tree alone, as before.
+      this.#rosters.delete(channel)
+    } else {
+      this.#rosters.set(channel, {
+        contas: new Set(frame.contas),
+        convidados: new Set(frame.convidados ?? []),
+        arvore: new Set<string>(this.membersOf(channel)),
+        em: Date.now(),
+        epoca: epochOf(group).toString(),
+      })
+    }
+    if (this.#visiveis(channel).join("|") !== antes) this.emit("members", { channel })
+    void this.#varrerSaidas(channel).catch((erro: unknown) => this.#falhaDeLugar(channel, "saída", erro))
+  }
+
+  /**
+   * Commit the departures that nobody committed, in one batch (P7).
+   *
+   * Only an account that asked to leave (`member.left`, authenticated by MLS, kept
+   * in `saidasHonradas` by every device that heard it) AND that the server roster
+   * says is gone (`#afastados`). Each half alone is not enough: the record alone
+   * would remove a person who came back, and the roster alone would let a server
+   * that lies remove anybody. The leaf that stays without a request (a deleted
+   * vault, a lost device) is not removed here: the count leaves it out, and its
+   * removal is a follow-up (see the 1.3.26 report).
+   *
+   * The brakes, because each commit in the common room costs every member a
+   * download and a tree update:
+   *  - one try per channel per `VARREDURA_INTERVALO_MS` on this device;
+   *  - at most `VARREDURA_LOTE` accounts in one commit;
+   *  - only the first `VARREDURA_VEZES` online members by address try, each after
+   *    its turn (`REJOIN_TURN_MS`); who sees the epoch move gives up. The server
+   *    takes one commit per epoch, so two at the same time cost one refusal.
+   */
+  async #varrerSaidas(channel: string): Promise<void> {
+    if (!this.vault.unlocked) return
+    const agora = Date.now()
+    if (agora - (this.#varridoEm.get(channel) ?? -Infinity) < Session.VARREDURA_INTERVALO_MS) return
+    const honradas = this.vault.contents.saidasHonradas ?? {}
+    const alvos = this.#afastados(channel)
+      .filter((conta) => honradas[`${channel}|${conta}`] !== undefined)
+      .slice(0, Session.VARREDURA_LOTE)
+    if (alvos.length === 0) return
+    this.#varridoEm.set(channel, agora)
+
+    const eu = this.identity.address
+    const ligados = this.#visiveis(channel).filter((conta) => conta === eu || this.#presentes.has(conta))
+    const vez = ligados.sort().indexOf(eu)
+    if (vez < 0 || vez >= Session.VARREDURA_VEZES) return
+    const grupo = this.#groups.get(channel)
+    if (!grupo) return
+    const epochAntes = epochOf(grupo)
+    await new Promise((resolve) => setTimeout(resolve, (vez + 1) * REJOIN_TURN_MS))
+    const depois = this.#groups.get(channel)
+    if (!depois || epochOf(depois) !== epochAntes) return
+    // The roster can have changed during the wait: only who is still gone.
+    const aindaAfastados = new Set<string>(this.#afastados(channel))
+    const lote = alvos.filter((conta) => aindaAfastados.has(conta))
+    if (lote.length === 0) return
+    const removeu = await this.#commitar(channel, async (group, tentativa) => {
+      // A refused first try means the epoch moved: somebody else's commit, maybe this same sweep.
+      if (tentativa > 1) return null
+      const folhas = lote.flatMap((conta) => leavesOf(group.state.ratchetTree, conta as UserAddress))
+      if (folhas.length === 0) return null
+      const removal = await removeMembers(group, folhas)
+      return { commit: umSoCommit(removal.commits), session: removal.session }
+    })
+    // Outside the queue, as in `#unseat`.
+    if (removeu) this.#announceLocalEpoch(channel)
   }
 
   /**
@@ -23952,6 +25901,11 @@ function fraseDaRecusaDoRegisto(codigo: string | null): string | null {
       return "this server needs a registration invite"
     case CODIGO_CONVITE_DE_REGISTO_INVALIDO:
       return "the registration invite is not valid"
+    case CODIGO_PROVA_EM_FALTA:
+    case CODIGO_PROVA_INVALIDA:
+      return "the account check did not pass"
+    case CODIGO_REDE_COM_MUITAS_CONTAS:
+      return "this network created many accounts today"
     default:
       return null
   }

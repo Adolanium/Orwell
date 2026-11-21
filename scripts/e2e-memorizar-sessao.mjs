@@ -313,7 +313,7 @@ for (const nomeDoMotor of escolhidos) {
 
     // 7. The switch in Account › Session.
     await irAConta(p3)
-    const interruptor = p3.getByRole("switch", { name: "Memorizar a sessão neste aparelho" })
+    const interruptor = p3.getByRole("switch", { name: "Manter sessão iniciada neste aparelho" })
     check("o interruptor está desligado", (await interruptor.getAttribute("aria-checked")) === "false")
     check('e "Expirar sessão" está à vista', (await p3.getByText("Expirar sessão").count()) > 0)
     await interruptor.click()
@@ -326,7 +326,7 @@ for (const nomeDoMotor of escolhidos) {
     await recarregarSemChaveDoSeparador(p3)
     check("com o interruptor ligado, recarregar entra sozinho", (await oQueAbre(p3)) === "dentro")
     await irAConta(p3)
-    await p3.getByRole("switch", { name: "Memorizar a sessão neste aparelho" }).click()
+    await p3.getByRole("switch", { name: "Manter sessão iniciada neste aparelho" }).click()
     await p3.waitForFunction(
       () => document.querySelector('[role="switch"][aria-checked="false"]:not([disabled])') !== null,
       null,

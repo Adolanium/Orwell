@@ -71,6 +71,13 @@
  * goes through MLS and the real server. Nothing here proves two machines cross
  * a NAT, and no stub would prove it.
  *
+ * Since 1.3.26 sections 1 to 8 run with the proof of work at registration off
+ * (`ENCLAVE_PROVA_TRABALHO=0`): an app from before 1.3.26 cannot solve it.
+ * Section 9 restarts the same server, on the same data, with the proof on: the
+ * accounts the old app already has log in again and talk, and a new account from
+ * the old app is refused (`versao-antiga`, which 1.3.25 shows as "Erro 203" at
+ * once) and never written.
+ *
  * ALL LOCAL AND ALL DISPOSABLE, by the template of `e2e-convite-link.mjs`: database in a
  * temporary folder deleted at the end, ports checked free, no target by argument.
  * There is no way to point it at production.
@@ -92,6 +99,18 @@ import { criarConta } from "./conta.mjs"
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto
 
+
+/*
+  The pairing screen of the OLD client (its built `dist`), which this script
+  proves and does not change. The current app says these differently since
+  21/11/2026 ("Ou cola o código", "Sim, juntar o aparelho", "Estás dentro"), so
+  they live here, named, and not in `strings.ts`.
+*/
+const DO_CLIENTE_ANTIGO = {
+  colar: "Ou cola o link",
+  sim: "São as mesmas",
+  dentro: "Este aparelho já é da conta",
+}
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const SERVIDOR_JS = join(RAIZ, "apps/server/dist/main.js")
 const DIST = process.env.ORWELL_DIST_ANTIGO ? resolve(process.env.ORWELL_DIST_ANTIGO) : ""
@@ -206,21 +225,33 @@ for (const porta of [PORTA_DA_FRENTE, PORTA_DO_SERVIDOR]) {
 
 // --- the NEW homeserver, disposable, with common room -------------------------
 const dados = mkdtempSync(join(tmpdir(), "orwell-e2e-cliente-antigo-"))
-const servidor = spawn(process.execPath, [SERVIDOR_JS], {
-  env: {
-    ...process.env,
-    ENCLAVE_DATA_DIR: dados,
-    ENCLAVE_SERVER_NAME: NOME,
-    ENCLAVE_BIND_HOST: "127.0.0.1",
-    ENCLAVE_BIND_PORT: String(PORTA_DO_SERVIDOR),
-    ENCLAVE_COMMUNITY_MODE: "true",
-    ENCLAVE_COMMON_ROOM: SALA_COMUM,
-  },
-  stdio: ["ignore", "pipe", "pipe"],
-})
 let registoDoServidor = ""
-servidor.stdout.on("data", (bocado) => (registoDoServidor += bocado))
-servidor.stderr.on("data", (bocado) => (registoDoServidor += bocado))
+/*
+  Sections 1 to 8 are about compatibility, so the proof of work at registration
+  (1.3.26) is off: an app from before 1.3.26 cannot solve it, and every new
+  account here comes from the old web. Section 9 starts the same server again,
+  on the same data, with the proof on, and checks what an old app meets then.
+*/
+function levantarOServidor({ comProva }) {
+  const processo = spawn(process.execPath, [SERVIDOR_JS], {
+    env: {
+      ...process.env,
+      ENCLAVE_DATA_DIR: dados,
+      ENCLAVE_SERVER_NAME: NOME,
+      ENCLAVE_BIND_HOST: "127.0.0.1",
+      ENCLAVE_BIND_PORT: String(PORTA_DO_SERVIDOR),
+      ENCLAVE_COMMUNITY_MODE: "true",
+      ENCLAVE_COMMON_ROOM: SALA_COMUM,
+      // Absent means the default (on); "0" turns it off.
+      ...(comProva ? {} : { ENCLAVE_PROVA_TRABALHO: "0" }),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+  processo.stdout.on("data", (bocado) => (registoDoServidor += bocado))
+  processo.stderr.on("data", (bocado) => (registoDoServidor += bocado))
+  return processo
+}
+let servidor = levantarOServidor({ comProva: false })
 
 // --- the front end, which acts as Caddy and serves the OLD web ------------------------
 const TIPOS = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".woff2": "font/woff2", ".map": "application/json", ".wasm": "application/wasm" }
@@ -653,7 +684,8 @@ try {
   await a.getByRole("button", { name: "Criar canal" }).first().click()
   await a.locator("form.prompt input").first().fill("adega")
   await a.locator("form.prompt button.primary").first().click()
-  await a.getByRole("heading", { name: "adega" }).waitFor({ timeout: 30_000 })
+  // Since 1.3.20 the heading is the room, and the channel's name sits beside it (h1 before).
+  await a.locator("h1, .topbar-comunidade").filter({ hasText: /^adega$/ }).first().waitFor({ timeout: 30_000 })
   /*
     The path that the FIXTURE has, probed on screen, like "Find" above.
     Up to old 0.5.x it's "Create invite link"; then the single invite sheet,
@@ -693,7 +725,7 @@ try {
   await c.getByRole("button", { name: "Entrar", exact: true }).click()
   check(
     "a Carla abre o link, cria conta, aceita, e o canal abre",
-    await c.getByRole("heading", { name: "adega" }).waitFor({ timeout: 60_000 }).then(() => true, () => false),
+    await c.locator("h1, .topbar-comunidade").filter({ hasText: /^adega$/ }).first().waitFor({ timeout: 60_000 }).then(() => true, () => false),
   )
   const naAdega = `bem-vinda Carla ${Date.now().toString(36)}`
   await dizer(a, naAdega)
@@ -1068,7 +1100,7 @@ try {
     const sasEva = esperarFase(eva.session, "sas")
     const { link: linkDaEva } = await eva.session.emparelharComoAnfitriao()
     await v.getByRole("button", { name: "Emparelhar", exact: true }).click()
-    await v.getByLabel("Ou cola o link").fill(linkDaEva)
+    await v.getByLabel(DO_CLIENTE_ANTIGO.colar).fill(linkDaEva)
     await v.getByRole("button", { name: "Continuar" }).click()
     const frasesV = v.locator('.gate-card input[type="password"]')
     await frasesV.nth(0).fill(FRASE)
@@ -1077,9 +1109,9 @@ try {
     await v.locator(".sas-palavras").waitFor({ timeout: 30_000 })
     await sasEva
     const concluiuV = esperarFase(eva.session, "concluido", 60_000)
-    await v.getByRole("button", { name: "São as mesmas" }).click()
+    await v.getByRole("button", { name: DO_CLIENTE_ANTIGO.sim }).click()
     await eva.session.confirmarSas()
-    await v.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 })
+    await v.getByRole("heading", { name: DO_CLIENTE_ANTIGO.dentro }).waitFor({ timeout: 90_000 })
     await concluiuV
     await v.getByRole("button", { name: "Entrar", exact: true }).click()
     await dentro(v)
@@ -1261,6 +1293,78 @@ try {
     check("8. e sem erros visíveis no Fábio e no Gil", fabio.erros.length === 0 && gil.erros.length === 0, [...fabio.erros, ...gil.erros].slice(0, 3).join(" | "))
     fabio.session.disconnect()
     gil.session.disconnect()
+  }
+
+  // ---------------------------------------------------------------------------
+  // 9. The same server with the proof of work on (the 1.3.26 default).
+  //    An account the old app already has keeps getting in; a NEW account from
+  //    the old app is refused, and the old app is told so.
+  // ---------------------------------------------------------------------------
+  {
+    const contasNaBase = () => {
+      const base = new DatabaseSync(join(dados, "enclave.sqlite"), { readOnly: true })
+      try {
+        return base.prepare("SELECT COUNT(*) AS n FROM accounts").get().n
+      } finally {
+        base.close()
+      }
+    }
+    const marcaA = redeA.length
+    const marcaB = redeB.length
+    servidor.kill()
+    await new Promise((resolve) => (servidor.exitCode !== null ? resolve() : servidor.once("exit", resolve)))
+    const contasAntes = contasNaBase()
+    servidor = levantarOServidor({ comProva: true })
+    check("9. o servidor volta de pé com a prova de trabalho ligada", await servidorDePe())
+
+    // Ana and Bruno reconnect on their own: logging in to an existing account needs no proof.
+    const entrouDeNovo = (saco, marca) => saco.slice(marca).some((l) => l.startsWith("TRAMA<") && l.includes('"t":"auth.ok"'))
+    let voltaram = false
+    for (let volta = 0; volta < 240 && !voltaram; volta++) {
+      await wait(500)
+      voltaram = entrouDeNovo(redeA, marcaA) && entrouDeNovo(redeB, marcaB)
+    }
+    const errosDaVolta = [...redeA.slice(marcaA), ...redeB.slice(marcaB)].filter((l) => l.startsWith("TRAMA<") && l.includes('"t":"error"'))
+    check("9. a Ana e o Bruno (contas que já existiam) voltam a entrar: auth.ok", voltaram, errosDaVolta.slice(0, 2).join(" | ").slice(0, 300))
+    const comProva = `com a prova ligada, ${Date.now().toString(36)}`
+    let ouviuComProva = false
+    // Section 8 leaves Bruno's screen on its own channel: both open the common room.
+    await abrirSalaComum(b)
+    for (let volta = 0; volta < 6 && !ouviuComProva; volta++) {
+      await abrirSalaComum(a)
+      await dizer(a, comProva)
+      ouviuComProva = await ouviu(b, comProva, 20_000)
+    }
+    check("9. e falam: a Ana diz, o Bruno ouve", ouviuComProva)
+
+    const redeD = []
+    const ctxD = await browser.newContext(CONTEXTO)
+    escutar(ctxD, redeD)
+    const d = await ctxD.newPage()
+    await d.goto(APP, { waitUntil: "domcontentloaded" })
+    const inicio = Date.now()
+    await criarConta(d, { nome: "Dora", frase: FRASE, servidor: NOME, ficheiro: false })
+    /*
+      1.3.25 does not know `versao-antiga` (its table of server codes stops at the
+      registration ones), so the gate says its generic "Erro 203". It is said at
+      once, not after a wait. None of the codes 1.3.25 knows means "update the
+      app": `registration-closed` would tell the person something false.
+    */
+    const AVISO = "Erro 203"
+    let msAteAoAviso = -1
+    for (let volta = 0; volta < 120 && msAteAoAviso < 0; volta++) {
+      await wait(250)
+      const texto = await d.locator("body").innerText({ timeout: 2_000 }).catch(() => "")
+      if (texto.includes(AVISO)) msAteAoAviso = Date.now() - inicio
+    }
+    const recusa = redeD.find((l) => l.startsWith("TRAMA<") && l.includes('"t":"error"') && l.includes('"versao-antiga"'))
+    check("9. o registo da Dora no cliente antigo recebe a recusa versao-antiga", recusa !== undefined)
+    check(`9. e o cliente antigo diz "${AVISO}" (em menos de 30 s)`, msAteAoAviso >= 0, `${msAteAoAviso} ms`)
+    check("9. e a Dora não entra na app", !(await d.getByRole("button", { name: "Configurações", exact: true }).count()))
+    const contasDepois = contasNaBase()
+    check("9. e o servidor não escreveu a conta da Dora", contasDepois === contasAntes, `${contasAntes} antes, ${contasDepois} depois`)
+    console.log(`  ..  o que a Dora viu: ${(await d.locator("body").innerText().catch(() => "")).replace(/\s+/g, " ").slice(0, 300)}`)
+    await ctxD.close()
   }
 } catch (erro) {
   check(`sem excepções pelo caminho: ${erro.message.split("\n")[0]}`, false)

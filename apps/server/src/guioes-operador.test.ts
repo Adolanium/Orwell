@@ -80,7 +80,7 @@ function basePovoada(): void {
     INSERT INTO events VALUES ('${CANAL}', 0, 'handshake', x'01', NULL, 0);
     INSERT INTO subscriptions VALUES ('${CANAL}', '@a:orwell.pt');
     INSERT INTO key_packages (address, package) VALUES ('@a:orwell.pt', x'01');
-    INSERT INTO channel_claims VALUES ('${CANAL}', '@a:orwell.pt', 0);
+    INSERT INTO channel_claims (channel, owner, at_second) VALUES ('${CANAL}', '@a:orwell.pt', 0);
     INSERT INTO channel_activity (channel) VALUES ('${CANAL}');
     INSERT INTO channel_epochs VALUES ('${CANAL}', 17);
     INSERT INTO group_infos VALUES ('${CANAL}', x'01', 0);

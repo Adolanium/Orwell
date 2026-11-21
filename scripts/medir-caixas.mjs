@@ -35,7 +35,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { chromium } from "playwright"
 import { fecharMedidas, medirCaixa, recorteAmpliado } from "./caixas-medidas.mjs"
-import { criarConta } from "./conta.mjs"
+import { criarConta, passarOFicheiroDaConta } from "./conta.mjs"
 import { verificador } from "./fase7-comum.mjs"
 import { abrirSecretaria } from "./secretaria.mjs"
 import { levantarServidor, RAIZ } from "./servidor-descartavel.mjs"
@@ -66,41 +66,27 @@ const percentagem = (escala) => Math.round(escala * 100)
 const campoDaFrase = (page) => page.locator('.gate-card input[type="password"]')
 const configuracoes = (page) => page.getByRole("button", { name: "Configurações", exact: true }).first()
 
-/** From the start of Setup to the password page, without typing it. */
+/** From the gate to "Criar conta" (21/11/2026: one form, no box to remember the session). */
 async function irAtePalavraPasse(page, servidor) {
-  const nome = page.getByPlaceholder("Como queres aparecer")
-  const naoCriar = page.getByRole("button", { name: "Não, criar conta" })
-  await nome.or(naoCriar).first().waitFor({ timeout: 60_000 })
-  if (await naoCriar.count()) {
-    await naoCriar.click()
-    await nome.waitFor()
-  }
-  await nome.fill("Ana")
+  const entrada = page.getByRole("heading", { name: "Bem-vindo ao Orwell" })
+  await entrada.waitFor({ timeout: 60_000 })
+  await page.getByRole("button", { name: "Criar conta", exact: true }).click()
   if (servidor) {
     await page.getByRole("button", { name: "Opções avançadas" }).click()
     await page.getByLabel("Servidor").fill(servidor)
   }
-  for (let volta = 0; volta < 8 && !(await campoDaFrase(page).count()); volta++) {
-    const saltar = page.getByRole("button", { name: "Saltar", exact: true })
-    if (await saltar.count()) await saltar.click()
-    else await page.getByRole("button", { name: SEGUINTE }).click()
-    await page.waitForTimeout(200)
-  }
-  await campoDaFrase(page).waitFor({ timeout: 10_000 })
+  await campoDaFrase(page).first().waitFor({ timeout: 10_000 })
 }
 
-/** The boxes of the gate when creating the account: the password page and the last. */
+/** The box of the gate when creating the account: "Entrar no canal oficial", ticked to measure the mark. */
 async function medirSetup(page, onde, servidor) {
   await irAtePalavraPasse(page, servidor)
-  const memorizar = page.locator('input[name="memorizar"]')
-  provar(`${onde}: «Memorizar a sessão» ao criar a conta`, await medirCaixa(page, memorizar))
-  // Off, so the app asks for the password again when it reopens.
-  await memorizar.setChecked(false)
-  await campoDaFrase(page).fill(FRASE)
-  await page.getByRole("button", { name: SEGUINTE }).click()
-  await page.getByRole("button", { name: /^Criar( conta)?$/ }).waitFor({ timeout: 30_000 })
+  await page.locator('.gate input[autocomplete="nickname"]').fill("Caixas")
+  await campoDaFrase(page).nth(0).fill(FRASE)
+  await campoDaFrase(page).nth(1).fill(FRASE)
   const canal = page.locator('input[name="canal-oficial"]')
-  if ((await canal.count()) && (await canal.isChecked())) provar(`${onde}: «Entrar no canal Orwell» no último passo`, await medirCaixa(page, canal))
+  await canal.setChecked(true)
+  provar(`${onde}: «Entrar no canal oficial do Orwell.» ao criar a conta`, await medirCaixa(page, canal))
 }
 
 /** Store the session on entry: the telemetry session and its snapshot. */
@@ -108,7 +94,7 @@ async function medirUnlock(page, onde, ficheiro) {
   await campoDaFrase(page).waitFor({ timeout: 60_000 })
   const caixa = page.locator('input[name="memorizar"]')
   await caixa.waitFor({ timeout: 10_000 })
-  provar(`${onde}: «Memorizar a sessão» ao entrar`, await medirCaixa(page, caixa))
+  provar(`${onde}: «Manter sessão iniciada» ao entrar`, await medirCaixa(page, caixa))
   writeFileSync(join(CAPTURAS, ficheiro), await recorteAmpliado(page, caixa, 12, 4))
 }
 
@@ -179,7 +165,8 @@ try {
 
     // Settings › Devices: "Include the images" (Task 11b). It starts
     // unchecked; it is checked by hand to measure the mark. Checking exports nothing.
-    await page.getByRole("button", { name: "Aparelhos", exact: true }).first().click()
+    await page.getByRole("button", { name: "Conta e segurança", exact: true }).first().click()
+    await page.getByRole("button", { name: "Guardar o ficheiro da conta" }).click()
     const imagens = page.locator('input[name="incluir-imagens"]')
     await imagens.waitFor({ timeout: 15_000 })
     await imagens.setChecked(true)
@@ -198,8 +185,8 @@ try {
       try {
         check(`${onde}: devicePixelRatio ${escala}`, (await sec.page.evaluate(() => devicePixelRatio)) === escala)
         await medirSetup(sec.page, onde, srv.NOME)
-        await campoDaFrase(sec.page).fill(FRASE)
-        await sec.page.getByRole("button", { name: /^Criar( conta)?$/ }).click()
+        await sec.page.locator(".gate form").getByRole("button", { name: "Criar conta", exact: true }).click()
+        await passarOFicheiroDaConta(sec.page, { guardar: false })
       } catch (erro) {
         console.error(sec.registo.slice(-30).join("\n"))
         throw erro

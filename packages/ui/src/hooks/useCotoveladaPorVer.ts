@@ -3,6 +3,7 @@ import { BUZZ_MAX_AGE_MS } from "@enclave/protocol"
 import type { EnclaveBridge } from "../bridge.js"
 import { isDirect } from "../lib/format.js"
 import { playSound } from "../lib/sounds.js"
+import { daPropriaConta } from "../sons/acontecimentos.js"
 
 /**
  * A nudge that arrives, for the whole app (20/11/2026).
@@ -21,9 +22,12 @@ import { playSound } from "../lib/sounds.js"
  * the master switch, the volume, the "nudge" toggle in Sounds, Busy,
  * Invisible, the notification pause and the burst limit (`sons/motor.ts`).
  *
- * **The same filters as the shake.** Only in a direct conversation, never an
- * old nudge, and never one from another device of this account: that one is
- * our own gesture, and there is no sound for our own gesture.
+ * **The same filters as the shake.** Only in a direct conversation, and never
+ * an old nudge.
+ *
+ * **One from another device of this account plays too (21/11/2026: both
+ * sides hear it, on every device of both accounts).** It does not
+ * light Friends: it is our own gesture, and there is nothing to go and see.
  */
 export interface OpcoesDaCotoveladaPorVer {
   /** This account's address, or `null` before it is known. */
@@ -50,9 +54,9 @@ export function useCotoveladaPorVer(bridge: EnclaveBridge, opcoes: OpcoesDaCotov
     return bridge.on.buzz((event) => {
       const { eu, emAmigos, directaAberta } = agora.current
       if (!isDirect(event.channel)) return
-      if (eu !== null && event.from === eu) return
       if (Math.abs(Date.now() - event.at) > BUZZ_MAX_AGE_MS) return
       playSound("buzz")
+      if (daPropriaConta(event.from, eu)) return
       // The person is already looking at that conversation: nothing to mark.
       if (emAmigos && directaAberta === event.channel) return
       setPorVer((antes) => new Map(antes).set(event.channel, event.from))

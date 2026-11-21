@@ -1,5 +1,5 @@
 /**
- * Phone in hand: the drawer, the rooms, the long press, the people panel
+ * Phone in hand: the tabs, the rooms, the long press, the people panel
  * and the keyboard.
  *
  *   node scripts/e2e-telemovel.mjs           (needs `npm run build` first)
@@ -12,14 +12,17 @@
  * words, it would hide exactly the bug that was there. This one taps like a
  * finger taps: `tap()`, no `force`, in a 390x844 context with touch.
  *
- * The path, which is the complaint read backwards:
- *   1. open the drawer from the hamburger;
- *   2. tap a channel WITH rooms: rooms appear and the drawer STAYS;
- *   3. tap a room: the drawer leaves and the conversation appears;
- *   4. tap a channel WITHOUT rooms: the drawer leaves, because there is nothing left to say;
- *   5. long press a channel: opens the menu that right-click used to open;
- *   6. the people panel opens and closes by the overlay;
- *   7. focus on the input bar does not hide it below the keyboard.
+ * The path, which is the complaint read backwards. Since the phone layout
+ * with tabs (option B, 20/11/2026) there is no drawer at 840 px or less:
+ * the Communities tab is the list (a rail of communities and the channels of
+ * the chosen one), and a conversation is pushed full screen over it.
+ *   1. the Communities tab shows the list, with the rail of communities;
+ *   2. tap a community WITH rooms on the rail: its rooms appear and the list STAYS;
+ *   3. tap a room: its conversation is pushed full screen; the back arrow and
+ *      the browser back button bring the list back;
+ *   4. long press a channel: opens the menu that right-click opens, as a sheet;
+ *   5. the people panel is pushed full screen and its arrow closes it;
+ *   6. focus on the input bar does not hide it below the keyboard.
  *
  * ALL LOCAL AND ALL DISPOSABLE, following the pattern of `e2e-emparelhar.mjs`:
  * your own homeserver in a temp folder, a front end acting as Caddy on 8472, and
@@ -34,8 +37,8 @@
  * pushing `--teclado` by hand. These three only show up on device.
  *
  * The account and channels are set up with the window WIDE, where the sidebar is
- * a column not a drawer, what we want to measure is the drawer working, not a
- * setup that depends on it. Only then the window shrinks to 390x844.
+ * a column: what we want to measure is the phone layout working, not a setup
+ * that depends on it. Only then the window shrinks to 390x844.
  *
  * Screenshots in `capturas/telemovel-*.png`, one per step, to look at.
  */
@@ -48,6 +51,7 @@ import { extname, join, normalize } from "node:path"
 import { fileURLToPath } from "node:url"
 import { chromium } from "playwright"
 import { criarConta } from "./conta.mjs"
+import { appAberta, profundidade, voltarUm } from "./separadores.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
@@ -171,7 +175,7 @@ if (!(await servidorDePe())) {
 }
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-const dentro = (page) => page.getByRole("button", { name: "Configurações", exact: true }).first().waitFor({ timeout: 90_000 })
+const dentro = (page) => appAberta(page, 90_000)
 
 let passo = 0
 async function retratar(page, nome) {
@@ -182,29 +186,33 @@ async function retratar(page, nome) {
   return ficheiro
 }
 
-/** Is the drawer out? It is the class that CSS reads to slide it. */
-const gavetaAberta = (page) => page.evaluate(() => document.querySelector(".sidebar")?.classList.contains("open") === true)
+/** The list of the open tab is on screen: no conversation pushed over it, and the tabs drawn. */
+const naLista = async (page) => (await profundidade(page)) === 0 && (await page.locator(".separadores").isVisible().catch(() => false))
+
+/** A conversation is pushed full screen over the list. */
+const conversaEmpurrada = (page) =>
+  page.evaluate(() => {
+    const ecra = document.querySelector(".ecra-empurrado")?.getBoundingClientRect()
+    return ecra !== undefined && Math.round(ecra.width) === innerWidth && Math.round(ecra.height) >= innerHeight - 1
+  })
+
+/**
+ * Back to the Communities list: the back arrow while something is pushed,
+ * then the tab. Each tab keeps its stack: coming back to Communities shows
+ * the conversation it had open, and its arrow brings the list.
+ */
+async function paraALista(page) {
+  for (let i = 0; i < 3 && (await profundidade(page)) > 0; i++) await voltarUm(page)
+  await page.locator(".separadores").getByRole("button", { name: "Comunidades", exact: true }).tap()
+  await wait(500)
+  for (let i = 0; i < 3 && (await profundidade(page)) > 0; i++) await voltarUm(page)
+}
 
 /** The rooms drawn in the tree, by name. Empty when there is no tree. */
 const salasNoEcra = (page) => page.evaluate(() => [...document.querySelectorAll(".room-tree .room-name")].map((n) => n.textContent))
 
-/**
- * Close the channel drawer by tapping the overlay.
- *
- * On the stripe to the right, not in the corner: the overlay starts at 60px from
- * the sidebar and the 280px drawer sits on top of it, so the top left corner of
- * the overlay is UNDER the drawer. A tap there is a tap on the drawer, that is
- * what this script did silently until we went to see what was on top of what.
- */
-async function fecharGavetaPeloVeu(page) {
-  if (!(await gavetaAberta(page))) return true
-  const veu = page.locator(".drawer-scrim")
-  const caixa = await veu.boundingBox()
-  if (!caixa) return false
-  await veu.tap({ position: { x: Math.round(caixa.width - 12), y: Math.round(caixa.height / 2) } })
-  await wait(400)
-  return (await gavetaAberta(page)) === false
-}
+/** The face of a community on the rail of the Communities tab. */
+const caraDaComunidade = (page, nome) => page.locator(`.carril-comunidade[aria-label="${nome}"]`).first()
 
 /** The line of a channel, by the name that reads in it. */
 const linhaDoCanal = (page, nome) => page.locator(".channel-row", { has: page.locator(`.channel-name[title="${nome}"]`) }).first()
@@ -279,7 +287,8 @@ try {
     await page.getByRole("button", { name: "Criar canal" }).first().click()
     await page.locator("form.prompt input").first().fill(canal)
     await page.locator("form.prompt button.primary").first().click()
-    await page.getByRole("heading", { name: canal }).waitFor({ timeout: 30_000 })
+    // Since 1.3.20 the heading is the room, and the channel's name sits beside it.
+    await page.locator("h1, .topbar-comunidade").filter({ hasText: new RegExp(`^${canal}$`) }).first().waitFor({ timeout: 30_000 })
   }
   check("dois canais criados: adega e lagar", true)
 
@@ -301,38 +310,51 @@ try {
   // ---------------------------------------------------------------------------
   await page.setViewportSize(TELEMOVEL)
   await wait(800)
-  check("a barra lateral deixa de ser uma coluna e passa a gaveta fechada", (await gavetaAberta(page)) === false)
-  await retratar(page, "conversa-sem-gaveta")
+  check("a barra lateral deixa de ser uma coluna: a app passa ao desenho do telemóvel", (await page.locator(".app.telemovel").count()) === 1)
+  check("e o hambúrguer antigo não é desenhado", !(await page.locator(".rail-menu").isVisible().catch(() => false)))
+  await retratar(page, "telemovel-ao-encolher")
 
   // ---------------------------------------------------------------------------
-  // 1. The hamburger opens the drawer. Real tap, no `force`.
+  // 1. The Communities tab shows the list. Real tap, no `force`.
   // ---------------------------------------------------------------------------
-  const hamburguer = page.getByRole("button", { name: "Abrir o painel lateral" })
-  check("o hambúrguer está à vista e é alcançável (sem force)", await hamburguer.isVisible())
-  await hamburguer.tap()
+  const separadorComunidades = page.locator(".separadores").getByRole("button", { name: "Comunidades", exact: true })
+  // Creating the channels pushed a conversation: the arrow brings the list back.
+  for (let i = 0; i < 3 && (await profundidade(page)) > 0; i++) await voltarUm(page)
+  check("o separador Comunidades está à vista e é alcançável (sem force)", await separadorComunidades.isVisible())
+  await separadorComunidades.tap()
   await wait(400)
-  check("tocar no hambúrguer abre a gaveta", await gavetaAberta(page))
-  const alvoDoHamburguer = await hamburguer.boundingBox()
+  check("tocar em Comunidades mostra a lista", await naLista(page))
+  const alvoDoSeparador = await separadorComunidades.boundingBox()
   check(
-    "e o hambúrguer tem 44px de alvo, que é o mínimo a que um dedo acerta",
-    (alvoDoHamburguer?.width ?? 0) >= 44 && (alvoDoHamburguer?.height ?? 0) >= 44,
-    `${Math.round(alvoDoHamburguer?.width ?? 0)}x${Math.round(alvoDoHamburguer?.height ?? 0)}`,
+    "e o separador tem 44px de alvo, que é o mínimo a que um dedo acerta",
+    (alvoDoSeparador?.width ?? 0) >= 44 && (alvoDoSeparador?.height ?? 0) >= 44,
+    `${Math.round(alvoDoSeparador?.width ?? 0)}x${Math.round(alvoDoSeparador?.height ?? 0)}`,
+  )
+  const carril = await page.evaluate(() =>
+    [...document.querySelectorAll(".carril-comunidade:not(.carril-nova)")].map((b) => {
+      const r = b.getBoundingClientRect()
+      return { nome: b.getAttribute("aria-label"), ok: r.width >= 44 && r.height >= 44 && r.x >= 0 && r.right <= innerWidth }
+    }),
+  )
+  check(
+    "o carril das comunidades mostra a adega e o lagar, cada cara com 44px",
+    ["adega", "lagar"].every((nome) => carril.some((c) => c.nome === nome && c.ok)),
+    carril.map((c) => `${c.nome}${c.ok ? "" : "✗"}`).join(", "),
   )
   /*
-    The drawer covers the conversation entirely, and nothing sits on top of it.
+    The list is opaque, and nothing sits on top of the channel lines.
 
     The complaint from 0.8.0 ("in mobile version users do not see the rooms")
     had two visible causes: the skin's glass (66%) let messages pass under the
-    room names, and the hamburger hint got stuck by the `:hover` touch over the
-    open channel line.
+    room names, and a hint stuck by the `:hover` touch over the open channel
+    line.
   */
-  const gavetaOpaca = await page.evaluate(() => {
-    // The ink is in the drawer itself (`paineis.css`).
+  const listaOpaca = await page.evaluate(() => {
     const cor = getComputedStyle(document.querySelector(".sidebar")).backgroundColor
     const alfa = /rgba?\(([^)]+)\)/.exec(cor)?.[1].split(/[ ,/]+/).filter(Boolean)[3]
     return { cor, opaca: alfa === undefined || Number(alfa) >= 0.99 }
   })
-  check("a gaveta é opaca: a conversa não passa por baixo das salas", gavetaOpaca.opaca, gavetaOpaca.cor)
+  check("a lista é opaca: nada passa por baixo das salas", listaOpaca.opaca, listaOpaca.cor)
   const linhasAoDedo = await page.evaluate(() =>
     [...document.querySelectorAll(".sidebar .channel-row")].map((linha) => {
       const r = linha.getBoundingClientRect()
@@ -341,83 +363,73 @@ try {
       return linha.contains(topo) && (dica === "none" || dica === "normal" || !dica.includes("painel"))
     }),
   )
-  const dicaDoHamburguer = await hamburguer.evaluate((botao) => getComputedStyle(botao, "::after").display)
-  check(
-    "e nada se pousa em cima dos canais: a dica do hambúrguer não existe ao dedo",
-    linhasAoDedo.length > 0 && linhasAoDedo.every(Boolean) && dicaDoHamburguer === "none",
-    `${linhasAoDedo.join(",")} | ::after ${dicaDoHamburguer}`,
-  )
-  await retratar(page, "gaveta-aberta")
+  check("e nada se pousa em cima da linha do canal", linhasAoDedo.length > 0 && linhasAoDedo.every(Boolean), linhasAoDedo.join(","))
+  await retratar(page, "lista-de-comunidades")
 
   // ---------------------------------------------------------------------------
-  // 2. THE COMPLAINT. Tap a channel: rooms appear, and the drawer STAYS.
-  //
-  // Note on the other side of the rule: a channel WITHOUT a tree closes the drawer
-  // on tap, because there is nothing left to show. Today there is no way to make
-  // one here, every channel is born with three rooms (`Session.SALAS_INICIAIS`),
-  // and that half only shows up in channels before rooms existed. It stays trapped
-  // in component test, in `App.gaveta.test.tsx`, and is mentioned here so it does
-  // not look forgotten.
+  // 2. THE COMPLAINT. Tap a community on the rail: its rooms appear, and the
+  //    list STAYS (nothing is pushed until a room or the line is tapped).
   // ---------------------------------------------------------------------------
-  await linhaDoCanal(page, "lagar").locator("button.channel").tap()
+  await caraDaComunidade(page, "lagar").tap()
   await wait(700)
   const salasDoLagar = await salasNoEcra(page)
   check("tocar no lagar mostra as salas dele", salasDoLagar.includes("conversa") && salasDoLagar.includes("voz"), salasDoLagar.join(", "))
-  check("E A GAVETA FICA ABERTA: é a queixa, medida", await gavetaAberta(page))
+  check("E A LISTA FICA: é a queixa, medida", await naLista(page))
   await retratar(page, "lagar-com-salas")
 
-  await linhaDoCanal(page, "adega").locator("button.channel").tap()
+  await caraDaComunidade(page, "adega").tap()
   await wait(700)
   const salasVisiveis = await salasNoEcra(page)
-  check("e tocar na adega troca para as salas DELA, sem fechar nada", salasVisiveis.includes("prensa") && salasVisiveis.includes("barricas"), salasVisiveis.join(", "))
-  check("a gaveta continua aberta ao segundo canal", await gavetaAberta(page))
-  await retratar(page, "salas-com-gaveta-aberta")
+  check("e tocar na adega troca para as salas DELA, sem abrir nada", salasVisiveis.includes("prensa") && salasVisiveis.includes("barricas"), salasVisiveis.join(", "))
+  check("a lista continua no ecrã à segunda comunidade", await naLista(page))
+  await retratar(page, "salas-da-adega")
 
   // ---------------------------------------------------------------------------
-  // 3. Tap a room: the drawer leaves and the conversation appears.
+  // 3. Tap a room: its conversation is pushed full screen. Back brings the list.
   // ---------------------------------------------------------------------------
   const prensa = page.locator('.room-tree button.room', { hasText: "prensa" }).first()
   await prensa.tap()
   await wait(600)
-  check("tocar numa sala fecha a gaveta: é o fim do percurso", (await gavetaAberta(page)) === false)
-  // The conversation is in front and it is THIS room: the input box in view, no
-  // panel on top, and the room highlighted in the drawer when you open it again.
+  check("tocar numa sala empurra a conversa dela em ecrã inteiro", await conversaEmpurrada(page))
+  check("sem separadores por cima da conversa", !(await page.locator(".separadores").isVisible().catch(() => false)))
   check("e a conversa está à frente, com a caixa de escrita à vista", await page.locator('textarea[placeholder="Escreve uma mensagem"]').isVisible())
+  const tituloDaSala = await page.locator(".ecra-empurrado .topbar h1").first().innerText().catch(() => "")
+  check("e é a sala em que se tocou que está aberta", tituloDaSala.trim() === "prensa", tituloDaSala.trim())
   await retratar(page, "sala-aberta")
-  await hamburguer.tap()
-  await wait(400)
+  await page.locator(".ecra-empurrado .topbar-voltar").first().tap()
+  await wait(600)
+  check("a seta para trás devolve a lista", await naLista(page))
   const salaAcesa = await page.locator(".room-row.current .room-name").first().innerText().catch(() => "")
-  check("e é a sala em que se tocou que está aberta", salaAcesa.trim() === "prensa", salaAcesa.trim())
-  check("e o véu dos canais fecha a gaveta ao toque", await fecharGavetaPeloVeu(page))
+  check("e a sala aberta continua acesa na lista", salaAcesa.trim() === "prensa", salaAcesa.trim())
+  await prensa.tap()
+  await wait(600)
+  await page.goBack()
+  await wait(600)
+  check("e o voltar do browser (o gesto do sistema) também", await naLista(page))
 
   // ---------------------------------------------------------------------------
-  // 4. The long press opens the menu that right-click used to open.
+  // 4. The long press opens the menu that right-click opens, as a sheet.
   // ---------------------------------------------------------------------------
-  await hamburguer.tap()
-  await wait(400)
   await toqueLongo(linhaDoCanal(page, "adega"))
   await wait(400)
   const menuAberto = await page.locator(".context-menu").first().isVisible().catch(() => false)
   check("manter o dedo pousado num canal abre o menu de contexto", menuAberto)
-  const itensDoMenu = menuAberto ? await page.locator(".context-menu button").allInnerTexts() : []
+  check("e o menu é uma folha em baixo", (await page.locator(".context-menu.context-folha").count()) === 1)
+  const itensDoMenu = menuAberto ? await page.locator(".context-menu [role=menuitem]").allInnerTexts() : []
   check("e o menu traz as acções do canal (mudar o nome, nova sala, …)", itensDoMenu.length >= 3, itensDoMenu.slice(0, 4).join(" | "))
   await retratar(page, "toque-longo-menu")
   /*
-    And closes with a TAP outside, just like it does in real life.
-    
-    There used to be an Escape here, and it proved nothing that matters: the menu
-    listens for `pointerdown` (not `mousedown`, see `ContextMenu.tsx`), and that is
-    the half a finger exercises. With Escape, the menu could close from the key
-    and stay stuck on touch without anyone noticing.
-    
-    The tap goes on the sidebar, which is always outside the menu and outside the
-    drawer.
-    */
-  await page.locator(".rail").tap({ position: { x: 30, y: 400 } })
+    And closes with a TAP outside, just like it does in real life: on the veil,
+    at the top of the screen, above the sheet. The menu listens for
+    `pointerdown` (see `ContextMenu.tsx`), the half a finger exercises.
+  */
+  await page.touchscreen.tap(195, 80)
   await wait(400)
   check("e um toque fora dispensa o menu", (await page.locator(".context-menu").count()) === 0)
-  if (!(await gavetaAberta(page))) await hamburguer.tap()
-  await wait(400)
+  // On a computer the right click on the line also picks the channel; on the
+  // phone that pushes its conversation. Measured, not required.
+  console.log(`  ..  depois do toque longo na linha do canal: ${(await profundidade(page)) > 0 ? "a conversa ficou empurrada" : "a lista ficou"}`)
+  if ((await profundidade(page)) > 0) await paraALista(page)
 
   // The other side of the same rule: a swipe does not open a menu. Without this,
   // the channel list could not be scrolled with a finger.
@@ -442,29 +454,31 @@ try {
   )
   await wait(300)
   check("mas um DESLIZE não abre menu nenhum: a lista continua a percorrer-se", (await page.locator(".context-menu").count()) === 0)
-  await fecharGavetaPeloVeu(page)
 
   // ---------------------------------------------------------------------------
-  // 5. The people panel opens, and closes by the overlay.
+  // 5. The people panel is pushed full screen, and its arrow closes it.
   // ---------------------------------------------------------------------------
+  await prensa.tap()
+  await wait(600)
   const pegaDasPessoas = page.getByRole("button", { name: "Membros" })
   const alvoDasPessoas = await pegaDasPessoas.boundingBox()
   check(
-    "a pega da lista de pessoas tem 44px de alvo",
+    "o botão da lista de pessoas tem 44px de alvo",
     (alvoDasPessoas?.width ?? 0) >= 44 && (alvoDasPessoas?.height ?? 0) >= 44,
     `${Math.round(alvoDasPessoas?.width ?? 0)}x${Math.round(alvoDasPessoas?.height ?? 0)}`,
   )
   await pegaDasPessoas.tap()
   await wait(500)
-  check("tocar na pega abre a lista de pessoas", await page.evaluate(() => document.querySelector(".members")?.classList.contains("open") === true))
-  const veu = page.locator(".members-scrim")
-  check("e há um véu por baixo dela, que até aqui não existia", await veu.isVisible())
-  await retratar(page, "pessoas-com-veu")
-  // In a corner of the overlay, not the center: the 280px panel covers the middle
-  // of the screen, and a tap in the center of the overlay was a tap on the panel.
-  await veu.tap({ position: { x: 10, y: 10 } })
+  const larguraDasPessoas = await page.evaluate(() => Math.round(document.querySelector(".members.open")?.getBoundingClientRect().width ?? 0))
+  check("tocar no botão abre a lista de pessoas em ecrã inteiro", larguraDasPessoas === TELEMOVEL.width, `${larguraDasPessoas} px`)
+  check("por cima da conversa: dois ecrãs sobre a lista", (await profundidade(page)) === 2)
+  await retratar(page, "pessoas-em-ecra-inteiro")
+  await page.locator(".members.open .topbar-voltar").first().tap()
   await wait(500)
-  check("tocar no véu fecha a lista: já não é preciso acertar outra vez na pega", await page.evaluate(() => document.querySelector(".members")?.classList.contains("open") !== true))
+  check(
+    "a seta das pessoas fecha-as e deixa a conversa",
+    (await page.evaluate(() => document.querySelector(".members")?.classList.contains("open") !== true)) && (await profundidade(page)) === 1,
+  )
 
   // ---------------------------------------------------------------------------
   // 6. The keyboard. Focus on the input bar does not send it off screen.
@@ -517,7 +531,7 @@ try {
 
   // With a person page open before. This script has only one account, and the face
   // of the writer is their own: opening the "Me" destination. It goes back via the
-  // sidebar, like it does in real life. (The page of ANOTHER person, over the
+  // Communities tab, like it does in real life. (The page of ANOTHER person, over the
   // channel, is measured with two accounts in `scripts/sondar-salas-telemovel.mjs`.)
   await page.locator('textarea[placeholder="Escreve uma mensagem"]').fill("a prensa já trabalha")
   await page.locator('textarea[placeholder="Escreve uma mensagem"]').press("Enter")
@@ -528,38 +542,32 @@ try {
   await cara.waitFor({ timeout: 30_000 })
   await cara.tap()
   await wait(800)
-  const destinoDepoisDaCara = await page.locator(".rail-btn.active").first().getAttribute("aria-label").catch(() => "")
-  check('(salas) tocar na própria cara abre a página "Eu"', destinoDepoisDaCara === "Eu", destinoDepoisDaCara ?? "")
-  await page.locator(".rail").getByRole("button", { name: "Comunidades", exact: true }).first().tap()
-  await wait(600)
-  if (!(await gavetaAberta(page))) await hamburguer.tap()
-  await wait(500)
+  // On the phone the page "Eu" is a screen of the "Tu" tab, pushed over its list.
+  const destinoDepoisDaCara = await page.locator(".app.telemovel").getAttribute("data-separador")
+  check('(salas) tocar na própria cara abre a página "Eu" (separador Tu)', destinoDepoisDaCara === "tu" && (await profundidade(page)) >= 1, `${destinoDepoisDaCara}`)
+  await paraALista(page)
   const comPagina = await salasAoDedo(page)
-  check("(salas) de volta às Comunidades, as salas da adega vêem-se na gaveta", salasCertas(comPagina), comPagina.map((s) => `${s.nome}${s.ok ? "" : "✗"}`).join(", "))
+  check("(salas) de volta às Comunidades, as salas da adega vêem-se na lista", salasCertas(comPagina), comPagina.map((s) => `${s.nome}${s.ok ? "" : "✗"}`).join(", "))
   await page.locator('.room-tree button.room', { hasText: "barricas" }).first().tap()
   await wait(800)
   check("(salas) e tocar numa sala abre a conversa dela", await page.locator('textarea[placeholder="Escreve uma mensagem"]').isVisible())
 
-  // With a call: enter the voice room, and go back to a text room via the drawer.
-  await hamburguer.tap()
-  await wait(500)
+  // With a call: enter the voice room, and go back to a text room by the list.
+  await paraALista(page)
   await page.locator('.room-tree button.room', { hasText: "voz" }).first().tap()
   await page.locator(".call").first().waitFor({ timeout: 30_000 })
   await wait(1500)
   check("(salas) tocar na sala de voz entra na chamada", await page.locator(".call").first().isVisible())
-  await hamburguer.tap()
-  await wait(500)
+  await paraALista(page)
   const naChamada = await salasAoDedo(page)
-  check("(salas) com a chamada a decorrer, as salas vêem-se na gaveta", salasCertas(naChamada), naChamada.map((s) => `${s.nome}${s.ok ? "" : "✗"}`).join(", "))
+  check("(salas) com a chamada a decorrer, as salas vêem-se na lista", salasCertas(naChamada), naChamada.map((s) => `${s.nome}${s.ok ? "" : "✗"}`).join(", "))
   await retratar(page, "salas-com-chamada")
   await page.locator('.room-tree button.room', { hasText: "prensa" }).first().tap()
   await wait(800)
   check("(salas) e tocar numa sala de texto abre a conversa, com a chamada viva", await page.locator('textarea[placeholder="Escreve uma mensagem"]').isVisible())
-  await hamburguer.tap()
-  await wait(500)
+  await paraALista(page)
   const depoisDaChamada = await salasAoDedo(page)
-  check("(salas) e as salas continuam na gaveta com a barra da chamada", salasCertas(depoisDaChamada), depoisDaChamada.map((s) => `${s.nome}${s.ok ? "" : "✗"}`).join(", "))
-  await fecharGavetaPeloVeu(page)
+  check("(salas) e as salas continuam na lista com a barra da chamada", salasCertas(depoisDaChamada), depoisDaChamada.map((s) => `${s.nome}${s.ok ? "" : "✗"}`).join(", "))
 
   // ---------------------------------------------------------------------------
   // 7. The gate, which is the Face ID screen.

@@ -25,6 +25,7 @@ import { Session, Vault } from "@enclave/client-core"
 import { devices, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { levantarServidor } from "./frente-lenta.mjs"
+import { abrirNoTu, appAberta, irPara } from "./separadores.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const CAPTURAS = join(RAIZ, "capturas")
@@ -114,11 +115,12 @@ try {
     const page = await ctx.newPage()
     await page.goto(casa.app, { waitUntil: "domcontentloaded" })
     await criarConta(page, { nome: `Ana ${largura}`, frase: FRASE, servidor: casa.nome })
-    await page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+    await appAberta(page)
     for (const [caso, bio] of Object.entries(BIOS)) {
       await bruno.updateProfile({ displayName: "Bruno", donations: [], bio })
       // The person's page: Friends, Find, the address, Open profile.
-      await page.getByRole("button", { name: "Amigos", exact: true }).first().click()
+      // On the phone, Friends is a tab (option B); on a computer, the rail.
+      await irPara(page, "amigos")
       await page.locator(".people-tabs").getByRole("button", { name: "Encontrar" }).click()
       await page.getByLabel("Cola um link ou endereço").fill(idBruno.address)
       await page.getByRole("button", { name: "Abrir perfil" }).click()
@@ -135,7 +137,7 @@ try {
 
     // The own profile ("Eu"), with each bio set in the editor.
     for (const [caso, bio] of Object.entries(BIOS)) {
-      await page.getByRole("button", { name: "Configurações", exact: true }).first().click()
+      await abrirNoTu(page, "Configurações")
       await page.getByRole("button", { name: "Conta", exact: true }).first().click()
       await page.getByRole("button", { name: "Editar perfil" }).first().click()
       const folha = page.locator(".sheet").first()
@@ -144,7 +146,7 @@ try {
       await folha.locator("button.primary").first().click()
       await folha.waitFor({ state: "detached", timeout: 15_000 }).catch(() => {})
       await page.keyboard.press("Escape").catch(() => {})
-      await page.getByRole("button", { name: "Eu", exact: true }).first().click()
+      await abrirNoTu(page, "O teu perfil")
       await page.locator(".profile-bio").first().waitFor({ timeout: 15_000 })
       await page.waitForTimeout(300)
       const meu = await medir(page, ".profile-name-row h2, .profile-facts h1, .profile-facts h2")

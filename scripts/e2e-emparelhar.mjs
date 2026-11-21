@@ -51,6 +51,8 @@ import { argon2id } from "@noble/hashes/argon2.js"
 import { chromium } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { aceitarConvite, convidar } from "./convite.mjs"
+import { abrirComunidade, appAberta, irPara, irParaDirectas, nomesDasComunidades, temComunidade, abrirDirecta as abrirDirectaEmQualquerLargura } from "./separadores.mjs"
+import { colarCodigo, palavrasDe } from "./juntar-aparelho.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
@@ -197,7 +199,8 @@ function escutar(context, saco) {
 }
 
 const CONTEXTO = { locale: "pt-PT" }
-const dentro = (page) => page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+// The app is open: the rail on a computer, the tabs on a phone (no rail there).
+const dentro = (page) => appAberta(page)
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function veASalaComum(page, timeout = 60_000) {
@@ -206,37 +209,25 @@ async function veASalaComum(page, timeout = 60_000) {
     const texto = await page.locator("body").innerText().catch(() => "")
     const lista = texto.split("Entrar com um link")[0] ?? ""
     if (/\borwell\b/i.test(lista)) return true
+    // On a phone the other communities are faces on the rail, named by their label only.
+    if ((await nomesDasComunidades(page)).some((nome) => /\borwell\b/i.test(nome))) return true
     await wait(1000)
   }
   return false
 }
 
 /**
- * Open a channel from the sidebar. On a narrow screen the sidebar is a drawer
- * closed: tap the rail button before tapping the channel row to open it.
- *
- * And it CLOSES after, which is what changed in September 2026. Choosing a
- * channel with rooms stopped closing the drawer on purpose, rooms draw below
- * the open channel, and closing it in the same gesture made the tree appear
- * behind a panel leaving the screen (that was the complaint: "can't see the
- * various channels or the rooms"). Who closes the drawer now is choosing a ROOM,
- * or the overlay. Here, when you just want to get to the channel conversation,
- * it closes with the same button that opened it.
+ * Open a channel and its conversation. On a computer, its line in the sidebar.
+ * On a phone (option B, 20/11/2026), the Communities tab, its face on the
+ * rail, then its line, which pushes the conversation full screen.
  */
 async function abrirCanal(page, nome) {
-  const linha = page.locator(".channel-name", { hasText: nome }).first()
-  const gaveta = page.getByRole("button", { name: "Abrir o painel lateral" })
-  if (!(await linha.isVisible().catch(() => false))) {
-    if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) !== "true") await gaveta.click()
-  }
-  await linha.click()
-  if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click()
-  await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
+  await abrirComunidade(page, nome)
 }
 
-/** The channel is in the list, visible or not (the drawer may be closed): by the row `title`. */
+/** The channel is in the account, visible or not: its sidebar line or, on a phone, its rail face. */
 async function temCanal(page, nome, timeout = 90_000) {
-  return page.locator(`.channel-name[title="${nome}"]`).first().waitFor({ state: "attached", timeout }).then(() => true, () => false)
+  return temComunidade(page, nome, timeout)
 }
 
 async function dizer(page, frase) {
@@ -432,12 +423,15 @@ try {
   // 2. Settings, Devices, Add device: the QR code and the link.
   // ---------------------------------------------------------------------------
   await pc.getByRole("button", { name: "Configurações" }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
+  await pc.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await pc.getByRole("button", { name: /^Aparelhos/ }).click()
   // The list comes from the manifest, which is requested from the server: wait for it.
   await pc.locator(".aparelhos-lista li").first().waitFor({ timeout: 15_000 }).catch(() => {})
   const listaAntes = await pc.locator(".aparelhos-lista li").count()
   check("a lista de aparelhos mostra um aparelho, este", listaAntes === 1 && (await pc.locator(".aparelhos-lista li.este").count()) === 1, String(listaAntes))
-  await pc.getByRole("button", { name: "Acrescentar aparelho" }).click()
+  // Back from the device list to "Conta e segurança", where "Juntar um aparelho" is.
+  await pc.locator(".conta-voltar").click()
+  await pc.getByRole("button", { name: "Juntar um aparelho" }).click()
   const folha = pc.locator(".sheet").first()
   await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
@@ -466,42 +460,30 @@ try {
   escutar(ctxTel, redeTel)
   const tel = await ctxTel.newPage()
   await tel.goto(APP, { waitUntil: "domcontentloaded" })
-  // From phase 8.1 Setup opens with "Do you use Orwell on another device?": the
-  // pairing path is the "Yes" to that question, not a button below the name.
-  await tel.getByRole("button", { name: "Sim, emparelhar este aparelho" }).click({ timeout: 60_000 })
-  await tel.getByRole("heading", { name: "Emparelhar este aparelho" }).waitFor({ timeout: 10_000 })
+  // 21/11/2026: the gate has three ways in; this is "Entrar com outro aparelho".
+  await tel.getByRole("button", { name: "Entrar com outro aparelho" }).click({ timeout: 60_000 })
+  await tel.getByLabel("Ou cola o código").waitFor({ timeout: 10_000 })
   check("o telemóvel tem a terceira via no portão", true)
 
   await tel.getByRole("button", { name: "Ler o código com a câmara" }).click()
   await tel.locator("video.leitor-qr-video").waitFor({ timeout: 10_000 })
-  const leuPelaCamara = await tel
-    .getByRole("heading", { name: "Palavra-passe deste aparelho" })
-    .waitFor({ timeout: 25_000 })
-    .then(() => true, () => false)
+  const leuPelaCamara = await tel.locator(".sas-palavras").waitFor({ timeout: 25_000 }).then(() => true, () => false)
   if (leuPelaCamara) {
-    check("o telemóvel LEU O QR PELA CÂMARA e passou à palavra-passe", true)
+    check("o telemóvel LEU O QR PELA CÂMARA e passou às palavras", true)
+    await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
   } else {
     // Stated, not hidden: the QR code is verified only by `qr.test.ts`.
-    check("o telemóvel leu o QR pela câmara (NÃO: o link vai colado; o QR fica provado só pelo teste do decodificador)", false)
+    check("o telemóvel leu o QR pela câmara (NÃO: o código vai colado; o QR fica provado só pelo teste do decodificador)", false)
     await tel.getByRole("button", { name: "Parar a câmara" }).click()
-    await tel.getByLabel("Ou cola o link").fill(link)
-    await tel.getByRole("button", { name: "Continuar" }).click()
-    await tel.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 10_000 })
+    await colarCodigo(tel, folha, link)
   }
 
-  const frases = tel.locator('.gate-card input[type="password"]')
-  await frases.nth(0).fill(FRASE)
-  await frases.nth(1).fill(FRASE)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-
   // ---------------------------------------------------------------------------
-  // 4. The six words, on both screens, identical.
+  // 4. The three words, on both screens, identical.
   // ---------------------------------------------------------------------------
-  await tel.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  const palavrasTel = await tel.locator(".sas-palavras").getAttribute("data-palavras")
-  const palavrasPc = await folha.locator(".sas-palavras").getAttribute("data-palavras")
-  check("as seis palavras são as MESMAS nos dois ecrãs", palavrasTel === palavrasPc && palavrasTel.split("-").length === 6, palavrasPc)
+  const palavrasTel = await palavrasDe(tel)
+  const palavrasPc = await palavrasDe(folha)
+  check("as três palavras são as MESMAS nos dois ecrãs", palavrasTel === palavrasPc && palavrasTel.split("-").length === 3, palavrasPc)
   check("e nenhuma delas é o segredo nem o pairId", !segredos.some((s) => palavrasPc.includes(s)))
   await pc.screenshot({ path: join(CAPTURAS, "emparelhar-pc.png") })
   await tel.screenshot({ path: join(CAPTURAS, "emparelhar-telemovel.png") })
@@ -509,31 +491,27 @@ try {
 
   const certificadosAntes = redeTel.filter((l) => l.startsWith("TRAMA<") && l.includes('"pair.message"')).length
   // Confirm first on the phone, then on the computer: this is the order in which
-  // the person holds the phone waiting. The other order is verified in
-  // `session.dois-aparelhos.test.ts`.
-  await tel.getByRole("button", { name: "São as mesmas" }).click()
-  await tel.getByText("Confirmado aqui. Falta confirmar no outro aparelho.").waitFor({ timeout: 5_000 })
+  // the person holds the phone waiting.
+  await tel.getByRole("button", { name: "Sim, juntar o aparelho" }).click()
+  await tel.getByText("Agora confirma no outro aparelho.").waitFor({ timeout: 5_000 })
   await wait(1500)
   check("antes do sim do computador não saiu certificado nenhum (só a chave de aparelho atravessou)", redeTel.filter((l) => l.startsWith("TRAMA<") && l.includes('"pair.message"')).length === certificadosAntes)
-  await folha.getByRole("button", { name: "São as mesmas" }).click()
+  await folha.getByRole("button", { name: "Sim, juntar o aparelho" }).click()
 
   // ---------------------------------------------------------------------------
-  // 5. The phone enters the account; the computer finishes.
+  // 5. The phone enters the account ("Estás dentro"); the computer finishes.
   // ---------------------------------------------------------------------------
-  await tel.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 }).then(
+  await tel.getByRole("heading", { name: "Estás dentro" }).waitFor({ timeout: 90_000 }).then(
     () => check("o telemóvel recebeu o certificado, escreveu o cofre e ligou-se", true),
     (erro) => check("o telemóvel recebeu o certificado, escreveu o cofre e ligou-se", false, erro.message.split("\n")[0]),
   )
-  const textoFinal = await tel.locator(".gate-card").innerText()
-  // Since history between devices (29/10/2026) the old conversations come from the other device.
-  check("a frase do fim: recebe as novas, e as conversas antigas chegam do outro aparelho", textoFinal.includes("Este aparelho já recebe as mensagens novas") && textoFinal.includes("As conversas antigas chegam do outro aparelho"))
-  check("e a de que os aparelhos se gerem a partir de qualquer aparelho", textoFinal.includes("Podes gerir os aparelhos a partir de qualquer um dos teus aparelhos."))
-  await folha.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 30_000 }).then(
+  await folha.getByText("O aparelho novo já está na conta.").waitFor({ timeout: 30_000 }).then(
     () => check("o computador concluiu", true),
     () => check("o computador concluiu", false),
   )
   await folha.getByRole("button", { name: "Fechar" }).first().click()
-  await tel.getByRole("button", { name: "Entrar", exact: true }).click()
+  await tel.locator('input[name="new-password"]').fill(FRASE)
+  await tel.getByRole("button", { name: "Abrir o Orwell" }).click()
   await dentro(tel)
   check("o telemóvel está dentro da aplicação", true)
 
@@ -581,7 +559,7 @@ try {
     for (const l of redePc.filter((l) => /keypackage\.claim|channel\.rejected|"welcome"|error/.test(l)).slice(-12)) console.log("      " + resumo(l))
     console.log("  ..  telemóvel, welcomes/recusas/erros/consola:")
     for (const l of redeTel.filter((l) => /"welcome"|channel\.rejected|"error"|CONSOLA|PAGEERROR/.test(l)).slice(-12)) console.log("      " + resumo(l))
-    console.log("  ..  telemóvel, canais no ecrã: " + JSON.stringify(await tel.locator(".channel-name").allInnerTexts().catch(() => [])))
+    console.log("  ..  telemóvel, canais no ecrã: " + JSON.stringify(await nomesDasComunidades(tel)))
   }
   check("o telemóvel vê a sala comum (entrou pelo cartão)", await veASalaComum(tel, 60_000))
   /*
@@ -610,7 +588,7 @@ try {
 
   // Erro 609 is gone (1.3.16): the phone opens a NEW direct conversation by itself,
   // with someone the account never spoke to in private (Carla, offline).
-  await tel.getByRole("button", { name: "Amigos", exact: true }).first().click()
+  await irPara(tel, "amigos")
   await tel.locator(".people-destination").waitFor({ timeout: 15_000 })
   await tel.locator(".people-tabs").getByRole("button", { name: "Encontrar" }).click()
   await tel.getByLabel("Cola um link ou endereço").fill(enderecoCarla)
@@ -626,7 +604,7 @@ try {
   }
   const textoTel = await tel.locator("body").innerText().catch(() => "")
   check("o telemóvel abre uma conversa directa nova sozinho (sem o Erro 609)", abriuDirecta && !textoTel.includes("609"), textoTel.includes("609") ? "apareceu o 609" : "")
-  await tel.getByRole("button", { name: "Comunidades" }).first().click().catch(() => {})
+  await irPara(tel, "comunidades").catch(() => {})
 
   await pc.getByRole("button", { name: "Comunidades" }).click().catch(() => {})
   await abrirCanal(pc, "adega")
@@ -676,7 +654,8 @@ try {
   // `attached` and not visible: on the phone the conversation list is a closed drawer,
   // and what we measure is whether the conversation arrived, not whether it is visible.
   const dmNoPc = await pc.getByRole("button", { name: "Amigos" }).click().then(() => pc.locator(".direct-row").first().waitFor({ state: "attached", timeout: 90_000 })).then(() => true, () => false)
-  const dmNoTel = await tel.getByRole("button", { name: "Amigos" }).click().then(() => tel.locator(".direct-row").first().waitFor({ state: "attached", timeout: 90_000 })).then(() => true, () => false)
+  // On the phone the direct conversations are the Messages tab.
+  const dmNoTel = await irParaDirectas(tel).then(() => tel.locator(".direct-row").first().waitFor({ state: "attached", timeout: 90_000 })).then(() => true, () => false)
   check("um terceiro convida a conta pelo endereço e o computador recebe", dmNoPc)
   check("e o telemóvel recebe também", dmNoTel)
   // Carlos's direct chat, not Bruno's (which was created earlier, in step 1b).
@@ -703,15 +682,8 @@ try {
   // must reach BOTH, and one from each of Ana's devices must reach Carlos).
   const staleEpochs = [...redePc, ...redeTel].filter((l) => l.startsWith("TRAMA<") && l.includes('"channel.rejected"') && l.includes("stale-epoch")).length
   console.log(`  ..  stale-epoch recebidos pelos dois aparelhos da Ana até aqui: ${staleEpochs} (medido, não exigido)`)
-  /** Open the direct chat in Friends: the row is a button, and on the phone it lives in a drawer. */
-  async function abrirDirecta(page) {
-    const botao = page.locator(".direct-row button.direct-open").first()
-    if (!(await botao.isVisible().catch(() => false))) {
-      await page.getByRole("button", { name: "Abrir o painel lateral" }).click().catch(() => {})
-    }
-    await botao.click()
-    await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 60_000 })
-  }
+  /** Open the direct chat: Friends on a computer, the Messages tab on a phone. */
+  const abrirDirecta = (page) => abrirDirectaEmQualquerLargura(page)
   // The conversation starts as a friend REQUEST: Ana must accept. Accept on the
   // PHONE on purpose: a commit made by the paired device on a channel where the
   // computer is also present, with both connected. This is where block E (device
@@ -720,6 +692,8 @@ try {
   // Since phase 3 of friendships, direct chats are between friends: Carlos asks
   // for friendship in the chat (the footer button), and the request reaches "Received".
   await c.getByRole("button", { name: "Pedir amizade" }).first().click()
+  // "Recebidos" is in Friends; on the phone that is its own tab, apart from Messages.
+  await irPara(tel, "amigos")
   await tel.locator(".people-tabs").getByRole("button", { name: /^Recebidos/ }).click()
   const aceitar = tel.locator(".people-requests").getByRole("button", { name: "Aceitar" }).first()
   if (await aceitar.waitFor({ timeout: 60_000 }).then(() => true, () => false)) await aceitar.click()

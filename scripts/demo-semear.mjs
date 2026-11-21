@@ -7,7 +7,7 @@
  * "demo-votacoes" with the general room (a picture in a message) and a polls room "votações" (no chat) holding an
  * open poll with a deadline (1 day) and a poll that Ana closed by hand. Each account is exported
  * to `.dev-data/demo-votacoes/contas/<nome>.json`, sealed by the password: import it at the
- * gate of your own browser ("Importar conta"). Importing moves the account to that browser.
+ * gate of your own browser ("Entrar com o ficheiro da conta"). Importing moves the account to that browser.
  */
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -97,9 +97,10 @@ try {
 
   for (const c of [ana, bruno]) {
     await c.page.getByRole("button", { name: "Configurações", exact: true }).first().click()
-    await c.page.getByRole("button", { name: "Aparelhos", exact: true }).click()
+    await c.page.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+    await c.page.getByRole("button", { name: "Guardar o ficheiro da conta" }).click()
     const d = c.page.waitForEvent("download", { timeout: 60_000 })
-    await c.page.getByRole("button", { name: "Exportar conta" }).first().click()
+    await c.page.locator(".sheet").getByRole("button", { name: "Guardar o ficheiro", exact: true }).first().click()
     const destino = join(PASTA, `${c.nome.toLowerCase()}.json`)
     await (await d).saveAs(destino)
     console.log(`${c.nome}: ${c.addr}  ->  ${destino}`)

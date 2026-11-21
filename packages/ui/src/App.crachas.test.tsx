@@ -642,4 +642,16 @@ describe("o toque por ver no botão Amigos", () => {
     expect(amigos().classList.contains("tocado")).toBe(false)
     expect(amigos().querySelector(".rail-toque")).toBeNull()
   })
+
+  // 21/11/2026: a nudge shakes both sides, whatever screen is open.
+  it("a nudge shakes the app with Communities open, not only the nudged conversation", async () => {
+    await abrir()
+    const app = (): Element => document.querySelector(".app")!
+    expect(app().classList.contains("buzzing")).toBe(false)
+    await act(async () => {
+      for (const ouvinte of ouvintesDoToque) ouvinte({ channel: DIRECTA, from: ANA, at: Date.now() })
+      await Promise.resolve()
+    })
+    expect(app().classList.contains("buzzing")).toBe(true)
+  })
 })

@@ -5,6 +5,7 @@ import {
   erroDaChamada,
   mensagemAEnviar,
   fonteDeBlob,
+  pendingImportKeysInLocalStorage,
   Session,
   transmissaoDoAnuncio,
   Vault,
@@ -19,8 +20,9 @@ import {
 // entire core for a double still have the real one.
 import { CONTA_PRINCIPAL, ContasDoAparelho } from "@enclave/client-core/contas"
 import { decifradorNoWorker, seladorNoWorker, type TrabalhadorDoSelo } from "@enclave/client-core/selo-worker"
+import { resolverNumTrabalhador, type TrabalhadorDaProva } from "@enclave/client-core/prova-worker"
 import { kindOf } from "@enclave/crypto"
-import { CAPACIDADE_REVOGACAO, TYPING_TTL_MS, type Payload, type Sobreposicao, type UserAddress } from "@enclave/protocol"
+import { CAPABILITY_PAIRING_PAKE, CAPACIDADE_REVOGACAO, TYPING_TTL_MS, type Payload, type Sobreposicao, type UserAddress } from "@enclave/protocol"
 import { Device } from "mediasoup-client"
 import { ehIos, type DefinicoesDoPush, type EnclaveBridge, type Profile } from "@enclave/ui"
 import { BrowserVaultBackend, type MotivoDaPerda } from "./vault-backend.js"
@@ -57,6 +59,9 @@ import pacote from "../package.json" with { type: "json" }
  * window, which is exactly what the person accepted by not locking.
  */
 const SESSION_KEY = "enclave-session-key"
+
+/** How long a lock waits for a profile edit still waiting to go out (1.3.26). The desktop waits the same. */
+const ESPERA_DO_PERFIL_AO_TRANCAR_MS = 2_000
 
 /**
  * The tab key is per account ("Switch Account"): the main one keeps the usual
@@ -167,6 +172,13 @@ export type PonteDoBrowser = EnclaveBridge & {
    */
   pararDeEscrever(modo?: { gravar: boolean }): Promise<void>
   /**
+   * Undo `pararDeEscrever` for a tab resumed from the back-forward cache, which
+   * holds the lock again (21/11/2026). Writes and connects again only if this
+   * tab, `id`, still owns the vault and nobody wrote it meanwhile. `false`: it
+   * stays stopped, and the caller reloads (its memory is stale).
+   */
+  retomarEscrita(id: string): Promise<boolean>
+  /**
    * Acquires ownership in the vault (fencing). Called before the gate reads the
    * vault. See `BrowserVaultBackend.assumirPosse`.
    */
@@ -249,16 +261,27 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         }
       : {}),
   })
+  // The account password changed on another device (1.3.26): the tab key follows the vault key, or a reload asks again.
+  session.on("status", (evento) => {
+    if (evento.code === "account-password-changed" && vault.unlocked && !vault.provisorio) cacheSessionKey(vault.exportSessionKey(), chaveDoSeparador)
+  })
   opcoes.aoCriar?.({ session, vault })
 
   /*
     This tab can no longer write: not to the server, not to the vault.
 
-    Once stopped, it does not recover. What brings it back is reloading the page,
-    which also brings new code, or puts the tab back in the lock queue.
+    Once stopped, it recovers only through `retomarEscrita`: a tab suspended into
+    the back-forward cache that holds the lock again and finds the vault as it
+    left it. Otherwise what brings it back is reloading the page, which also
+    brings new code, or puts the tab back in the lock queue.
     See `pararDeEscrever` below.
   */
   let escritaParada = false
+  /**
+   * Bumped by every stop and every resume: a resume that a new stop overtook
+   * while it read the record (the page hid again) does not reopen anything.
+   */
+  let voltaDaEscrita = 0
 
   /*
     The page leaving writes anything still in the timer.
@@ -277,6 +300,12 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
     if (escritaParada) return
     // The transaction must be born in this handler: no seal in the Worker now, and none in flight waits.
     vault.semFundo = true
+    /*
+      A profile edit still waiting (1.3.26): try to send it, as with the batch. If
+      the page dies first, the vault still says it never went (`perfilPorPublicar`),
+      and the next opening of this vault, in any tab, sends it.
+    */
+    if (session.perfilPorPublicar) void session.publicarPerfilPendente().catch(() => {})
     void session.flush().catch(() => {})
   })
   // Back from the back-forward cache: batched writes seal in the Worker again.
@@ -665,6 +694,19 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         cacheSessionKey(vault.exportSessionKey(), chaveDoSeparador)
         return { ok: true }
       },
+      // 1.3.26: the tab key follows the new vault key, or a reload would ask again.
+      mudarPalavraPasse: async (actual, nova) => {
+        // Through the session: the new record goes to the other devices of the account.
+        await session.mudarPalavraPasse(actual, nova)
+        cacheSessionKey(vault.exportSessionKey(), chaveDoSeparador)
+        return { ok: true }
+      },
+      // S4: "I forgot the current password". The web has no system re-auth: the open vault is the proof (THREAT-MODEL.md).
+      changePasswordWithOpenVault: async (nova) => {
+        await session.changePasswordWithOpenVault(nova)
+        cacheSessionKey(vault.exportSessionKey(), chaveDoSeparador)
+        return { ok: true }
+      },
       lock: async () => {
         // "Sign Out" forgets the remembered session BEFORE locking: if the tab dies
         // mid-way, what remains is a closed vault, never a session that opens by itself.
@@ -673,6 +715,15 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         // in-memory group secrets, and only then does the vault key go away —
         // from memory and from the tab's reload cache alike.
         largarPreferenciasDeVoz()
+        /*
+          A profile edit still waiting goes out now, while the socket is open (1.3.26),
+          within two seconds like the desktop: locking never waits on the network with
+          the keys in memory. What does not make it goes on the next opening.
+        */
+        await Promise.race([
+          session.publicarPerfilPendente().catch(() => {}),
+          new Promise<void>((resolve) => setTimeout(resolve, ESPERA_DO_PERFIL_AO_TRANCAR_MS)),
+        ])
         session.disconnect()
         session.reset()
         // The blobs in the queue reach the disk before locking: once locked, the queue no longer touches it.
@@ -729,7 +780,13 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         session.disconnect()
         session.reset()
         // Once the vault is in, the images never make this throw: the missing ones are counted.
-        const resultado = await vault.importVault(dados, passphrase, { armazem: session.armazem })
+        const resultado = await vault.importVault(dados, passphrase, {
+          armazem: session.armazem,
+          // A new device of the account, added to the manifest before anything is written (1.3.26, `passagem.ts`).
+          passagem: (pedido) => session.passagemDoImportar(pedido),
+          // The same new key on a retry: a failed import never takes a second seat (`pendingImportKeys.ts`).
+          pendingImportKeys: pendingImportKeysInLocalStorage(),
+        })
         // The imported account has its own passphrase; the old tab key is void.
         clearSessionKey(chaveDoSeparador)
         return { ok: true, ...resultado }
@@ -738,6 +795,11 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       // is on disk until the provisional is written (`pairing.done`).
       createProvisional: async (passphrase) => {
         await vault.criarProvisorio(passphrase)
+        return { ok: true }
+      },
+      // 1.3.26: no password yet; `pairing.seal` gives it the account's.
+      createProvisionalToSeal: async () => {
+        vault.criarProvisorioPorSelar()
         return { ok: true }
       },
     },
@@ -786,10 +848,19 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         temChaveDeConta: session.temChaveDeConta,
         servidorSuporta: session.suportaEmparelhamento,
         servidorRevoga: session.serverCapabilities.includes(CAPACIDADE_REVOGACAO),
+        serverKnowsShortCode: session.serverCapabilities.includes(CAPABILITY_PAIRING_PAKE),
       }),
       host: () => session.emparelharComoAnfitriao(),
       join: async (link) => {
         session.emparelharComoConvidado(link)
+        return { ok: true }
+      },
+      showCode: async (server) => {
+        session.pairAsGuestByCode(server)
+        return { ok: true }
+      },
+      typeCode: async (code) => {
+        await session.pairAsHostByCode(code)
         return { ok: true }
       },
       confirm: async () => {
@@ -822,6 +893,10 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         session.concluirEmparelhamento()
         return { ok: true }
       },
+      seal: async (frase) => {
+        await session.selarAposEmparelhar(frase)
+        return { ok: true }
+      },
       devices: () => session.aparelhosDaConta(),
       revoke: async (deviceKey) => {
         await session.revokeDevice(deviceKey)
@@ -837,6 +912,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         await session.juntarAvisar()
         return { ok: true }
       },
+      joinCheckPassword: (passphrase) => session.joinCheckPassword(passphrase),
       juntarTrocar: async (passphrase) => {
         largarPreferenciasDeVoz()
         // If we throw, the vault stays closed with the secondary on disk, and the tab
@@ -878,6 +954,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
     sincronia: {
       estado: async () => session.estadoDaSincronia(),
       lugarEm: async (channel) => session.lugarEm(channel),
+      previousOnlineAt: async () => session.previousOnlineAt(),
       historico: async () => structuredClone(session.historicoEntreAparelhos()),
     },
 
@@ -951,6 +1028,19 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         session.definirConviteDeRegisto(codigo)
         return { ok: true }
       },
+      definirConviteDeComunidade: async (link) => ({ ok: session.definirConviteDeComunidade(link) }),
+      // The proof of work of a new account, in a Web Worker (1.3.26). See `prova-worker.ts`.
+      prepararContaNova: (aoProgresso) =>
+        session.prepararContaNova({
+          aoProgresso,
+          resolver: resolverNumTrabalhador(
+            () => new Worker(new URL("./prova-worker.ts", import.meta.url), { type: "module" }) as unknown as TrabalhadorDaProva,
+          ),
+        }),
+      contaNova: async () => session.contaNova,
+      criarCanais: () => session.criarCanais(),
+      roomQuota: () => session.roomQuota(),
+      autorNovo: (address) => session.autorNovoAte(address),
       setVisible: async (visible) => {
         session.setVisible(visible)
         return { ok: true }
@@ -1154,11 +1244,15 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         await session.send(channel, { t: "buzz", at: Date.now() })
         return { ok: true }
       },
-      members: async (channel) => session.membersOf(channel),
+      // The tree minus who the server says is gone (P7). See `Session.membrosVisiveis`.
+      members: async (channel) => session.membrosVisiveis(channel),
+      afastados: async (channel) => session.membrosAfastados(channel),
       history: async (channel) => session.history(channel),
       reaccoesGuardadas: async (channel) => session.reaccoesGuardadas(channel),
       conversaArquivada: async (channel, cursor) => session.conversaArquivada(channel, cursor),
       temConversaArquivada: async (channel) => session.temConversaArquivada(channel),
+      loadOlderFromMembers: (channel, room) => session.loadOlderFromMembers(channel, room),
+      hasOlderFromMembers: async (channel) => session.hasOlderFromMembers(channel),
       forget: async (channel) => {
         await session.forgetChannel(channel)
         return { ok: true }
@@ -1371,7 +1465,16 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
 
     on: {
       message: (handler) => session.on("message", handler),
-      epoch: (handler) => session.on("epoch", handler),
+      // `members` too (P7): the shown list changed without an epoch, and the interface
+      // reads the members on this event. Not the session `epoch`, which rekeys calls.
+      epoch: (handler) => {
+        const largarEpoca = session.on("epoch", handler)
+        const largarMembros = session.on("members", handler)
+        return () => {
+          largarEpoca()
+          largarMembros()
+        }
+      },
       status: (handler) => session.on("status", handler),
       connection: (handler) => session.on("connection", handler),
       channels: (handler) => session.on("channels", handler),
@@ -1463,6 +1566,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
     },
 
     pararDeEscrever: async (modo = { gravar: true }) => {
+      voltaDaEscrita += 1
       if (escritaParada) return backend.escritasAcabadas()
       escritaParada = true
       // From here every write is synchronous to the disk, and a seal still in the Worker never lands.
@@ -1512,6 +1616,27 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
       */
       session.pararDeEscrever()
       await backend.escritasAcabadas()
+    },
+
+    retomarEscrita: async (id) => {
+      if (!escritaParada) return true
+      const volta = ++voltaDaEscrita
+      // The record and the vault first: a stale memory never writes.
+      if (!(await backend.retomarPosse(id))) return false
+      // Stopped again while reading (the page hid again): stay stopped and sealed.
+      if (volta !== voltaDaEscrita) {
+        backend.selar()
+        return false
+      }
+      if (!session.retomarEscrita()) {
+        backend.selar()
+        return false
+      }
+      escritaParada = false
+      vault.semFundo = false
+      // The new connection recovers every channel from the stored cursor, and the history resumes its plan.
+      void session.connect().catch(() => {})
+      return true
     },
 
     assumirPosse: async (id) => {

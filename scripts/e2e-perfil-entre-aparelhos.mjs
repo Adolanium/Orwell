@@ -32,6 +32,8 @@ import { argon2id } from "@noble/hashes/argon2.js"
 import { chromium } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { irParaEmparelhar } from "./fase7-comum.mjs"
+import { appAberta } from "./separadores.mjs"
+import { juntarComPalavras } from "./juntar-aparelho.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
@@ -177,7 +179,8 @@ function escutar(context, saco) {
 }
 
 const CONTEXTO = { locale: "pt-PT" }
-const dentro = (page) => page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+// The app is open: the rail on a computer, the tabs on a phone (no rail there).
+const dentro = (page) => appAberta(page)
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const NOME_NOVO = "Ana Maria"
 const AVISO_DO_PERFIL = "O teu perfil ainda não chegou do aparelho principal."
@@ -276,8 +279,8 @@ try {
   // 2. Add device: the link.
   // ---------------------------------------------------------------------------
   await pc.getByRole("button", { name: "Configurações", exact: true }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await pc.getByRole("button", { name: "Acrescentar aparelho" }).click()
+  await pc.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await pc.getByRole("button", { name: "Juntar um aparelho" }).click()
   folha = pc.locator(".sheet").first()
   await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
@@ -293,23 +296,11 @@ try {
   const tel = await ctxTel.newPage()
   await tel.goto(APP, { waitUntil: "domcontentloaded" })
   await irParaEmparelhar(tel)
-  await tel.getByRole("heading", { name: "Emparelhar este aparelho" }).waitFor({ timeout: 10_000 })
-  await tel.getByLabel("Ou cola o link").fill(link)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 10_000 })
-  const frases = tel.locator('.gate-card input[type="password"]')
-  await frases.nth(0).fill(FRASE)
-  await frases.nth(1).fill(FRASE)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await tel.getByRole("button", { name: "São as mesmas" }).click()
-  await folha.getByRole("button", { name: "São as mesmas" }).click()
-  await tel.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 })
+  await tel.getByLabel("Ou cola o código").waitFor({ timeout: 10_000 })
+  await juntarComPalavras(tel, folha, link, FRASE)
   const textoFinal = await tel.locator(".gate-card").innerText()
   check("o telemóvel entra na conta, e o estado chegou inteiro", !textoFinal.includes("não chegou a tempo"))
   await folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
-  await tel.getByRole("button", { name: "Entrar", exact: true }).click()
   await dentro(tel)
 
   // ---------------------------------------------------------------------------

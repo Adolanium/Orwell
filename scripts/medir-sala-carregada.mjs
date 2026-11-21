@@ -47,6 +47,7 @@ import { moradaDeSala } from "@enclave/protocol"
 import { chromium, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { levantarServidor } from "./frente-lenta.mjs"
+import { appAberta, nomesDasComunidades } from "./separadores.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const argumento = (nome, omissao) => {
@@ -242,7 +243,7 @@ try {
   let page = await ctx.newPage()
   await page.goto(APP, { waitUntil: "domcontentloaded" })
   await criarConta(page, { nome: "Ana", frase: FRASE, servidor: NOME, memorizar: true, canalOficial: false })
-  await page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+  await appAberta(page)
   const base = new DatabaseSync(join(dados, "enclave.sqlite"), { readOnly: true })
   const ana = base.prepare("SELECT address FROM accounts ORDER BY rowid ASC").get().address
   base.close()
@@ -288,7 +289,8 @@ try {
   console.log(`  ..  caso montado em ${Math.round((Date.now() - t0) / 1000)} s`)
 
   // Ana's app takes it all in, then closes.
-  await ate(async () => (await page.locator(".channel-name").count()) >= CANAIS + 1, 240_000, 1_000)
+  // Sidebar lines on a computer, rail faces on a phone (the sidebar there lists only the chosen community).
+  await ate(async () => (await nomesDasComunidades(page)).length >= CANAIS + 1, 240_000, 1_000)
   await ate(async () => (await page.evaluate(() => globalThis.__medida.escritas)) > 0, 30_000)
   await wait(15_000)
   const tamanho = await page.evaluate(() => globalThis.__medida.maiorEscrita)
@@ -313,7 +315,7 @@ try {
   }
   const inicio = Date.now()
   await page.goto(APP, { waitUntil: "commit" })
-  const entrou = await page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 120_000 }).then(() => Date.now() - inicio, () => -1)
+  const entrou = await appAberta(page, 120_000).then(() => Date.now() - inicio, () => -1)
   await wait(Math.max(0, 30_000 - (Date.now() - inicio)))
   const m1 = await page.evaluate(() => globalThis.__medida)
   resultado.fases.arranque = { msAteApp: entrou, ...resumir(m1, 0, 30_000), rssPicoMB: pararRss ? pararRss() : null }

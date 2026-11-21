@@ -76,6 +76,21 @@ function comACaixaDeTexto(folha: string): string {
   return raiz.toString()
 }
 
+/**
+ * The call card's name row (1.3.26): the voice wave left the top-right corner,
+ * where it sat under the "⋯", and went into a row with the name
+ * (`.call-chip-name-row`). 1.3.19 had no such row: the reference gets the row
+ * as it is today, so the comparison is about the same card, and the wave's
+ * own size and colour still come from 1.3.19.
+ */
+function comAFilaDoNome(folha: string): string {
+  return `${folha}
+.call-chip-name-row { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.call-chip-name { min-width: 0; }
+.call-chip-onda { position: static; }
+`
+}
+
 const EU = "@eu:s"
 const OUTRA = "@outra:s"
 const PNG = `data:image/png;base64,${Buffer.from(
@@ -273,7 +288,7 @@ afterAll(async () => {
 })
 
 describe("o tema Aurora é a 1.3.19", () => {
-  const referencia = comACaixaDeTexto(folhaDa1319())
+  const referencia = comAFilaDoNome(comACaixaDeTexto(folhaDa1319()))
   const hoje = folhaDeHoje()
 
   it.each(Object.keys(FIXTURAS))("%s: as mesmas cores, contornos, sombras, letra e caixas", async (nome) => {

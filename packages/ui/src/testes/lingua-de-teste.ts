@@ -1,4 +1,5 @@
 import { definirLingua } from "../strings.js"
+import { postLoginHold } from "../hooks/usePostLoginHold.js"
 
 /**
  * The tests of this package read Portuguese.
@@ -13,3 +14,10 @@ import { definirLingua } from "../strings.js"
  * `LINGUA_BASE`, not at what this file sets.
  */
 definirLingua("pt")
+
+/*
+  The opening hold after entering (`usePostLoginHold`) is off here: the fake
+  bridges of the App tests never go online, and each would sit on the opening
+  for the whole ceiling. `App.postLoginHold.test.tsx` turns it on and measures it.
+*/
+postLoginHold.capMs = 0

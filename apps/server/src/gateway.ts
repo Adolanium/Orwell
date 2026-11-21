@@ -15,12 +15,16 @@ import {
   CAPACIDADE_APARELHOS,
   CAPACIDADE_BUNDLE,
   CAPACIDADE_COFRE_CIFRADO,
+  CAPACIDADE_MANIFESTO_AO_VIVO,
   CAPACIDADE_EMPARELHAMENTO,
+  CAPABILITY_PAIRING_PAKE,
   CAPACIDADE_ENVIO_RECUSADO,
   CAPACIDADE_HISTORICO_RECUSADO,
   CAPACIDADE_ESTREIA_DA_DIRECTA,
   CAPACIDADE_LIGACOES_CURTAS,
+  CAPACIDADE_MEMBROS_DO_CANAL,
   CAPACIDADE_BUGS,
+  MEMBROS_DO_CANAL_MAX,
   CAPACIDADE_IDADE_ATESTADA,
   CAPACIDADE_MORADAS_OPACAS,
   CAPACIDADE_RESGATE_POR_PROVA,
@@ -29,10 +33,12 @@ import {
   CAPACIDADE_SFU,
   CAPACIDADE_SFU_FOTOGRAMA_CHAVE,
   CAPACIDADE_SINAL_EFEMERO,
+  CAPACIDADE_SINAL_PARA,
   CAPACIDADE_WEB_PUSH,
   CODIGO_COFRE_ABUSO,
   CODIGO_VERSAO_ANTIGA,
   PROTOCOL_VERSION,
+  verificarConviteNoRegisto,
   verificarProvaDoConvite,
   type CodigoDeRecusaDoCofre,
   type CodigoDeRecusaDoSinal,
@@ -58,6 +64,33 @@ import {
   CODIGO_CONVITE_DE_REGISTO_INVALIDO,
   CODIGO_REGISTO_FECHADO,
 } from "@enclave/protocol"
+// The abuse brake, part 2 (1.3.26). A separate import, like the one above, so it does not clash with another branch.
+import {
+  CAPABILITY_ROOM_LIMIT,
+  CAPACIDADE_LIMITE_DE_CANAIS,
+  CAPACIDADE_LIMITES_DE_CONTA_NOVA,
+  CAPACIDADE_PROVA_DE_TRABALHO,
+  CODIGO_PROVA_EM_FALTA,
+  CODIGO_PROVA_INVALIDA,
+  CODIGO_REDE_COM_MUITAS_CONTAS,
+  RECUSA_DE_CONTA_NOVA,
+  RECUSA_DE_LIMITE_DE_CANAIS,
+  REFUSAL_ROOM_LIMIT,
+  type ContaNova,
+  type CriarCanais,
+  type RoomQuota,
+  type ProvaDeTrabalho,
+} from "@enclave/protocol"
+import {
+  CriadoresDosConvites,
+  EmissorDeProvas,
+  FilaDaSalaComum,
+  LimiteDeRede,
+  PassesDoConvite,
+  VigiaDaContaNova,
+  type FaseDaContaNova,
+  type RedeIdentificada,
+} from "./anti-abuso.js"
 
 /**
  * The client gateway.
@@ -101,6 +134,12 @@ interface Connection {
    * when it does.
    */
   deviceKey: Uint8Array | null
+  /**
+   * The key that signed this connection's login, in base64url: the device key
+   * with a chain, the account key without one. What `para` in a `channel.sinal`
+   * names (`CAPACIDADE_SINAL_PARA`). `null` before `auth.ok`.
+   */
+  chaveDoLogin: string | null
   /**
    * Address claimed at auth.begin, still unproven, with the key it named.
    *
@@ -170,6 +209,34 @@ interface Connection {
    * `channel.subscribe` included), and only these can send them. See `#cofre`.
    */
   cofreCifrado: boolean
+  /**
+   * Whether this connection announced `CAPACIDADE_MANIFESTO_AO_VIVO` in `hello`.
+   * Only these get the account's new manifest, unasked, after another
+   * connection of the same account publishes one.
+   */
+  manifestoAoVivo: boolean
+  /**
+   * The abuse brake (1.3.26). The connection's network as the per-network limit
+   * sees it: HMAC keys, never the address. `null` when that limit is off.
+   */
+  rede: RedeIdentificada | null
+  /**
+   * The connection comes from loopback: development on the same machine, a test,
+   * a script. The per-network limit, the new-account limits and the join ceiling
+   * leave it alone. In production every client comes through the proxies and
+   * `request.ip` is its public address (see `ip-do-cliente.test.ts`).
+   */
+  deLoopback: boolean
+  /** The connection announced `CAPACIDADE_PROVA_DE_TRABALHO`: it can solve the proof. */
+  sabeProvaDeTrabalho: boolean
+  /** The connection announced `CAPACIDADE_LIMITES_DE_CONTA_NOVA`: it understands the new-account refusals. */
+  sabeContaNova: boolean
+  /** The connection announced `CAPACIDADE_LIMITE_DE_CANAIS`: it reads a refused `invite.create`. */
+  sabeLimiteDeCanais: boolean
+  /** When the account was created (ms), read at login, when the new-account limits apply to it. `null` otherwise. */
+  criadaEm: number | null
+  /** The last channel a first use was refused for by the new-account limit. See `#mayOpen`. */
+  estreiaRecusada: string | null
 }
 
 /**
@@ -193,12 +260,30 @@ type FrameSfu = Extract<ClientFrame, { t: `sfu.${string}` }>
 /** A pairing box. See `Gateway.#caixas`. */
 interface CaixaDeEmparelhamento {
   readonly pairId: string
-  /** The AUTHENTICATED connection that opened: the device that owns the account. */
+  /**
+   * The connection that opened. In a QR box (`pair.open`), the AUTHENTICATED
+   * device that owns the account. In a short-code box (`pair.code.open`), the
+   * NEW device, typically without an account. See `#accountSide`.
+   */
   readonly anfitriao: Connection
-  /** The connection that joined, typically without an account. Only one. */
+  /**
+   * The connection that joined. Only one. In a QR box, the new device,
+   * typically without an account; in a short-code box, the authenticated
+   * account that typed the code.
+   */
   convidado: Connection | null
   readonly criadoEm: number
-  readonly prazo: ReturnType<typeof setTimeout>
+  prazo: ReturnType<typeof setTimeout>
+  /**
+   * Short-code boxes only: `true`. QR boxes: `false`.
+   */
+  readonly byCode: boolean
+  /**
+   * Short-code boxes only: the two characters the account types to find the
+   * box, while nobody has joined. `null` from the first join on (a code joins
+   * once), and always `null` for a QR box.
+   */
+  nameplate: string | null
 }
 
 /**
@@ -240,7 +325,44 @@ export class Gateway {
   constructor(
     private readonly store: Store,
     private readonly config: ServerConfig,
-  ) {}
+  ) {
+    if (config.provaDeTrabalho) {
+      this.#provas = new EmissorDeProvas({
+        ...config.provaDeTrabalho,
+        contarUltimaHora: () => this.store.contasCriadasDesde(currentMinute() - 59),
+      })
+    }
+    if (config.limiteDeRede) {
+      this.#limiteDeRede = new LimiteDeRede(config.limiteDeRede)
+      this.#passesDoConvite = new PassesDoConvite(config.limiteDeRede)
+    }
+    if (config.contaNova) this.#vigia = new VigiaDaContaNova(config.contaNova)
+    if ((config.entradasNaSalaComumPorHora ?? 0) > 0) {
+      this.#filaDaSalaComum = new FilaDaSalaComum({ porHora: config.entradasNaSalaComumPorHora as number })
+    }
+  }
+
+  /** The abuse brake, part 2 (1.3.26). Each piece is `null` when the operator turned it off. See `anti-abuso.ts`. */
+  readonly #provas: EmissorDeProvas | null = null
+  readonly #limiteDeRede: LimiteDeRede | null = null
+  /**
+   * The network key of a connection when the account limit is off (no caps of
+   * its own: only `identificar` is used). Same HMAC with a daily salt, in memory.
+   */
+  readonly #identificadorDeRede = new LimiteDeRede({ porHora: 0, porDia: 0 })
+  /** New accounts a community invite let past the network limit, per channel and per invite maker. */
+  readonly #passesDoConvite: PassesDoConvite | null = null
+  /** Who made each community invite, in memory, for the cap per maker. See `CriadoresDosConvites`. */
+  readonly #criadoresDosConvites = new CriadoresDosConvites()
+  readonly #vigia: VigiaDaContaNova | null = null
+  readonly #filaDaSalaComum: FilaDaSalaComum | null = null
+  /**
+   * Accounts that asked the common room's members for a seat in the last ten
+   * minutes, with when that ends. A member who claims their key packages is
+   * admitting them, which does not count against the member's people a day.
+   * Memory only, and only while the new-account limits are on.
+   */
+  readonly #pediramASalaComum = new Map<string, number>()
 
   /**
    * Seat repairs as numbers, for `GET /_interno/canais` (1.3.25, P8). In memory,
@@ -346,6 +468,11 @@ export class Gateway {
       // that does not see this hides the "add device" button. See
       // `CAPACIDADE_EMPARELHAMENTO`.
       CAPACIDADE_EMPARELHAMENTO,
+      // Has short-code pairing boxes (1.3.26): `pair.code.open` from the new
+      // device, without an account, and `pair.code.join` from the account, by
+      // the two characters of the code it sees. See
+      // `CAPABILITY_PAIRING_PAKE` and `#openCodeBox`.
+      CAPABILITY_PAIRING_PAKE,
       // A device the account removed from the manifest cannot connect, claim or
       // publish key packages, and never gets back into any of the account's
       // manifests. A client that does not see this still revokes (removes the
@@ -362,6 +489,9 @@ export class Gateway {
       // without storing it. Only to connections that announced it in `hello`.
       // See `CAPACIDADE_SINAL_EFEMERO` and `#sinal`.
       CAPACIDADE_SINAL_EFEMERO,
+      // A `channel.sinal` with `para` goes only to that device's connections.
+      // See `CAPACIDADE_SINAL_PARA` and `#sinal`.
+      CAPACIDADE_SINAL_PARA,
       // The server arbitrates the first creation of a DM. In 1.0 the DM has an
       // opaque address and goes through the general arbitration (first to claim
       // wins); the capability stays announced because the client reads it to
@@ -376,6 +506,9 @@ export class Gateway {
       CAPACIDADE_LIGACOES_CURTAS,
       // Verifies the code proof in `invite.redeem`. See `CAPACIDADE_RESGATE_POR_PROVA`.
       CAPACIDADE_RESGATE_POR_PROVA,
+      // Answers `channel.members.get` with its roster of the channel. See
+      // `CAPACIDADE_MEMBROS_DO_CANAL` and `#membrosDoCanal`.
+      CAPACIDADE_MEMBROS_DO_CANAL,
       // Stores the channel name seal and returns it (`invite.resolved`,
       // `invite.selo`). See `CAPACIDADE_SELO_DO_CONVITE`.
       CAPACIDADE_SELO_DO_CONVITE,
@@ -383,6 +516,16 @@ export class Gateway {
       // `cofre.get`, `cofre.del`), only for connections that announce it in `hello`.
       // See `CAPACIDADE_COFRE_CIFRADO` and `#cofre`.
       CAPACIDADE_COFRE_CIFRADO,
+      // Counts the channels each account creates, says the count
+      // (`channel.quota`) and refuses past the cap (1.3.26). Always announced:
+      // with the cap off the count says `null`. See `CAPACIDADE_LIMITE_DE_CANAIS`.
+      CAPACIDADE_LIMITE_DE_CANAIS,
+      // Counts the rooms each account creates inside channels (`room.claim`,
+      // `room.release`) and refuses past the cap (1.3.26). See `CAPABILITY_ROOM_LIMIT`.
+      CAPABILITY_ROOM_LIMIT,
+      // Sends the account's new manifest to its other live connections that
+      // announced it in `hello`. See `CAPACIDADE_MANIFESTO_AO_VIVO`.
+      CAPACIDADE_MANIFESTO_AO_VIVO,
       // Wakes closed apps with an empty Web Push, only while a sender is
       // attached (`ENCLAVE_PUSH` not `off`). See `CAPACIDADE_WEB_PUSH` and
       // `acordarAparelhos`.
@@ -451,12 +594,31 @@ export class Gateway {
   static readonly FRASE_CONTA_SUSPENSA =
     "Your account is suspended on this server. Open the app to read the reason and ask for a review. / A tua conta está suspensa neste servidor. Abre a app para ler o motivo e pedir revisão."
 
-  /** The messages for a refused new account (1.3.25), for an app that does not know the codes. See `#fecharRegistoRecusado`. */
-  static readonly FRASE_REGISTO_FECHADO = "Este servidor não aceita contas novas. This server does not accept new accounts."
+  /**
+   * The messages for a refused new account (1.3.25), for an app that does not know the codes. See `#fecharRegistoRecusado`.
+   * English first, then " / " and Portuguese, like the neighbours (1.3.26). Apps that know the codes show their own sentence.
+   */
+  static readonly FRASE_REGISTO_FECHADO = "This server does not accept new accounts. / Este servidor não aceita contas novas."
   static readonly FRASE_CONVITE_DE_REGISTO_EM_FALTA =
-    "Este servidor só aceita contas novas com um código de convite. This server only accepts new accounts with an invite code."
+    "This server only accepts new accounts with an invite code. / Este servidor só aceita contas novas com um código de convite."
   static readonly FRASE_CONVITE_DE_REGISTO_INVALIDO =
-    "Esse código de convite não é válido. That invite code is not valid."
+    "That invite code is not valid. / Esse código de convite não é válido."
+  /**
+   * The messages of three media refusals (1.3.26: they were in Portuguese only). The client reads
+   * the `code` (`codigoDaRecusaDoSfu`), never the message, so the change is safe for every version.
+   */
+  static readonly FRASE_SFU_DEMASIADOS_PEDIDOS = "too many media requests this minute"
+  static readonly FRASE_SFU_NOUTRO_APARELHO = "this account is in a call on another device"
+  static readonly FRASE_SFU_FORA_DA_CHAMADA = "join the call before you ask for a transport"
+  /** The messages for the abuse brake's refusals (1.3.26). An app that knows the codes shows its own sentence. */
+  static readonly FRASE_PROVA_EM_FALTA =
+    "Prepare the account again: the server needs a short check from the app. / Prepara a conta outra vez: o servidor precisa de uma verificação curta da app."
+  static readonly FRASE_PROVA_INVALIDA =
+    "The check from the app is not valid or it expired. Try again. / A verificação da app não é válida ou expirou. Tenta outra vez."
+  /** A community invite lets a new account past the network limit only if the community has an account at least this old (72 h). */
+  static readonly MINUTOS_DE_UMA_CONTA_ANTIGA = 72 * 60
+  static readonly FRASE_REDE_COM_MUITAS_CONTAS =
+    "This network created many accounts today. Open an invite link from a person who uses Orwell. / Esta rede criou muitas contas hoje. Abre uma ligação de convite de uma pessoa que usa o Orwell."
 
   /**
    * How often `fecharSuspensas` runs (`app.ts`): a connection opened before
@@ -480,10 +642,18 @@ export class Gateway {
    */
   static PRAZO_DO_LOGIN_MS = 30_000
 
+  /** What loopback counts as for the per-network limit when a test sets `travaoEmLoopback` (RFC 5737). */
+  static readonly REDE_DO_LOOPBACK_NOS_TESTES = "192.0.2.1"
+
   /** One UTC day: account ages are signed to the day (`account.age.get`). */
   static readonly DIA_MS = 86_400_000
 
-  accept(socket: WebSocket): void {
+  /**
+   * @param ip The requester's address as Fastify reads it behind the trusted
+   * proxies (`request.ip`). Used once, here, to compute the network's HMAC keys,
+   * and then dropped: the connection does not keep it.
+   */
+  accept(socket: WebSocket, ip?: string): void {
     const connection: Connection = {
       socket,
       id: randomUUID(),
@@ -493,6 +663,7 @@ export class Gateway {
       janela: null,
       address: null,
       deviceKey: null,
+      chaveDoLogin: null,
       pending: null,
       challenge: null,
       channels: new Set(),
@@ -506,6 +677,22 @@ export class Gateway {
       envioRecusado: false,
       historicoRecusado: false,
       cofreCifrado: false,
+      manifestoAoVivo: false,
+      rede: null,
+      deLoopback: ip !== undefined && ehLoopback(ip) && this.config.travaoEmLoopback !== true,
+      sabeProvaDeTrabalho: false,
+      sabeContaNova: false,
+      sabeLimiteDeCanais: false,
+      criadaEm: null,
+      estreiaRecusada: null,
+    }
+    if (!connection.deLoopback) {
+      // A test that applies the brake to loopback (`travaoEmLoopback`) counts loopback as one public
+      // network: a private address is never counted (see `prefixoDaRede`).
+      const vista = ip !== undefined && ehLoopback(ip) && this.config.travaoEmLoopback === true ? Gateway.REDE_DO_LOOPBACK_NOS_TESTES : ip
+      // Always identified, also with the account limit off: the short-code caps use it
+      // (`#openCodeBox`). The account rules still apply only with `#limiteDeRede`.
+      connection.rede = (this.#limiteDeRede ?? this.#identificadorDeRede).identificar(vista)
     }
     this.#connections.add(connection)
     this.#porId.set(connection.id, connection)
@@ -595,6 +782,7 @@ export class Gateway {
     this.#connections.delete(connection)
     this.#porId.delete(connection.id)
     this.#baldesDoSinal.delete(`ligacao|${connection.id}`)
+    this.#pairCodeAttempts.delete(`connection|${connection.id}`)
     // A pairing box with one side missing is useless, and leaving it open
     // would let a third party take the place of the side that dropped.
     if (this.#caixas.size > 0) this.#largarCaixas(connection)
@@ -698,6 +886,167 @@ export class Gateway {
    */
   static readonly PAIR_JOINS_POR_MINUTO = 6
 
+  // ------------------------------------------------ short-code pairing (1.3.26)
+
+  /**
+   * Short-code boxes waiting for a join, by nameplate. The same objects as in
+   * `#caixas`; a box leaves this map at its first join, or when it dies.
+   *
+   * What the server learns from a short-code box: the nameplate (two of the
+   * six characters, 961 possible), the random `pairId`, that a connection
+   * (usually without an account) opened it, which account joined, and when.
+   * **Never the other four characters, never the key CPace derives**: the
+   * CPace messages cross in `pair.send`, and from them alone nobody gets the
+   * code without trying it online. Nothing is written to the database.
+   */
+  #nameplates = new Map<string, CaixaDeEmparelhamento>()
+
+  /**
+   * Five minutes for someone to type the code. After the first join the box
+   * gets the normal `PAIR_TTL_MS` from that moment: a code typed at 4:59 does
+   * not die in the middle of the words. Not `readonly`, for the tests.
+   */
+  static PAIR_CODE_TTL_MS = 5 * 60_000
+
+  /**
+   * Short-code boxes waiting at once, across the process. Below the 961
+   * nameplates so that a new device drawing a random code rarely hits one in
+   * use (at the cap, one in eight; it draws again), and inside
+   * `PAIR_CAIXAS_VIVAS`, which still counts every box.
+   */
+  static PAIR_CODES_LIVE = 128
+
+  /**
+   * Codes an ACCOUNT may type per window, found or not: the ceiling on online
+   * guessing. Each try is one CPace run, and a run is one guess at the four
+   * secret characters (1 in 923,521). Five in ten minutes is a person who
+   * typed badly twice and tried again; more is a script.
+   */
+  static readonly PAIR_CODE_ATTEMPTS_PER_ACCOUNT = 5
+  static readonly PAIR_CODE_WINDOW_MS = 10 * 60_000
+
+  /** Codes a connection may open per window: a new device makes one, and a new one when it expires. */
+  static readonly PAIR_CODE_OPENS_PER_CONNECTION = 5
+
+  /**
+   * Waiting short codes per network at once (1.3.26 review, finding 1). A
+   * household pairing two devices at the same time fits; a script with many
+   * sockets on one address no longer fills `PAIR_CODES_LIVE`.
+   */
+  static readonly PAIR_CODES_PER_NETWORK = 2
+
+  /** Codes a network may open per window, across all its connections: a new connection does not start the count again. */
+  static readonly PAIR_CODE_OPENS_PER_NETWORK = 10
+
+  /** Attempts per account (and opens per connection) in the last window, by key. Memory only. */
+  #pairCodeAttempts = new Map<string, number[]>()
+
+  /** One unit of a short-code ceiling, or `false` when the window is spent. */
+  #withinPairCodeWindow(key: string, ceiling: number): boolean {
+    const now = Date.now()
+    const recent = (this.#pairCodeAttempts.get(key) ?? []).filter((stamp) => now - stamp < Gateway.PAIR_CODE_WINDOW_MS)
+    if (recent.length >= ceiling) {
+      this.#pairCodeAttempts.set(key, recent)
+      return false
+    }
+    recent.push(now)
+    this.#pairCodeAttempts.set(key, recent)
+    if (this.#pairCodeAttempts.size > 4096) {
+      for (const [other, stamps] of this.#pairCodeAttempts) {
+        if (stamps.every((stamp) => now - stamp >= Gateway.PAIR_CODE_WINDOW_MS)) this.#pairCodeAttempts.delete(other)
+      }
+    }
+    return true
+  }
+
+  /** The side of a box that is the account: the opener of a QR box, the joiner of a short-code box. */
+  #accountSide(box: CaixaDeEmparelhamento): Connection | null {
+    return box.byCode ? box.convidado : box.anfitriao
+  }
+
+  /**
+   * `pair.code.open`: the new device opens a box under the nameplate of the
+   * code it shows. Passes without an account (see `#dispatch`), capped per
+   * connection, one waiting code per connection.
+   */
+  #openCodeBox(connection: Connection, nameplate: string, pairId: string): void {
+    for (const box of this.#nameplates.values()) {
+      if (box.anfitriao === connection) {
+        this.#send(connection, { t: "pair.rejected", pairId, reason: "exists" })
+        return
+      }
+    }
+    if (!this.#withinPairCodeWindow(`connection|${connection.id}`, Gateway.PAIR_CODE_OPENS_PER_CONNECTION)) {
+      this.#send(connection, { t: "pair.rejected", pairId, reason: "rate-limited" })
+      return
+    }
+    // Per network too (1.3.26 review, finding 1): a script with many sockets on one
+    // address would otherwise fill `PAIR_CODES_LIVE`. A private address has no key,
+    // and keeps only the per-connection caps above.
+    const network = chaveDeHojeDaRede(connection.rede)
+    if (network !== undefined) {
+      let waiting = 0
+      for (const box of this.#nameplates.values()) if (mesmaRede(box.anfitriao.rede, connection.rede)) waiting++
+      if (waiting >= Gateway.PAIR_CODES_PER_NETWORK || !this.#withinPairCodeWindow(`network|${network}`, Gateway.PAIR_CODE_OPENS_PER_NETWORK)) {
+        this.#send(connection, { t: "pair.rejected", pairId, reason: "rate-limited" })
+        return
+      }
+    }
+    // A nameplate in use, or a `pairId` taken: the new device draws another code.
+    if (this.#nameplates.has(nameplate) || this.#caixas.has(pairId)) {
+      this.#send(connection, { t: "pair.rejected", pairId, reason: "exists" })
+      return
+    }
+    if (this.#nameplates.size >= Gateway.PAIR_CODES_LIVE || this.#caixas.size >= Gateway.PAIR_CAIXAS_VIVAS) {
+      this.#send(connection, { t: "pair.rejected", pairId, reason: "full" })
+      return
+    }
+    const box: CaixaDeEmparelhamento = {
+      pairId,
+      anfitriao: connection,
+      convidado: null,
+      criadoEm: Date.now(),
+      prazo: setTimeout(() => this.#queimarCaixa(box, "expired"), Gateway.PAIR_CODE_TTL_MS),
+      byCode: true,
+      nameplate,
+    }
+    box.prazo.unref?.()
+    this.#caixas.set(pairId, box)
+    this.#nameplates.set(nameplate, box)
+    this.#send(connection, { t: "pair.opened", pairId })
+  }
+
+  /**
+   * `pair.code.join`: an account joins the box of the code it typed.
+   *
+   * The attempt counts before the lookup, so a wrong nameplate costs the same
+   * as a right one, and the answer for "no such code", "expired" and "already
+   * used" is the same `unknown`. The nameplate leaves the index at once: this
+   * is the only join the code ever gets, so a wrong CPace guess here is the
+   * last guess at this code.
+   */
+  #joinCodeBox(connection: Connection, nameplate: string): void {
+    const who = connection.address as string
+    if (!this.#withinPairCodeWindow(`account|${who}`, Gateway.PAIR_CODE_ATTEMPTS_PER_ACCOUNT)) {
+      this.#send(connection, { t: "pair.code.rejected", nameplate, reason: "rate-limited" })
+      return
+    }
+    const box = this.#nameplates.get(nameplate)
+    if (!box || box.anfitriao === connection) {
+      this.#send(connection, { t: "pair.code.rejected", nameplate, reason: "unknown" })
+      return
+    }
+    this.#nameplates.delete(nameplate)
+    box.nameplate = null
+    box.convidado = connection
+    // From here the box lives as a QR box does: the code is spent, the pairing is not.
+    clearTimeout(box.prazo)
+    box.prazo = setTimeout(() => this.#queimarCaixa(box, "expired"), Gateway.PAIR_TTL_MS)
+    box.prazo.unref?.()
+    this.#send(connection, { t: "pair.code.joined", nameplate, pairId: box.pairId })
+    this.#send(box.anfitriao, { t: "pair.joined", pairId: box.pairId })
+  }
+
   /** The box this connection is in, by `pairId`, or nothing. */
   #caixaDe(connection: Connection, pairId: string): CaixaDeEmparelhamento | undefined {
     const caixa = this.#caixas.get(pairId)
@@ -727,6 +1076,8 @@ export class Gateway {
       convidado: null,
       criadoEm: Date.now(),
       prazo: setTimeout(() => this.#queimarCaixa(caixa, "expired"), Gateway.PAIR_TTL_MS),
+      byCode: false,
+      nameplate: null,
     }
     // A box's timer does not keep the process alive: a server that is shutting
     // down shuts down, and the box dies with it.
@@ -746,7 +1097,8 @@ export class Gateway {
       return
     }
     const caixa = this.#caixas.get(pairId)
-    if (!caixa) {
+    // A short-code box is joined by its nameplate, by an account, never by its id.
+    if (!caixa || caixa.byCode) {
       this.#send(connection, { t: "pair.rejected", pairId, reason: "unknown" })
       return
     }
@@ -782,6 +1134,7 @@ export class Gateway {
   ): void {
     if (this.#caixas.get(caixa.pairId) !== caixa) return
     this.#caixas.delete(caixa.pairId)
+    if (caixa.nameplate !== null && this.#nameplates.get(caixa.nameplate) === caixa) this.#nameplates.delete(caixa.nameplate)
     clearTimeout(caixa.prazo)
     for (const lado of [caixa.anfitriao, caixa.convidado]) {
       if (!lado || lado === quemFechou) continue
@@ -828,6 +1181,10 @@ export class Gateway {
     // is NOT here: the device that opens has the account and proves it first.
     const semConta =
       frame.t === "pair.join" ||
+      // The new device of a short-code pairing opens its box before it has an
+      // account (`#openCodeBox`). `pair.code.join` is NOT here: it is the
+      // account's side.
+      frame.t === "pair.code.open" ||
       ((frame.t === "pair.send" || frame.t === "pair.close") && this.#caixaDe(connection, frame.pairId) !== undefined)
     const needsAuth =
       frame.t !== "hello" && frame.t !== "auth.begin" && frame.t !== "auth.finish" && frame.t !== "ping" && !semConta
@@ -896,6 +1253,10 @@ export class Gateway {
         connection.envioRecusado = frame.capabilities?.includes(CAPACIDADE_ENVIO_RECUSADO) ?? false
         connection.historicoRecusado = frame.capabilities?.includes(CAPACIDADE_HISTORICO_RECUSADO) ?? false
         connection.cofreCifrado = frame.capabilities?.includes(CAPACIDADE_COFRE_CIFRADO) ?? false
+        connection.manifestoAoVivo = frame.capabilities?.includes(CAPACIDADE_MANIFESTO_AO_VIVO) ?? false
+        connection.sabeProvaDeTrabalho = frame.capabilities?.includes(CAPACIDADE_PROVA_DE_TRABALHO) ?? false
+        connection.sabeContaNova = frame.capabilities?.includes(CAPACIDADE_LIMITES_DE_CONTA_NOVA) ?? false
+        connection.sabeLimiteDeCanais = frame.capabilities?.includes(CAPACIDADE_LIMITE_DE_CANAIS) ?? false
         this.#send(connection, {
           t: "hello.ok",
           version: PROTOCOL_VERSION,
@@ -918,6 +1279,9 @@ export class Gateway {
             : {}),
           // Who may create an account here (1.3.25). See `registo.ts` in the protocol.
           registo: this.config.registo ?? "aberto",
+          // The proof-of-work challenge for a new account (1.3.26). One per `hello`: it costs an HMAC, and
+          // the server keeps nothing until one is spent. None when no new account can get in.
+          ...(this.#provas && this.config.registo !== "fechado" ? { provaDeTrabalho: this.#provas.emitir() } : {}),
         })
         return
 
@@ -943,7 +1307,14 @@ export class Gateway {
       }
 
       case "auth.finish":
-        this.#finishAuth(connection, frame.signature, { posse: frame.posse ?? 0, marca: frame.assumirPosse }, frame.conviteDeRegisto)
+        this.#finishAuth(
+          connection,
+          frame.signature,
+          { posse: frame.posse ?? 0, marca: frame.assumirPosse },
+          frame.conviteDeRegisto,
+          frame.provaDeTrabalho,
+          frame.conviteDeComunidade,
+        )
         return
 
       case "channel.subscribe": {
@@ -1020,6 +1391,8 @@ export class Gateway {
         return
 
       case "channel.send": {
+        // The common room's new-account limits (1.3.26), before the account's cap: a refusal here spends nothing.
+        if (frame.kind === "application" && this.#recusarPelaContaNova(connection, frame)) return
         /*
           Two buckets (S6 review): messages, and commits with their Welcomes.
           With a single bucket, an account syncing (anti-entropy, a burst of
@@ -1044,7 +1417,7 @@ export class Gateway {
           // Only to a client that reads it: see `CAPACIDADE_HISTORICO_RECUSADO`.
           if (!connection.historicoRecusado) return
           const recentes = this.#tectos.get(`backfills|${connection.address as string}`) ?? []
-          const retryAfterMs = Math.min(60_000, Math.max(1, (recentes[0] ?? Date.now()) + 60_000 - Date.now()))
+          const retryAfterMs = Math.min(Gateway.JANELA_DOS_TECTOS_MS, Math.max(1, (recentes[0] ?? Date.now()) + Gateway.JANELA_DOS_TECTOS_MS - Date.now()))
           this.#send(connection, { t: "channel.backfill.page", channel: frame.channel, events: [], more: true, retryAfterMs })
           return
         }
@@ -1125,6 +1498,17 @@ export class Gateway {
           })
           return
         }
+        // A new account adds a limited number of people a day (1.3.26). The pool answer, empty, with the reason.
+        if (!this.#podeAdicionar(connection, frame.address)) {
+          this.#send(connection, {
+            t: "keypackage.claimed",
+            address: frame.address,
+            keyPackage: null,
+            ...(frame.bundle ? { keyPackages: [], manifest: null } : {}),
+            ...(connection.sabeContaNova ? { recusa: RECUSA_DE_CONTA_NOVA } : {}),
+          })
+          return
+        }
         await this.#claimKeyPackage(connection, frame.address, frame.bundle, frame.devices)
         return
       }
@@ -1134,6 +1518,21 @@ export class Gateway {
         // is useful to somebody else.
         if (!this.#dentroDoTecto("convites", connection.address as string, Gateway.CONVITES_POR_MINUTO)) return
         if (!this.#mayReach(connection, frame.channel)) return
+        // The cap on channels (1.3.26), for a channel an app did not say was one: a
+        // link makes it a community, so it counts against its founder now. Refused
+        // past the cap. Said to a client that reads it; an older one waits, and its
+        // wait times out.
+        if (!this.#contarComoComunidade(connection, frame.channel)) {
+          if (connection.sabeLimiteDeCanais) {
+            this.#send(connection, {
+              t: "invite.created",
+              channel: frame.channel,
+              codeHash: frame.codeHash,
+              recusa: RECUSA_DE_LIMITE_DE_CANAIS,
+            })
+          }
+          return
+        }
         const codigoCurto = this.store.createInvite({
           codeHash: frame.codeHash,
           channel: frame.channel,
@@ -1144,6 +1543,8 @@ export class Gateway {
           // seal never gets here.
           ...(frame.selo === undefined ? {} : { selo: frame.selo }),
         })
+        // Who made it, in memory, for the cap per maker on the network limit. See `PassesDoConvite`.
+        this.#criadoresDosConvites.anotar(frame.codeHash, connection.address as string)
         this.#send(connection, {
           t: "invite.created",
           channel: frame.channel,
@@ -1200,6 +1601,7 @@ export class Gateway {
         const owning = this.store.channelOfInvite(frame.codeHash)
         if (!owning || !this.#mayReach(connection, owning)) return
         this.store.revokeInvite(frame.codeHash)
+        this.#criadoresDosConvites.esquecer(frame.codeHash)
         return
       }
 
@@ -1322,12 +1724,41 @@ export class Gateway {
           })
           return
         }
-        const owner = this.store.claimChannel(frame.channel, connection.address as string)
+        // The cap on channels an account creates (1.3.26). Only a claim
+        // that says it is one, and only a new one. Before the daily new-channel
+        // ceiling: this one has the clearer answer.
+        if (frame.comunidade === true && !this.#podeCriarComunidade(connection, frame.channel)) {
+          this.#send(connection, {
+            t: "channel.claim.result",
+            channel: frame.channel,
+            owner: "",
+            mine: false,
+            empty: true,
+            recusa: RECUSA_DE_LIMITE_DE_CANAIS,
+            ...this.#criarCanaisNaResposta(connection),
+          })
+          return
+        }
+        // A new account opens a limited number of new channels a day (1.3.26). Only a claim that would be new.
+        if (!this.#podeEstrear(connection, frame.channel)) {
+          this.#send(connection, {
+            t: "channel.claim.result",
+            channel: frame.channel,
+            owner: "",
+            mine: false,
+            empty: true,
+            ...(connection.sabeContaNova ? { recusa: RECUSA_DE_CONTA_NOVA } : {}),
+          })
+          return
+        }
+        const comunidade = frame.comunidade === true && !this.#ehSalaComum(frame.channel)
+        const owner = this.store.claimChannel(frame.channel, connection.address as string, comunidade)
         this.#send(connection, {
           t: "channel.claim.result",
           channel: frame.channel,
           owner,
           mine: owner === connection.address,
+          ...(comunidade ? this.#criarCanaisNaResposta(connection) : {}),
           // Being the designated creator is not enough to create: a client that
           // lost its vault and came back still is one, and would create a second
           // group with the same id. This is what the client needs to know to
@@ -1367,6 +1798,10 @@ export class Gateway {
         return
       }
 
+      case "channel.members.get":
+        this.#membrosDoCanal(connection, frame.channel)
+        return
+
       case "channel.groupinfo.take": {
         if (!this.#ehSalaComum(frame.channel)) {
           this.#send(connection, { t: "channel.groupinfo", channel: frame.channel })
@@ -1380,6 +1815,11 @@ export class Gateway {
           return
         }
         if (!this.#dentroDoTecto("cartoes", connection.address as string, Gateway.CARTOES_POR_MINUTO)) return
+        // The join ceiling (1.3.26): someone waiting in the queue gets "no card", and the card stays for when there is room.
+        if (this.#esperaNaFila(connection, frame.channel) !== null) {
+          this.#send(connection, { t: "channel.groupinfo", channel: frame.channel })
+          return
+        }
 
         const info = this.store.takeGroupInfo(frame.channel)
         if (!info) {
@@ -1474,6 +1914,8 @@ export class Gateway {
         // The devices this manifest names that are in their pairing window are
         // devices of the account now: the window closes and they keep their seats.
         if (resultado.ok) {
+          // Before the windows close: a device this manifest admits from its pairing window learns the list from the pairing, not from here.
+          this.#avisarManifestoNovo(connection, quem)
           const nomeados = new Set(frame.manifest.devices.map((device) => device.deviceKey))
           for (const outra of this.#connections) {
             if (outra.address !== quem || outra.janela === null || outra.deviceKey === null) continue
@@ -1503,6 +1945,46 @@ export class Gateway {
         return
       }
 
+      case "channel.quota":
+        this.#send(connection, {
+          t: "channel.quota.result",
+          criarCanais: this.#criarCanaisDe(connection),
+          rooms: this.#roomQuotaOf(connection),
+        })
+        return
+
+      case "room.claim": {
+        // Only a member of the channel counts a room in it; the common room's rooms are the operator's.
+        const quota = this.#roomQuotaOf(connection)
+        const quem = connection.address as string
+        if (!this.#isSeated(connection, frame.channel) || this.#ehSalaComum(frame.channel)) {
+          this.#send(connection, { t: "room.claim.result", channel: frame.channel, room: frame.room, ok: true, ...(quota ? { rooms: quota } : {}) })
+          return
+        }
+        if (!this.store.roomIsCounted(frame.channel, frame.room)) {
+          if (quota !== null && quota.created >= quota.max) {
+            this.#send(connection, {
+              t: "room.claim.result",
+              channel: frame.channel,
+              room: frame.room,
+              ok: false,
+              refusal: REFUSAL_ROOM_LIMIT,
+              rooms: quota,
+            })
+            return
+          }
+          this.store.countRoom(frame.channel, frame.room, quem)
+        }
+        const depois = this.#roomQuotaOf(connection)
+        this.#send(connection, { t: "room.claim.result", channel: frame.channel, room: frame.room, ok: true, ...(depois ? { rooms: depois } : {}) })
+        return
+      }
+
+      case "room.release":
+        // Any member may delete a room (the app checks the permission); the place is its creator's again.
+        if (this.#isSeated(connection, frame.channel)) this.store.releaseRoom(frame.channel, frame.room)
+        return
+
       case "account.age.get": {
         // Its own bucket: opening a poll with a hundred voters asks a hundred ages at once,
         // and sharing the manifests' 60 dropped the rest and the minute's manifests too.
@@ -1523,8 +2005,10 @@ export class Gateway {
             return false
           }
         })()
+        // The first day of the account, for the common room's links (1.3.26). See `account.age.result.novaAte`.
+        const novaAte = this.#novaAte(daqui ? exacta : null)
         if (!chave || criadaEm === null || !daqui) {
-          this.#send(connection, { t: "account.age.result", address: frame.address, atestacao: null, chave: null })
+          this.#send(connection, { t: "account.age.result", address: frame.address, atestacao: null, chave: null, ...novaAte })
           return
         }
         const corpo = { address: frame.address, criadaEm, servidor: this.config.serverName, keyId: chave.keyId }
@@ -1533,6 +2017,7 @@ export class Gateway {
           address: frame.address,
           atestacao: { ...corpo, assinatura: toBase64(ed25519.sign(mensagemDaAtestacao(corpo), chave.privateKey)) },
           chave: { keyId: chave.keyId, key: toBase64(chave.publicKey) },
+          ...novaAte,
         })
         return
       }
@@ -1572,6 +2057,12 @@ export class Gateway {
         if (!this.#dentroDoTecto("pedidos-de-lugar", connection.address as string, Gateway.PEDIDOS_DE_LUGAR_POR_MINUTO)) return
         if (!this.#dentroDoTecto("pedidos-de-lugar", `${connection.address as string}|${frame.channel}`, Gateway.PEDIDOS_DE_LUGAR_POR_CANAL)) return
         {
+          // The join ceiling (1.3.26): a first join over it waits, and the members hear nothing yet.
+          const fila = this.#esperaNaFila(connection, frame.channel)
+          if (fila !== null) {
+            this.#send(connection, { t: "channel.rejoin.sent", channel: frame.channel, ouviram: 0, fila })
+            return
+          }
           const ouviram = this.broadcast(frame.channel, {
             t: "channel.rejoin",
             channel: frame.channel,
@@ -1579,11 +2070,21 @@ export class Gateway {
             // Which device asks (1.3.25): its leaf is the only one to take out (C1). Never what
             // the client says: the key this connection proved at login, and none without a chain.
             ...(connection.deviceKey !== null ? { device: toBase64(connection.deviceKey) } : {}),
+            // The device's own signature (1.3.26), untouched and only with `device`: the members
+            // check it against that leaf. The server cannot make one. See `pedido-de-lugar.ts`.
+            ...(connection.deviceKey !== null && frame.prova !== undefined ? { prova: frame.prova } : {}),
           })
           // Say how many it reached. Zero is a useful answer: it means nobody
           // online can admit, which is different from being ignored by those who are.
           this.#send(connection, { t: "channel.rejoin.sent", channel: frame.channel, ouviram })
           this.lugares.pedido(frame.channel, connection.address as string, ouviram)
+          if (this.#vigia && this.#ehSalaComum(frame.channel)) {
+            const agora = Date.now()
+            this.#pediramASalaComum.set(connection.address as string, agora + 10 * 60_000)
+            if (this.#pediramASalaComum.size > 4096) {
+              for (const [quem, ate] of this.#pediramASalaComum) if (ate <= agora) this.#pediramASalaComum.delete(quem)
+            }
+          }
         }
         return
 
@@ -1628,6 +2129,12 @@ export class Gateway {
         return
       case "pair.join":
         this.#juntarACaixa(connection, frame.pairId)
+        return
+      case "pair.code.open":
+        this.#openCodeBox(connection, frame.nameplate, frame.pairId)
+        return
+      case "pair.code.join":
+        this.#joinCodeBox(connection, frame.nameplate)
         return
       case "pair.send": {
         const caixa = this.#caixaDe(connection, frame.pairId)
@@ -1842,7 +2349,7 @@ export class Gateway {
    * now". Spends nothing.
    */
   #esperaDoBalde(chave: string, custo: number, tecto: number, agora: number): number {
-    const vivos = (this.#baldesDoSinal.get(chave) ?? []).filter((gasto) => agora - gasto.at < 60_000)
+    const vivos = (this.#baldesDoSinal.get(chave) ?? []).filter((gasto) => agora - gasto.at < Gateway.JANELA_DOS_TECTOS_MS)
     if (vivos.length === 0) this.#baldesDoSinal.delete(chave)
     else this.#baldesDoSinal.set(chave, vivos)
     let usado = vivos.reduce((soma, gasto) => soma + gasto.custo, 0)
@@ -1850,14 +2357,14 @@ export class Gateway {
     // Spends are in arrival order: the oldest goes first.
     for (const gasto of vivos) {
       usado -= gasto.custo
-      if (usado + custo <= tecto) return Math.max(1, gasto.at + 60_000 - agora)
+      if (usado + custo <= tecto) return Math.max(1, gasto.at + Gateway.JANELA_DOS_TECTOS_MS - agora)
     }
-    return 60_000
+    return Gateway.JANELA_DOS_TECTOS_MS
   }
 
   /** What this bucket spent in the last minute. Spends nothing. */
   #usadoNoBalde(chave: string, agora: number): number {
-    return (this.#baldesDoSinal.get(chave) ?? []).reduce((soma, gasto) => (agora - gasto.at < 60_000 ? soma + gasto.custo : soma), 0)
+    return (this.#baldesDoSinal.get(chave) ?? []).reduce((soma, gasto) => (agora - gasto.at < Gateway.JANELA_DOS_TECTOS_MS ? soma + gasto.custo : soma), 0)
   }
 
   #gastarDoBalde(chave: string, custo: number, agora: number): void {
@@ -1869,7 +2376,7 @@ export class Gateway {
     if (this.#baldesDoSinal.size > 4096) {
       for (const [outra, lista] of this.#baldesDoSinal) {
         const ultimo = lista[lista.length - 1]
-        if (!ultimo || agora - ultimo.at >= 60_000) this.#baldesDoSinal.delete(outra)
+        if (!ultimo || agora - ultimo.at >= Gateway.JANELA_DOS_TECTOS_MS) this.#baldesDoSinal.delete(outra)
       }
     }
   }
@@ -1891,7 +2398,8 @@ export class Gateway {
    *
    * **Who receives it:** every other connection subscribed to the channel
    * that announced the capability, including other devices of the same
-   * account (each is a leaf and has its own hash). The sender gets no echo.
+   * account (each is a leaf and has its own hash). With `para`, only the
+   * connections of that device (`CAPACIDADE_SINAL_PARA`). The sender gets no echo.
    */
   #sinal(connection: Connection, frame: Extract<ClientFrame, { t: "channel.sinal" }>): void {
     const tectos = tectosDoSinal(this.config)
@@ -1913,9 +2421,15 @@ export class Gateway {
       return
     }
 
+    /*
+      With `para`, only that device's connections (`CAPACIDADE_SINAL_PARA`):
+      none connected, and the signal is dropped, as one for a channel nobody
+      else is in. The cost below is the copies really sent.
+    */
     const destinos: Connection[] = []
     for (const outra of this.#connections) {
       if (outra === connection || !outra.address || !outra.sinalEfemero) continue
+      if (frame.para !== undefined && outra.chaveDoLogin !== frame.para) continue
       if (outra.channels.has(frame.channel)) destinos.push(outra)
     }
     const custo = tamanho * destinos.length
@@ -2249,7 +2763,7 @@ export class Gateway {
     }
 
     if (!this.#dentroDoTecto("sfu", connection.address as string, Gateway.SFU_POR_MINUTO)) {
-      this.#recusarSfu(connection, "demasiados-pedidos", "demasiados pedidos de media neste minuto", ref)
+      this.#recusarSfu(connection, "demasiados-pedidos", Gateway.FRASE_SFU_DEMASIADOS_PEDIDOS, ref)
       return
     }
 
@@ -2278,7 +2792,7 @@ export class Gateway {
         }
         const chave = chaveDeAmbito(frame.channel, frame.scope)
         if (this.#chamadaNoutroAparelho(connection, frame.tomar === true)) {
-          this.#recusarSfu(connection, "noutro-aparelho", "esta conta está numa chamada noutro aparelho", ref)
+          this.#recusarSfu(connection, "noutro-aparelho", Gateway.FRASE_SFU_NOUTRO_APARELHO, ref)
           return
         }
         const { rtpCapabilities, produtores } = await motor.entrar(chave, connection.id)
@@ -2326,7 +2840,7 @@ export class Gateway {
         }
         const chave = chaveDeAmbito(frame.channel, frame.scope)
         if (!connection.sfu.has(chave)) {
-          this.#recusarSfu(connection, "fora-da-chamada", "entra na chamada antes de pedir um transporte", ref)
+          this.#recusarSfu(connection, "fora-da-chamada", Gateway.FRASE_SFU_FORA_DA_CHAMADA, ref)
           return
         }
         // No `as Sentido` on purpose: this way the compiler requires the
@@ -2694,6 +3208,7 @@ export class Gateway {
     }
 
     connection.address = null
+    connection.chaveDoLogin = null
     // Logged out now: a window from an earlier login on this socket ends with it (M3).
     this.#fecharJanela(connection)
     connection.challenge = crypto.getRandomValues(new Uint8Array(32))
@@ -2706,6 +3221,8 @@ export class Gateway {
     signature: string,
     posse: { posse: number; marca: string | undefined },
     conviteDeRegisto?: string,
+    provaDeTrabalho?: ProvaDeTrabalho,
+    conviteDeComunidade?: { codeHash: string; prova: string },
   ): void {
     const pending = connection.pending
     const challenge = connection.challenge
@@ -2734,9 +3251,48 @@ export class Gateway {
     // `ENCLAVE_REGISTO`): after the signature, so nobody spends an invite with a
     // key they do not hold, and before anything else is written. A refused one
     // closes the connection, like a suspension: retrying gives the same answer.
+    //
+    // And the abuse brake (1.3.26): the network limit and the proof of work, for
+    // a new account only. See `Store.entrarOuRegistar` for the order.
+    const rede = connection.rede
+    const limite = this.#limiteDeRede
+    const provas = this.#provas
+    const passes = this.#passesDoConvite
+    // The keys of the community invite that let this account past the network limit, if one did.
+    let chavesDoConvite: string[] | undefined
     const registo = this.store.entrarOuRegistar(pending.address, pending.accountKey, {
       modo: this.config.registo ?? "aberto",
       convite: conviteDeRegisto,
+      ...(provas || (limite && rede)
+        ? {
+            contaNova: {
+              redeCheia: () => (limite && rede ? !limite.podeCriar(rede) : false),
+              conviteDeComunidade: () => {
+                if (!conviteDeComunidade || !passes) return false
+                const pedido = { codeHash: conviteDeComunidade.codeHash, address: pending.address }
+                const canal = this.store.canalDoConviteParaRegisto(
+                  conviteDeComunidade.codeHash,
+                  (codeKey) => verificarConviteNoRegisto(codeKey, conviteDeComunidade.prova, pedido),
+                  currentMinute() - Gateway.MINUTOS_DE_UMA_CONTA_ANTIGA,
+                )
+                if (canal === undefined) return false
+                // Counted under the channel and under who made the invite (its founder
+                // when that is not known any more). See `PassesDoConvite`.
+                const criador = this.#criadoresDosConvites.de(conviteDeComunidade.codeHash) ?? this.store.claimantOf(canal)
+                const chaves = [`canal:${canal}`, ...(criador !== undefined ? [`quem:${criador}`] : [])]
+                if (!passes.pode(chaves)) return false
+                chavesDoConvite = chaves
+                return true
+              },
+              prova: () => (provas ? provas.verificar(provaDeTrabalho) : "ok"),
+              aoCriar: (via) => {
+                // A registration invite does not count against the network; a community invite counts against its channel.
+                if (limite && rede && via !== "convite-de-registo") limite.registar(rede)
+                if (via === "convite-de-comunidade" && passes && chavesDoConvite !== undefined) passes.registar(chavesDoConvite)
+              },
+            },
+          }
+        : {}),
     })
     if (registo === "address-taken") {
       this.#send(connection, { t: "error", code: "address-taken", message: "address bound to another key", fatal: true })
@@ -2813,7 +3369,10 @@ export class Gateway {
     // With a chain, `signingKey` is the device key; without one it is the
     // account key, and the connection has no known device. See `Connection.deviceKey`.
     connection.deviceKey = pending.comCadeia ? pending.signingKey : null
-    this.#send(connection, { t: "auth.ok", address: pending.address, posse: geracao })
+    connection.chaveDoLogin = toBase64(pending.signingKey)
+    // The new-account limits (1.3.26): the age the server knows, read once per login.
+    const contaNova = this.#contaNovaDe(connection, pending.address)
+    this.#send(connection, { t: "auth.ok", address: pending.address, posse: geracao, ...(contaNova ? { contaNova } : {}) })
     // The account's own vault version, right after `auth.ok`: it is the only
     // scope known before any subscription. See `cofre.versoes`.
     if (connection.cofreCifrado) {
@@ -2911,6 +3470,16 @@ export class Gateway {
    * created again (see `channelNeverUsed`). What bounds it is the cap on first
    * uses, not a sweeper.
    */
+  /**
+   * The window every "per minute" cap of this gateway counts in: the send
+   * buckets, the signal and vault buckets, and the `retryAfterMs` they report.
+   * One minute in production, and never anything else there. Static so a test
+   * that has to prove what happens when a cap is hit, and then lifts, can wait
+   * seconds instead of a minute: the caps are still hit, the refusal and the
+   * retry are the same code, only the clock that refills the bucket is shorter.
+   */
+  static JANELA_DOS_TECTOS_MS = 60_000
+
   /**
    * Content frames per account and per minute.
    *
@@ -3168,7 +3737,7 @@ export class Gateway {
     }
     const recentes = this.#tectos.get(`${balde}|${connection.address as string}`) ?? []
     const maisAntigo = recentes[0] ?? agora
-    const retryAfterMs = Math.max(1, maisAntigo + 60_000 - agora)
+    const retryAfterMs = Math.max(1, maisAntigo + Gateway.JANELA_DOS_TECTOS_MS - agora)
     if (connection.envioRecusado) {
       this.#send(connection, {
         t: "channel.rejected",
@@ -3195,7 +3764,7 @@ export class Gateway {
   #dentroDoTecto(balde: string, quem: string, porMinuto: number): boolean {
     const agora = Date.now()
     const chave = `${balde}|${quem}`
-    const recentes = (this.#tectos.get(chave) ?? []).filter((carimbo) => agora - carimbo < 60_000)
+    const recentes = (this.#tectos.get(chave) ?? []).filter((carimbo) => agora - carimbo < Gateway.JANELA_DOS_TECTOS_MS)
     this.#tectos.set(chave, recentes)
     if (recentes.length >= porMinuto) return false
     recentes.push(agora)
@@ -3204,7 +3773,7 @@ export class Gateway {
     // and runs only when the map is already large.
     if (this.#tectos.size > 4096) {
       for (const [outra, carimbos] of this.#tectos) {
-        if (carimbos.length === 0 || agora - (carimbos[carimbos.length - 1] as number) >= 60_000) {
+        if (carimbos.length === 0 || agora - (carimbos[carimbos.length - 1] as number) >= Gateway.JANELA_DOS_TECTOS_MS) {
           this.#tectos.delete(outra)
         }
       }
@@ -3381,9 +3950,11 @@ export class Gateway {
     return !podeEstrearCanal(channel, this.config.commonRoom)
   }
 
-  #mayOpen(address: string, channel: string): boolean {
+  #mayOpen(connection: Connection, address: string, channel: string): boolean {
     if (!this.store.channelNeverUsed(channel)) return false
     if (this.#formaFechada(channel)) return false
+    // A new account opens a limited number of new channels a day (1.3.26). See `#podeEstrear`.
+    if (!this.#podeEstrear(connection, channel)) return false
     return this.store.claimChannel(channel, address) === address
   }
 
@@ -3405,7 +3976,7 @@ export class Gateway {
     // first use of a channel stores a subscription or a claim, at the request
     // of someone with no seat anywhere yet. See `#dentroDoTecto`.
     if (!this.#dentroDoTecto("estreias", connection.address, Gateway.ESTREIAS_POR_MINUTO)) return false
-    return this.#mayOpen(connection.address, channel)
+    return this.#mayOpen(connection, connection.address, channel)
   }
 
   /**
@@ -3494,7 +4065,15 @@ export class Gateway {
       ehCommitExterno(ciphertext, frame.channel)
     const entradaPeloCartao = !sentado && commitDoCartao
     if (!sentado && !entradaPeloCartao) {
-      this.#send(connection, { t: "channel.rejected", channel: frame.channel, reason: "no-seat" })
+      // Refused by the new-account limit on new channels (1.3.26): said as such to a client that reads it.
+      const pelaContaNova = connection.estreiaRecusada === frame.channel && connection.sabeContaNova
+      connection.estreiaRecusada = null
+      this.#send(connection, {
+        t: "channel.rejected",
+        channel: frame.channel,
+        reason: pelaContaNova ? "conta-nova" : "no-seat",
+        ...(pelaContaNova && frame.ref !== undefined ? { ref: frame.ref } : {}),
+      })
       return
     }
 
@@ -3543,7 +4122,7 @@ export class Gateway {
       return
     }
     if (!guardado.ok) {
-      if (guardado.reason === "stale-epoch") this.lugares.notar("recusasPorEpoca")
+      if (guardado.reason === "stale-epoch") this.lugares.recusaPorEpoca(connection.id)
       this.#send(connection, {
         t: "channel.rejected",
         channel: frame.channel,
@@ -3660,6 +4239,11 @@ export class Gateway {
     return servidas
   }
 
+  /** Who claimed, for whom, which devices: what `lugares.semChave` needs to tell a retry (1.3.26). Memory only. */
+  #reclamacao(connection: Connection, address: string, devices: string[] | undefined): { quem: string; alvo: string; aparelhos?: string[] | undefined } {
+    return { quem: connection.id, alvo: address, aparelhos: devices }
+  }
+
   async #claimKeyPackage(connection: Connection, address: string, bundle: boolean, devices: string[] | undefined): Promise<void> {
     // A claim is ALWAYS answered. A malformed address or an unreachable
     // federation peer used to throw out of this handler, the reply never
@@ -3687,19 +4271,21 @@ export class Gateway {
           const keyPackages = packages.map((p) => ({ deviceKey: p.deviceKey, keyPackage: toBase64(p.keyPackage) }))
           const singular = keyPackages[0]?.keyPackage ?? (fallback ? toBase64(fallback) : null)
           resposta = { t: "keypackage.claimed", address, keyPackage: singular, keyPackages, manifest }
+          this.lugares.reclamou(connection.id, packages.length + (packages.length === 0 && fallback ? 1 : 0))
           // A seat repair names the asker's device (1.3.25, C1). The devices it named that the
           // manifest lists and that got nothing: that seat fails with "no invite keys".
           if (devices !== undefined && manifest !== null) {
             const listados = new Set(manifest.devices.map((d) => d.deviceKey))
             const pedidos = devices.filter((d) => listados.has(d)).length
-            if (packages.length < pedidos) this.lugares.semChave("reseat", pedidos, packages.length)
+            if (packages.length < pedidos) this.lugares.semChave("reseat", pedidos, packages.length, Date.now(), this.#reclamacao(connection, address, devices))
           } else if (singular === null) {
-            this.lugares.semChave("convite", manifest?.devices.length ?? 0, 0)
+            this.lugares.semChave("convite", manifest?.devices.length ?? 0, 0, Date.now(), this.#reclamacao(connection, address, devices))
           }
         } else {
           const claimed = this.store.claimKeyPackage(address)
           resposta = { t: "keypackage.claimed", address, keyPackage: claimed ? toBase64(claimed) : null }
-          if (claimed === undefined) this.lugares.semChave("convite", 0, 0)
+          if (claimed !== undefined) this.lugares.reclamou(connection.id, 1)
+          if (claimed === undefined) this.lugares.semChave("convite", 0, 0, Date.now(), this.#reclamacao(connection, address, undefined))
         }
         /*
           ALSO when the claim came back empty (20/11/2026, P4). The nudge used to go only
@@ -3758,6 +4344,54 @@ export class Gateway {
     }
   }
 
+  /** Roster requests per account per minute. A client asks at most every 2 min per channel. */
+  static readonly MEMBROS_POR_MINUTO = 120
+
+  /** How far back a Welcome makes an unsubscribed account "invited" in the roster. */
+  static readonly CONVIDADO_RECENTE_DIAS = 7
+
+  /**
+   * The server roster of one channel, for a member to correct its count (P7, 1.3.26).
+   *
+   * The data is the server's own: `subscriptions`, which it keeps to wake offline
+   * accounts, and the recipients of recent Welcomes. It learns nothing new from the
+   * question. Only to a connection subscribed to the channel, so a stranger cannot
+   * list a channel. Only for a channel this server hosts: for one hosted elsewhere
+   * the local table has only our accounts, and the honest answer is "I do not know".
+   */
+  #membrosDoCanal(connection: Connection, channel: string): void {
+    const quem = connection.address as string
+    if (!this.#dentroDoTecto("membros", quem, Gateway.MEMBROS_POR_MINUTO)) return
+    const daqui = (() => {
+      try {
+        return parseAddress(channel).server === this.config.serverName
+      } catch {
+        return false
+      }
+    })()
+    if (!daqui || !connection.channels.has(channel)) {
+      this.#send(connection, { t: "channel.members", channel })
+      return
+    }
+    /*
+      Plus every account with a connection on the channel now. The subscription row is
+      per account, and a device dropped from the group (a reseat whose Welcome died)
+      unsubscribes the whole account while a sibling device is still connected and
+      reading. Without this the roster called that account gone.
+    */
+    const contas = new Set(this.store.localSubscribers(channel))
+    for (const outra of this.#connections) {
+      if (outra.address && outra.channels.has(channel)) contas.add(outra.address)
+    }
+    const desde = Math.floor(Date.now() / 60_000) - Gateway.CONVIDADO_RECENTE_DIAS * 1440
+    const convidados = this.store.convidadosPorEntrar(channel, desde)
+    if (contas.size > MEMBROS_DO_CANAL_MAX || convidados.length > MEMBROS_DO_CANAL_MAX) {
+      this.#send(connection, { t: "channel.members", channel })
+      return
+    }
+    this.#send(connection, { t: "channel.members", channel, contas: [...contas], convidados })
+  }
+
   /**
    * Close a connection from a revoked device, with the reason stated.
    *
@@ -3794,15 +4428,216 @@ export class Gateway {
    * "Código do servidor: registration-closed" in the toast, and the gate says
    * "Erro 203". One that knows the code shows its own sentence.
    */
-  #fecharRegistoRecusado(connection: Connection, motivo: "registo-fechado" | "convite-em-falta" | "convite-invalido"): void {
-    const [code, message] =
-      motivo === "registo-fechado"
-        ? [CODIGO_REGISTO_FECHADO, Gateway.FRASE_REGISTO_FECHADO]
-        : motivo === "convite-em-falta"
-          ? [CODIGO_CONVITE_DE_REGISTO_EM_FALTA, Gateway.FRASE_CONVITE_DE_REGISTO_EM_FALTA]
-          : [CODIGO_CONVITE_DE_REGISTO_INVALIDO, Gateway.FRASE_CONVITE_DE_REGISTO_INVALIDO]
+  #fecharRegistoRecusado(
+    connection: Connection,
+    motivo: "registo-fechado" | "convite-em-falta" | "convite-invalido" | "prova-em-falta" | "prova-invalida" | "rede-cheia",
+  ): void {
+    const [code, message] = ((): [string, string] => {
+      switch (motivo) {
+        case "registo-fechado":
+          return [CODIGO_REGISTO_FECHADO, Gateway.FRASE_REGISTO_FECHADO]
+        case "convite-em-falta":
+          return [CODIGO_CONVITE_DE_REGISTO_EM_FALTA, Gateway.FRASE_CONVITE_DE_REGISTO_EM_FALTA]
+        case "convite-invalido":
+          return [CODIGO_CONVITE_DE_REGISTO_INVALIDO, Gateway.FRASE_CONVITE_DE_REGISTO_INVALIDO]
+        case "prova-em-falta":
+          /*
+            An app from before 1.3.26 cannot solve the proof, and does not know
+            the new code. `versao-antiga` with its sentence is the one refusal
+            that tells the person what to do: get the new version. An app that
+            can solve it gets the real code, and asks for a challenge again.
+          */
+          return connection.sabeProvaDeTrabalho
+            ? [CODIGO_PROVA_EM_FALTA, Gateway.FRASE_PROVA_EM_FALTA]
+            : [CODIGO_VERSAO_ANTIGA, Gateway.FRASE_VERSAO_ANTIGA]
+        case "prova-invalida":
+          return [CODIGO_PROVA_INVALIDA, Gateway.FRASE_PROVA_INVALIDA]
+        case "rede-cheia":
+          return [CODIGO_REDE_COM_MUITAS_CONTAS, Gateway.FRASE_REDE_COM_MUITAS_CONTAS]
+      }
+    })()
     this.#send(connection, { t: "error", code, message, fatal: true })
     connection.socket.close()
+  }
+
+  // ---------------------------------------------------------------- abuse brake, part 2 (1.3.26)
+
+  /** The new-account phase of this connection's account, or `null` when the limits do not apply to it. */
+  #faseDe(connection: Connection): FaseDaContaNova {
+    // Community mode is a family server, where everyone already knows everyone: no new-account limits.
+    if (!this.#vigia || connection.deLoopback || this.config.communityMode) return null
+    return this.#vigia.fase(connection.criadaEm)
+  }
+
+  /** At login: read the account's age, and say the limits in `auth.ok` while they apply. */
+  #contaNovaDe(connection: Connection, address: string): ContaNova | null {
+    if (!this.#vigia || connection.deLoopback || this.config.communityMode) return null
+    connection.criadaEm = this.store.criadaEmDe(address)
+    if (this.#faseDe(connection) === null || connection.criadaEm === null) return null
+    const { intervaloAte24hS, intervaloAte72hS } = this.#vigia.limites
+    return {
+      ate24h: connection.criadaEm + Gateway.DIA_MS,
+      ate72h: connection.criadaEm + 3 * Gateway.DIA_MS,
+      intervaloAte24hS,
+      intervaloAte72hS,
+    }
+  }
+
+  /** `{ novaAte }` while an account of this server is in its first day: the end of it, rounded UP to the hour. */
+  #novaAte(criadaEm: number | null): { novaAte?: number } {
+    if (!this.#vigia || criadaEm === null || this.config.communityMode) return {}
+    const fim = criadaEm + Gateway.DIA_MS
+    if (fim <= Date.now()) return {}
+    return { novaAte: Math.ceil(fim / 3_600_000) * 3_600_000 }
+  }
+
+  /**
+   * The common room's limits for a new account, on one message. `true` when it
+   * refused (and said so). Only the common room: elsewhere a new account writes
+   * at the usual pace. Size first, so a refused image does not spend the turn
+   * of the text that follows.
+   */
+  #recusarPelaContaNova(connection: Connection, frame: { channel: string; ciphertext: string; ref?: string | undefined }): boolean {
+    if (!this.#vigia || !this.#ehSalaComum(frame.channel)) return false
+    const fase = this.#faseDe(connection)
+    if (fase === null) return false
+    // Base64 length to bytes, without decoding: the frame is already bounded by MAX_FRAME_BYTES.
+    const bytes = Math.floor((frame.ciphertext.length * 3) / 4)
+    if (!this.#vigia.tamanhoPermitido(bytes, fase)) {
+      if (connection.sabeContaNova) {
+        this.#send(connection, {
+          t: "channel.rejected",
+          channel: frame.channel,
+          reason: "conta-nova",
+          ...(frame.ref !== undefined ? { ref: frame.ref } : {}),
+        })
+      }
+      return true
+    }
+    const vez = this.#vigia.enviar(connection.address as string, fase)
+    if (vez.ok) return false
+    // A client that does not back off is closed, as for the account's cap (`#recusarEnvioPorRitmo`).
+    if (!this.#dentroDoTecto("envio-recusas", connection.id, Gateway.ENVIO_RECUSAS_ATE_FECHAR)) {
+      this.#send(connection, { t: "error", code: "rate-abuse", message: "too many refused sends", fatal: true })
+      connection.socket.close()
+      return true
+    }
+    if (connection.envioRecusado) {
+      this.#send(connection, {
+        t: "channel.rejected",
+        channel: frame.channel,
+        reason: "rate-limited",
+        retryAfterMs: vez.retryAfterMs,
+        ...(frame.ref !== undefined ? { ref: frame.ref } : {}),
+        ...(connection.sabeContaNova ? { contaNova: true as const } : {}),
+      })
+    }
+    return true
+  }
+
+  /** May this account add `outro` to a channel (claim its key packages)? Itself, and a common-room newcomer, do not count. */
+  #podeAdicionar(connection: Connection, outro: string): boolean {
+    const fase = this.#faseDe(connection)
+    if (fase === null || !this.#vigia) return true
+    if (outro === connection.address) return true
+    // Admitting someone to the common room is the room's business, not this account's choice of people.
+    const pediu = this.#pediramASalaComum.get(outro)
+    if (pediu !== undefined && pediu > Date.now()) return true
+    return this.#vigia.adicionar(connection.address as string, outro, fase)
+  }
+
+  /**
+   * The cap on channels for this connection's account now
+   * (1.3.26): the new-account one in its first 72 hours, else the one for every
+   * account. `null`: no cap (turned off, loopback). See `Store.comunidadesCriadasPor`.
+   */
+  #criarCanaisDe(connection: Connection): CriarCanais | null {
+    if (!connection.address || connection.deLoopback) return null
+    const tecto = this.#tectoDeComunidades(this.#faseDe(connection))
+    if (tecto === null) return null
+    return { criados: this.store.comunidadesCriadasPor(connection.address), ...tecto }
+  }
+
+  /** The cap for an account in this phase: the lower of the new-account one (first 72 h) and the one for all. `null`: none. */
+  #tectoDeComunidades(fase: FaseDaContaNova): { maximo: number; contaNova: boolean } | null {
+    const deTodas = this.config.comunidadesPorConta ?? 0
+    const daNova = fase !== null && this.#vigia ? this.#vigia.limites.comunidades : 0
+    const contaNova = daNova > 0 && (deTodas <= 0 || daNova < deTodas)
+    const maximo = contaNova ? daNova : deTodas
+    return maximo > 0 ? { maximo, contaNova } : null
+  }
+
+  /** The cap on rooms for this connection's account (1.3.26). `null`: no cap (turned off, loopback). */
+  #roomQuotaOf(connection: Connection): RoomQuota | null {
+    if (!connection.address || connection.deLoopback) return null
+    // The lower of the new-account cap (first 72 h) and the one for every account, as for channels.
+    const forAll = this.config.channelsPerAccount ?? 0
+    const forNew = this.#faseDe(connection) !== null && this.#vigia ? (this.#vigia.limites.rooms ?? 0) : 0
+    const newAccount = forNew > 0 && (forAll <= 0 || forNew < forAll)
+    const max = newAccount ? forNew : forAll
+    if (max <= 0) return null
+    return { created: this.store.roomsCreatedBy(connection.address), max, ...(newAccount ? { newAccount: true } : {}) }
+  }
+
+  #criarCanaisNaResposta(connection: Connection): { criarCanais?: CriarCanais } {
+    const quota = this.#criarCanaisDe(connection)
+    return quota ? { criarCanais: quota } : {}
+  }
+
+  /** May this account claim this channel as a NEW community? A claim it already holds, the common room, and a used channel never count. */
+  #podeCriarComunidade(connection: Connection, channel: string): boolean {
+    if (this.#ehSalaComum(channel)) return true
+    if (!this.store.channelNeverUsed(channel)) return true
+    const quem = connection.address as string
+    if (this.store.claimantOf(channel) === quem && this.store.claimComunidade(channel) === true) return true
+    const quota = this.#criarCanaisDe(connection)
+    return quota === null || quota.criados < quota.maximo
+  }
+
+  /**
+   * Before an invite is made into this channel: count it as its founder's
+   * community if it was not yet, or refuse (1.3.26). Only a claim made by an app
+   * that did not say it was a community (`false`): a claim from before the
+   * column (`null`), the common room, and a channel with no claim are left
+   * alone. The founder's cap is read with the founder's age, not the inviter's.
+   */
+  #contarComoComunidade(connection: Connection, channel: string): boolean {
+    if (connection.deLoopback || this.#ehSalaComum(channel)) return true
+    if (this.store.claimComunidade(channel) !== false) return true
+    const fundador = this.store.claimantOf(channel)
+    if (fundador === undefined) return true
+    // The founder's phase, by the same rule as `#faseDe` (community mode has no new-account limits).
+    const criadaEm = this.#vigia && !this.config.communityMode ? this.store.criadaEmDe(fundador) : null
+    const tecto = this.#tectoDeComunidades(this.#vigia ? this.#vigia.fase(criadaEm) : null)
+    if (tecto !== null && this.store.comunidadesCriadasPor(fundador) >= tecto.maximo) return false
+    this.store.marcarComunidade(channel)
+    return true
+  }
+
+  /** May this account make this channel its own for the first time? Only a NEW claim counts; the common room never. */
+  #podeEstrear(connection: Connection, channel: string): boolean {
+    const fase = this.#faseDe(connection)
+    if (fase === null || !this.#vigia) return true
+    if (this.#ehSalaComum(channel)) return true
+    if (!this.store.channelNeverUsed(channel) || this.store.claimantOf(channel) === connection.address) return true
+    if (this.#vigia.estrear(connection.address as string, fase)) return true
+    connection.estreiaRecusada = channel
+    return false
+  }
+
+  /**
+   * Must this account wait to join the common room? `null`: it may go on. Only
+   * a FIRST join counts: a member coming back (seat repair, a new device, a lost
+   * group) has a subscription, a claim, or a Welcome waiting, and never waits.
+   */
+  #esperaNaFila(connection: Connection, channel: string): { posicao: number; esperaMs: number } | null {
+    if (!this.#filaDaSalaComum || connection.deLoopback || !this.#ehSalaComum(channel)) return null
+    const quem = connection.address as string
+    if (this.store.isSubscribed(channel, quem) || this.store.claimantOf(channel) === quem || this.store.hasWelcomeFor(channel, quem)) {
+      return null
+    }
+    const vez = this.#filaDaSalaComum.pedir(quem)
+    return vez.ok ? null : { posicao: vez.posicao, esperaMs: vez.esperaMs }
   }
 
   #fecharSuspensa(connection: Connection): void {
@@ -3870,7 +4705,8 @@ export class Gateway {
     }
     let caixaDeUmActivo = false
     for (const caixa of this.#caixas.values()) {
-      if (caixa.anfitriao.address === address && this.#aparelhoActivo(caixa.anfitriao, manifesto)) {
+      const accountConnection = this.#accountSide(caixa)
+      if (accountConnection !== null && accountConnection.address === address && this.#aparelhoActivo(accountConnection, manifesto)) {
         caixaDeUmActivo = true
         break
       }
@@ -3907,6 +4743,32 @@ export class Gateway {
     if (connection.janela === null) return
     clearTimeout(connection.janela)
     connection.janela = null
+  }
+
+  /**
+   * The account's new manifest, unasked, to its OTHER live connections that
+   * announced `CAPACIDADE_MANIFESTO_AO_VIVO` (1.3.26). As stored, after
+   * `putDeviceManifest` accepted it: the receivers verify it as any
+   * `manifest.result`. A device that joined with the account file shows up on
+   * the others at once. Not to the publisher (it has the verdict), not to a
+   * connection in its pairing window (it is not the account's yet).
+   */
+  #avisarManifestoNovo(publicadora: Connection, address: string): void {
+    const manifest = this.store.deviceManifestOf(address)
+    if (manifest === null) return
+    let texto: string | null = null
+    for (const outra of this.#connections) {
+      if (outra === publicadora || outra.address !== address || !outra.manifestoAoVivo || outra.janela !== null) continue
+      /*
+        Only to devices this manifest still names, and not revoked. A device the
+        manifest removes gets `device-revoked` with the manifest as proof; this
+        frame first would make it note the version as seen, and the proof (a
+        version ABOVE the one it saw) would no longer hold.
+      */
+      if (!this.#aparelhoActivo(outra, manifest)) continue
+      texto ??= JSON.stringify({ t: "manifest.result", address, manifest } satisfies ServerFrame)
+      this.#enviarTexto(outra, texto)
+    }
   }
 
   /** The connection's device is in this manifest of its account, and not revoked. */
@@ -3969,6 +4831,11 @@ export interface PushDoGateway {
 }
 
 /** The key of a pending request: the channel length first, for the reason given in `chaveDeAmbito`. */
+/** A loopback address: the same machine. `::ffff:127.x` is what a dual-stack socket shows for IPv4 loopback. */
+function ehLoopback(ip: string): boolean {
+  return ip === "::1" || ip.startsWith("127.") || ip.toLowerCase().startsWith("::ffff:127.")
+}
+
 function chaveDoPendente(canal: string, quem: string): string {
   return `${canal.length}:${canal}:${quem}`
 }
@@ -4224,4 +5091,17 @@ class MetricasDoCofre {
     const copia = (m: MinutoDoCofre): MinutoDoCofre => ({ ...m, entradasRecusadas: { ...m.entradasRecusadas }, recusas: { ...m.recusas } })
     return { actual: copia(actual), anteriores: this.#anteriores.map(copia) }
   }
+}
+
+/** The newest day key of a connection's network, or nothing for a private or unknown address. */
+function chaveDeHojeDaRede(rede: RedeIdentificada | null): string | undefined {
+  if (rede === null || rede.chaves.size === 0) return undefined
+  return rede.chaves.get(Math.max(...rede.chaves.keys()))
+}
+
+/** Two connections on the same network: they share a day key (today's, or yesterday's across midnight). */
+function mesmaRede(a: RedeIdentificada | null, b: RedeIdentificada | null): boolean {
+  if (a === null || b === null) return false
+  for (const [dia, chave] of a.chaves) if (b.chaves.get(dia) === chave) return true
+  return false
 }

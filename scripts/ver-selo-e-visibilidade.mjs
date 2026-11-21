@@ -12,6 +12,7 @@ import { chromium } from "playwright"
 import { mkdirSync } from "node:fs"
 import { criarContaEEntrar } from "./conta.mjs"
 import { comLingua } from "./ambiente.mjs"
+import { escolherComunidade, noTelemovel } from "./separadores.mjs"
 
 const WEB = comLingua(process.env.ORWELL_WEB ?? "http://127.0.0.1:5175")
 const SERVIDOR = process.env.ORWELL_HOME ?? "localhost:8449"
@@ -46,11 +47,11 @@ await page.goto(WEB, { waitUntil: "domcontentloaded" })
 // splash stays on screen until then. Poll in a loop instead of waiting for a
 // number: in a fresh profile folder startup is much slower than in a reused one.
 for (let i = 0; i < 40; i++) {
-  if (await page.getByPlaceholder("Como queres aparecer").count()) break
+  if (await page.getByRole("heading", { name: "Bem-vindo ao Orwell" }).count()) break
   await page.waitForTimeout(1000)
 }
 // If it doesn't appear, show what's on screen. A boot error is silent otherwise, and a timeout that expires tells you nothing.
-if (!(await page.getByPlaceholder("Como queres aparecer").count())) {
+if (!(await page.getByRole("heading", { name: "Bem-vindo ao Orwell" }).count())) {
   console.log("=== não é o ecrã de criar conta ===")
   console.log((await page.locator("body").innerText()).slice(0, 800))
   console.log("erros:", erros)
@@ -64,24 +65,19 @@ await criarContaEEntrar(page, { nome: `Selo ${MARCA.slice(-3)}`, frase: FRASE, s
 console.log("conta criada")
 
 /**
- * On a narrow screen the sidebar is a drawer, and it needs to open.
- *
- * Without this the sidebar seal exists in the DOM but you can't see it, and the
- * script waits forever for a button that the closed drawer covers. The button
- * only shows at widths where the drawer exists. On other widths the CSS hides it.
+ * On a phone (840 px or less, option B) the common room's line lives in the
+ * Communities list, with its face chosen on the rail: show it. Without this the
+ * seal is not in the DOM (the sidebar lists only the chosen community there).
+ * On a computer the sidebar is a column, and there is nothing to do.
  */
 async function abrirGaveta() {
-  const botao = page.getByRole("button", { name: "Abrir o painel lateral" }).first()
-  if (!(await botao.count()) || !(await botao.isVisible())) return
-  // The button toggles. Called twice without this guard, it closes what the first call opened. Then the script waits for an element it just hid. The `aria-expanded` holds the state, and that's why it's there.
-  if ((await botao.getAttribute("aria-expanded")) === "true") return
-  await botao.click()
-  await page.waitForTimeout(600)
+  if (!(await noTelemovel(page))) return
+  await escolherComunidade(page, /orwell/i, { timeout: 1_000 }).catch(() => {})
 }
 
 // Wait for the main channel. It's the only one where the seal appears.
-await abrirGaveta()
 for (let i = 0; i < 40; i++) {
+  await abrirGaveta()
   if (await page.locator("button.channel").filter({ hasText: /orwell/i }).count()) break
   await page.waitForTimeout(1000)
 }
@@ -90,7 +86,7 @@ const canal = page.locator("button.channel").filter({ hasText: /orwell/i }).firs
 console.log("canal comum:", (await canal.count()) ? "sim" : "NAO", "· visível:", await canal.isVisible().catch(() => false))
 if (!(await canal.isVisible().catch(() => false))) {
   console.log("botões visíveis:", (await page.getByRole("button").allTextContents()).join(" | ").slice(0, 300))
-  await page.screenshot({ path: `${SAIDA}/gaveta-${largura}.png` })
+  await page.screenshot({ path: `${SAIDA}/lista-${largura}.png` })
 }
 await canal.click()
 await page.waitForTimeout(1200)

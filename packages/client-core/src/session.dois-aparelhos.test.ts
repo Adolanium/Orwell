@@ -636,16 +636,17 @@ describe("uma conta com dois aparelhos", () => {
     // "device-unreachable", nothing spent, and the brake STAYS recorded. Without
     // it, this repeats per friend on each connection, with three retries and three
     // seconds of wait, forever. The second pass is "cooldown" without hitting the
-    // server; `force` lifts the brake and retries. (Each retry is three claims:
-    // the short race of `#invite`.)
+    // server; `force` lifts the brake and retries. (Each retry is one claim: the
+    // claim names the missing device, and the short race of `#invite` is for a first
+    // publication, not for a named device at 0, 1.3.26.)
     const claimsAntes = rele.claims.get(ana.address) ?? 0
     expect(await carlos.session.repairInvite(CANAL, ana.address)).toBe("device-unreachable")
-    expect(rele.claims.get(ana.address)).toBe(claimsAntes + 3)
+    expect(rele.claims.get(ana.address)).toBe(claimsAntes + 1)
     expect(carlos.vault.contents.repairAttempts[`${ana.address}|${CANAL}`]).toBeTypeOf("number")
     expect(await carlos.session.repairInvite(CANAL, ana.address)).toBe("cooldown")
-    expect(rele.claims.get(ana.address)).toBe(claimsAntes + 3)
+    expect(rele.claims.get(ana.address)).toBe(claimsAntes + 1)
     expect(await carlos.session.repairInvite(CANAL, ana.address, true)).toBe("device-unreachable")
-    expect(rele.claims.get(ana.address)).toBe(claimsAntes + 6)
+    expect(rele.claims.get(ana.address)).toBe(claimsAntes + 2)
 
     // The phone restores the pool; repair asks ONLY for the missing device, and
     // the laptop's pool loses nothing.

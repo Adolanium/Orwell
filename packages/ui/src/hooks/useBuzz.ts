@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { BUZZ_MAX_AGE_MS } from "@enclave/protocol"
 import type { EnclaveBridge } from "../bridge.js"
 import { isDirect } from "../lib/format.js"
 import { COTOVELADA_INTERVALO_MS, segundosQueFaltam } from "../lib/limiteDaCotovelada.js"
+import { tocarCotoveladaEnviada } from "../lib/sounds.js"
 
 /**
  * The nudge, the MSN Messenger nudge.
@@ -34,6 +34,15 @@ import { COTOVELADA_INTERVALO_MS, segundosQueFaltam } from "../lib/limiteDaCotov
  * shake in `screens.css` takes twice the time at half the distance, and the
  * class stays on for all of it (`SHAKE_CALMO_MS`).
  *
+ * **Whoever sends hears it too (21/11/2026).** Once the send is accepted, the
+ * same sound plays on the sender's device (`tocarCotoveladaEnviada`).
+ *
+ * **Both sides, every device (21/11/2026).** A nudge that
+ * arrives shakes the whole app (`useNudgeShake`) and plays its sound
+ * (`useCotoveladaPorVer`) on every device of both accounts, also on the
+ * sender's other devices. This hook keeps the sending device's half: the shake
+ * of the press and the sound once the send is accepted.
+ *
  * **Silences with the rest.** The sound goes through the common engine, which
  * already respects the mute button, volume, and "Busy". Someone working can
  * mute the noise without losing the message: the shake still
@@ -47,8 +56,8 @@ const SHAKE_MS = 820
 /** The calm shake, with reduced motion: twice as long. Keep in step with `screens.css`. */
 const SHAKE_CALMO_MS = 1640
 
-/** Read at the moment of each nudge: the preference can change while the app is open. */
-function duracaoDoAbanao(): number {
+/** Read at the moment of each nudge: the preference can change while the app is open. Also for `useNudgeShake`. */
+export function duracaoDoAbanao(): number {
   const reduzido =
     typeof window !== "undefined" &&
     typeof window.matchMedia === "function" &&
@@ -89,25 +98,11 @@ export function useBuzz(bridge: EnclaveBridge, channel: string | null): Buzz {
   const canalRef = useRef(channel)
   canalRef.current = channel
 
-  useEffect(() => {
-    return bridge.on.buzz((event) => {
-      // A nudge from another conversation does not shake this one. It still arrives
-      // as an unread message, the usual way; what it does not do is shake the screen
-      // of someone reading something else.
-      if (event.channel !== canalRef.current) return
-      // Only in a direct conversation. The core already drops a nudge sent to a
-      // group channel; this is the second wall, in the piece that shakes.
-      if (!isDirect(event.channel)) return
-      // An old tap is not felt. Defense against a replay that slipped past the
-      // session cut, cheap, and the cost of not having it was the screen shaking
-      // by itself when opening the app.
-      if (Math.abs(Date.now() - event.at) > BUZZ_MAX_AGE_MS) return
-      // No sound here since 20/11/2026: `useCotoveladaPorVer` plays it for the whole
-      // app, once, wherever the person is. This hook only shakes.
-      setShaking(true)
-    })
-    // Subscribed once, like all the app's other subscriptions.
-  }, [])
+  /*
+    A nudge that ARRIVES does not shake here since 21/11/2026: `useNudgeShake`
+    shakes the whole app, on every screen and every device, and its sound is in
+    `useCotoveladaPorVer`. This hook shakes only for our own press.
+  */
 
   // Clear the shake on its own. Restarted on each new nudge, so two in a row
   // give two jolts, not one cut short.
@@ -152,12 +147,18 @@ export function useBuzz(bridge: EnclaveBridge, channel: string | null): Buzz {
     if (segundosQueFaltam(ultimosEnvios.current.get(channel), agora) > 0) return
     ultimosEnvios.current.set(channel, agora)
     setCooldown(Math.ceil(COTOVELADA_INTERVALO_MS / 1000))
-    // The shake is the echo of what you just did, on both sides, like in MSN. Not
-    // sound: there is never sound for your own action (see `sons/motor.ts`). The
+    // The shake is the echo of what you just did, on both sides, like in MSN. The
     // shake comes so whoever pressed it knows it worked.
     setShaking(true)
-    // A lost nudge is not an error to put on anyone's screen.
-    void bridge.channels.buzz(channel).catch(() => undefined)
+    // The sound too, since 21/11/2026, but only once the send was accepted: a
+    // refused nudge (rate, error) plays nothing. A lost nudge is not an error to
+    // put on anyone's screen.
+    void bridge.channels
+      .buzz(channel)
+      .then((resposta) => {
+        if (resposta.ok) tocarCotoveladaEnviada()
+      })
+      .catch(() => undefined)
   }, [bridge, channel])
 
   return { buzz, cooldown, shaking, available }

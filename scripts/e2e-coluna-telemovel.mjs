@@ -19,14 +19,19 @@
  * device (iPhone 13 on WebKit, Pixel 7 on Chromium, with the touch, `userAgent`
  * and screen from `playwright.devices`), a fresh account:
  *
- *   1. joins, opens the drawer by hamburger and taps the common room right away;
- *   2. the drawer STAYS, and rooms appear in it, visible and tappable;
- *   3. tapping a room closes the drawer (end of the path);
- *   4. the hamburger reopens the drawer, with rooms visible;
+ * Since the phone layout with tabs (option B, 20/11/2026) there is no drawer
+ * at 840 px or less: the Communities tab is the list (the rail of
+ * communities and the channels of the chosen one) and a room pushes its
+ * conversation full screen over it. The same path, on the tabs:
+ *
+ *   1. joins, taps the Communities tab and the common room's face right away;
+ *   2. the list STAYS, and rooms appear in it, visible and tappable;
+ *   3. tapping a room pushes its conversation (the list leaves the screen);
+ *   4. the back arrow brings the list back, with rooms visible;
  *   5. rotate the screen: in landscape the column is visible, back to portrait
- *      the drawer closes;
- *   6. the browser bar changes height: the drawer follows;
- *   7. enter a voice room and reopen the drawer (Chromium only, it has fake mic).
+ *      the list is there;
+ *   6. the browser bar changes height: the list follows;
+ *   7. enter a voice room and go back to the list (Chromium only, it has fake mic).
  *
  * At each step it measures the `getBoundingClientRect` of the column and what is
  * on top of each room (`elementFromPoint`). All local and disposable: no way to
@@ -45,6 +50,7 @@ import { fileURLToPath } from "node:url"
 import { chromium, devices, webkit } from "playwright"
 import { FRASE } from "./ambiente.mjs"
 import { criarConta } from "./conta.mjs"
+import { appAberta, voltarUm } from "./separadores.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
@@ -134,11 +140,16 @@ for (const [o_que, caminho] of [["a web construída", join(DIST, "index.html")],
 }
 
 
-const dentro = (page) => page.getByRole("button", { name: "Configurações", exact: true }).first().waitFor({ timeout: 90_000 })
+const dentro = (page) => appAberta(page, 90_000)
 const linhaComum = (page) => page.locator(".channel-row").first()
 const SALAS_DA_ANA = ["prensa", "barricas"]
 
-/** The column, measured: where it is, whether it shows, and how many rooms are visible and tappable. */
+/**
+ * The column, measured: where it is, whether it shows, and how many rooms are
+ * visible and tappable. On the phone "aberta" is the Communities list on
+ * screen (nothing pushed over it), and "visivel" also asks that nothing covers
+ * it: the list stays mounted under a pushed conversation.
+ */
 async function medir(page) {
   return page.evaluate(() => {
     const coluna = document.querySelector(".sidebar")
@@ -146,6 +157,9 @@ async function medir(page) {
     const r = coluna.getBoundingClientRect()
     const estilo = getComputedStyle(coluna)
     const dentroDoEcra = r.width > 0 && r.height > 0 && r.left >= 0 && r.right <= innerWidth + 1 && r.top >= 0 && r.bottom <= innerHeight + 1
+    const app = document.querySelector(".app.telemovel")
+    const centro = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+    const descoberta = centro !== null && coluna.contains(centro)
     const nomes = [...document.querySelectorAll(".room-tree .room-name")]
     const salasAVista = nomes.filter((nome) => {
       const q = nome.getBoundingClientRect()
@@ -155,8 +169,8 @@ async function medir(page) {
     }).length
     return {
       existe: true,
-      aberta: coluna.classList.contains("open"),
-      visivel: dentroDoEcra && estilo.visibility !== "hidden" && estilo.display !== "none",
+      aberta: app ? app.getAttribute("data-profundidade") === "0" && app.getAttribute("data-separador") === "comunidades" : coluna.classList.contains("open"),
+      visivel: dentroDoEcra && descoberta && estilo.visibility !== "hidden" && estilo.display !== "none",
       salas: nomes.map((n) => n.textContent),
       salasAVista,
       caixa: `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)} em ${innerWidth}x${innerHeight}`,
@@ -226,45 +240,46 @@ try {
       passo += 1
       await c.screenshot({ path: join(CAPTURAS, `coluna-telemovel-${rotulo}-${String(passo).padStart(2, "0")}-${nome}.png`) })
     }
-    const hamburguer = c.getByRole("button", { name: "Abrir o painel lateral" })
+    const separadorComunidades = c.locator(".separadores").getByRole("button", { name: "Comunidades", exact: true })
 
     await c.goto(APP, { waitUntil: "domcontentloaded" })
     await criarConta(c, { nome: `Carla ${rotulo}`, frase: FRASE, servidor: NOME })
     await dentro(c)
     await linhaComum(c).waitFor({ state: "attached", timeout: 90_000 })
 
-    // 1. Opens the drawer and immediately taps the common room, before rooms arrive.
-    await hamburguer.tap()
+    // 1. The Communities tab, and right away a tap on the common room's face, before rooms arrive.
+    for (let i = 0; i < 3 && (await c.locator(".ecra-empurrado").count()) > 0; i++) await voltarUm(c)
+    await separadorComunidades.tap()
     await wait(400)
     let m = await medir(c)
-    check(`${rotulo}: o hambúrguer abre a gaveta, à vista`, m.aberta && m.visivel, m.caixa)
+    check(`${rotulo}: o separador Comunidades mostra a lista, à vista`, m.aberta && m.visivel, m.caixa)
     const salasJaLa = m.salas.filter((s) => SALAS_DA_ANA.includes(s)).length
-    await linhaComum(c).locator("button.channel").tap()
+    await c.locator(".carril-comunidade:not(.carril-nova)").first().tap()
     await wait(400)
     m = await medir(c)
-    check(`${rotulo}: tocar na sala comum com as salas ainda a caminho deixa a gaveta à vista`, m.aberta && m.visivel, `${m.caixa}; salas da Ana já lá: ${salasJaLa}`)
+    check(`${rotulo}: tocar na sala comum com as salas ainda a caminho deixa a lista à vista`, m.aberta && m.visivel, `${m.caixa}; salas da Ana já lá: ${salasJaLa}`)
     await retratar("toque-antes-das-salas")
 
     // 2. Rooms arrive and are visible.
     const demorou = await esperarSalas(c)
     await wait(300)
     m = await medir(c)
-    check(`${rotulo}: as salas chegam com a gaveta aberta`, demorou !== null && m.aberta && m.visivel, `${demorou} ms`)
+    check(`${rotulo}: as salas chegam com a lista no ecrã`, demorou !== null && m.aberta && m.visivel, `${demorou} ms`)
     check(`${rotulo}: e estão à vista e ao dedo, sem nada por cima`, m.salasAVista >= m.salas.length && m.salas.length >= 4, `${m.salasAVista}/${m.salas.length}`)
     await retratar("salas-a-vista")
 
-    // 3. Tapping a room closes the drawer.
+    // 3. Tapping a room pushes its conversation over the list.
     await c.locator(".room-tree button.room", { hasText: "prensa" }).first().tap()
     await wait(600)
     m = await medir(c)
-    check(`${rotulo}: tocar em "prensa" fecha a gaveta`, !m.aberta && !m.visivel, m.caixa)
+    check(`${rotulo}: tocar em "prensa" empurra a conversa e a lista sai do ecrã`, !m.aberta && !m.visivel, m.caixa)
     await retratar("sala-aberta")
 
-    // 4. The menu reopens it, with rooms visible.
-    await hamburguer.tap()
+    // 4. The back arrow brings the list back, with rooms visible.
+    await c.locator(".ecra-empurrado .topbar-voltar").first().tap()
     await wait(500)
     m = await medir(c)
-    check(`${rotulo}: o hambúrguer reabre a gaveta com as salas à vista`, m.aberta && m.visivel && m.salasAVista >= 4, `${m.salasAVista} salas, ${m.caixa}`)
+    check(`${rotulo}: a seta para trás devolve a lista com as salas à vista`, m.aberta && m.visivel && m.salasAVista >= 4, `${m.salasAVista} salas, ${m.caixa}`)
     await retratar("reaberta")
 
     // 5. Rotate the screen. In landscape the phone becomes wide: the column becomes a column.
@@ -278,30 +293,31 @@ try {
     await wait(800)
     m = await medir(c)
     if (!m.aberta) {
-      await hamburguer.tap()
+      for (let i = 0; i < 3 && (await c.locator(".ecra-empurrado").count()) > 0; i++) await voltarUm(c)
+      await separadorComunidades.tap()
       await wait(500)
       m = await medir(c)
     }
-    check(`${rotulo}: de pé outra vez, a gaveta volta com as salas`, m.aberta && m.visivel && m.salasAVista >= 4, `${m.salasAVista} salas, ${m.caixa}`)
+    check(`${rotulo}: de pé outra vez, a lista volta com as salas`, m.aberta && m.visivel && m.salasAVista >= 4, `${m.salasAVista} salas, ${m.caixa}`)
 
     // 6. The browser bar appears and shrinks the window.
     await c.setViewportSize({ width, height: height - 80 })
     await wait(500)
     m = await medir(c)
-    check(`${rotulo}: com a barra do browser à vista, a gaveta cabe no ecrã`, m.aberta && m.visivel && m.salasAVista >= 4, m.caixa)
+    check(`${rotulo}: com a barra do browser à vista, a lista cabe no ecrã`, m.aberta && m.visivel && m.salasAVista >= 4, m.caixa)
     await c.setViewportSize({ width, height })
     await wait(400)
 
-    // 7. A voice room, and the drawer again.
+    // 7. A voice room, and the list again.
     if (comMicrofone) {
       await c.locator(".room-tree button.room", { hasText: "voz" }).first().tap()
       await wait(2500)
       m = await medir(c)
-      check(`${rotulo}: entrar na sala de voz fecha a gaveta`, !m.aberta, m.caixa)
-      await hamburguer.tap()
+      check(`${rotulo}: entrar na sala de voz empurra a chamada e a lista sai`, !m.aberta, m.caixa)
+      await voltarUm(c)
       await wait(600)
       m = await medir(c)
-      check(`${rotulo}: na chamada, o hambúrguer abre a gaveta com as salas à vista`, m.aberta && m.visivel && m.salasAVista >= 4, `${m.salasAVista} salas, ${m.caixa}`)
+      check(`${rotulo}: na chamada, a seta para trás devolve a lista com as salas à vista`, m.aberta && m.visivel && m.salasAVista >= 4, `${m.salasAVista} salas, ${m.caixa}`)
       await retratar("na-chamada")
     }
     check(`${rotulo}: nenhum erro de página`, erros.length === 0, erros[0] ?? "")

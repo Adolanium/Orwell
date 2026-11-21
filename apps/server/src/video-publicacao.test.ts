@@ -37,7 +37,19 @@ import {
 let servidor: ServidorDeTeste
 const abertas: ContaDeTeste[] = []
 
+/*
+  A 3 MB video is three parts, and a member serves two parts per window of
+  `TECTOS_DOS_ANEXOS.janelaMs` (4 MB a minute, 1.4 MB a part on the wire). So
+  the third part of every video asked for (Carla's request, the sibling's
+  "Fetch") waited a whole minute, and each of those tests took sixty seconds.
+  Here the window is ten seconds: the third part still waits for the window to
+  pass, the same code path, only the wait is shorter. The window is read when a
+  session is built, so it is set before any account. Not with `MEDIR_VIDEO`,
+  whose times are the real ones.
+*/
+const JANELA_DOS_ANEXOS = TECTOS_DOS_ANEXOS.janelaMs
 beforeAll(async () => {
+  if (!process.env["MEDIR_VIDEO"]) TECTOS_DOS_ANEXOS.janelaMs = 10_000
   servidor = await levantarServidor()
 }, 30_000)
 
@@ -46,6 +58,7 @@ afterEach(() => {
 })
 
 afterAll(async () => {
+  TECTOS_DOS_ANEXOS.janelaMs = JANELA_DOS_ANEXOS
   await servidor?.fechar()
 })
 

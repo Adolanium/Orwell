@@ -151,3 +151,25 @@ describe("movimento reduzido: o sino continua a balançar", () => {
     expect(angulo(calma)).toBeCloseTo(angulo(fotogramas(ecras, "sino-bate")) / 2, 5)
   })
 })
+
+/**
+ * The voice wave in the Aurora theme (1.3.26). 1.3.19 stopped it
+ * (`transform: none` above, in `aurora.gen.css`), and that rule comes back
+ * scoped. `aurora.css` undoes it at the Aurora weight: the bars keep their
+ * `scaleY()` and follow the level slower, as in the flat skin.
+ */
+describe("reduced motion: the Aurora voice wave keeps moving, slower", () => {
+  const aurora = semComentarios(ler("./aurora.css"))
+  const regra = blocosReduzidos(aurora).map((b) => regraEm(b, ':root[data-theme="aurora"] .onda-barra')).find(Boolean) ?? ""
+
+  it("1.3.19 stopped it, so the theme has to undo that", () => {
+    expect(blocosReduzidos(componentes).map((b) => regraEm(b, ".onda-barra")).join("\n")).toMatch(/transform:\s*none/)
+  })
+
+  it("the theme gives the bars their scaleY() back and a slow transform transition", () => {
+    expect(regra).toMatch(/transform:\s*scaleY\(/)
+    expect(regra).not.toMatch(/transform:\s*none/)
+    expect(regra).toMatch(/transition-property:\s*transform !important/)
+    expect(Number(/transition-duration:\s*([\d.]+)ms !important/.exec(regra)?.[1])).toBeGreaterThanOrEqual(300)
+  })
+})

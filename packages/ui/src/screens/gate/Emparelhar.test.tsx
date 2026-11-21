@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { BridgeContext } from "../../App.js"
 import type { EnclaveBridge, PairEvento } from "../../bridge.js"
 import { ToastProvider } from "../../components/Toast.js"
@@ -9,21 +9,33 @@ import { Emparelhar } from "./Emparelhar.js"
 afterEach(cleanup)
 
 /**
- * The mobile gate, from link to words.
+ * "Entrar com outro aparelho" on the new device (21/11/2026, mock-up `Emparelhar`).
  *
- * What holds: a non-pairing link doesn't pass the first page; a good link leads to
- * the password; the vault is only created after; and the six words appear in large
- * letters with BOTH buttons, because without "They're not" the SAS protects nothing.
- * And at the end, the two phrases, once.
+ * What holds: a code that is not for adding a device does not pass; a good one
+ * starts at once with a provisional vault and no password; the screen shows THREE
+ * words with both answers; and the account password is asked at the end, on
+ * "Estás dentro", where `pairing.seal` checks it (Erro 140) or, with no record
+ * from the other device, a new one is chosen twice. Nothing deletes an account.
  */
 const LINK = "https://orwell.pt/app/emparelhar#6gzjKC5Y-jxiXv_ZLoIzYX6ZL4PeZ24HirzSb__z6VY"
+const SEIS = "lua-pedra-rio-sol-mar-vento"
 
-function ponte(): { bridge: EnclaveBridge; emitir: (evento: PairEvento) => void; chamadas: string[] } {
+function ponte(): {
+  bridge: EnclaveBridge
+  emitir: (evento: PairEvento) => void
+  chamadas: string[]
+  selos: string[]
+} {
   const chamadas: string[] = []
+  const selos: string[] = []
   let ouvinte: ((evento: PairEvento) => void) | null = null
   const bridge = {
     vault: {
       status: vi.fn(async () => ({ exists: false, supportsOsProtection: false })),
+      createProvisionalToSeal: vi.fn(async () => {
+        chamadas.push("provisorio")
+        return { ok: true }
+      }),
       create: vi.fn(async () => {
         chamadas.push("vault.create")
         return { ok: true }
@@ -48,14 +60,19 @@ function ponte(): { bridge: EnclaveBridge; emitir: (evento: PairEvento) => void;
         chamadas.push("refuse")
         return { ok: true }
       }),
-      cancel: vi.fn(async () => ({ ok: true })),
+      cancel: vi.fn(async () => {
+        chamadas.push("cancel")
+        return { ok: true }
+      }),
+      seal: vi.fn(async (frase: string) => {
+        selos.push(frase)
+        if (frase === "errada-123") throw new Error("this is not the account password")
+        return { ok: true }
+      }),
       done: vi.fn(async () => {
         chamadas.push("done")
         return { ok: true }
       }),
-      status: vi.fn(),
-      host: vi.fn(),
-      devices: vi.fn(),
     },
     on: {
       pair: (handler: (evento: PairEvento) => void) => {
@@ -66,22 +83,10 @@ function ponte(): { bridge: EnclaveBridge; emitir: (evento: PairEvento) => void;
       },
     },
   } as unknown as EnclaveBridge
-  return { bridge, emitir: (evento) => ouvinte?.(evento), chamadas }
+  return { bridge, emitir: (evento) => act(() => ouvinte?.(evento)), chamadas, selos }
 }
 
-function montar(bridge: EnclaveBridge, onDone = vi.fn()): ReturnType<typeof vi.fn> {
-  render(
-    <BridgeContext.Provider value={bridge}>
-      <ToastProvider>
-        <Emparelhar onDone={onDone} onBack={() => {}} />
-      </ToastProvider>
-    </BridgeContext.Provider>,
-  )
-  return onDone
-}
-
-/** The same, with `onBack` visible and `unmount` returned: what the exit tests need. */
-function montarComSaida(bridge: EnclaveBridge, onBack: () => void): { unmount: () => void; onDone: ReturnType<typeof vi.fn> } {
+function montar(bridge: EnclaveBridge, onBack = vi.fn()): { onDone: ReturnType<typeof vi.fn>; onBack: ReturnType<typeof vi.fn>; unmount: () => void } {
   const onDone = vi.fn()
   const { unmount } = render(
     <BridgeContext.Provider value={bridge}>
@@ -90,161 +95,144 @@ function montarComSaida(bridge: EnclaveBridge, onBack: () => void): { unmount: (
       </ToastProvider>
     </BridgeContext.Provider>,
   )
-  return { unmount, onDone }
+  return { onDone, onBack, unmount }
 }
 
-/** From zero to pairing in progress: link, password, and vault created. */
-async function ateAoEmparelhamento(chamadas: string[]): Promise<void> {
-  fireEvent.change(screen.getByLabelText(strings.pairing.pasteLabel), { target: { value: LINK } })
-  fireEvent.click(screen.getByRole("button", { name: strings.pairing.pasteAction }))
-  const campos = document.querySelectorAll('input[type="password"]')
-  fireEvent.change(campos[0] as Element, { target: { value: "frase-de-teste-8" } })
-  fireEvent.change(campos[1] as Element, { target: { value: "frase-de-teste-8" } })
-  fireEvent.click(screen.getByRole("button", { name: strings.gate.next }))
-  await waitFor(() => expect(chamadas).toContain(`join ${LINK}`))
+async function colar(chamadas: string[], link = LINK): Promise<void> {
+  fireEvent.change(screen.getByLabelText(strings.juntarAparelho.colarCodigo), { target: { value: link } })
+  fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.continuar }))
+  if (link === LINK) await waitFor(() => expect(chamadas).toContain(`join ${LINK}`))
 }
 
-describe("Juntar este aparelho a uma conta", () => {
-  it("um link que não é de emparelhamento não passa da primeira página", () => {
+async function ateDentro(p: ReturnType<typeof ponte>, palavraPasse: "conta" | "nova" = "conta"): Promise<void> {
+  await colar(p.chamadas)
+  p.emitir({ fase: "sas", palavras: SEIS })
+  fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.sim }))
+  p.emitir({ fase: "certificado", address: "@a:orwell.pt", palavraPasse })
+  await screen.findByRole("heading", { name: strings.juntarAparelho.estasDentro })
+}
+
+describe("Entrar com outro aparelho, no aparelho novo", () => {
+  it("diz onde está o código no outro aparelho, com a câmara e o campo para colar, e sem palavra-passe", () => {
+    montar(ponte().bridge)
+    expect(screen.getByRole("heading", { name: strings.entrada.comOutroAparelho })).toBeTruthy()
+    expect(screen.getByText(strings.juntarAparelho.novoLead)).toBeTruthy()
+    expect(screen.getByRole("button", { name: strings.juntarAparelho.lerCamara })).toBeTruthy()
+    expect(document.querySelector('input[type="password"]')).toBeNull()
+  })
+
+  it("um código que não é para juntar aparelhos não passa, e não cria nada", () => {
     const { bridge, chamadas } = ponte()
     montar(bridge)
-    fireEvent.change(screen.getByLabelText(strings.pairing.pasteLabel), { target: { value: "https://orwell.pt/app/convite#x/y" } })
-    fireEvent.click(screen.getByRole("button", { name: strings.pairing.pasteAction }))
-    expect(screen.getByText(strings.pairing.linkInvalid)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText(strings.juntarAparelho.colarCodigo), { target: { value: "https://orwell.pt/app/convite#x/y" } })
+    fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.continuar }))
+    expect(screen.getByText(strings.juntarAparelho.codigoInvalido)).toBeTruthy()
     expect(chamadas).toEqual([])
   })
 
-  it("um link bom pede a chave deste aparelho, e o cofre só se cria depois dela", async () => {
-    const { bridge, chamadas } = ponte()
-    montar(bridge)
-    fireEvent.change(screen.getByLabelText(strings.pairing.pasteLabel), { target: { value: LINK } })
-    fireEvent.click(screen.getByRole("button", { name: strings.pairing.pasteAction }))
-    expect(screen.getByRole("heading", { name: strings.pairing.keyTitle })).toBeTruthy()
-    expect(chamadas).toEqual([])
-    const campos = document.querySelectorAll('input[type="password"]')
-    fireEvent.change(campos[0] as Element, { target: { value: "frase-de-teste-8" } })
-    fireEvent.change(campos[1] as Element, { target: { value: "frase-de-teste-8" } })
-    fireEvent.click(screen.getByRole("button", { name: strings.gate.next }))
-    await waitFor(() => expect(chamadas).toEqual(["vault.create", `join ${LINK}`]))
+  it("um código bom começa logo, num cofre provisório sem palavra-passe; nada vai ao disco", async () => {
+    const p = ponte()
+    montar(p.bridge)
+    await colar(p.chamadas)
+    expect(p.chamadas.slice(0, 2)).toEqual(["provisorio", `join ${LINK}`])
+    expect(p.chamadas).not.toContain("vault.create")
+    expect(screen.getByText(strings.juntarAparelho.aLigar)).toBeTruthy()
   })
 
-  it('as seis palavras aparecem grandes, com "São as mesmas" e "Não são", e o fim diz as duas frases', async () => {
-    const { bridge, emitir, chamadas } = ponte()
-    const onDone = montar(bridge)
-    fireEvent.change(screen.getByLabelText(strings.pairing.pasteLabel), { target: { value: LINK } })
-    fireEvent.click(screen.getByRole("button", { name: strings.pairing.pasteAction }))
-    const campos = document.querySelectorAll('input[type="password"]')
-    fireEvent.change(campos[0] as Element, { target: { value: "frase-de-teste-8" } })
-    fireEvent.change(campos[1] as Element, { target: { value: "frase-de-teste-8" } })
-    fireEvent.click(screen.getByRole("button", { name: strings.gate.next }))
-    await waitFor(() => expect(chamadas).toContain(`join ${LINK}`))
-
-    emitir({ fase: "ligado" })
-    emitir({ fase: "sas", palavras: "cilgiro-ransecis-penvesa-zoffonox-sigrinsis-vellesa" })
-    await waitFor(() => expect(screen.getByRole("heading", { name: strings.pairing.sasTitle })).toBeTruthy())
-    expect(document.querySelectorAll(".sas-palavra")).toHaveLength(6)
-    expect(document.querySelector(".sas-palavras")?.getAttribute("data-palavras")).toBe("cilgiro-ransecis-penvesa-zoffonox-sigrinsis-vellesa")
-    expect(screen.getByRole("button", { name: strings.pairing.sasDifferent })).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: strings.pairing.sasSame }))
-    await waitFor(() => expect(chamadas).toContain("confirm"))
-    expect(screen.getByText(strings.pairing.sasConfirmedHere)).toBeTruthy()
-
-    emitir({ fase: "certificado", address: "@a:orwell.pt" })
-    await waitFor(() => expect(screen.getByRole("heading", { name: strings.pairing.doneTitle })).toBeTruthy())
-    expect(chamadas).toContain("done")
-    expect(screen.getByText(strings.pairing.doneBody)).toBeTruthy()
-    expect(screen.getByText(strings.pairing.doneGuestNote)).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: strings.pairing.doneAction }))
-    expect(onDone).toHaveBeenCalledWith("@a:orwell.pt")
+  it("as palavras: só três, com os dois botões; sim confirma", async () => {
+    const p = ponte()
+    montar(p.bridge)
+    await colar(p.chamadas)
+    p.emitir({ fase: "sas", palavras: SEIS })
+    expect(screen.getByRole("heading", { name: strings.juntarAparelho.palavrasTitulo })).toBeTruthy()
+    const lista = document.querySelector(".sas-palavras") as HTMLElement
+    expect(lista.getAttribute("data-palavras")).toBe("lua-pedra-rio")
+    expect(lista.querySelectorAll("li")).toHaveLength(3)
+    fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.sim }))
+    await waitFor(() => expect(p.chamadas).toContain("confirm"))
+    expect(screen.getByText(strings.juntarAparelho.confirmadoAqui)).toBeTruthy()
   })
 
-  it('entre o certificado e a entrada, "a receber o teu estado", com o prazo à vista', async () => {
-    const { bridge, emitir, chamadas } = ponte()
-    montar(bridge)
-    await ateAoEmparelhamento(chamadas)
-    emitir({ fase: "estado" })
-    expect(await screen.findByText(strings.pairing.receivingState)).toBeTruthy()
-    expect(screen.getByRole("timer").textContent).toBe(strings.pairing.stateDeadline(15))
-    // It arrived whole: you go in, and the end doesn't talk about missing state.
-    emitir({ fase: "certificado", address: "@a:orwell.pt", estado: "inteiro" })
-    await waitFor(() => expect(screen.getByRole("heading", { name: strings.pairing.doneTitle })).toBeTruthy())
-    expect(screen.queryByText(strings.pairing.stateMissing)).toBeNull()
+  it('"Não são iguais" recusa e mostra a falha, com "Tentar de novo"', async () => {
+    const p = ponte()
+    montar(p.bridge)
+    await colar(p.chamadas)
+    p.emitir({ fase: "sas", palavras: SEIS })
+    fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.nao }))
+    await waitFor(() => expect(p.chamadas).toContain("refuse"))
+    expect(screen.getByRole("heading", { name: strings.juntarAparelho.falhou })).toBeTruthy()
+    expect(screen.getByRole("button", { name: strings.common.retry })).toBeTruthy()
   })
 
-  it("se o estado não chegar no prazo, entra na mesma e di-lo", async () => {
-    const { bridge, emitir, chamadas } = ponte()
-    montar(bridge)
-    await ateAoEmparelhamento(chamadas)
-    emitir({ fase: "estado" })
-    await screen.findByText(strings.pairing.receivingState)
-    emitir({ fase: "certificado", address: "@a:orwell.pt", estado: "em-falta" })
-    await waitFor(() => expect(screen.getByRole("heading", { name: strings.pairing.doneTitle })).toBeTruthy())
-    expect(chamadas).toContain("done")
-    expect(screen.getByText(strings.pairing.stateMissing)).toBeTruthy()
+  it('"Estás dentro": a palavra-passe da conta errada dá Erro 140 e fica; a certa sela, guarda e abre', async () => {
+    const p = ponte()
+    const { onDone } = montar(p.bridge)
+    await ateDentro(p, "conta")
+    const campo = screen.getByLabelText(strings.juntarAparelho.palavraPasseDaConta)
+    expect(campo.getAttribute("autocomplete")).toBe("current-password")
+    expect(screen.queryByLabelText(strings.entrada.palavraPasseOutraVez)).toBeNull()
+    fireEvent.change(campo, { target: { value: "errada-123" } })
+    fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.abrir }))
+    expect((await screen.findByRole("alert")).textContent).toContain("140")
+    expect(p.chamadas).not.toContain("done")
+    fireEvent.change(campo, { target: { value: "a-palavra-da-conta" } })
+    fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.abrir }))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith("@a:orwell.pt"))
+    expect(p.selos).toEqual(["errada-123", "a-palavra-da-conta"])
+    expect(p.chamadas).toContain("done")
   })
 
-  it('"Não são" recusa e não escreve nada', async () => {
-    const { bridge, emitir, chamadas } = ponte()
-    montar(bridge)
-    fireEvent.change(screen.getByLabelText(strings.pairing.pasteLabel), { target: { value: LINK } })
-    fireEvent.click(screen.getByRole("button", { name: strings.pairing.pasteAction }))
-    const campos = document.querySelectorAll('input[type="password"]')
-    fireEvent.change(campos[0] as Element, { target: { value: "frase-de-teste-8" } })
-    fireEvent.change(campos[1] as Element, { target: { value: "frase-de-teste-8" } })
-    fireEvent.click(screen.getByRole("button", { name: strings.gate.next }))
-    await waitFor(() => expect(chamadas).toContain(`join ${LINK}`))
-    emitir({ fase: "sas", palavras: "a-b-c-d-e-f" })
-    await waitFor(() => expect(screen.getByRole("button", { name: strings.pairing.sasDifferent })).toBeTruthy())
-    fireEvent.click(screen.getByRole("button", { name: strings.pairing.sasDifferent }))
-    await waitFor(() => expect(chamadas).toContain("refuse"))
-    expect(screen.getByRole("heading", { name: strings.pairing.failedTitle })).toBeTruthy()
-    expect(chamadas).not.toContain("confirm")
-    expect(chamadas).not.toContain("done")
-  })
-})
-
-/**
- * Leaving mid-way doesn't leave a useless vault locking the gate.
- *
- * The vault is born before pairing (you need a password to write what comes) and an
- * abandoned pairing leaves it empty: no identity inside. The next startup's gate found
- * it, asked for the password, and `loadIdentity` threw: an account that doesn't exist
- * asking for a key that opens nothing.
- */
-describe("sair a meio do emparelhamento", () => {
-  it('o "Voltar" da página que falhou cancela, destrói o cofre, e só depois sai', async () => {
-    const { bridge, emitir, chamadas } = ponte()
-    const onBack = vi.fn()
-    montarComSaida(bridge, onBack)
-    await ateAoEmparelhamento(chamadas)
-
-    emitir({ fase: "falhou", razao: "tempo-esgotado" })
-    await waitFor(() => expect(screen.getByRole("heading", { name: strings.pairing.failedTitle })).toBeTruthy())
-    fireEvent.click(screen.getByRole("button", { name: strings.gate.back }))
-
-    await waitFor(() => expect(chamadas).toContain("vault.destroy"))
+  it("after Erro 140 it says what to do without the password, and Cancel leaves the pairing", async () => {
+    const p = ponte()
+    const { onBack } = montar(p.bridge)
+    await ateDentro(p, "conta")
+    // Before a wrong password, nothing about forgetting it.
+    expect(screen.queryByText(strings.juntarAparelho.forgotAccountPassword)).toBeNull()
+    fireEvent.change(screen.getByLabelText(strings.juntarAparelho.palavraPasseDaConta), { target: { value: "errada-123" } })
+    fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.abrir }))
+    expect((await screen.findByRole("alert")).textContent).toContain("140")
+    expect(screen.getByText(strings.juntarAparelho.forgotAccountPassword)).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: strings.common.cancel }))
     await waitFor(() => expect(onBack).toHaveBeenCalled())
+    expect(p.chamadas).toContain("cancel")
+    expect(p.chamadas).not.toContain("done")
+    expect(p.chamadas).not.toContain("vault.destroy")
   })
 
-  it("fechar o ecrã sem responder destrói o cofre na mesma", async () => {
-    const { bridge, chamadas } = ponte()
-    const { unmount } = montarComSaida(bridge, vi.fn())
-    await ateAoEmparelhamento(chamadas)
-
-    unmount()
-    await waitFor(() => expect(chamadas).toContain("vault.destroy"))
+  it("sem registo do outro aparelho, escolhe-se a palavra-passe da conta, duas vezes", async () => {
+    const p = ponte()
+    const { onDone } = montar(p.bridge)
+    await ateDentro(p, "nova")
+    fireEvent.change(screen.getByLabelText(strings.juntarAparelho.palavraPasseDaConta), { target: { value: "nova-frase-1" } })
+    fireEvent.change(screen.getByLabelText(strings.entrada.palavraPasseOutraVez), { target: { value: "outra-frase" } })
+    fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.abrir }))
+    expect((await screen.findByRole("alert")).textContent).toBe(strings.entrada.diferentes)
+    fireEvent.change(screen.getByLabelText(strings.entrada.palavraPasseOutraVez), { target: { value: "nova-frase-1" } })
+    fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.abrir }))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    expect(p.selos).toEqual(["nova-frase-1"])
   })
 
-  it("depois de a conta entrar, fechar o ecrã NÃO destrói nada", async () => {
-    const { bridge, emitir, chamadas } = ponte()
-    const { unmount } = montarComSaida(bridge, vi.fn())
-    await ateAoEmparelhamento(chamadas)
-
-    emitir({ fase: "certificado", address: "@a:orwell.pt" })
-    await waitFor(() => expect(screen.getByRole("heading", { name: strings.pairing.doneTitle })).toBeTruthy())
-
+  it('"Voltar" e sair a meio cancelam o emparelhamento, e nunca apagam um cofre', async () => {
+    const p = ponte()
+    const { onBack, unmount } = montar(p.bridge)
+    await colar(p.chamadas)
     unmount()
-    await waitFor(() => expect(chamadas).toContain("done"))
-    expect(chamadas).not.toContain("vault.destroy")
+    await waitFor(() => expect(p.chamadas).toContain("cancel"))
+    expect(p.chamadas).not.toContain("vault.destroy")
+    expect(onBack).not.toHaveBeenCalled()
+  })
+
+  it("depois de abrir, sair já não cancela nada: a conta está no disco", async () => {
+    const p = ponte()
+    const { unmount } = montar(p.bridge)
+    await ateDentro(p)
+    fireEvent.change(screen.getByLabelText(strings.juntarAparelho.palavraPasseDaConta), { target: { value: "a-palavra-da-conta" } })
+    fireEvent.click(screen.getByRole("button", { name: strings.juntarAparelho.abrir }))
+    await waitFor(() => expect(p.chamadas).toContain("done"))
+    const antes = p.chamadas.length
+    unmount()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(p.chamadas.slice(antes)).not.toContain("cancel")
   })
 })

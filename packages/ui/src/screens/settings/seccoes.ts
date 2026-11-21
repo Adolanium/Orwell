@@ -43,8 +43,8 @@ export function seccoes(): readonly EntradaDeSeccao[] {
     { id: "media", label: strings.settings.media },
     // Blocked users, with "Unblock", and what the app stores.
     { id: "privacidade", label: strings.settings.privacidade },
-    // The account's devices and, below, this device: export and delete.
-    { id: "aparelhos", label: strings.settings.devices },
+    // Account and security (21/11/2026): password, file, devices, add a device; below, delete.
+    { id: "aparelhos", label: strings.contaESeguranca.titulo },
     { id: "ajuda", label: strings.settings.ajuda },
   ]
 }

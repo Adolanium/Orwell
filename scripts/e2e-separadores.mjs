@@ -235,9 +235,13 @@ async function destrancar(page) {
   await dentro(page)
 }
 
+/** Since 1.3.20 the heading is the room, and the channel's name sits beside it (as in `e2e-cliente-antigo.mjs`). */
+const canalAberto = (page, nome) =>
+  page.locator("h1, .topbar-comunidade").filter({ hasText: new RegExp(`^${nome}$`) }).first().waitFor({ timeout: 30_000 })
+
 async function abrirCanal(page, nome) {
   await page.locator(".channel-list .channel-name", { hasText: nome }).first().click()
-  await page.getByRole("heading", { name: nome }).waitFor({ timeout: 30_000 })
+  await canalAberto(page, nome)
 }
 
 async function dizer(page, frase) {
@@ -333,11 +337,11 @@ for (const nomeDoMotor of escolhidos) {
     await p1.getByRole("button", { name: "Criar canal" }).first().click()
     await p1.locator("form.prompt input").first().fill(celeiro)
     await p1.locator("form.prompt button.primary").first().click()
-    await p1.getByRole("heading", { name: celeiro }).waitFor({ timeout: 30_000 })
+    await canalAberto(p1, celeiro)
     await p1.getByRole("button", { name: "Criar canal" }).first().click()
     await p1.locator("form.prompt input").first().fill(canal)
     await p1.locator("form.prompt button.primary").first().click()
-    await p1.getByRole("heading", { name: canal }).waitFor({ timeout: 30_000 })
+    await canalAberto(p1, canal)
     await dizer(p1, "um: escrito no primeiro separador")
     check("o separador 1 é dono e escreve", await ve(p1, "um: escrito no primeiro separador"))
     check("e tem o WebSocket aberto", s1.abertos() === 1, `${s1.abertos()}`)

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { criarConta } from "./conta.mjs"
 import { comLingua } from "./ambiente.mjs"
+import { irPara, noTelemovel } from "./separadores.mjs"
 
 const URL = comLingua(process.argv[2] ?? "http://127.0.0.1:5183/")
 const SERVER = process.argv[3] ?? "localhost:8470"
@@ -42,14 +43,15 @@ async function conta(nome, viewport) {
 /**
  * The account address, read from the screen itself.
  *
- * On a phone the sidebar starts closed, and that is where the address lives,  * so open it first if needed.
+ * On a phone (option B) the account card, where the address lives, is in the
+ * "Tu" tab: go there if needed.
  */
 async function enderecoDe(page) {
   for (let tentativa = 0; tentativa < 2; tentativa++) {
     const texto = await page.locator("body").innerText()
     const encontrado = texto.match(/@[a-z-]+:[a-z0-9.:]+/i)
     if (encontrado) return encontrado[0]
-    await page.getByRole("button", { name: /painel lateral/i }).first().click().catch(() => {})
+    if (await noTelemovel(page)) await irPara(page, "tu").catch(() => {})
     await page.waitForTimeout(1200)
   }
   return null
@@ -83,6 +85,8 @@ await a.page.waitForTimeout(6000)
 // ---------------------------------------------------------------------------
 // B responds from the BELL, the new path.
 // ---------------------------------------------------------------------------
+// On the phone the bell is on the account card, in the "Tu" tab.
+await irPara(b.page, "tu").catch(() => {})
 const sino = b.page.getByRole("button", { name: /notificaç/i }).first()
 await sino.click()
 await b.page.waitForTimeout(1200)
@@ -112,7 +116,7 @@ check(
 
 // The Friends screen, which reads from the same fold, also doesn't have the request.
 await b.page.keyboard.press("Escape")
-await b.page.getByRole("button", { name: /amigos|pessoas/i }).first().click().catch(() => {})
+await irPara(b.page, "amigos").catch(() => {})
 await b.page.waitForTimeout(2000)
 const amigosB = await b.page.locator("main").innerText()
 check("no ecrã de Amigos o pedido também desapareceu", !/quer ser teu amigo/i.test(amigosB))

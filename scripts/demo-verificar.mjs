@@ -1,6 +1,6 @@
 /**
  * Look at the demo (`demo-servidor.mjs` + `demo-semear.mjs`) the way its owner does: a clean
- * browser, "Importar conta" with `ana.json`, then the community, its rooms, the polls page and
+ * browser, "Entrar com o ficheiro da conta" with `ana.json`, then the community, its rooms, the polls page and
  * the composer menu. Screenshots in `capturas/demo-*.png`.
  *
  *   node scripts/demo-verificar.mjs [frente=8492]
@@ -8,7 +8,8 @@
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { chromium } from "playwright"
-import { irParaONome } from "./fase7-comum.mjs"
+import { importarFicheiro } from "./fase7-comum.mjs"
+import { mostrarLista } from "./separadores.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const PORTA = process.argv[2] ?? "8492"
@@ -19,10 +20,7 @@ const ctx = await b.newContext({ locale: "pt-PT", viewport: { width: 1280, heigh
 const page = await ctx.newPage()
 page.on("pageerror", (e) => console.log("pageerror:", e.message))
 await page.goto(`http://127.0.0.1:${PORTA}/app/?lingua=pt`, { waitUntil: "domcontentloaded" })
-await irParaONome(page)
-await page.locator('.import-account input[type="file"]').setInputFiles(join(RAIZ, ".dev-data/demo-votacoes/contas/ana.json"))
-await page.locator('input[name="import-password"]').fill("demo-orwell-2026")
-await page.getByRole("button", { name: "Importar", exact: true }).click()
+await importarFicheiro(page, join(RAIZ, ".dev-data/demo-votacoes/contas/ana.json"), "demo-orwell-2026")
 await page.getByRole("button", { name: "Configurações", exact: true }).first().waitFor({ timeout: 90_000 })
 await wait(8000)
 console.log("canais:", await page.locator(".channel-name").allInnerTexts())
@@ -53,13 +51,13 @@ await wait(500)
 console.log("menu do + (sem «Criar votação»):", await page.getByRole("menuitem").allInnerTexts())
 await page.screenshot({ path: OUT("05-caixa-de-escrita-menu") })
 await page.keyboard.press("Escape")
-// The phone: the drawer shows the same row.
+// The phone: the Communities list shows the same row (a tab since option B, not a drawer).
 await page.setViewportSize({ width: 390, height: 844 })
 await wait(800)
-await page.getByRole("button", { name: "Abrir o painel lateral" }).click()
+await mostrarLista(page)
 await wait(600)
 console.log("no telemóvel, sala visível:", await page.locator(".room-row", { has: page.locator(".room-name", { hasText: "votações" }) }).first().isVisible())
-await page.screenshot({ path: OUT("06-telemovel-gaveta") })
+await page.screenshot({ path: OUT("06-telemovel-lista") })
 await page.locator(".room-row", { has: page.locator(".room-name", { hasText: "votações" }) }).first().locator("button.room").click()
 await wait(1200)
 await page.screenshot({ path: OUT("07-telemovel-sala-de-votacoes") })

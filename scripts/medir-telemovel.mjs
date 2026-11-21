@@ -9,6 +9,11 @@
  *  1. Settings in the rail was cut off on a phone in landscape
  *     (568x320, 750x342): the rail did not scroll.
  *  2. The settings sections only existed in the hamburger drawer.
+ *
+ * Since the phone layout with tabs (option B, 20/11/2026) there is no rail
+ * and no drawer at 840 px or less: Settings is a screen of the "Tu" tab, and
+ * the direct chat is pushed full screen from Messages. The checks of the rail
+ * and of the drawer became the same checks on the tabs.
  *  3. In Friends, "Encontrar" was cut off (347 px of tabs in 304).
  *  4. The compose box was 119 px wide.
  *  5. The header of a direct chat wrapped onto three lines.
@@ -27,6 +32,7 @@ import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { chromium, firefox, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
+import { abrirNoTu, appAberta, irPara, noTelemovel } from "./separadores.mjs"
 import { levantarServidor, RAIZ } from "./servidor-descartavel.mjs"
 
 const MOTORES = { chromium, firefox, webkit }
@@ -43,7 +49,7 @@ function check(nome, ok, detalhe = "") {
 
 const ANA = "Ana"
 const BRUNO = "Bruno"
-const dentro = (page) => page.getByRole("button", { name: "Configurações", exact: true }).first().waitFor({ timeout: 90_000 })
+const dentro = (page) => appAberta(page, 90_000)
 
 /** An element's rectangle, rounded. */
 async function caixa(locator) {
@@ -53,8 +59,33 @@ async function caixa(locator) {
   })
 }
 
-/** The rail's Settings button can be reached: scroll the rail to the end, and a finger hits it. */
+/**
+ * Settings can be reached at this size. On a computer: the rail's button,
+ * with the rail scrolled to its end. On a phone: the "Tu" tab in view and to
+ * the finger, and in its list the "Configurações" entry, also in view and to
+ * the finger (scrolled into view, as a finger would).
+ */
 async function configuracoesAlcancaveis(page) {
+  const acerto = (seletor, texto) =>
+    page.evaluate(
+      ([s, t]) => {
+        const el = [...document.querySelectorAll(s)].find((e) => !t || e.getAttribute("aria-label") === t || e.textContent?.includes(t))
+        if (!el) return { ok: false, motivo: `sem ${s}` }
+        el.scrollIntoView({ block: "nearest" })
+        const r = el.getBoundingClientRect()
+        const dentroDoEcra = r.top >= 0 && r.bottom <= window.innerHeight + 0.5 && r.height >= 40
+        const alvo = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+        const acerta = alvo !== null && el.contains(alvo)
+        return { ok: dentroDoEcra && acerta, motivo: `${s}: topo ${Math.round(r.top)}, fundo ${Math.round(r.bottom)} em ${window.innerHeight}, altura ${Math.round(r.height)}, acerta ${acerta}` }
+      },
+      [seletor, texto],
+    )
+  if (await noTelemovel(page)) {
+    await irPara(page, "tu")
+    const tab = await acerto(".separadores .separador", "Tu")
+    if (!tab.ok) return tab
+    return acerto(".menu-do-tu-entrada", "Configurações")
+  }
   return page.evaluate(() => {
     const carril = document.querySelector(".rail")
     const botao = [...document.querySelectorAll(".rail .rail-btn")].find((el) => el.getAttribute("aria-label") === "Configurações" || el.getAttribute("title") === "Configurações")
@@ -69,7 +100,7 @@ async function configuracoesAlcancaveis(page) {
 }
 
 async function separador(page, nome) {
-  await page.getByRole("button", { name: "Amigos", exact: true }).first().click()
+  await irPara(page, "amigos")
   await page.locator(".people-destination").waitFor({ timeout: 15_000 })
   await page.locator(".people-tabs").getByRole("button", { name: nome }).click()
 }
@@ -144,22 +175,19 @@ async function medirMotor(nome, servidor, portaBase) {
       check(`${w}px: o cabeçalho da directa fica numa linha`, linhas === 1 && topo.h <= 64, `altura ${topo.h}, ${botoes.length} botões em ${linhas} linha(s)`)
       check(`${w}px: nenhum botão do cabeçalho sai do ecrã`, botoes.every((botao) => botao.direita <= w), botoes.map((botao) => botao.direita).join(","))
       if (grosso) check(`${w}px: os botões do cabeçalho têm 44 px para o dedo`, botoes.every((botao) => botao.h >= 44 && botao.w >= 44), botoes.map((botao) => `${botao.w}x${botao.h}`).join(" "))
-      // The tabs again, now with the conversations handle beside them (Bruno already has one).
-      const comPega = await b.locator(".people-bar").evaluate((barra) => {
-        const nav = barra.querySelector(".people-tabs")
-        const pega = barra.querySelector(".people-bar-conversas")
-        const tabs = [...barra.querySelectorAll(".people-tab")]
+      // Before option B the Friends tabs shared their bar with the
+      // conversations handle, and had to fit beside it. On the phone the direct
+      // chat is pushed full screen now: no handle, and no bar of tabs over it.
+      const sobreAConversa = await b.evaluate(() => {
+        const visivel = (el) => el !== null && el.getBoundingClientRect().width > 0
         return {
-          pega: pega !== null && pega.getBoundingClientRect().width > 0,
-          linhas: new Set(tabs.map((tab) => Math.round(tab.getBoundingClientRect().top))).size,
-          cabem: nav.scrollWidth <= nav.clientWidth + 1 && tabs.every((tab) => tab.getBoundingClientRect().right <= window.innerWidth),
-          larguras: `${Math.round(nav.getBoundingClientRect().width)} para ${tabs.map((tab) => Math.round(tab.getBoundingClientRect().width)).join("+")}`,
+          pega: visivel(document.querySelector(".people-bar-conversas")),
+          separadores: visivel(document.querySelector(".separadores")),
+          empurrada: Math.round(document.querySelector(".ecra-empurrado")?.getBoundingClientRect().width ?? 0),
         }
       })
-      // At 390 px they fit on one line; at 360 px, with the handle beside them, they wrap to two, all in view.
-      const linhasAceites = w >= 390 ? 1 : 2
-      check(`${w}px: com a pega das conversas, os separadores cabem todos (${linhasAceites} linha${linhasAceites > 1 ? "s no máximo" : ""})`, comPega.pega && comPega.cabem && comPega.linhas <= linhasAceites, JSON.stringify(comPega))
-      const entrada = b.locator(".chat-composer .composer-line > input:not([type=file])")
+      check(`${w}px: a directa ocupa o ecrã, sem pega das conversas nem separadores por cima`, !sobreAConversa.pega && !sobreAConversa.separadores && sobreAConversa.empurrada === w, JSON.stringify(sobreAConversa))
+      const entrada = b.locator(".chat-composer .composer-line > textarea")
       const largura = (await caixa(entrada)).w
       check(`${w}px: a caixa de escrita tem pelo menos ${minimo} px`, largura >= minimo, `${largura} px`)
       const letra = await entrada.evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize))
@@ -172,13 +200,24 @@ async function medirMotor(nome, servidor, portaBase) {
     await b.setViewportSize({ width: 390, height: 844 })
 
     // --- The settings sections, on the screen itself -------------------------
-    await b.getByRole("button", { name: "Configurações", exact: true }).first().click()
+    await abrirNoTu(b, "Configurações")
     const lista = b.getByRole("navigation", { name: "Secções das configurações" })
     await lista.waitFor({ timeout: 10_000 })
+    // The pushed screen slides in (220 ms, 440 ms with reduced motion): measure it once it is in place.
+    await b.waitForFunction(() => document.querySelector(".ecra-empurrado")?.getAnimations({ subtree: true }).every((a) => a.playState !== "running") ?? true, null, { timeout: 5_000 }).catch(() => {})
     const itens = lista.getByRole("button")
-    const visiveis = await itens.evaluateAll((botoes) => botoes.filter((el) => { const r = el.getBoundingClientRect(); return r.height >= 44 && r.bottom <= window.innerHeight && r.right <= window.innerWidth }).length)
-    check("390px: as seis secções estão à vista no ecrã, sem abrir a gaveta", visiveis === 6, `${visiveis} de ${await itens.count()}`)
-    check("e a gaveta continua fechada", !(await b.locator(".sidebar.open").count()))
+    // In view means above the bar of tabs too, when it is drawn.
+    const visiveis = await itens.evaluateAll((botoes) => {
+      const barra = document.querySelector(".separadores")?.getBoundingClientRect()
+      const fundo = barra && barra.height > 0 ? barra.top : window.innerHeight
+      const caixas = botoes.map((el) => el.getBoundingClientRect())
+      return {
+        n: caixas.filter((r) => r.height >= 44 && r.bottom <= fundo && r.right <= window.innerWidth).length,
+        detalhe: `fundo ${Math.round(fundo)}, largura ${window.innerWidth}; ${caixas.map((r) => `${Math.round(r.top)}-${Math.round(r.bottom)} x${Math.round(r.left)}-${Math.round(r.right)}`).join(" ")}`,
+      }
+    })
+    check("390px: as seis secções estão à vista no ecrã, sem rolar", visiveis.n === 6, `${visiveis.n} de ${await itens.count()}; ${visiveis.detalhe}`)
+    check("e as Configurações são um ecrã empurrado do Tu, com a barra Voltar", (await b.locator(".ecra-empurrado .barra-do-telemovel").count()) === 1)
     await b.screenshot({ path: join(CAPTURAS, `telemovel-${nome}-configuracoes-lista.png`) })
     await lista.getByRole("button", { name: "Microfone e câmara" }).click()
     check("tocar numa secção abre-a", await b.getByRole("heading", { level: 2, name: "Microfone e câmara" }).first().isVisible().catch(() => false))
@@ -190,13 +229,13 @@ async function medirMotor(nome, servidor, portaBase) {
       await b.setViewportSize({ width: w, height: h })
       await b.waitForTimeout(300)
       const alcance = await configuracoesAlcancaveis(b)
-      check(`${w}x${h}: as Configurações do carril estão à vista e ao dedo`, alcance.ok, alcance.motivo)
+      check(`${w}x${h}: as Configurações estão à vista e ao dedo (separador Tu)`, alcance.ok, alcance.motivo)
       if (w === 568) await b.screenshot({ path: join(CAPTURAS, `telemovel-${nome}-deitado-568.png`) })
     }
 
     // --- Wide screen: as it was ----------------------------------------------
     await b.setViewportSize({ width: 1200, height: 860 })
-    await b.waitForTimeout(300)
+    await b.waitForTimeout(600)
     await b.getByRole("button", { name: "Configurações", exact: true }).first().click()
     check("1200px: o menu das secções continua na barra lateral", await b.locator(".sidebar .settings-nav").isVisible().catch(() => false))
     check("1200px: sem lista no ecrã nem botão de voltar", (await b.getByRole("navigation", { name: "Secções das configurações" }).count()) === 0 && (await b.getByRole("button", { name: "Voltar às secções" }).count()) === 0)

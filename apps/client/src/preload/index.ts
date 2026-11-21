@@ -4,6 +4,7 @@ import { CANAIS_DE_ATALHOS } from "../main/atalhos.js"
 import { CANAIS_DE_CANAL, LEITURAS_DE_CANAL } from "../main/canais.js"
 import { CANAIS_DA_MINIATURA } from "../main/miniaturas-pela-janela.js"
 import { CANAIS_DA_OVERLAY } from "../main/overlay.js"
+import { CANAIS_DA_PERMISSAO_DE_MEDIA } from "../main/permissao-de-media.js"
 import { CANAIS_SFU } from "../main/sfu.js"
 
 /**
@@ -68,6 +69,8 @@ contextBridge.exposeInMainWorld("enclaveHost", {
     lock: () => ipcRenderer.invoke("vault:lock"),
     memorizar: (ligar: boolean) => ipcRenderer.invoke("vault:memorizar", ligar),
     definirPalavraPasse: (frase: string) => ipcRenderer.invoke("vault:definir-palavra-passe", frase),
+    mudarPalavraPasse: (actual: string, nova: string) => ipcRenderer.invoke("vault:mudar-palavra-passe", actual, nova),
+    changePasswordWithOpenVault: (nova: string) => ipcRenderer.invoke("vault:change-password-with-open-vault", nova),
     destroy: () => ipcRenderer.invoke("vault:destroy"),
     export: (passphrase?: string, opcoes?: { incluirImagens?: boolean }) => ipcRenderer.invoke("vault:export", passphrase, opcoes),
     /*
@@ -82,6 +85,7 @@ contextBridge.exposeInMainWorld("enclaveHost", {
       return ipcRenderer.invoke("vault:import", new Uint8Array(await ficheiro.arrayBuffer()), passphrase)
     },
     createProvisional: (passphrase: string | null) => ipcRenderer.invoke("vault:createProvisional", passphrase),
+    createProvisionalToSeal: () => ipcRenderer.invoke("vault:createProvisionalToSeal"),
   },
   /** Switch account. See `contas` in `EnclaveBridge`. */
   contas: {
@@ -99,15 +103,19 @@ contextBridge.exposeInMainWorld("enclaveHost", {
     status: () => ipcRenderer.invoke("pairing:status"),
     host: () => ipcRenderer.invoke("pairing:host"),
     join: (link: string) => ipcRenderer.invoke("pairing:join", link),
+    showCode: (server: string) => ipcRenderer.invoke("pairing:show-code", server),
+    typeCode: (code: string) => ipcRenderer.invoke("pairing:type-code", code),
     confirm: () => ipcRenderer.invoke("pairing:confirm"),
     refuse: () => ipcRenderer.invoke("pairing:refuse"),
     cancel: () => ipcRenderer.invoke("pairing:cancel"),
     done: () => ipcRenderer.invoke("pairing:done"),
+    seal: (frase: string) => ipcRenderer.invoke("pairing:seal", frase),
     devices: () => ipcRenderer.invoke("pairing:devices"),
     revoke: (deviceKey: string) => ipcRenderer.invoke("pairing:revoke", deviceKey),
     juntar: (link: string) => ipcRenderer.invoke("pairing:juntar", link),
     juntarAvisar: () => ipcRenderer.invoke("pairing:juntar-avisar"),
     juntarTrocar: (passphrase: string | null) => ipcRenderer.invoke("pairing:juntar-trocar", passphrase),
+    joinCheckPassword: (passphrase: string) => ipcRenderer.invoke("pairing:join-check-password", passphrase),
     juntarCancelar: () => ipcRenderer.invoke("pairing:juntar-cancelar"),
   },
   /** Account state that travels between devices. See `estado` in `EnclaveBridge`. */
@@ -125,6 +133,7 @@ contextBridge.exposeInMainWorld("enclaveHost", {
   sincronia: {
     estado: () => ipcRenderer.invoke("sincronia:estado"),
     lugarEm: (channel: string) => ipcRenderer.invoke("sincronia:lugar-em", channel),
+    previousOnlineAt: () => ipcRenderer.invoke("sincronia:previous-online-at"),
     historico: () => ipcRenderer.invoke("sincronia:historico"),
   },
   /** Post video. See `video` in `EnclaveBridge`. */
@@ -175,6 +184,14 @@ contextBridge.exposeInMainWorld("enclaveHost", {
     escolherSalaComum: (entrar: boolean) => ipcRenderer.invoke("session:escolher-sala-comum", entrar),
     sondarRegisto: (servidor: string) => ipcRenderer.invoke("session:sondar-registo", servidor),
     definirConviteDeRegisto: (codigo: string | null) => ipcRenderer.invoke("session:convite-de-registo", codigo),
+    definirConviteDeComunidade: (link: string | null) => ipcRenderer.invoke("session:convite-de-comunidade", link),
+    // The abuse brake, part 2 (1.3.26). The window solves the proof; see `prepararContaNova` in the renderer bridge.
+    desafioDeRegisto: () => ipcRenderer.invoke("session:desafio-de-registo"),
+    definirProvaDeTrabalho: (prova: unknown) => ipcRenderer.invoke("session:prova-de-trabalho", prova),
+    contaNova: () => ipcRenderer.invoke("session:conta-nova"),
+    criarCanais: () => ipcRenderer.invoke("session:criar-canais"),
+    roomQuota: () => ipcRenderer.invoke("session:room-quota"),
+    autorNovo: (address: string) => ipcRenderer.invoke("session:autor-novo", address),
     setVisible: (visible: boolean) => ipcRenderer.invoke("session:set-visible", visible),
     latency: () => ipcRenderer.invoke("session:latency"),
     verificarLigacao: (opcoes?: { silencioMinimoMs?: number }) => ipcRenderer.invoke("session:verificar-ligacao", opcoes),
@@ -386,10 +403,13 @@ this channel.
     pedirPerfis: (channel: string, contas: string[]) => ipcRenderer.invoke("channel:pedir-perfis", channel, contas),
     buzz: (channel: string) => ipcRenderer.invoke("channel:buzz", channel),
     members: (channel: string) => ipcRenderer.invoke("channel:members", channel),
+    afastados: (channel: string) => ipcRenderer.invoke("channel:afastados", channel),
     history: (channel: string) => ipcRenderer.invoke("channel:history", channel),
     reaccoesGuardadas: (channel: string) => ipcRenderer.invoke("channel:reaccoes-guardadas", channel),
     conversaArquivada: (channel: string, cursor?: number | null) => ipcRenderer.invoke("channel:conversa-arquivada", channel, cursor),
     temConversaArquivada: (channel: string) => ipcRenderer.invoke("channel:tem-conversa-arquivada", channel),
+    loadOlderFromMembers: (channel: string, room?: string) => ipcRenderer.invoke("channel:load-older-from-members", channel, room),
+    hasOlderFromMembers: (channel: string) => ipcRenderer.invoke("channel:has-older-from-members", channel),
     forget: (channel: string) => ipcRenderer.invoke("channel:forget", channel),
     leave: (channel: string) => ipcRenderer.invoke("channel:leave", channel),
     safetyNumber: (channel: string, address: string) =>
@@ -523,6 +543,15 @@ this channel.
     /** The Settings panel where permission is granted. macOS only. */
     abrirDefinicoes: () => ipcRenderer.invoke("ecra:abrirDefinicoes"),
   },
+  /**
+   * The macOS microphone and camera permission, before a capture. See
+   * `main/permissao-de-media.ts`. The renderer names a device, never an address.
+   */
+  permissaoDeMedia: {
+    pedir: (video: boolean) => ipcRenderer.invoke(CANAIS_DA_PERMISSAO_DE_MEDIA.pedir, video === true),
+    abrirDefinicoes: (dispositivo: "microfone" | "camara") =>
+      ipcRenderer.invoke(CANAIS_DA_PERMISSAO_DE_MEDIA.abrirDefinicoes, dispositivo),
+  },
   /** The thumbnail the window made for `event:miniatura-pedido`. See `main/miniaturas-pela-janela.ts`. */
   miniatura: {
     responder: (id: number, mini: unknown) => ipcRenderer.invoke(CANAIS_DA_MINIATURA.resposta, id, mini),
@@ -530,6 +559,8 @@ this channel.
   on: {
     message: (handler: (payload: unknown) => void) => subscribe("event:message", handler),
     epoch: (handler: (payload: unknown) => void) => subscribe("event:epoch", handler),
+    /** The shown member list changed without an epoch (P7). For the interface only: it never rekeys a call. */
+    members: (handler: (payload: unknown) => void) => subscribe("event:members", handler),
     status: (handler: (payload: unknown) => void) => subscribe("event:status", handler),
     connection: (handler: (payload: unknown) => void) => subscribe("event:connection", handler),
     channels: (handler: (payload: unknown) => void) => subscribe("event:channels", handler),

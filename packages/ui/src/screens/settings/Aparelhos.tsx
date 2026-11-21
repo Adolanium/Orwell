@@ -7,7 +7,6 @@ import { useToast } from "../../components/Toast.js"
 import { useConfirmar } from "../../hooks/useConfirmar.js"
 import { formatShortDate } from "../../lib/format.js"
 import { strings, traduzirErro } from "../../strings.js"
-import { AcrescentarAparelho } from "./AcrescentarAparelho.js"
 import { Armazem } from "./Armazem.js"
 import { JuntarContas } from "./JuntarContas.js"
 
@@ -58,7 +57,6 @@ export function Aparelhos(): React.JSX.Element {
   const confirmar = useConfirmar()
   const [aparelhos, setAparelhos] = useState<AparelhoDaConta[] | null | undefined>(undefined)
   const [estado, setEstado] = useState<EstadoDaConta | null>(null)
-  const [aAcrescentar, setAAcrescentar] = useState(false)
   /** "Merge another account" open (phase 8.2). */
   const [aJuntar, setAJuntar] = useState(false)
   const podeJuntar = bridge.pairing?.juntar !== undefined
@@ -80,7 +78,6 @@ export function Aparelhos(): React.JSX.Element {
 
   useEffect(recarregar, [recarregar])
 
-  const podeAcrescentar = estado?.temChaveDeConta === true && estado.servidorSuporta
   const revogar = bridge.pairing?.revoke
   const podeRevogar = estado?.temChaveDeConta === true && estado.servidorRevoga === true && revogar !== undefined
   const aRevogar = revogacao?.que === "a-revogar"
@@ -118,11 +115,8 @@ export function Aparelhos(): React.JSX.Element {
   return (
     <>
       <section className="card settings-card">
-        <h2>{strings.settings.devices}</h2>
+        <h2>{strings.contaESeguranca.aparelhos}</h2>
         <p className="field-note">{strings.settings.devicesLead}</p>
-        {/* Phase 8.1: said here, where the second device is added, so no one
-            creates a new account on it. The same phrase from "How it works". */}
-        <p className="field-note">{strings.comoFunciona.umaContaChega}</p>
         {aparelhos === null && <p className="field-note">{strings.settings.devicesUnknown}</p>}
         {aparelhos && aparelhos.length > 0 && (
           <ul className="aparelhos-lista">
@@ -170,11 +164,6 @@ export function Aparelhos(): React.JSX.Element {
         {estado !== null && estado.temChaveDeConta && !estado.servidorSuporta && (
           <p className="field-note">{strings.pairing.serverUnsupported}</p>
         )}
-        {podeAcrescentar && (
-          <Button variant="primary" onClick={() => setAAcrescentar(true)}>
-            {strings.settings.addDevice}
-          </Button>
-        )}
         {podeRevogar && <p className="field-note">{strings.settings.revokeHonest}</p>}
         {/* Phase 8.2: the extra account merges with the main one and exits this device. */}
         {podeJuntar && (
@@ -196,15 +185,6 @@ export function Aparelhos(): React.JSX.Element {
 
       {/* The sheet mounts beside the card: the card glass (`backdrop-filter`)
           pinned it to its box. */}
-      {aAcrescentar && (
-        <AcrescentarAparelho
-          onClose={() => {
-            setAAcrescentar(false)
-            recarregar()
-          }}
-          onConcluido={recarregar}
-        />
-      )}
       {aJuntar && (
         <JuntarContas
           onClose={() => setAJuntar(false)}

@@ -29,6 +29,7 @@ describe("o som de cada entrada do sino", () => {
     const esperado: Record<AppNotification["kind"], TipoDeSom | null> = {
       "dm-message": "directa",
       "dm-new": "directa",
+      "device-new": null,
       mention: "mencao",
       "room-added": "canal",
       "friend-request": "pedido",

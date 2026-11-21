@@ -32,6 +32,20 @@ import { ItemRelatado } from "./autoria.js"
 /** The extension type: "orwell-retrato-v1", in the private use range (0xF000 to 0xFFFF). */
 export const EXTENSAO_RETRATO = 0xf0f0
 
+/**
+ * "orwell-perfis-a-pedido-v1", in the private use range, alongside `EXTENSAO_RETRATO`
+ * and `EXTENSAO_PERMISSOES` (1.3.26).
+ *
+ * Never travels as an extension: it is only DECLARED in the leaf's capabilities.
+ * It means "this client asks for the profiles it lacks in ANY channel (the `pp`
+ * request, until 1.3.25 only in the common room), and answers that request". The
+ * members of a channel that grows skip resending their whole profile (portrait
+ * included, ~124 KB) when every newcomer declares it: the newcomer pulls the latest
+ * signed version of each person instead. A newcomer that does not declare it
+ * (1.3.25 and older) still gets the resend.
+ */
+export const EXTENSAO_PERFIS_A_PEDIDO = 0xf0f2
+
 /** The snapshot cap, in bytes of JSON. A Welcome fits in a 12 MiB frame; this leaves plenty of room. */
 export const RETRATO_MAX_BYTES = 256 * 1024
 

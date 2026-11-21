@@ -348,3 +348,19 @@ describe("formatarTempo", () => {
     expect(formatarTempo(Number.NaN)).toBe("0:00")
   })
 })
+
+/**
+ * The order of the list without dragging (phone, option B, 20/11/2026). A
+ * finger has no reliable HTML drag, so each track but the first has "Subir".
+ * The CSS shows it only in the phone layout (`styles/telemovel.css`): the
+ * computer keeps its drag and its look.
+ */
+describe('a ordem da lista sem arrastar', () => {
+  it('"Subir" passa a faixa para cima da anterior; a primeira não tem', () => {
+    montar()
+    escolher(["01 Abertura.mp3", "02 Fado.mp3", "03 Fim.mp3"])
+    expect(screen.queryByRole("button", { name: strings.musica.subir("01 Abertura") })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: strings.musica.subir("03 Fim") }))
+    expect(nomesNaLista()).toEqual(["01 Abertura", "03 Fim", "02 Fado"])
+  })
+})

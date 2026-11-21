@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { EnclaveBridge } from "./bridge.js"
 import { App, appendBounded, paginaDoCofre } from "./App.js"
 import type { ChatMessage } from "./types.js"
@@ -32,6 +32,9 @@ let arquivo: unknown[] = []
 let moderadores = new Set<string>()
 let aoVivo: ((message: ChatMessage) => void) | null = null
 let paginasDoArquivo: ((cursor?: number | null) => { entradas: unknown[]; seguinte: number | null }) | null = null
+/** The members' past (history-last-100): absent unless a test sets it, like an older host. */
+let doMembros: ((canal: string, sala?: string) => Promise<{ outcome: "loaded" | "end" | "no-member" | "offline"; lines: number }>) | null = null
+let membrosTemMais = false
 
 beforeEach(() => {
   poder.criar = false
@@ -42,6 +45,8 @@ beforeEach(() => {
   moderadores = new Set()
   aoVivo = null
   paginasDoArquivo = null
+  doMembros = null
+  membrosTemMais = false
 })
 
 function ponte(): EnclaveBridge {
@@ -76,6 +81,9 @@ function ponte(): EnclaveBridge {
       conversaArquivada: async (_canal: string, cursor?: number | null) =>
         paginasDoArquivo ? paginasDoArquivo(cursor) : { entradas: arquivo, seguinte: null },
       temConversaArquivada: async () => arquivo.length > 0,
+      ...(doMembros
+        ? { loadOlderFromMembers: (canal: string, sala?: string) => doMembros!(canal, sala), hasOlderFromMembers: async () => membrosTemMais }
+        : {}),
       typing: async () => ({ ok: true }),
       buzz: async () => ({ ok: true }),
       members: async () => [EU, ANA],
@@ -173,6 +181,28 @@ const votacao = {
 /** The "olá N" lines the conversation draws. */
 const linhas = (): Set<string> => new Set([...document.querySelectorAll(".timeline .message-body")].map((corpo) => /olá \d+/.exec(corpo.textContent ?? "")?.[0] ?? ""))
 
+/**
+ * The reader scrolls up to the first line in memory: the window draws its last lines
+ * and grows as the reader goes up, and the button is above the first line. jsdom does
+ * no layout, so the scroller's geometry is set by hand.
+ */
+function subirAteAoPrincipio(): void {
+  const el = document.querySelector(".timeline") as HTMLElement
+  Object.defineProperty(el, "clientHeight", { configurable: true, get: () => 800 })
+  Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => 100_000 })
+  // From the bottom upward: the reader leaves the bottom, and what arrives does not slide the window.
+  act(() => {
+    el.scrollTop = 99_200
+    fireEvent.scroll(el)
+  })
+  for (let volta = 0; volta < 20; volta++) {
+    act(() => {
+      el.scrollTop = 0
+      fireEvent.scroll(el)
+    })
+  }
+}
+
 async function carregarAntigas(): Promise<void> {
   const botao = screen.getByRole("button", { name: strings.chat.loadOlder })
   await act(async () => {
@@ -183,17 +213,23 @@ async function carregarAntigas(): Promise<void> {
 
 describe("«Carregar mais antigas» num canal com muitos votos", () => {
   it("um toque traz linhas da conversa, mesmo com 1 000 votos de outra sala pelo meio", async () => {
+    // The seed takes the newest 100 LINES (history-last-100): 10 after the votes, the poll, 89 before them.
     historico = [
-      ...Array.from({ length: 300 }, (_, i) => conversa(i + 1)),
-      votacao,
-      ...Array.from({ length: 1000 }, (_, i) => voto(302 + i)),
-      ...Array.from({ length: 10 }, (_, i) => conversa(1400 + i)),
+      ...Array.from({ length: 500 }, (_, i) => conversa(i + 1)),
+      { ...votacao, seq: 501 },
+      ...Array.from({ length: 1000 }, (_, i) => voto(502 + i)),
+      ...Array.from({ length: 10 }, (_, i) => conversa(1600 + i)),
     ]
     await abrirConversa()
-    expect(linhas().size).toBe(10)
+    subirAteAoPrincipio()
+    // The poll is a line too: 10, the poll and 89 before it.
+    expect(linhas().has("olá 412")).toBe(true)
+    expect(linhas().has("olá 411")).toBe(false)
     await carregarAntigas()
-    // The line right before the ones on screen, which sits under 1 000 votes in the vault.
-    expect(linhas().has("olá 300")).toBe(true)
+    // The seed held lines 412 to 500, under 1 000 votes; the tap brings the next 100 lines, 312 to 411.
+    expect(linhas().has("olá 411")).toBe(true)
+    expect(linhas().has("olá 312")).toBe(true)
+    expect(linhas().has("olá 311")).toBe(false)
   })
 })
 
@@ -225,20 +261,23 @@ describe("o tecto da memória não corta o que se carregou à mão", () => {
       sender: `@r${seq}:casa.pt`,
       payload: { t: "reaction", target: `conversa-${1 + (seq % 20)}`, emoji: "👍", remove: false },
     })
+    // The seed takes 100 lines (history-last-100): lines 1 to 10 stay in the vault.
     historico = [
-      ...Array.from({ length: 20 }, (_, i) => conversa(i + 1)),
-      ...Array.from({ length: 380 }, (_, i) => reaccao(100 + i)),
+      ...Array.from({ length: 100 }, (_, i) => conversa(i + 1)),
+      ...Array.from({ length: 380 }, (_, i) => reaccao(300 + i)),
       ...Array.from({ length: 10 }, (_, i) => conversa(1400 + i)),
     ]
     await abrirConversa()
-    // A catch-up fills memory to the bound before the click: 200 seeded, 200 live.
+    // A catch-up fills memory past the bound before the click: 480 seeded, 200 live.
     await act(async () => {
       for (let i = 0; i < 200; i++) aoVivo?.(reaccao(1500 + i) as unknown as ChatMessage)
       await new Promise((r) => setTimeout(r, 200))
     })
+    subirAteAoPrincipio()
+    expect(linhas().has("olá 11")).toBe(true)
     await carregarAntigas()
     expect(linhas().has("olá 1")).toBe(true)
-    // 610 in memory now, past the bound of 400. Live:
+    // 690 in memory now, past the bound of 400. Live:
     await act(async () => {
       for (let i = 0; i < 5; i++) aoVivo?.(conversa(2000 + i) as unknown as ChatMessage)
       await new Promise((r) => setTimeout(r, 200))
@@ -274,5 +313,83 @@ describe("appendBounded com um tecto maior", () => {
     for (let seq = 1; seq <= 450; seq++) lista = appendBounded(lista, conversa(seq) as unknown as ChatMessage, 500)
     expect(lista.length).toBe(450)
     expect(appendBounded(lista, conversa(451) as unknown as ChatMessage).length).toBe(400)
+  })
+})
+
+describe("history-last-100: the lines past the device come from the members", () => {
+  it("the seed is 100 lines, not 100 entries", async () => {
+    historico = [
+      ...Array.from({ length: 150 }, (_, i) => conversa(i + 1)),
+      { ...votacao, seq: 151 },
+      ...Array.from({ length: 300 }, (_, i) => voto(152 + i)),
+    ]
+    membrosTemMais = true
+    const pedidos: number[] = []
+    doMembros = async () => {
+      pedidos.push(1)
+      return { outcome: "end", lines: 0 }
+    }
+    await abrirConversa()
+    subirAteAoPrincipio()
+    // The 100 seeded lines are all in memory: the poll and 99 before it (52 to 150), under 300 votes.
+    expect(linhas().has("olá 52")).toBe(true)
+    expect(linhas().has("olá 51")).toBe(false)
+    await carregarAntigas()
+    const vistas = linhas()
+    for (const n of [52, 100, 150, 1]) expect(vistas.has(`olá ${n}`)).toBe(true)
+    // The vault still had lines: the members are not asked.
+    expect(pedidos).toHaveLength(0)
+  })
+
+  it("with the device at its start, the tap asks a member for the room on screen, and what comes stays", async () => {
+    historico = Array.from({ length: 10 }, (_, i) => conversa(1400 + i))
+    membrosTemMais = true
+    const pedidos: [string, string | undefined][] = []
+    doMembros = async (canal, sala) => {
+      pedidos.push([canal, sala])
+      // The lines arrive as live messages, older than everything on screen.
+      for (let i = 0; i < 100; i++) aoVivo?.(conversa(1000 + i) as unknown as ChatMessage)
+      await new Promise((r) => setTimeout(r, 50))
+      return { outcome: "loaded", lines: 100 }
+    }
+    await abrirConversa()
+    // The button shows with nothing older in the vault: the members have it.
+    await carregarAntigas()
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200))
+    })
+    expect(pedidos).toEqual([[LAGAR, "conversa"]])
+    // Memory was full before them in a real catch-up; here they come, and all of them stay.
+    expect(linhas().has("olá 1000")).toBe(true)
+    expect(linhas().has("olá 1099")).toBe(true)
+    expect(linhas().has("olá 1409")).toBe(true)
+    expect(screen.getByRole("button", { name: strings.chat.loadOlder })).toBeTruthy()
+  })
+
+  it("with no member online, the tap says so with its code", async () => {
+    historico = Array.from({ length: 10 }, (_, i) => conversa(1400 + i))
+    membrosTemMais = true
+    doMembros = async () => ({ outcome: "no-member", lines: 0 })
+    await abrirConversa()
+    await carregarAntigas()
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100))
+    })
+    expect(document.body.textContent).toContain("395")
+    // Nothing ended: the button stays for the next try.
+    expect(screen.getByRole("button", { name: strings.chat.loadOlder })).toBeTruthy()
+    expect(document.querySelector(".timeline-inicio-do-aparelho")).toBeNull()
+  })
+
+  it("when the members say the past is complete, the start of the device shows", async () => {
+    historico = Array.from({ length: 10 }, (_, i) => conversa(1400 + i))
+    membrosTemMais = true
+    doMembros = async () => ({ outcome: "end", lines: 0 })
+    await abrirConversa()
+    await carregarAntigas()
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100))
+    })
+    expect(document.querySelector(".timeline-inicio-do-aparelho")).toBeTruthy()
   })
 })

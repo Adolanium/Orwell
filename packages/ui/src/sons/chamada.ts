@@ -53,11 +53,29 @@ export function comecaAChamar(entrada: EntradaNaPrivada): boolean {
  * the call) or when I am no longer in that call (I gave up, or the call
  * dropped). The time limit is handled by the engine (`TOQUE_MAXIMO_MS`).
  *
- * Orwell has no "reject call" action: the receiver lets it ring until the end.
- * When the gesture exists, rejecting stops the ring here, same as answering.
+ * The receiver can decline since 21/11/2026 (the notice's "Decline"): that
+ * stops the ring on the receiver's device only, and the call goes on, so the
+ * caller keeps waiting here until someone answers, they give up, or 30 s pass.
  */
 export function paraDeChamar(aChamar: string, chamadaActual: string | null, haOutra: boolean): boolean {
   return chamadaActual !== aChamar || haOutra
+}
+
+/**
+ * Does the incoming ring stop? (21/11/2026.) When this device answers (it is in
+ * that call), when another device of my account answers (my address is in the
+ * call: answering anywhere is answering), and when the call ends before that
+ * (nobody is left in it). Declining is a gesture, handled by the shell; the
+ * time limit is the engine's (`TOQUE_MAXIMO_MS`).
+ */
+export function incomingRingStops(ringing: string, callChannel: string | null, inTheCall: Iterable<string>, me: string | null): boolean {
+  if (callChannel === ringing) return true
+  let anyone = false
+  for (const who of inTheCall) {
+    if (me !== null && who === me) return true
+    anyone = true
+  }
+  return !anyone
 }
 
 /* ------------------------------------------- lost voice call */

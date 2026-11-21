@@ -198,6 +198,13 @@ export interface SincroniaDoCanal {
   progresso: ProgressoDoTipo[]
   /** The time of the last comparison with another member (a digest sent or heard), or `null`. */
   ultimaComparacao: number | null
+  /**
+   * The past from before this account's seat is arriving now, from another
+   * member (D2) or from a sibling device (the account history). The "Chat
+   * history is syncing." marker shows only while this is true. Absent from a
+   * core before D2: no marker.
+   */
+  passado?: boolean
 }
 
 /**

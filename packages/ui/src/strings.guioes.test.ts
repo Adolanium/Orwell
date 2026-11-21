@@ -150,6 +150,7 @@ const FORA = new Map<string, string>([
   ["geral", "o marcador do campo de nome de canal, que é um exemplo e não uma etiqueta"],
   ["sanctus-christus", "canal de um ambiente de diagnóstico, criado fora deste guião"],
   ["sala-de-verificacao", "canal criado pela API do núcleo e não pela interface, logo sem `fill`"],
+  ["P1 antes de entrarem?", "a pergunta que o `e2e-votacoes-conta-nova.mjs` escreve, por um `fill` com variável (`poll(pergunta)`)"],
   [
     "Criar link de convite",
     "procurado pelo `e2e-cliente-antigo.mjs` no cliente ANTIGO, que ainda diz esta frase; o guião prova o cliente antigo e não muda",

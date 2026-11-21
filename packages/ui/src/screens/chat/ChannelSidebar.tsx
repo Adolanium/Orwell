@@ -1,4 +1,6 @@
 import { nomeDaSalaNoEcra } from "../../lib/nomesDeOrigem.js"
+import { BlockedButton } from "../../components/BlockedButton.js"
+import { FaixaDoFicheiro } from "../../components/FaixaDoFicheiro.js"
 import { nomeVisivel } from "@enclave/client-core"
 import { memo, useEffect, useRef, useState } from "react"
 import type { Activity, ChannelRoom, ConnectionState, Profile } from "../../bridge.js"
@@ -18,6 +20,7 @@ import { SeloOficial } from "../../components/SeloOficial.js"
 import { Vozes } from "../../components/Vozes.js"
 import { useCollapsed } from "../../hooks/usePrefs.js"
 import { useToqueLongo } from "../../hooks/useToqueLongo.js"
+import { useTelemovel } from "../../hooks/useTelemovel.js"
 import type { RoomGroup } from "../../hooks/useRooms.js"
 import { temArvore as temArvoreDeSalas } from "./arvoreDeSalas.js"
 import { largaDepois } from "./reordenarCategorias.js"
@@ -462,6 +465,8 @@ function ChannelSidebarInteira({
   latencia = null,
   onLatenciaHover,
   onPrompt,
+  channelCapTip,
+  roomCapTip,
   onSaveStatus,
   pedidoDeEstado,
   chamada = null,
@@ -692,6 +697,14 @@ function ChannelSidebarInteira({
   latencia?: { ms: number; ate: "servidor" | "par" } | null | undefined
   onLatenciaHover?: ((dentro: boolean) => void) | undefined
   onPrompt: (prompt: "channel" | "amigo" | "link") => void
+  /**
+   * Why this account cannot create a channel now (1.3.26: the cap), or
+   * nothing. With it, the "+" of the column stays, grey, with this as its tip
+   * (`BlockedButton`); "Join with a link" stays.
+   */
+  channelCapTip?: string | undefined
+  /** The same for rooms: "New room" and the "+" of each category stay, grey, with this tip. */
+  roomCapTip?: string | undefined
   onSaveStatus: (statusText: string) => void
   /** Rises when "Custom…" asks for the status line to edit. */
   pedidoDeEstado?: number | undefined
@@ -715,6 +728,13 @@ function ChannelSidebarInteira({
   const [alvo, setAlvo] = useState<string | null>(null)
   /* The same menus, with a finger down. See `useToqueLongo`. */
   const aoDedo = useToqueLongo()
+  /*
+    On the phone the menu of the community line is only a menu (decision of
+    20/11/2026): picking the channel there pushes its conversation, and a long
+    press is a question about the line, not a visit. On a computer the right
+    click still picks the channel first, as it always did.
+  */
+  const telemovel = useTelemovel()
   const aside = useRef<HTMLElement>(null)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
@@ -771,7 +791,7 @@ function ChannelSidebarInteira({
             <PlusIcon size={17} />
           </button>
         )}
-        {view === "chat" && (
+        {view === "chat" && !channelCapTip && (
           <button
             className="header-add"
             title={strings.sidebar.createRoom}
@@ -781,7 +801,14 @@ function ChannelSidebarInteira({
             <PlusIcon size={17} />
           </button>
         )}
+        {view === "chat" && channelCapTip && (
+          <BlockedButton className="header-add" tip={channelCapTip} label={strings.sidebar.createRoom} side="below-end">
+            <PlusIcon size={17} />
+          </BlockedButton>
+        )}
       </header>
+      {/* The account-file banner, for the phone's lists (21/11/2026). Hidden on a computer, where the main column has it. */}
+      {view === "chat" && <FaixaDoFicheiro />}
 
       {view === "perfil" ? (
         <div className="sidebar-body">
@@ -922,11 +949,11 @@ function ChannelSidebarInteira({
                       .join(" ")}
                     onContextMenu={(event) => {
                       event.preventDefault()
-                      onSelectChannel(channel)
+                      if (!telemovel) onSelectChannel(channel)
                       onChannelMenu(channel, { x: event.clientX, y: event.clientY })
                     }}
                     {...aoDedo((ponto) => {
-                      onSelectChannel(channel)
+                      if (!telemovel) onSelectChannel(channel)
                       onChannelMenu(channel, ponto)
                     })}
                   >
@@ -1150,20 +1177,6 @@ function ChannelSidebarInteira({
                                     ? { title: strings.rooms.dragCategory(grupo.category) }
                                     : {})}
                               >
-                                {/* Left of the name, a sibling of the toggle: a button cannot hold
-                                    another, and a click here must not fold the category. */}
-                                {onNewRoomInCategory && (
-                                  <button
-                                    type="button"
-                                    className="category-criar"
-                                    aria-label={strings.sidebar.criarSalaNaCategoriaRotulo(grupo.category)}
-                                    title={strings.sidebar.criarSalaNaCategoria}
-                                    draggable={false}
-                                    onClick={() => onNewRoomInCategory(grupo.category)}
-                                  >
-                                    <PlusIcon size={11} />
-                                  </button>
-                                )}
                                 <button
                                   className="category-toggle"
                                   aria-expanded={categoriaAberta}
@@ -1204,6 +1217,31 @@ function ChannelSidebarInteira({
                                       ) : null
                                     })()}
                                 </button>
+                                {/* At the right end of the line, like the header `+`: a sibling of
+                                    the toggle, since a button cannot hold another and a click here
+                                    must not fold the category. */}
+                                {!onNewRoomInCategory && roomCapTip && (
+                                  <BlockedButton
+                                    className="category-criar"
+                                    tip={roomCapTip}
+                                    label={strings.sidebar.criarSalaNaCategoriaRotulo(grupo.category)}
+                                    side="end"
+                                  >
+                                    <PlusIcon size={11} />
+                                  </BlockedButton>
+                                )}
+                                {onNewRoomInCategory && (
+                                  <button
+                                    type="button"
+                                    className="category-criar"
+                                    aria-label={strings.sidebar.criarSalaNaCategoriaRotulo(grupo.category)}
+                                    title={strings.sidebar.criarSalaNaCategoria}
+                                    draggable={false}
+                                    onClick={() => onNewRoomInCategory(grupo.category)}
+                                  >
+                                    <PlusIcon size={11} />
+                                  </button>
+                                )}
                               </h3>
                             )}
                             {(categoriaAberta || !grupo.category) && (
@@ -1317,6 +1355,16 @@ function ChannelSidebarInteira({
                           </button>
                         </div>
                       )}
+                      {!onNewRoom && roomCapTip && (
+                        <div className="room-row">
+                          <BlockedButton className="room room-new" tip={roomCapTip} label={strings.sidebar.newRoom} side="start">
+                            <span className="room-glyph" aria-hidden="true">
+                              <PlusIcon size={13} />
+                            </span>
+                            <span className="room-name">{strings.sidebar.newRoom}</span>
+                          </BlockedButton>
+                        </div>
+                      )}
                     </div>
                   )}
                 </li>
@@ -1361,7 +1409,7 @@ function ChannelSidebarInteira({
           <Button variant="ghost" className="wide join-link" onClick={() => onPrompt("link")}>
             {strings.sidebar.joinWithLink}
           </Button>
-          {rooms.length === 0 && aEsperaDeEntrada.length === 0 && (
+          {!channelCapTip && rooms.length === 0 && aEsperaDeEntrada.length === 0 && (
             <p className="sidebar-note">
               {strings.sidebar.noRoomsBefore}
               <strong>+</strong>

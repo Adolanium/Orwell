@@ -38,6 +38,7 @@ import { criarConta } from "./conta.mjs"
 import { aceitarConvite, convidar } from "./convite.mjs"
 import { abrirCanal, aceitarAmizade, ate, consultar, contasDoServidor, criarCanal, dentro, dizer, irParaEmparelhar, ouviu, pedirAmizade, verificador } from "./fase7-comum.mjs"
 import { levantarServidor, RAIZ } from "./servidor-descartavel.mjs"
+import { juntarComPalavras } from "./juntar-aparelho.mjs"
 
 const FRASE = "frase-de-verificacao-2026"
 const SEGUINTE = /^(Continuar|Seguinte)$/
@@ -198,27 +199,16 @@ try {
   // 0b. Ana's second device: Firefox, via link.
   await ana.page.keyboard.press("Escape").catch(() => {})
   await ana.page.getByRole("button", { name: "Configurações", exact: true }).first().click()
-  await ana.page.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await ana.page.getByRole("button", { name: "Acrescentar aparelho" }).click()
+  await ana.page.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await ana.page.getByRole("button", { name: "Juntar um aparelho" }).click()
   const folhaPar = ana.page.locator(".sheet").first()
   await folhaPar.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folhaPar.locator("code[data-link]").getAttribute("data-link")
   const ana2 = await abrir(firefox, "ana-firefox", carla.browser)
   await irParaEmparelhar(ana2.page)
-  await ana2.page.getByLabel("Ou cola o link").fill(link)
-  await ana2.page.getByRole("button", { name: SEGUINTE }).first().click()
-  await ana2.page.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 15_000 })
-  const campos = ana2.page.locator('.gate-card input[type="password"]')
-  for (let i = 0; i < (await campos.count()); i++) await campos.nth(i).fill(FRASE)
-  await ana2.page.getByRole("button", { name: SEGUINTE }).first().click()
-  await ana2.page.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folhaPar.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await ana2.page.getByRole("button", { name: "São as mesmas" }).click()
-  await folhaPar.getByRole("button", { name: "São as mesmas" }).click()
-  const emparelhado = await ana2.page.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 }).then(() => true, () => false)
+  const emparelhado = await juntarComPalavras(ana2.page, folhaPar, link, FRASE).then(() => true, () => false)
   await folhaPar.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
   await ana.page.keyboard.press("Escape").catch(() => {})
-  await ana2.page.getByRole("button", { name: "Entrar", exact: true }).click()
   await dentro(ana2.page)
   const manifesto = consultar(srv.base, "SELECT manifest FROM device_manifests WHERE address = ?", enderecoAna)[0]
   numeros.aparelhosDaAna = manifesto ? JSON.parse(manifesto.manifest).devices.length : 0

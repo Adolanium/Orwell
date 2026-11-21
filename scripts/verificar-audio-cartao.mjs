@@ -63,6 +63,7 @@
 import { chromium } from "playwright"
 import { criarContaEEntrar } from "./conta.mjs"
 import { alvo, alvoApp, FRASE } from "./ambiente.mjs"
+import { appAberta, irPara } from "./separadores.mjs"
 
 /*
   The target comes from `ambiente.mjs`, not from two default values written here.
@@ -172,16 +173,16 @@ async function abrir(largura, altura) {
   return { ctx, page }
 }
 
-/** The sidebar drawer, on narrow screens where it is not a column. */
+/**
+ * The account card on a narrow screen. Since option B (20/11/2026) the phone
+ * has no drawer: the card lives in the "Tu" tab, at the top of its list.
+ */
 async function abrirGaveta(page) {
-  const menu = page.getByRole("button", { name: /abrir o painel lateral/i }).first()
-  if (await menu.isVisible().catch(() => false)) {
-    await menu.click()
-    // The drawer slides; measuring mid-transition gives false numbers.
-    await page.waitForTimeout(700)
-  }
-  const aberta = await page.evaluate(() => document.querySelector("aside.sidebar")?.classList.contains("open"))
-  if (!aberta) throw new Error("a gaveta não abriu — a medição a 390px não valeria nada")
+  await irPara(page, "tu")
+  // The tab switch is instant, but give layout a frame or two before measuring.
+  await page.waitForTimeout(400)
+  const aVista = await page.locator(".menu-do-tu .me-audio-btn").first().isVisible().catch(() => false)
+  if (!aVista) throw new Error("o cartão da conta não está à vista no separador Tu — a medição a 390px não valeria nada")
 }
 
 /**
@@ -253,7 +254,7 @@ console.log(`\n== silenciar sem estar em chamada, e a escolha sobreviver ==${SAB
 
   // Reload is the test that the choice lives longer than the screen.
   await page.reload({ waitUntil: "domcontentloaded" })
-  await page.getByRole("button", { name: "Configurações" }).waitFor({ timeout: 60_000 })
+  await appAberta(page, 60_000)
   await page.waitForTimeout(600)
   await sabotar(page)
   const depois = await estado(page)
@@ -459,7 +460,8 @@ console.log("\n== 390px, nome comprido e acentuado, sem transbordo ==")
     const marca = document.querySelector(".me-name > .dot")
     if (!linha || !cartao || !nome || !marca) return null
     const caixa = linha.getBoundingClientRect()
-    const lateral = document.querySelector("aside.sidebar").getBoundingClientRect()
+    // The column that holds the card: the sidebar on a computer, the "Tu" list on a phone.
+    const lateral = (document.querySelector(".app.telemovel .menu-do-tu") ?? document.querySelector("aside.sidebar")).getBoundingClientRect()
     const marcaCaixa = marca.getBoundingClientRect()
     return {
       linha: { esquerda: caixa.left, direita: caixa.right },

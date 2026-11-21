@@ -120,9 +120,23 @@ export function fraseDoStatus(status: SessionStatus, labelFor: (channel: string)
       // The account removed this device from another device, or its pairing did not
       // finish (never in the manifest). The UI takes the person to the gate.
       return translateError(status.emparelhamentoPorAcabar ? "pairing-unfinished" : "device-revoked")
+    case "account-password-changed":
+      // The account password changed on another device (1.3.26): this vault opens with the new one now.
+      return strings.settings.palavraPasseMudouNoutro
     case "account-suspended":
       // The account is suspended on this server. The interface shows the full warning.
       return translateError("account-suspended")
+    // The abuse brake, part 2 (1.3.26).
+    case "new-account":
+      return strings.contaNova.aviso
+    case "new-account-slow": {
+      const segundos = Number.parseInt(status.detail, 10)
+      return strings.contaNova.ritmo(Number.isFinite(segundos) && segundos > 0 ? segundos : 30)
+    }
+    case "new-account-refused":
+      return translateError(status.detail)
+    case "common-room-queued":
+      return strings.contaNova.naFila
     case "account-channel-foreign":
       // Goes to the log (`route: "log"`); the phrase serves those who read it in a report.
       return translateError("account-channel-foreign")
@@ -147,6 +161,19 @@ function chaveDoConviteRecusado(detalhe: string): string {
   if (detalhe === "too many invite requests") return "too many invite requests"
   return "that invite no longer exists"
 }
+
+/**
+ * Notices that say what is happening to the person right after connecting,
+ * and so must not wait for the quiet window (1.3.26): the new-account notice,
+ * a message held by the common room's limit, and the common room's queue.
+ */
+const FURAM_O_SILENCIO: ReadonlySet<string> = new Set([
+  "new-account",
+  "new-account-slow",
+  "common-room-queued",
+  // The account password changed while this device was off (1.3.26): it learns it in the recovery right after connecting.
+  "account-password-changed",
+])
 
 /** How long after a connection comes up mechanics stay quiet. */
 export const QUIET_WINDOW_MS = 6_000
@@ -190,7 +217,7 @@ export function routeStatus(status: SessionStatus, context: RoutingContext): Sta
    * say nothing anyone can act on — the connection banner already covers them.
    */
   const settling = context.connectedAt > 0 && context.now - context.connectedAt < QUIET_WINDOW_MS
-  if (settling && (status.level === "info" || status.code === "server-error")) {
+  if (settling && !FURAM_O_SILENCIO.has(status.code ?? "") && (status.level === "info" || status.code === "server-error")) {
     return { target: "log", reason: "quiet-window" }
   }
 

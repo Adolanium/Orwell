@@ -2,6 +2,8 @@ import {
   enviarRelato,
   mensagemAEnviar,
   origemDoServidorDe,
+  PENDING_IMPORT_KEYS_FILE,
+  pendingImportKeysIn,
   podeSair,
   Session,
   Vault,
@@ -20,9 +22,11 @@ import { kindOf } from "@enclave/crypto"
 // From the protocol, not the UI: this process loads no React, and
 // `@enclave/ui` brings the entire tree behind it.
 import {
+  CAPABILITY_PAIRING_PAKE,
   CAPACIDADE_REVOGACAO,
   MOTIVOS,
   NOTA_MAX,
+  ProvaDeTrabalho,
   TYPING_TTL_MS,
   type MessageExtras,
   type Payload,
@@ -74,6 +78,7 @@ import {
   type ResultadoDoArranque,
 } from "./actualizacao-windows.js"
 import { CHAVE_PUBLICA_DE_ACTUALIZACOES } from "./chave-de-actualizacoes.js"
+import { confirmWithSystem } from "./system-auth.js"
 import { codigoDoEstado, CORES_DO_ARRANQUE, htmlDoArranque } from "./ecra-de-arranque.js"
 import { type LinguaDoAnfitriao, linguaDoAnfitriao, linguasDoSistemaElectron, textosDoAnfitriao } from "./lingua-do-anfitriao.js"
 import { escreverTema, FICHEIRO_DO_TEMA, FUNDO_DA_JANELA, lerTemaGuardado, temaValido, temaVisto, type TemaEscolhido } from "./tema-da-janela.js"
@@ -92,6 +97,7 @@ import {
   type EscolhaDeEcra,
   type EstadoDaPermissao,
 } from "./ecra.js"
+import { CANAIS_DA_PERMISSAO_DE_MEDIA, criarPermissaoDeMedia } from "./permissao-de-media.js"
 import { preVisualizarLink } from "./link-preview.js"
 import { enderecoParaAbrirFora } from "./links-externos.js"
 import { ligarOverlayDeJogo } from "./overlay-janela.js"
@@ -102,6 +108,7 @@ import { ArmazemDaContaActiva } from "./armazem-backend.js"
 import { miniaturistaDaSecretaria } from "./miniaturista.js"
 import { CANAIS_DA_MINIATURA, PedidosDeMiniatura } from "./miniaturas-pela-janela.js"
 import { permissaoConcedida } from "./permissoes.js"
+import { quitAfterDrain } from "./quit-after-drain.js"
 
 /**
  * Main process: window lifecycle, hardening, and the IPC surface.
@@ -276,6 +283,21 @@ let linguaGuardada: string | null = (() => {
 })()
 /** The language of this process now. `getPreferredSystemLanguages` needs no `ready`. */
 const linguaAgora = (): LinguaDoAnfitriao => linguaDoAnfitriao(linguaGuardada, linguasDoSistemaElectron(app))
+/** The seeds of imports that did not finish, outside every account folder (`pendingImportKeys.ts`). */
+const PENDING_IMPORT_KEYS_PATH = join(app.getPath("userData"), PENDING_IMPORT_KEYS_FILE)
+const pendingImportKeys = pendingImportKeysIn({
+  read: () => {
+    try {
+      return readFileSync(PENDING_IMPORT_KEYS_PATH, "utf8")
+    } catch {
+      return null
+    }
+  },
+  write: (text) => {
+    if (text === null) rmSync(PENDING_IMPORT_KEYS_PATH, { force: true })
+    else escreverInteiro(PENDING_IMPORT_KEYS_PATH, new TextEncoder().encode(text))
+  },
+})
 const contas: ContasDoAparelho = new ContasDoAparelho({
   lerLista: () => {
     try {
@@ -353,6 +375,15 @@ function servidorDaConta(): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * A profile edit still waiting goes out before a close (1.3.26), within the same two
+ * seconds: the vault keeps `perfilPorPublicar`, and the next opening sends what did not.
+ */
+function publicarPerfilPendente(prazoMs = 2_000): Promise<void> {
+  if (!session.perfilPorPublicar) return Promise.resolve()
+  return Promise.race([session.publicarPerfilPendente().catch(() => {}), new Promise<void>((resolve) => setTimeout(resolve, prazoMs).unref?.())])
 }
 
 function drenarArmazem(prazoMs = 2_000): Promise<void> {
@@ -1153,6 +1184,13 @@ function registerIpc(window: BrowserWindow): void {
     return { ok: true }
   })
 
+  // 1.3.26: the pairing vault without a password yet; `pairing:seal` gives it the account's.
+  tratar("vault:createProvisionalToSeal", async () => {
+    // Like `vault:create`: an account added on this device gets its own folder before the vault is born.
+    await aplicarMudancaDeConta()
+    vault.criarProvisorioPorSelar()
+    return { ok: true }
+  })
   tratar("vault:createProvisional", async (_event, passphrase: string | null) => {
     await vault.criarProvisorio(passphrase)
     return { ok: true }
@@ -1175,6 +1213,29 @@ function registerIpc(window: BrowserWindow): void {
     return { ok: true }
   })
 
+  // 1.3.26: change the password of this device's vault. See `Vault.mudarPalavraPasse`.
+  tratar("vault:mudar-palavra-passe", async (_event, actual: unknown, nova: unknown) => {
+    if (typeof actual !== "string" || typeof nova !== "string" || nova.length === 0) throw new Error("this vault needs a passphrase")
+    // Through the session: the new record goes to the other devices of the account.
+    await session.mudarPalavraPasse(actual, nova)
+    return { ok: true }
+  })
+
+  // S4: "I forgot the current password". Touch ID first where the system has it.
+  tratar("vault:change-password-with-open-vault", async (_event, nova: unknown) => {
+    if (typeof nova !== "string" || nova.length === 0) throw new Error("this vault needs a passphrase")
+    await confirmWithSystem(
+      {
+        platform: process.platform,
+        canPromptTouchID: () => systemPreferences.canPromptTouchID(),
+        promptTouchID: (reason) => systemPreferences.promptTouchID(reason),
+      },
+      textosDoAnfitriao(linguaAgora()).touchIdReason,
+    )
+    await session.changePasswordWithOpenVault(nova)
+    return { ok: true }
+  })
+
   tratar("vault:memorizar", async (_event, ligar: unknown) => {
     if (ligar === true) await vault.memorizar()
     else await vault.esquecerSessao()
@@ -1186,6 +1247,8 @@ function registerIpc(window: BrowserWindow): void {
   // "Sign out" forgets the saved session BEFORE locking (F1).
   tratar("vault:lock", async () => {
     await vault.esquecerSessao().catch(() => {})
+    // A profile edit still waiting goes out now, while the socket is open (1.3.26).
+    await publicarPerfilPendente()
     session.disconnect()
     session.reset()
     await drenarArmazem()
@@ -1280,7 +1343,13 @@ function registerIpc(window: BrowserWindow): void {
     try {
       session.disconnect()
       session.reset()
-      const resultado = await vault.importVault(dados, passphrase, { armazem: session.armazem })
+      const resultado = await vault.importVault(dados, passphrase, {
+        armazem: session.armazem,
+        // A new device of the account, added to the manifest before anything is written (1.3.26, `passagem.ts`).
+        passagem: (pedido) => session.passagemDoImportar(pedido),
+        // The same new key on a retry: a failed import never takes a second seat (`pendingImportKeys.ts`).
+        pendingImportKeys,
+      })
       ficheiroDeContaEscolhido = null
       return { ok: true, ...resultado }
     } finally {
@@ -1325,8 +1394,18 @@ function registerIpc(window: BrowserWindow): void {
     temChaveDeConta: session.temChaveDeConta,
     servidorSuporta: session.suportaEmparelhamento,
     servidorRevoga: session.serverCapabilities.includes(CAPACIDADE_REVOGACAO),
+    serverKnowsShortCode: session.serverCapabilities.includes(CAPABILITY_PAIRING_PAKE),
   }))
   tratar("pairing:host", () => session.emparelharComoAnfitriao())
+  // Short code (1.3.26): the new device shows it, the device with the account types it.
+  tratar("pairing:show-code", (_event, server: string) => {
+    session.pairAsGuestByCode(server)
+    return { ok: true }
+  })
+  tratar("pairing:type-code", async (_event, code: string) => {
+    await session.pairAsHostByCode(code)
+    return { ok: true }
+  })
   tratar("pairing:join", (_event, link: string) => {
     session.emparelharComoConvidado(link)
     return { ok: true }
@@ -1356,6 +1435,11 @@ function registerIpc(window: BrowserWindow): void {
     session.concluirEmparelhamento()
     return { ok: true }
   })
+  tratar("pairing:seal", async (_event, frase: unknown) => {
+    if (typeof frase !== "string" || frase.length === 0) throw new Error("this vault needs a passphrase")
+    await session.selarAposEmparelhar(frase)
+    return { ok: true }
+  })
   tratar("pairing:devices", () => session.aparelhosDaConta())
   // "Join the other account" (phase 8.2). The order lives in the core: see `Session.juntarTrocar`.
   tratar("pairing:juntar", (_event, link: string) => {
@@ -1367,6 +1451,7 @@ function registerIpc(window: BrowserWindow): void {
     return { ok: true }
   })
   tratar("pairing:juntar-trocar", (_event, passphrase: string | null) => session.juntarTrocar(passphrase))
+  tratar("pairing:join-check-password", (_event, passphrase: string) => session.joinCheckPassword(String(passphrase)))
   tratar("pairing:juntar-cancelar", () => {
     session.cancelarJuntar()
     return { ok: true }
@@ -1380,6 +1465,7 @@ function registerIpc(window: BrowserWindow): void {
   // the bytes of an attachment on request. The core never bails on `pedirAnexo`.
   tratar("sincronia:estado", () => session.estadoDaSincronia())
   tratar("sincronia:lugar-em", (_event, channel: string) => session.lugarEm(channel))
+  tratar("sincronia:previous-online-at", () => session.previousOnlineAt())
   tratar("sincronia:historico", () => structuredClone(session.historicoEntreAparelhos()))
   tratar("anexo:pedir", (_event, id: { channel: string; alvo: string; indice: number }) =>
     session.pedirAnexo(String(id?.channel ?? ""), String(id?.alvo ?? ""), Number(id?.indice ?? -1)),
@@ -1459,6 +1545,31 @@ function registerIpc(window: BrowserWindow): void {
     session.definirConviteDeRegisto(typeof codigo === "string" ? codigo : null)
     return { ok: true }
   })
+
+  // A community invite link for a new account over the network limit (1.3.26). See `Session.definirConviteDeComunidade`.
+  tratar("session:convite-de-comunidade", (_event, link: unknown) => ({
+    ok: session.definirConviteDeComunidade(typeof link === "string" && link.length <= 4096 ? link : null),
+  }))
+
+  /*
+    The proof of work of a new account (1.3.26). The challenge is asked here,
+    where the socket lives; the window solves it in a Web Worker (a frozen main
+    process would freeze every window) and hands the proof back. What comes
+    back is checked for shape: the renderer is not trusted with more than that,
+    and the server checks the rest.
+  */
+  tratar("session:desafio-de-registo", () => session.desafioDeRegisto())
+  tratar("session:prova-de-trabalho", (_event, prova: unknown) => {
+    const lida = ProvaDeTrabalho.safeParse(prova)
+    session.definirProvaDeTrabalho(lida.success ? lida.data : null)
+    return { ok: lida.success }
+  })
+  tratar("session:conta-nova", () => session.contaNova)
+  tratar("session:criar-canais", () => session.criarCanais())
+  tratar("session:room-quota", () => session.roomQuota())
+  tratar("session:autor-novo", (_event, address: unknown) =>
+    typeof address === "string" && address.length <= 320 ? session.autorNovoAte(address) : null,
+  )
 
   tratar("session:set-visible", (_event, visible: boolean) => {
     session.setVisible(visible)
@@ -1573,7 +1684,9 @@ function registerIpc(window: BrowserWindow): void {
     return { ok: true }
   })
 
-  tratar("channel:members", (_event, channel: string) => session.membersOf(channel))
+  // The tree minus who the server says is gone (P7). See `Session.membrosVisiveis`.
+  tratar("channel:members", (_event, channel: string) => session.membrosVisiveis(channel))
+  tratar("channel:afastados", (_event, channel: string) => session.membrosAfastados(channel))
 
   // Plaintext history crosses to the renderer the same way live messages do:
   // decrypted in the main process, never as ciphertext.
@@ -1581,6 +1694,9 @@ function registerIpc(window: BrowserWindow): void {
   // The conversation older than the vault, from the media store, by the same path (17/11/2026).
   tratar("channel:conversa-arquivada", (_event, channel: string, cursor?: number | null) => session.conversaArquivada(channel, cursor))
   tratar("channel:tem-conversa-arquivada", (_event, channel: string) => session.temConversaArquivada(channel))
+  // "Load older" past the device: the next lines from a member online (history-last-100).
+  tratar("channel:load-older-from-members", (_event, channel: string, room?: string) => session.loadOlderFromMembers(channel, room))
+  tratar("channel:has-older-from-members", (_event, channel: string) => session.hasOlderFromMembers(channel))
 
   tratar("channel:forget", async (_event, channel: string) => {
     await session.forgetChannel(channel)
@@ -2054,9 +2170,32 @@ function registerIpc(window: BrowserWindow): void {
     return { ok: true }
   })
 
+  /**
+   * The microphone and camera permission of macOS, asked before a capture.
+   *
+   * Without it, a refusal by the system gives a call with silence and no error.
+   * See `permissao-de-media.ts`. `getMediaAccessStatus` and `askForMediaAccess`
+   * exist only on macOS (and the first on Windows); outside macOS the module
+   * answers first and calls neither.
+   */
+  const permissaoDeMedia = criarPermissaoDeMedia({
+    plataforma: process.platform,
+    ler: (tipo) => systemPreferences.getMediaAccessStatus(tipo) as EstadoDaPermissao,
+    pedir: (tipo) => systemPreferences.askForMediaAccess(tipo),
+    abrir: (endereco) => shell.openExternal(endereco),
+  })
+  tratar(CANAIS_DA_PERMISSAO_DE_MEDIA.pedir, (_event, video: unknown) => permissaoDeMedia.pedir(video))
+  tratar(CANAIS_DA_PERMISSAO_DE_MEDIA.abrirDefinicoes, (_event, dispositivo: unknown) =>
+    permissaoDeMedia.abrirDefinicoes(dispositivo),
+  )
+
   // Push decrypted payloads to the renderer. Ciphertext never crosses this line.
   session.on("message", (message) => window.webContents.send("event:message", message))
   session.on("epoch", (epoch) => window.webContents.send("event:epoch", epoch))
+  // The shown member list changed without an epoch (P7). Its own channel (1.3.26 review,
+  // finding 3): on `event:epoch` it reached the renderer's `call.rekey`, which sent
+  // `voice.join` again and rotated the media key with no change in the group.
+  session.on("members", (evento) => window.webContents.send("event:members", evento))
   session.on("status", (status) => window.webContents.send("event:status", status))
   session.on("connection", (state) => window.webContents.send("event:connection", state))
   session.on("channels", (channels) => window.webContents.send("event:channels", channels))
@@ -2187,12 +2326,16 @@ app.on("before-quit", (event) => {
   /*
     First, the blobs in the store queue (a portrait set just before quitting):
     the vault that `shutdown` writes may reference them. The quit stops, waits
-    at most two seconds, and resumes.
+    at most two seconds, and resumes. The resume is in a new task, never a
+    microtask: see `quit-after-drain.ts` (the process that did not end after
+    SIGTERM).
   */
   if (!armazemDrenadoParaSair) {
     armazemDrenadoParaSair = true
     event.preventDefault()
-    void drenarArmazem().then(() => app.quit())
+    // And a profile edit still waiting (1.3.26), under the same two seconds: both run side by side,
+    // each capped at 2 s, and what does not make it goes on the next opening.
+    void quitAfterDrain(() => Promise.all([drenarArmazem(), publicarPerfilPendente()]).then(() => {}), () => app.quit())
     return
   }
   // From here on a `close` is a real close, not hiding the window.

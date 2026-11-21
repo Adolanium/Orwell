@@ -165,6 +165,14 @@ function capacidades(objecto: unknown, prefixo = "", nivel = 0): string[] {
  */
 const SO_NA_SECRETARIA: Record<string, string> = {
   /*
+    The proof of work of a new account (1.3.26): the session lives in the main
+    process, and the window solves the challenge in its own Web Worker, so these
+    two carry the challenge out and the proof back. The browser solves it next to
+    its session, and offers only \`prepararContaNova\`, which both have.
+  */
+  "session.desafioDeRegisto": "o principal tem a sessão e a janela resolve a prova num Web Worker; no browser a sessão está na página",
+  "session.definirProvaDeTrabalho": "o principal tem a sessão e a janela resolve a prova num Web Worker; no browser a sessão está na página",
+  /*
     The account file is chosen in the main process (Task 11b, fix): the
     renderer never gives it a path to open. In the browser the `<input
     type="file">` gives a `Blob`, which the bridge reads in slices, and there is no path.
@@ -183,6 +191,14 @@ const SO_NA_SECRETARIA: Record<string, string> = {
   "ecra.abrirDefinicoes": "idem",
   "ecra.som": "idem",
   "ecra.aoPedir": "idem",
+  /*
+    The macOS microphone and camera panel (1.3.26). The browser asks on its own,
+    with its dialog, and its remedy is in the browser settings; the installed app
+    has a TCC permission of its own, and the alert of a refusal opens its panel.
+    See `apps/client/src/main/permissao-de-media.ts`.
+  */
+  privacidadeDoSistema: "o browser pede o microfone sozinho; aqui o macOS tem uma permissão própria da app (TCC)",
+  "privacidadeDoSistema.abrir": "idem",
 
   /*
     The new version alert. In the browser the prompt doesn't exist: the page
@@ -232,6 +248,13 @@ const SO_NA_SECRETARIA_NO_CALL: Record<string, string> = {
     report that. See `somDoSistema` in `src/main/ecra.ts`.
   */
   somDoEcraDisponivel: "no browser o som do ecrã é uma caixa do selector do sistema; aqui depende do sistema operativo",
+  /*
+    The macOS permission (TCC), asked before a capture (1.3.26). A refusal there
+    gives a silent track, not an error, and only the host can read it. In the
+    browser a refusal is a `NotAllowedError` from the engine, which the call
+    already says.
+  */
+  permissaoDoSistema: "só a aplicação instalada lê a permissão do macOS; no browser a recusa já é um NotAllowedError",
 }
 
 /** What only the browser has, each entry with the reason in writing. */
@@ -248,6 +271,8 @@ const SO_NO_BROWSER: Record<string, string> = {
     "a ficha de posse no IndexedDB (fencing, `vault-backend.ts`): trava as escritas de um separador que perdeu a posse; na aplicação instalada `requestSingleInstanceLock` garante uma instância só",
   emChamada:
     "o `pagehide` com `persisted` (`pagina-escondida.ts`): o separador que vai para a cache de navegação larga a posse, menos com uma chamada aberta; a aplicação instalada não tem cache de navegação nem posse entre separadores",
+  retomarEscrita:
+    "the iOS back-forward cache resume (`main.tsx`, 1.3.26): a suspended tab writes its vault again only if its ownership record still names it; the installed app has one window, no back-forward cache and no ownership between tabs",
 }
 const SO_NO_BROWSER_NO_CALL: Record<string, string> = {}
 

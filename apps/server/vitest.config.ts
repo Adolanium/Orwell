@@ -22,5 +22,15 @@ export default defineConfig({
     // the inline, the package is externalized and loaded raw by Node: the
     // `vi.mock` never reaches it and the real Argon2id runs anyway, silently.
     server: { deps: { inline: ["@enclave/client-core"] } },
+    /*
+      These tests spend their time waiting on sockets and timers, not on CPU:
+      measured on 20/11/2026, one suite alone on a 14-core machine, the sum of
+      the test times was the same with 4 workers and with 8 (657 s and 662 s),
+      and the suite went from 175 s to 91 s. A share of the cores and not a
+      number, so a smaller machine is not oversubscribed; it is also fewer than
+      vitest's own default (every core but one). A `--maxWorkers` on the command
+      line still wins over this.
+    */
+    maxWorkers: "60%",
   },
 })

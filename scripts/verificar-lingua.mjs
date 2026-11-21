@@ -113,8 +113,8 @@ async function abrir({ locale, endereco = BASE, guardada }) {
   before phase 8.1 ("Passo 1 de"), which is no longer the first screen, and the
   script failed in four cases without anyone running it.
 */
-const EM_PORTUGUES = ["Já usas o Orwell noutro aparelho?", "Não, criar conta"]
-const EM_INGLES = ["Do you already use Orwell on another device?", "No, create an account"]
+const EM_PORTUGUES = ["Bem-vindo ao Orwell", "Entrar com o ficheiro da conta"]
+const EM_INGLES = ["Welcome to Orwell", "Sign in with the account file"]
 
 const diz = (texto, frases) => frases.every((frase) => texto.includes(frase))
 const naoDiz = (texto, frases) => frases.every((frase) => !texto.includes(frase))

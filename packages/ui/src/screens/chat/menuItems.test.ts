@@ -6,6 +6,7 @@ import {
   itensDaPessoaNaChamada,
   itensDaSala,
   itensDoCanal,
+  itemDeMover,
   type SalaResumo,
 } from "./menuItems.js"
 import { itensDaPessoa } from "../profile/menuDaPessoa.js"
@@ -748,5 +749,55 @@ describe("silenciar no menu do canal e da sala", () => {
       accoes: { abrir: () => {}, renomear: () => {}, fechar: () => {} },
     }).map((item) => item.label)
     expect(silenciada.slice(0, 2)).toEqual([strings.menu.open, strings.silencio.ativar])
+  })
+})
+
+/**
+ * Reorder without dragging (phone, option B, 20/11/2026). On a computer a room
+ * and a category move by drag and drop. A finger on a phone has no reliable
+ * HTML drag, so the phone menus carry a "Mover" entry with a cascade: up,
+ * down, and (for a room) to another category.
+ */
+describe("itemDeMover", () => {
+  it("is absent when there is nowhere to go", () => {
+    expect(itemDeMover({})).toBeNull()
+  })
+
+  it("up, down and the categories, in that order, in a cascade", () => {
+    const feito: string[] = []
+    const item = itemDeMover({
+      acima: () => feito.push("cima"),
+      abaixo: () => feito.push("baixo"),
+      categorias: [{ nome: "Produção", ir: () => feito.push("produção") }],
+    })
+    expect(item?.label).toBe(strings.menu.mover)
+    expect(item?.submenu?.map((entrada) => entrada.label)).toEqual([
+      strings.menu.moverParaCima,
+      strings.menu.moverParaBaixo,
+      "Produção",
+    ])
+    expect(item?.submenu?.[2]?.section).toBe(strings.menu.moverParaCategoria)
+    for (const entrada of item?.submenu ?? []) entrada.onSelect()
+    expect(feito).toEqual(["cima", "baixo", "produção"])
+  })
+
+  it("goes after rename in the room and category menus, only for whoever organizes", () => {
+    const mover = itemDeMover({ abaixo: () => {} })
+    const sala: SalaResumo = { room: "prensa", name: "prensa", kind: "text" } as SalaResumo
+    const comMover = itensDaSala({
+      sala,
+      podeOrganizar: true,
+      mover,
+      accoes: { abrir: () => {}, renomear: () => {}, fechar: () => {} },
+    }).map((item) => item.label)
+    expect(comMover).toEqual([strings.menu.open, strings.menu.renameRoom, strings.menu.mover, strings.menu.closeRoom])
+    expect(
+      itensDaSala({ sala, podeOrganizar: false, mover, accoes: { abrir: () => {}, renomear: () => {}, fechar: () => {} } }).map(
+        (item) => item.label,
+      ),
+    ).toEqual([strings.menu.open])
+    expect(
+      itensDaCategoria({ podeOrganizar: true, mover, accoes: { renomear: () => {}, apagar: () => {} } }).map((item) => item.label),
+    ).toEqual([strings.menu.renameCategory, strings.menu.mover, strings.menu.deleteCategory])
   })
 })

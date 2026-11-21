@@ -1,7 +1,7 @@
 # Orwell's installers.
 #
-# Unsigned, with the cost spelled out on the
-# downloads page: on macOS the first launch requires approval in System Settings,
+# Without a paid signature (macOS gets an ad hoc one, see `mac.identity`), with
+# the cost spelled out on the downloads page: on macOS the first launch requires approval in System Settings,
 # and on Windows the blue SmartScreen screen appears. It's the price of not
 # paying annual rent to two companies to distribute our own code; the alternative
 # costs 99 USD/year from Apple plus Windows certificate, saved for when there's
@@ -78,12 +78,49 @@ mac:
   # System audio when sharing the screen (macOS 14.2+). Without this key macOS
   # won't even ask, and the audio track arrives silent. See `somDoSistema` in
   # `src/main/ecra.ts`.
+  #
+  # The microphone and camera texts are Orwell's, not Electron's default ("This
+  # app needs access to the microphone"): macOS shows them in its dialog, and a
+  # dialog that does not say who asks and why reads as a trap.
+  #
+  # Bluetooth too. Orwell does not use Bluetooth: no code here calls Web
+  # Bluetooth, and Bluetooth headphones and headsets reach the app through the
+  # system audio (Core Audio), as any other microphone and speaker, with no
+  # Bluetooth permission. Electron puts both keys in every app it builds, with
+  # "This app needs access to Bluetooth", because Chromium has Bluetooth code
+  # (Web Bluetooth, passkeys on a phone) that can start the Bluetooth stack, and
+  # macOS then shows the dialog. If it appears, the text says the truth: saying
+  # no changes nothing. The keys stay, because an app that starts the Bluetooth
+  # stack without them is closed by macOS.
   extendInfo:
     NSAudioCaptureUsageDescription: "Orwell uses system audio when you share your screen in a call."
-  # No signing identity, stated here so the build won't look for it and die on a
-  # machine that has it configured for something else.
-  identity: null
-  # Notarization requires signing; without it, this must stay off.
+    NSMicrophoneUsageDescription: "Orwell uses the microphone when you speak in a call."
+    NSCameraUsageDescription: "Orwell uses the camera when you turn on video in a call."
+    NSBluetoothAlwaysUsageDescription: "Orwell does not use Bluetooth. Your Bluetooth headphones work without this permission. You can select Don't Allow."
+    NSBluetoothPeripheralUsageDescription: "Orwell does not use Bluetooth. Your Bluetooth headphones work without this permission. You can select Don't Allow."
+  # Ad hoc signature ("-"): a signature with no certificate and no team, on the
+  # whole universal app, both slices and every helper.
+  #
+  # It is NOT the paid Apple signature, and it changes nothing for Gatekeeper:
+  # the first launch still needs approval in System Settings. What it fixes is
+  # the microphone (1.3.26). Up to 1.3.25 this said `identity: null`, and the
+  # universal merge left the x86_64 slice with no signature at all. On an Intel
+  # Mac, `tccd` then refuses the microphone WITHOUT asking ("Policy disallows
+  # prompt", measured on macOS 26.5), and the call starts with silence. With an
+  # ad hoc signature macOS asks, like for any app. The arm64 slice only worked
+  # because the linker signs arm64 code by itself.
+  #
+  # No hardened runtime: with it, an ad hoc signature needs
+  # `com.apple.security.cs.disable-library-validation` to start at all, and the
+  # microphone and camera would need the `device.audio-input` and `device.camera`
+  # entitlements. Without it, none of the three is needed. It only exists for
+  # notarization, which this build does not do.
+  #
+  # Each version gets a new signature (its hash), so macOS asks again for the
+  # microphone after each update. That is the cost of no certificate.
+  identity: "-"
+  hardenedRuntime: false
+  # Notarization requires a paid signature; without it, this must stay off.
   notarize: false
 
 dmg:

@@ -1008,16 +1008,42 @@ select option {
   The dawn comes from `body::before` and does not hide: the background does not
   flicker. The duration comes from the script (`--abertura-saida`), which removes
   the copy.
+
+  The hold also has an end of its own, kept here and not by the script's timers
+  (21/11/2026): `veil-deadline`, delayed by `VEIL_DEADLINE_MS` (3s), fades the
+  copy out and the app in even if the tab froze and no timer ever ran. The
+  normal exit replaces it before then (`.abertura-a-sair`, a different
+  animation name, so it starts from zero). The name does not start with
+  `abertura-`: `acertarFase` would move its start back to the opening's origin.
+
+  And the copy has no background: since the flat skin (17/11/2026) the gate's
+  fill (`fundo.css`) came with the clone, and a copy left up covered the live
+  app with an opaque sheet. The body under it is the same colour.
   */
 .abertura-veu {
   position: fixed;
   inset: 0;
   z-index: 9000;
   pointer-events: none;
+  animation: veil-deadline 200ms ease-out 3s both;
+}
+
+body > .abertura-veu {
+  background: transparent;
 }
 
 .abertura-a-segurar body > :not(.abertura-veu) {
   opacity: 0;
+  animation: veil-deadline 200ms ease-out 3s reverse both;
+}
+
+@keyframes veil-deadline {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }
 
 .abertura-a-sair .abertura-veu {
@@ -1078,5 +1104,14 @@ select option {
 
   .abertura-a-sair body > :not(.abertura-veu) {
     animation: abertura-esbate var(--abertura-saida, 360ms) ease-out reverse both !important;
+  }
+
+  /* The deadline fades slower too (`SAIDA_REDUZIDA_MS`). Only the duration: the
+     universal rule shortens durations and leaves delays alone, so the 3s holds.
+     `body >` outranks the Aurora copy of the universal rule (`:root[data-theme]
+     *`), which comes later. */
+  .abertura-a-segurar body > .abertura-veu,
+  .abertura-a-segurar body > :not(.abertura-veu) {
+    animation-duration: 360ms !important;
   }
 }

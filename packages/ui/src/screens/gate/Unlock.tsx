@@ -1,60 +1,65 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useContext, useEffect, useRef, useState } from "react"
 import { marcarArranque } from "@enclave/client-core"
-import { TextoDeErro } from "../../components/TextoDeErro.js"
 import { useBridge } from "../../App.js"
 import { Button } from "../../components/Button.js"
-import { ApagarConta } from "../../components/ConfirmarDestruicao.js"
 import { Field } from "../../components/Field.js"
+import { OrwellWordmark } from "../../components/Logo.js"
+import { TextoDeErro } from "../../components/TextoDeErro.js"
+import { ToastContext } from "../../components/Toast.js"
+import { strings, traduzirErro } from "../../strings.js"
 import { CampoDeIdentidade } from "./CampoDeIdentidade.js"
-import { Emparelhar } from "./Emparelhar.js"
-import { EntrarComOutraConta } from "./EntrarComOutraConta.js"
+import { CartaoDoPortao, IconeAparelhos, IconeFicheiro } from "./Entrada.js"
 import { fraseDoCampo } from "./fraseDoCampo.js"
 import { CaixaMemorizar, podeMemorizar, useEstadoDoCofre, useMemorizarDepoisDeAbrir } from "./MemorizarSessao.js"
-import { LigacaoMudarDeConta, pagina } from "./MudarDeConta.js"
-import { strings, traduzirErro } from "../../strings.js"
+import { LigacaoMudarDeConta, useContasDoAparelho } from "./MudarDeConta.js"
+import { entrarNumaContaNova, type Intencao } from "./outraEntrada.js"
 import { Splash } from "./Splash.js"
+import { SINGLE_ACCOUNT_ID, storedAccountName } from "../../lib/accountNames.js"
 
+/**
+ * "Keep me signed in" comes OFF (21/11/2026). With it on, the app stops asking
+ * for the password, and the person forgets the one thing that opens the
+ * account file and joins a new device (problem 9 of the gate map). Who wants it
+ * ticks the box. Change it in this line.
+ */
+export const MANTER_SESSAO_POR_OMISSAO = false
+
+/**
+ * Back to this device (mock-up `Voltar`, 21/11/2026): the name, the password,
+ * "Manter sessão iniciada", "Entrar". Two ways out, and neither deletes the
+ * account: "Esqueci-me da palavra-passe" opens the other two ways in (another
+ * device, the file), and "Usar outra conta" opens the three ways of the first
+ * screen. Both add an empty account next to this one (`outraEntrada.ts`): the
+ * account here stays on this device, closed, in "Mudar de conta".
+ */
 export function Unlock({
   onDone,
   onLigacaoFalhou,
-  onStartOver,
-  semTentativaSilenciosa = false,
 }: {
   /** The vault is open: enter. Called before the connection ends (see `attempt`). */
   onDone: (address: string) => void
   /** The connection started on entry failed, after `onDone`: the app is already open. */
   onLigacaoFalhou?: (erro: Error) => void
-  /**
-   * The vault on this device no longer exists: ask the host again what is on
-   * disk, which is what the app uses to create the account.
-   */
-  onStartOver: () => void
-  /**
-   * Do not open by itself. After `device-revoked` (the device was removed from
-   * the account on another device): with the system keychain, the silent attempt
-   * opened, connected, got the same refusal and came back here, in a loop. The
-   * gate stays still, with the text above, and the user decides.
-   */
-  semTentativaSilenciosa?: boolean
 }): React.JSX.Element {
   const bridge = useBridge()
+  const toast = useContext(ToastContext)
   const [passphrase, setPassphrase] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(!semTentativaSilenciosa)
-  const [needsPassphrase, setNeedsPassphrase] = useState(semTentativaSilenciosa)
-  const [aApagar, setAApagar] = useState(false)
-  const [outraConta, setOutraConta] = useState(false)
-  /** The pairing for "Sign in with another account", opened on top of the gate. */
-  const [aEmparelhar, setAEmparelhar] = useState(false)
-  /** The vault and the platform (F0): protection of this vault and where to store it. */
+  const [busy, setBusy] = useState(true)
+  const [needsPassphrase, setNeedsPassphrase] = useState(false)
+  const [esqueceste, setEsqueceste] = useState(false)
+  const [aSair, setASair] = useState(false)
   const estado = useEstadoDoCofre(bridge)
   const caixa = podeMemorizar(bridge, estado)
-  /** "Memorize the session", on by default. */
-  const [memorizar, setMemorizar] = useState(true)
+  const [memorizar, setMemorizar] = useState(MANTER_SESSAO_POR_OMISSAO)
   const memorizarDepoisDeAbrir = useMemorizarDepoisDeAbrir(bridge)
   // Read at the moment of `attempt`, which is a `useCallback` without these dependencies.
   const memorizarAgora = useRef(false)
   memorizarAgora.current = caixa && memorizar
+  const contas = useContasDoAparelho(bridge)
+  const activa = contas?.find((conta) => conta.activa)
+  // The list's name, or the one kept outside the vault for this account (`lib/accountNames.ts`).
+  const nome = activa?.nome.trim() || storedAccountName(activa?.id ?? SINGLE_ACCOUNT_ID)
 
   const attempt = useCallback(
     (secret: string | null) => {
@@ -65,45 +70,22 @@ export function Unlock({
         try {
           await bridge.vault.unlock(secret)
           marcarArranque("cofre-aberto")
-          // With the text written and the box connected: memorize, before everything else.
-          // A failure is reported and does not prevent sign in.
           if (secret !== null) await memorizarDepoisDeAbrir(memorizarAgora.current)
           address = (await bridge.identity.load()).address
         } catch (caught) {
-          // Only a failure to OPEN the vault belongs here. The first attempt is
-          // the silent one, using the system keychain; if that is not how this
-          // vault was protected, ask — do not show an error.
+          // The first attempt is the silent one (keychain, remembered session,
+          // tab key). If that is not how this vault opens, ask, with no error.
           if (secret === null) setNeedsPassphrase(true)
           else setError(traduzirErro(caught))
           setBusy(false)
           return
         }
-
-        /**
-         * The vault is open. Go in, connected or not.
-         *
-         * Connecting used to sit inside the same try, so a homeserver that was
-         * down — or a laptop with no network — turned a perfectly good unlock
-         * into a passphrase prompt for a keychain vault that has no passphrase
-         * to type. A failed connection is what the banner and the session's own
-         * reconnect loop are for.
-         *
-         * **And go in NOW, not when the connection ends (12/11/2026).** Entry
-         * waited for `connect()`, which is the handshake, the catch-up of every
-         * channel one after another, the invite keys and the profile. Measured
-         * on a phone profile (CPU 4x, slow 4G) with five channels: 2.5 s of
-         * gate in front of history the device already had, and more with every
-         * channel (`scripts/medir-arranque-telemovel.mjs`). The vault is open,
-         * so the app opens with what it holds; the connection goes on behind,
-         * and its state shows in the banner like any reconnect. A revocation or
-         * a suspension that the connection finds still takes the app back to
-         * the gate: `handleStatus` in `App.tsx` moves the stage on the status,
-         * wherever it is.
-         *
-         * The failure does not stay quiet: it goes to `onLigacaoFalhou`, for the
-         * connection banner. Swallowed, an early connection that dropped before
-         * `auth.ok` opened an app with no channels and no sign of why.
-         */
+        /*
+          Go in NOW, not when the connection ends (12/11/2026): the vault is
+          open, so the app opens with what it holds, and the connection goes on
+          behind with its state in the banner. A revocation or a suspension that
+          the connection finds still takes the app back to the gate.
+        */
         const ligacao = bridge.session.connect()
         onDone(address)
         await ligacao.catch((caught: Error) => onLigacaoFalhou?.(caught))
@@ -112,189 +94,161 @@ export function Unlock({
     [onDone, onLigacaoFalhou],
   )
 
-  /**
-   * Discard the vault on this device and start over.
-   *
-   * It is the only way out for those who forgot the password, and it is
-   * destructive by design: the account lives here and nowhere else. Asks with
-   * the same Settings sheet, password included (`ApagarConta`). These were two
-   * `window.confirm` calls in a row, which on Electron blocked the window and
-   * passed with two Enter presses without reading anything.
-   *
-   * A failure stays on the sheet, not at the gate: that is where the decision
-   * was made.
-   *
-   * `vault.destroy` tries to leave channels before deleting, and with the vault
-   * closed it has no keys to do so: no groups in memory or in the vault, so there
-   * is nothing to leave and nothing throws. That is exactly the price the second
-   * sentence of the warning announces.
-   */
-  const startOver = useCallback(async () => {
-    await bridge.vault.destroy()
-    // With another account on this device, the deleted one left the list and the active
-    // one became the other: reload opens that. With one account only, sign up, as always.
-    const restantes = bridge.contas ? (await bridge.contas.listar().catch(() => null))?.contas : null
-    if (restantes?.some((conta) => conta.temCofre)) pagina.recarregar()
-    else onStartOver()
-  }, [onStartOver])
-
-  // Exactly one silent attempt, even under StrictMode's double-mounted
-  // effects: a second concurrent unlock+connect only races the first.
+  // Exactly one silent attempt, even under StrictMode's double-mounted effects.
   const attempted = useRef(false)
   useEffect(() => {
-    if (attempted.current || semTentativaSilenciosa) return
+    if (attempted.current) return
     attempted.current = true
     attempt(null)
   }, [])
 
-  /*
-    Leave pairing without a new account: if the one here is still on disk (the
-    user went back before "delete"), go back to the gate; if already deleted,
-    the gate has nothing to open, and ask the host what is on disk, like in
-    "Create new". The disk says, not a flag in memory: `Pair` deletes the empty
-    vault from the attempt on exit.
-  */
-  const sairDoEmparelhamento = useCallback(() => {
-    void bridge.vault
-      .status()
-      .then(({ exists }) => (exists ? setAEmparelhar(false) : onStartOver()))
-      .catch(() => onStartOver())
-  }, [bridge, onStartOver])
-
-  if (aEmparelhar) {
-    return <Emparelhar substituirConta onDone={(address) => onDone(address)} onBack={sairDoEmparelhamento} />
+  const outraForma = (intencao: Intencao): void => {
+    if (aSair) return
+    setASair(true)
+    void entrarNumaContaNova(bridge, intencao).catch((erro: Error) => {
+      setASair(false)
+      toast?.(traduzirErro(erro), "error")
+    })
   }
 
   if (busy && !needsPassphrase) return <Splash />
 
-  /*
-    Finding 9 (F0): a revoked device with an `os` vault, only from the system
-    keychain. There is no password to write, and the field for it was useless.
-    The text from 748 stays (above, in `App`) and "Start over".
-  */
-  if (semTentativaSilenciosa && estado?.protection === "os") {
+  if (esqueceste) {
     return (
       <div className="gate">
-        <div className="gate-pilha">
-          <div className="gate-card">
-            <h1>{strings.gate.unlockTitle}</h1>
-            <p className="gate-lead">{strings.gate.revogadoSemFrase}</p>
-            <Button variant="primary" type="button" onClick={() => setAApagar(true)}>
-              {strings.gate.comecarDeNovo}
+        <CartaoDoPortao titulo={strings.entrada.esquecesteTitulo} onVoltar={() => setEsqueceste(false)} voltarDesligado={aSair}>
+          <p className="gate-lead">{strings.entrada.esquecesteTexto}</p>
+          <div className="entrada-caminhos entrada-fundo">
+            <Button variant="ghost" type="button" className="entrada-botao entrada-caminho" disabled={aSair} onClick={() => outraForma("outro-aparelho")}>
+              <IconeAparelhos />
+              {strings.entrada.comOutroAparelho}
+            </Button>
+            <Button variant="ghost" type="button" className="entrada-botao entrada-caminho" disabled={aSair} onClick={() => outraForma("ficheiro")}>
+              <IconeFicheiro />
+              {strings.entrada.comFicheiro}
             </Button>
           </div>
-          {aApagar && <ApagarConta porta="portao" fazer={startOver} onClose={() => setAApagar(false)} />}
-        </div>
+        </CartaoDoPortao>
       </div>
     )
   }
 
   return (
     <div className="gate">
-      <div className="gate-pilha">
+      <div className="gate-card gate-entrada entrada-ola">
         {/*
-          A real form, not a loose box with a button beside it.
-          
-          This is what Face ID delivers, and it is not a figure of speech: the
-          vault from SYSTEM (Keychain on iOS, Manager on Android) is what
-          `THREAT-MODEL.md` already names as the right place for the password,
-          and on iPhone filling it from there goes through the face. In other
-          words: the requested feature delivered by the system vault, without us
-          inventing our own encryption or storing any key anywhere.
-          
-          A manager only offers to fill what it knows as a sign-in form: `<form>`,
-          an identity field and a password marked as CURRENT. Until now the app
-          asked to SAVE (Setup uses `new-password`) and never asked to fill, which
-          is the most obvious gap the survey found.
-          */}
+          The name is kept outside the vault for this screen (`lib/accountNames.ts`).
+          An older account, before its first opening with this version: the mark and
+          "Olá", and the name is stored right after the unlock.
+        */}
+        {nome ? (
+          <span className="entrada-avatar" aria-hidden="true">
+            {[...nome][0]?.toUpperCase()}
+          </span>
+        ) : (
+          <header className="setup-head">
+            <OrwellWordmark size={22} />
+          </header>
+        )}
+        <h1 className="entrada-titulo">{nome ? strings.entrada.ola(nome) : strings.entrada.olaSemNome}</h1>
+        {/*
+          A real sign-in form: `<form>`, an identity field and a password marked
+          as CURRENT, so the system password manager (Face ID on iPhone) offers
+          to fill it.
+        */}
         <form
-          className="gate-card"
+          className="entrada-formulario"
           onSubmit={(event) => {
             event.preventDefault()
             if (busy) return
-            // What the FIELD has, not what React thinks it has: the system manager is who
-            // we now invite to write here, and it can fill without firing any event. See
-            // `fraseDoCampo`.
+            // What the FIELD has: the manager can fill without an event. See `fraseDoCampo`.
             attempt(fraseDoCampo(event.currentTarget, "password", passphrase))
           }}
         >
-          <h1>{strings.gate.unlockTitle}</h1>
-          <p className="gate-lead">{strings.gate.unlockLead}</p>
-          {/* The key for the manager record. See `CampoDeIdentidade`. */}
           <CampoDeIdentidade />
-          <Field label={strings.gate.passphrase}>
+          <Field label={strings.entrada.palavraPasse}>
             <input
               type="password"
               name="password"
               autoComplete="current-password"
               autoFocus
               value={passphrase}
-              onChange={(event) => setPassphrase(event.target.value)}
+              aria-invalid={error ? true : undefined}
+              onChange={(event) => {
+                setPassphrase(event.target.value)
+                setError(null)
+              }}
             />
           </Field>
-          {caixa && <CaixaMemorizar ligada={memorizar} onMudar={setMemorizar} />}
           {error && (
-            <p className="error">
+            <p className="error" role="alert">
               <TextoDeErro texto={error} />
             </p>
           )}
-          <Button variant="primary" type="submit" disabled={busy}>
+          {caixa && <CaixaMemorizar ligada={memorizar} onMudar={setMemorizar} />}
+          <Button variant="primary" type="submit" className="entrada-botao" disabled={busy}>
             {busy ? (
               <>
-                {/* The spinning ring: the word alone looked like a stuck button. */}
                 <span className="anel-ocupado" aria-hidden="true" />
-                {strings.gate.opening}
+                {strings.entrada.aAbrir}
               </>
             ) : (
-              strings.gate.open
+              strings.entrada.entrar
             )}
           </Button>
-          {/*
-            What is happening while nothing visible happens.
-
-            Derivation takes between one and seven seconds on a phone, and until
-            now it ran on the main thread: the screen froze, not a pixel changed,
-            and looked the same as a stuck app. Now it runs in a Worker, the
-            screen responds, and this is what it says.
-          */}
-          {busy && (
-            <p className="field-note" role="status">
-              {strings.gate.openingNote}
-            </p>
-          )}
         </form>
-        {/* Two exits, one per line. The second is for those with an account who want
-            ANOTHER on this device: by file or by pairing. */}
         <div className="gate-rodape">
           <p>
-            {strings.gate.lostAccount}{" "}
-            <button type="button" className="gate-link" disabled={busy} onClick={() => setAApagar(true)}>
-              {strings.gate.lostAccountAction}
+            <button type="button" className="gate-link" disabled={busy} onClick={() => setEsqueceste(true)}>
+              {strings.entrada.esqueci}
             </button>
           </p>
-          <p>
-            <button type="button" className="gate-link" disabled={busy} onClick={() => setOutraConta(true)}>
-              {strings.gate.otherAccount}
-            </button>
-          </p>
-          {/* Only with another account on this device: for those with one, the gate stays the same. */}
+          {bridge.contas && (
+            <p>
+              <button type="button" className="gate-link" disabled={busy || aSair} onClick={() => outraForma("inicio")}>
+                {strings.entrada.outraConta}
+              </button>
+            </p>
+          )}
+          {/* Only with another account on this device. */}
           <LigacaoMudarDeConta disabled={busy} />
-          {/* No "How it works" here ("remove the how it works
-              from login"). The page stays in sign up (`Setup`) and in settings;
-              the entry gate has only what is to enter. */}
         </div>
-        {aApagar && <ApagarConta porta="portao" fazer={startOver} onClose={() => setAApagar(false)} />}
-        {outraConta && (
-          <EntrarComOutraConta
-            onDone={(address) => onDone(address)}
-            onEmparelhar={() => {
-              setOutraConta(false)
-              setAEmparelhar(true)
-            }}
-            onClose={() => setOutraConta(false)}
-          />
-        )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * This device left the account (21/11/2026): removed in Settings on another
+ * device. The account is still on the other devices; the file or another
+ * device brings it back here. Nothing on this screen deletes anything.
+ */
+export function AparelhoRemovido({
+  onFicheiro,
+  onOutroAparelho,
+}: {
+  onFicheiro: () => void
+  onOutroAparelho?: (() => void) | undefined
+}): React.JSX.Element {
+  return (
+    <div className="gate">
+      <CartaoDoPortao titulo={strings.entrada.removido}>
+        <div className="entrada-caminhos entrada-fundo">
+          <Button variant="ghost" type="button" className="entrada-botao entrada-caminho" onClick={onFicheiro}>
+            <IconeFicheiro />
+            {strings.entrada.comFicheiro}
+          </Button>
+          {onOutroAparelho && (
+            <Button variant="ghost" type="button" className="entrada-botao entrada-caminho" onClick={onOutroAparelho}>
+              <IconeAparelhos />
+              {strings.entrada.comOutroAparelho}
+            </Button>
+          )}
+        </div>
+        <div className="gate-rodape">
+          <LigacaoMudarDeConta rotulo={strings.entrada.voltarAConta} podeAcrescentar={false} />
+        </div>
+      </CartaoDoPortao>
     </div>
   )
 }

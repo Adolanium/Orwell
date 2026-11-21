@@ -28,6 +28,8 @@ import { xchacha20poly1305 } from "@noble/ciphers/chacha.js"
 import { argon2id } from "@noble/hashes/argon2.js"
 import { chromium, firefox, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
+import { abrirComunidade, appAberta } from "./separadores.mjs"
+import { juntarComPalavras } from "./juntar-aparelho.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
@@ -157,19 +159,12 @@ function escutar(context, nome) {
   context.on("page", (page) => page.on("pageerror", (erro) => erros.push(`${nome}: ${erro.message}`)))
 }
 const CONTEXTO = { locale: "pt-PT" }
-const dentro = (page, timeout = 90_000) => page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout })
+// The app is open: the rail on a computer, the bar of tabs on a phone.
+const dentro = (page, timeout = 90_000) => appAberta(page, timeout)
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-async function abrirCanal(page, nome) {
-  const linha = page.locator(".channel-name", { hasText: nome }).first()
-  const gaveta = page.getByRole("button", { name: "Abrir o painel lateral" })
-  if (!(await linha.isVisible().catch(() => false))) {
-    if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) !== "true") await gaveta.click()
-  }
-  await linha.click()
-  if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click()
-  await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
-}
+/** Open a channel's conversation at any width: on the phone through the rail of communities (`separadores.mjs`). */
+const abrirCanal = (page, nome) => abrirComunidade(page, nome)
 async function dizer(page, frase) {
   const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]')
   await caixa.click()
@@ -227,15 +222,16 @@ try {
   await pc.getByRole("button", { name: "Criar canal" }).first().click()
   await pc.locator("form.prompt input").first().fill("adega")
   await pc.locator("form.prompt button.primary").first().click()
-  await pc.getByRole("heading", { name: "adega" }).waitFor({ timeout: 30_000 })
+  // Since 1.3.20 the heading is the room, and the channel's name sits beside it.
+  await pc.locator("h1, .topbar-comunidade").filter({ hasText: /^adega$/ }).first().waitFor({ timeout: 30_000 })
   const antes = `antes do telemóvel, ${Date.now().toString(36)}`
   await dizer(pc, antes)
   check("a Ana cria a conta e o canal adega no computador, e escreve", await ouviu(pc, antes))
 
   // ---- pairing, by the link
   await pc.getByRole("button", { name: "Configurações" }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await pc.getByRole("button", { name: "Acrescentar aparelho" }).click()
+  await pc.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await pc.getByRole("button", { name: "Juntar um aparelho" }).click()
   const folha = pc.locator(".sheet").first()
   await folha.locator("code[data-link]").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
@@ -250,22 +246,10 @@ try {
   escutar(ctxTel, "telemóvel")
   let tel = await ctxTel.newPage()
   await tel.goto(APP, { waitUntil: "domcontentloaded" })
-  await tel.getByRole("button", { name: "Sim, emparelhar este aparelho" }).click({ timeout: 60_000 })
-  await tel.getByLabel("Ou cola o link").fill(link)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 15_000 })
-  const frases = tel.locator('.gate-card input[type="password"]')
-  await frases.nth(0).fill(FRASE)
-  await frases.nth(1).fill(FRASE)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await tel.getByRole("button", { name: "São as mesmas" }).click()
-  await folha.getByRole("button", { name: "São as mesmas" }).click()
-  await tel.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 })
-  await folha.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 30_000 }).catch(() => {})
+  await tel.getByRole("button", { name: "Entrar com outro aparelho" }).click({ timeout: 60_000 })
+  await juntarComPalavras(tel, folha, link, FRASE)
+  await folha.getByText("O aparelho novo já está na conta.").waitFor({ timeout: 30_000 }).catch(() => {})
   await folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
-  await tel.getByRole("button", { name: "Entrar", exact: true }).click()
   await dentro(tel)
   check("o telemóvel emparelha pelo link e entra na conta", true)
 
@@ -281,7 +265,8 @@ try {
   await tel.close()
   await pc.keyboard.press("Escape").catch(() => {})
   await pc.getByRole("button", { name: "Configurações" }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
+  await pc.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await pc.getByRole("button", { name: /^Aparelhos/ }).click()
   await pc.locator(".aparelhos-lista li").nth(1).waitFor({ timeout: 15_000 })
   check("o computador vê dois aparelhos", (await pc.locator(".aparelhos-lista li").count()) === 2)
   await pc.getByRole("button", { name: /^Revogar / }).first().click()
@@ -301,21 +286,17 @@ try {
     await porta.fill(FRASE)
     await tel.keyboard.press("Enter")
   }
-  const frase = "Este aparelho foi tirado da conta noutro aparelho."
+  // 21/11/2026: its own screen, "Este aparelho saiu da conta.", with the two ways back in.
   const viuAFrase = await tel
-    .locator(".gate-convite", { hasText: frase })
+    .getByRole("heading", { name: "Este aparelho saiu da conta." })
     .waitFor({ timeout: 60_000 })
     .then(() => true, () => false)
-  check("o telemóvel volta, sai da conta e diz porquê", viuAFrase, (await tel.locator(".gate-convite").textContent().catch(() => "")) ?? "")
+  check("o telemóvel volta, sai da conta e diz porquê", viuAFrase)
   if (!viuAFrase) console.log(`  ..  o ecrã do telemóvel: ${JSON.stringify(((await tel.locator("body").innerText().catch(() => "")) ?? "").slice(0, 300))}`)
-  check("e a frase leva o código 748", ((await tel.locator(".gate-convite").textContent().catch(() => "")) ?? "").includes("748"))
-  const noRegisto = await tel
-    .getByRole("button", { name: "Sim, emparelhar este aparelho" })
-    .or(tel.getByPlaceholder("Como queres aparecer"))
-    .first()
-    .waitFor({ timeout: 30_000 })
-    .then(() => true, () => false)
-  check("o telemóvel fica no registo de conta nova, não no portão da conta", noRegisto)
+  const caminhos =
+    (await tel.getByRole("button", { name: "Entrar com o ficheiro da conta" }).count()) === 1 &&
+    (await tel.getByRole("button", { name: "Entrar com outro aparelho" }).count()) === 1
+  check("e oferece o ficheiro da conta e outro aparelho, nunca apagar", caminhos)
   await wait(1000)
   const depois = await armazem(tel)
   check("o cofre do telemóvel foi apagado do IndexedDB (mensagens e media)", depois.cofre === null, JSON.stringify(depois.chaves))

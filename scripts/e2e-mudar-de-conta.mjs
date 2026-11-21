@@ -34,7 +34,7 @@ const ANA = "Ana"
 const BRUNO = "Bruno"
 const FRASE_ANA = "frase-da-ana-2026"
 /** The "Devices" section of Settings, where "Export account" lives. */
-const DEFINICOES_APARELHOS = "Aparelhos"
+const DEFINICOES_APARELHOS = "Conta e segurança"
 const FRASE_BRUNO = "frase-do-bruno-2026"
 const MOTORES = { chromium, firefox, webkit }
 const pedidos = process.argv.slice(2).filter((arg) => !arg.startsWith("--"))
@@ -175,7 +175,9 @@ try {
       // 7. The export is from the open account and carries no remembered session.
       await configuracoes(page).click()
       await page.getByRole("button", { name: DEFINICOES_APARELHOS, exact: true }).first().click()
-      const exportar = page.getByRole("button", { name: "Exportar conta", exact: true }).first()
+      // 21/11/2026: Conta e segurança › "Guardar o ficheiro da conta" › "Guardar o ficheiro".
+      await page.getByRole("button", { name: "Guardar o ficheiro da conta" }).click().catch(() => {})
+      const exportar = page.locator(".sheet").getByRole("button", { name: "Guardar o ficheiro", exact: true }).first()
       await exportar.waitFor({ timeout: 15_000 }).catch(() => {})
       if (await exportar.count()) {
         const [descarga] = await Promise.all([page.waitForEvent("download", { timeout: 60_000 }), exportar.click()])

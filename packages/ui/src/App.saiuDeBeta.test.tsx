@@ -108,7 +108,7 @@ describe("o portão com um cofre do beta", () => {
     await assentar()
     expect(screen.getByText(strings.saiuDeBeta.texto)).toBeTruthy()
     expect(document.querySelector('input[type="password"]')).toBeNull()
-    expect(screen.queryByRole("heading", { name: strings.gate.unlockTitle })).toBeNull()
+    expect(screen.queryByRole("heading", { name: strings.entrada.olaSemNome })).toBeNull()
     // Neither the silent attempt from `Unlock`, nor an export: the vault does not open.
     expect(vault.unlock).not.toHaveBeenCalled()
     expect(vault.export).not.toHaveBeenCalled()
@@ -120,8 +120,8 @@ describe("o portão com um cofre do beta", () => {
     render(<App bridge={bridge} />)
     const botao = await screen.findByRole("button", { name: strings.saiuDeBeta.criarContaNova })
     await userEvent.setup().click(botao)
-    // The new Setup, from the first question.
-    expect(await screen.findByRole("heading", { name: strings.gate.outroAparelhoPergunta })).toBeTruthy()
+    // The new Setup, from the first screen.
+    expect(await screen.findByRole("heading", { name: strings.entrada.bemVindo })).toBeTruthy()
     expect(vault.destroy).toHaveBeenCalledTimes(1)
     expect(vault.unlock).not.toHaveBeenCalled()
     // Fresh setup, not the warning about "there is already a vault on this device".
@@ -135,21 +135,21 @@ describe("o portão com um cofre do beta", () => {
     await userEvent.setup().click(await screen.findByRole("button", { name: strings.saiuDeBeta.criarContaNova }))
     expect(await screen.findByText(strings.errors.boot)).toBeTruthy()
     expect(screen.getByRole("button", { name: strings.common.retry })).toBeTruthy()
-    expect(screen.queryByRole("heading", { name: strings.gate.outroAparelhoPergunta })).toBeNull()
+    expect(screen.queryByRole("heading", { name: strings.entrada.bemVindo })).toBeNull()
     expect(vault.unlock).not.toHaveBeenCalled()
   })
 
   it("com um cofre da 1.0 (orwv2) o portão é o de sempre", async () => {
     const { bridge } = ponteDoCofre("orwv2")
     render(<App bridge={bridge} />)
-    expect(await screen.findByRole("heading", { name: strings.gate.unlockTitle })).toBeTruthy()
+    expect(await screen.findByRole("heading", { name: strings.entrada.olaSemNome })).toBeTruthy()
     expect(screen.queryByRole("heading", { name: strings.saiuDeBeta.titulo })).toBeNull()
   })
 
   it("uma ponte que não diz a `versao` dá o portão de sempre", async () => {
     const { bridge } = ponteDoCofre(undefined)
     render(<App bridge={bridge} />)
-    expect(await screen.findByRole("heading", { name: strings.gate.unlockTitle })).toBeTruthy()
+    expect(await screen.findByRole("heading", { name: strings.entrada.olaSemNome })).toBeTruthy()
     expect(screen.queryByRole("heading", { name: strings.saiuDeBeta.titulo })).toBeNull()
   })
 })

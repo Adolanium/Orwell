@@ -108,6 +108,20 @@ html {
     animation-duration: 620ms !important;
   }
 
+  /*
+    The tip of a "+" at a cap (`BlockedButton`), on hover and on a tap, still
+    fades, slower: with the fade at zero it would jump in. Opacity only,
+    nothing moves.
+  */
+  .no-tecto::after,
+  .no-tecto::before {
+    transition-duration: 450ms !important;
+  }
+
+  .dica-tocada {
+    animation-duration: 450ms !important;
+  }
+
   /* The bell is not here either: its calm swing in `screens.css` carries its own
      duration with `!important` (12/11/2026). */
 

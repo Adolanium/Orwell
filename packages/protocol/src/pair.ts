@@ -3,6 +3,7 @@ import { hkdf } from "@noble/hashes/hkdf.js"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { z } from "zod"
 import { fromBase64, toBase64 } from "./canonical.js"
+import { PalavraPasseDaConta } from "./estado.js"
 import { CapacidadesDeAparelho, EstadoDeConta } from "./estado.js"
 import { encodeName } from "./names.js"
 
@@ -269,6 +270,13 @@ export const PairPayload = z.discriminatedUnion("t", [
     accountPrivateKey: Base64.length(43).optional(),
     /** How many `estado` parts come next. Absent: none (0.5.7 host). */
     estado: z.number().int().min(1).max(ESTADO_PARTES_MAX).optional(),
+    /**
+     * The account password record (1.3.26, `PalavraPasseDaConta`): the new device
+     * asks for the account password after pairing and checks it against this.
+     * Absent: a host before 1.3.26, or one with no password (keychain vault); the
+     * new device then chooses one.
+     */
+    palavraPasse: PalavraPasseDaConta.optional().catch(undefined),
   }),
   z.object({ t: z.literal("confirmado") }),
   z.object({ t: z.literal("pronto"), capacidades: CapacidadesDeAparelho.optional() }),

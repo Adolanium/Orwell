@@ -5,6 +5,7 @@ import type { EnclaveBridge } from "../../bridge.js"
 import { ToastProvider } from "../../components/Toast.js"
 import { strings } from "../../strings.js"
 import { Emparelhar } from "./Emparelhar.js"
+import { ateAPalavraPasse, comEmparelhamento } from "../../../testes/emparelharAtePalavraPasse.js"
 import { Setup } from "./Setup.js"
 
 afterEach(cleanup)
@@ -42,7 +43,7 @@ function ponte(chamadas: string[]): EnclaveBridge {
 }
 
 describe("F3: contas novas sem cofre sem frase", () => {
-  it("o registo na secretária pede a palavra-passe, sem a caixa do porta-chaves, e memoriza", async () => {
+  it("o registo na secretária cria o cofre com a palavra-passe, e não memoriza sem pedirem (21/11/2026)", async () => {
     const chamadas: string[] = []
     render(
       <ToastProvider>
@@ -51,41 +52,33 @@ describe("F3: contas novas sem cofre sem frase", () => {
         </BridgeContext.Provider>
       </ToastProvider>,
     )
-    fireEvent.change(await screen.findByPlaceholderText(strings.gate.namePlaceholder), { target: { value: "Ana" } })
-    fireEvent.click(screen.getByRole("button", { name: strings.gate.next }))
-    fireEvent.click(await screen.findByRole("button", { name: strings.gate.skipPhoto }))
-    await waitFor(() => expect(document.querySelector('input[name="new-password"]')).not.toBeNull())
-    expect(screen.queryByText(strings.gate.osKeychain)).toBeNull()
-    const caixa = document.querySelector('input[name="memorizar"]') as HTMLInputElement
-    expect(caixa.checked).toBe(true)
-
+    fireEvent.click(await screen.findByRole("button", { name: strings.entrada.criarConta }))
+    fireEvent.change(await screen.findByLabelText(strings.entrada.nome), { target: { value: "Ana" } })
+    expect(document.querySelector('input[name="memorizar"]')).toBeNull()
     const campo = document.querySelector('input[name="new-password"]') as HTMLInputElement
     fireEvent.change(campo, { target: { value: FRASE } })
+    fireEvent.change(document.querySelector('input[name="confirm-password"]') as HTMLInputElement, { target: { value: FRASE } })
     fireEvent.submit(campo.closest("form") as HTMLFormElement)
-    await waitFor(() => expect(document.querySelector('input[name="confirm-password"]')).not.toBeNull())
-    const confirmar = document.querySelector('input[name="confirm-password"]') as HTMLInputElement
-    fireEvent.change(confirmar, { target: { value: FRASE } })
-    fireEvent.submit(confirmar.closest("form") as HTMLFormElement)
-
-    await waitFor(() => expect(chamadas).toEqual([`create ${FRASE}`, "memorizar true"]))
+    await waitFor(() => expect(chamadas).toContain(`create ${FRASE}`))
+    expect(chamadas).not.toContain("memorizar true")
+    expect(chamadas).not.toContain("create SEM FRASE")
   })
 
-  it("emparelhar na secretária também pede a palavra-passe, sem a caixa do porta-chaves", async () => {
+  it("emparelhar na secretária também sela o cofre com uma palavra-passe, nunca sem frase", async () => {
     const chamadas: string[] = []
+    const { bridge, emitir } = comEmparelhamento(ponte(chamadas), chamadas)
     render(
       <ToastProvider>
-        <BridgeContext.Provider value={ponte(chamadas)}>
-          <Emparelhar linkInicial="https://orwell.pt/app/par#segredo" onDone={vi.fn()} onBack={vi.fn()} />
+        <BridgeContext.Provider value={bridge}>
+          <Emparelhar linkInicial="https://orwell.pt/app/emparelhar#6gzjKC5Y-jxiXv_ZLoIzYX6ZL4PeZ24HirzSb__z6VY" onDone={vi.fn()} onBack={vi.fn()} />
         </BridgeContext.Provider>
       </ToastProvider>,
     )
-    await waitFor(() => expect(document.querySelector('input[name="new-password"]')).not.toBeNull())
-    await waitFor(() => expect(document.querySelector('input[name="memorizar"]')).not.toBeNull())
-    expect(screen.queryByText(strings.gate.osKeychain)).toBeNull()
-    fireEvent.change(document.querySelector('input[name="new-password"]') as HTMLInputElement, { target: { value: FRASE } })
-    fireEvent.change(document.querySelector('input[name="confirm-password"]') as HTMLInputElement, { target: { value: FRASE } })
-    fireEvent.submit((document.querySelector('input[name="new-password"]') as HTMLInputElement).closest("form") as HTMLFormElement)
-    await waitFor(() => expect(chamadas).toContain(`create ${FRASE}`))
+    await ateAPalavraPasse(emitir, "conta")
+    const campo = document.querySelector('input[name="current-password"]') as HTMLInputElement
+    fireEvent.change(campo, { target: { value: FRASE } })
+    fireEvent.submit(campo.closest("form") as HTMLFormElement)
+    await waitFor(() => expect(chamadas).toContain(`seal ${FRASE}`))
     expect(chamadas).not.toContain("create SEM FRASE")
   })
 })

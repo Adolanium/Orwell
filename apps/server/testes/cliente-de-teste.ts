@@ -86,18 +86,39 @@ export class Cliente {
   }
 
   /**
-   * Connect and authenticate WITH the device chain (`accountKey` and
-   * `deviceCert` in `auth.begin`), the way every app has logged in since
-   * August 2026: the connection then has a device key.
+   * Connect and send `hello`, and nothing else: a new device before it has an account.
+   * `forwardedFor` sends an `X-Forwarded-For`, which the server reads from a
+   * loopback peer: the test then looks like a client of that public network.
    */
-  static async ligarComCadeia(url: string, identidade: Identity): Promise<Cliente> {
-    const socket = new WebSocket(url)
+  static async withoutAccount(url: string, { forwardedFor }: { forwardedFor?: string } = {}): Promise<Cliente> {
+    const socket = new WebSocket(url, forwardedFor === undefined ? {} : { headers: { "x-forwarded-for": forwardedFor } })
     await new Promise<void>((resolve, reject) => {
       socket.once("open", () => resolve())
       socket.once("error", reject)
     })
     const cliente = new Cliente(socket)
     cliente.enviar({ t: "hello", version: PROTOCOL_VERSION, capabilities: [COMMIT_DEPOIS_DO_ECO] })
+    await cliente.proximoDe("hello.ok")
+    return cliente
+  }
+
+  /**
+   * Connect and authenticate WITH the device chain (`accountKey` and
+   * `deviceCert` in `auth.begin`), the way every app has logged in since
+   * August 2026: the connection then has a device key.
+   */
+  static async ligarComCadeia(
+    url: string,
+    identidade: Identity,
+    { capacidades = [COMMIT_DEPOIS_DO_ECO] }: { capacidades?: string[] } = {},
+  ): Promise<Cliente> {
+    const socket = new WebSocket(url)
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", () => resolve())
+      socket.once("error", reject)
+    })
+    const cliente = new Cliente(socket)
+    cliente.enviar({ t: "hello", version: PROTOCOL_VERSION, capabilities: capacidades })
     await cliente.proximoDe("hello.ok")
     cliente.enviar({
       t: "auth.begin",
@@ -320,10 +341,20 @@ export function desligarContas(contas: readonly ContaDeTeste[]): void {
 export async function ate(predicado: () => boolean, rotulo: string, prazoMs = 15_000, passoMs = 50): Promise<number> {
   const inicio = Date.now()
   while (Date.now() - inicio < prazoMs) {
-    if (predicado()) return Date.now() - inicio
+    if (predicado()) return medirEspera(rotulo, Date.now() - inicio)
     await new Promise((resolve) => setTimeout(resolve, passoMs))
   }
   throw new Error(`esgotou-se o prazo à espera de: ${rotulo}`)
+}
+
+/**
+ * With `ORWELL_MEDIR_ESPERAS=<ms>`, every wait longer than that is printed with its
+ * label (`ESPERA <ms> <label>`). It is how a slow file tells which wait is the slow one.
+ */
+function medirEspera(rotulo: string, ms: number): number {
+  const limiar = Number(process.env["ORWELL_MEDIR_ESPERAS"] ?? NaN)
+  if (ms >= limiar) console.log(`ESPERA ${ms} ${rotulo}`)
+  return ms
 }
 
 /** A new channel founded by `dono`, with the others seated one by one. */
@@ -478,7 +509,7 @@ export async function recarregar(
 export async function ateQue(predicado: () => Promise<boolean>, rotulo: string, prazoMs = 15_000, passoMs = 100): Promise<number> {
   const inicio = Date.now()
   while (Date.now() - inicio < prazoMs) {
-    if (await predicado()) return Date.now() - inicio
+    if (await predicado()) return medirEspera(rotulo, Date.now() - inicio)
     await new Promise((resolve) => setTimeout(resolve, passoMs))
   }
   throw new Error(`esgotou-se o prazo à espera de: ${rotulo}`)

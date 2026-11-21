@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react"
+import { BIO_MAX, cortarBio } from "@enclave/client-core"
 import { TextoDeErro } from "../../components/TextoDeErro.js"
 import { useBridge } from "../../App.js"
 import type { Profile } from "../../bridge.js"
@@ -6,6 +7,7 @@ import { BotaoCopiarId } from "../../components/BotaoCopiarId.js"
 import { Button } from "../../components/Button.js"
 import { Enquadrar } from "../../components/Enquadrar.js"
 import { CampoDeNome } from "../../components/CampoDeNome.js"
+import { CampoDaBio } from "../../components/CampoDaBio.js"
 import { Field } from "../../components/Field.js"
 import { Interruptor } from "../../components/Interruptor.js"
 import { Modal } from "../../components/Modal.js"
@@ -44,7 +46,18 @@ export function ProfileEditor({
 }): React.JSX.Element {
   const bridge = useBridge()
   const confirmar = useConfirmar()
-  const [draft, setDraft] = useState<Profile>(initial)
+  /*
+    A bio written before 1.3.26 can pass 300 graphemes. The editor opens it cut
+    to 300 and says so; the cut version is the starting point, so only a real
+    edit counts as a change. Nothing is rewritten until the person saves.
+  */
+  const [{ inicial, bioAntigaCortada }] = useState(() => {
+    const bio = cortarBio(initial.bio ?? "")
+    return initial.bio === undefined || bio === initial.bio
+      ? { inicial: initial, bioAntigaCortada: false }
+      : { inicial: { ...initial, bio }, bioAntigaCortada: true }
+  })
+  const [draft, setDraft] = useState<Profile>(inicial)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   /** The GIF that stopped moving because it was too heavy. It is not an error: the face changed. */
@@ -158,7 +171,7 @@ export function ProfileEditor({
 
   // Click-outside and Escape with unsaved edits should not silently throw the
   // edits away — but they should not be trapped either. Ask.
-  const dirty = JSON.stringify(draft) !== JSON.stringify(initial) || listaMudou
+  const dirty = JSON.stringify(draft) !== JSON.stringify(inicial) || listaMudou
 
   return (
     <Modal
@@ -239,14 +252,12 @@ export function ProfileEditor({
             menu and "Custom…". Two places for the same
             line kept disagreeing. Text already there stays in the draft and saves as is:
             leaving the editor does not erase it. */}
-        <Field label={strings.profileEditor.bio}>
-          <textarea
-            value={draft.bio ?? ""}
-            maxLength={1000}
-            rows={3}
-            onChange={(event) => patch({ bio: event.target.value })}
-          />
-        </Field>
+        <CampoDaBio rotulo={strings.profileEditor.bio} value={draft.bio ?? ""} onChange={(bio) => patch({ bio })} />
+        {bioAntigaCortada && (
+          <p className="field-note warn" role="status">
+            {strings.profileEditor.bioAntigaCortada(BIO_MAX)}
+          </p>
+        )}
         {/* The difference from status, shown below the field, labeled "Bio". */}
         <p className="field-note">{strings.profileEditor.bioNote}</p>
 

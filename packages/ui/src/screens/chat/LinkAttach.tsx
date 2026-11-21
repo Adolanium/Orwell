@@ -8,6 +8,7 @@ import { TextoDeErro } from "../../components/TextoDeErro.js"
 import { strings, traduzirErro } from "../../strings.js"
 import { fetchPreviewViaHost, type PreviewFields } from "../social/fetchPreview.js"
 import { LinkPreview } from "../social/LinkPreview.js"
+import { VideoPreviews } from "./videoPreviews.js"
 
 /** How long to wait after the last key before fetching on its own. The same as
  * the feed draft uses, for the same reason: an address being typed passes
@@ -80,6 +81,7 @@ export function LinkAttach({
   card,
   onChange,
   onDismiss,
+  previews,
 }: {
   /** The address found in the text being typed. */
   url: string
@@ -88,8 +90,12 @@ export function LinkAttach({
   onChange: (card: LinkCard | null) => void
   /** Dismiss the preview for this address. The link still goes. */
   onDismiss: () => void
+  /** The compose box's video previews, shared with Enter (see `VideoPreviews`). Without it, the card keeps its own. */
+  previews?: VideoPreviews
 }): React.JSX.Element {
   const bridge = useBridge()
+  const proprias = useRef<VideoPreviews | null>(null)
+  const videoPreviews = previews ?? (proprias.current ??= new VideoPreviews((alvo) => bridge.social.linkPreview(alvo)))
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   /** True after a failed attempt: only then do the manual fields appear. */
@@ -122,7 +128,8 @@ export function LinkAttach({
     setBusy(true)
     setNote(null)
     const base: LinkCard = { url, kind: videoId ? "video" : "link" }
-    void fetchPreviewViaHost(url, (alvo) => bridge.social.linkPreview(alvo))
+    // A video goes through the box's shared previews, so Enter waits on this same request.
+    void (videoPreviews.of(url) ?? fetchPreviewViaHost(url, (alvo) => bridge.social.linkPreview(alvo)))
       .then((preview) => {
         const campos: PreviewFields = {
           ...(preview.title ? { title: preview.title } : {}),

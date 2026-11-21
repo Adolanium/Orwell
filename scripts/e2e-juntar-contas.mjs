@@ -11,12 +11,13 @@
  * four in desktop browsers (1200x860).
  *
  *  1. Race that fails: Ana opens "Merge another account", pastes Dora's link,
- *     types the new password and "delete", and Dora says "They are not the same".
+ *     types "delete", and Dora says "They are not the same".
  *     Ana stays whole: same account key on disk, channel in the sidebar; Bruno
  *     and Carla get no warning.
  *  2. Race that ends well: "They are the same" on both screens. Ana warns, exits
- *     everything, and the device becomes Dora's. Ana's password opens nothing
- *     more; the new one opens a device vault, no account private key.
+ *     types Dora's account password after the words (a wrong one is Error 140,
+ *     and nothing is deleted), exits everything, and the device becomes Dora's.
+ *     Ana's password opens nothing more; Dora's opens a device vault.
  *  3. Bruno sees, once, "Ana became Dora" and "Add Dora?"; taps, Dora
  *     accepts, and Bruno has Dora in friends, Ana gone.
  *  4. Carla sees "Invite Dora to ...?"; taps, and Dora joins the channel
@@ -38,6 +39,7 @@ import { fileURLToPath } from "node:url"
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js"
 import { argon2id } from "@noble/hashes/argon2.js"
 import { chromium } from "playwright"
+import { abrirJuntarUmAparelho } from "./juntar-aparelho.mjs"
 import { criarConta } from "./conta.mjs"
 import { aceitarConvite, convidar, etiquetaDe } from "./convite.mjs"
 
@@ -183,13 +185,13 @@ async function ate(condicao, ms = 60_000, passo = 500) {
 }
 
 /** A new account in its own context. Returns the page and the address. */
-async function conta(nome, opcoes = {}) {
+async function conta(nome, opcoes = {}, frase = FRASE) {
   const ctx = await browser.newContext({ locale: "pt-PT", viewport: { width: 1200, height: 860 }, ...opcoes })
   const page = await ctx.newPage()
   const erros = []
   page.on("pageerror", (erro) => erros.push(erro.message))
   await page.goto(APP, { waitUntil: "domcontentloaded" })
-  await criarConta(page, { nome, frase: FRASE, servidor: NOME })
+  await criarConta(page, { nome, frase, servidor: NOME })
   await dentro(page)
   const link = await meuLink(page)
   // The long connection (`/app/amigo#@<id>:<servidor>`) or the short one from 1.0 (`/a#<id>`, 5b).
@@ -224,7 +226,7 @@ async function pedirAmizade(page, link) {
 /** The bell text, and tap a button in it (or just read). */
 async function sino(page, botao = null) {
   await page.locator(".me-bell").first().click()
-  const lista = page.locator(".notif-panel")
+  const lista = page.locator(".notif-janela")
   await lista.waitFor({ timeout: 10_000 })
   const texto = (await lista.innerText().catch(() => "")).replace(/\s+/g, " ")
   let carregou = false
@@ -238,6 +240,9 @@ async function sino(page, botao = null) {
   await page.keyboard.press("Escape")
   return { texto, carregou }
 }
+
+/** The address as the bell shows it: the first 12 characters, then "…". */
+const enderecoCurto = (endereco) => endereco.slice(0, 12)
 
 /** The Friends title ("Friends (1)") and the list names. */
 async function amigos(page) {
@@ -273,30 +278,23 @@ async function cofreDe(page, frase) {
   }
 }
 
-/** On Dora: Settings, Devices, Add device. Returns the sheet and the link. */
+/** On Dora: Settings › Conta e segurança › Juntar um aparelho. Returns the sheet and the code. */
 async function abrirCaixa(pc) {
-  await pc.getByRole("button", { name: "Configurações" }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await pc.getByRole("button", { name: "Acrescentar aparelho" }).click()
-  const folha = pc.locator(".sheet").first()
-  await folha.locator("code[data-link]").waitFor({ timeout: 20_000 })
-  return { folha, link: await folha.locator("code[data-link]").getAttribute("data-link") }
+  return abrirJuntarUmAparelho(pc)
 }
 
 /** On Ana: Devices, "Merge another account", up to the six words. Returns the sheet. */
 async function juntarAteAsPalavras(tel, link) {
   await tel.getByRole("button", { name: "Configurações" }).first().click()
-  await tel.getByRole("button", { name: "Aparelhos", exact: true }).click()
+  await tel.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await tel.getByRole("button", { name: /^Aparelhos/ }).click()
   await tel.getByRole("button", { name: "Juntar a outra conta" }).click()
   const folha = tel.locator(".juntar-contas")
   await folha.getByText("O que não passa: nem histórico, nem perfil, nem preferências.").waitFor({ timeout: 10_000 })
   await folha.getByRole("button", { name: "Começar" }).click()
-  await folha.getByLabel("Ou cola o link").fill(link)
+  await folha.getByLabel("Ou cola o código").fill(link)
   await folha.getByRole("button", { name: "Continuar" }).click()
-  const frases = folha.locator('input[type="password"]')
-  await frases.nth(0).fill(FRASE_NOVA)
-  await frases.nth(1).fill(FRASE_NOVA)
-  await folha.getByRole("button", { name: "Continuar" }).click()
+  // No password before the words: "apagar" first, the main account's password after (1.3.26).
   const pergunta = tel.getByRole("alertdialog", { name: "Apagar a conta?" })
   await pergunta.getByLabel('Escreve "apagar" para confirmar').fill("apagar")
   await pergunta.getByRole("button", { name: "Apagar para sempre" }).click()
@@ -325,7 +323,8 @@ try {
   const ana = await conta("Ana")
   const bruno = await conta("Bruno")
   const carla = await conta("Carla")
-  const dora = await conta("Dora")
+  // Dora has her own password: after joining, Ana's device opens with it (one password per account, 1.3.26).
+  const dora = await conta("Dora", {}, FRASE_NOVA)
   check("quatro contas, cada uma com endereço", [ana, bruno, carla, dora].every((c) => c.address), [ana, bruno, carla, dora].map((c) => c.address).join(" "))
 
   // The setup: Ana friends with Bruno, in Carla's channel.
@@ -350,9 +349,9 @@ try {
   const primeira = await abrirCaixa(dora.page)
   const folhaAna = await juntarAteAsPalavras(ana.page, primeira.link)
   await primeira.folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  check('as seis palavras aparecem nos dois ecrãs, depois do "apagar" escrito', true)
-  await folhaAna.getByRole("button", { name: "São as mesmas" }).click()
-  await primeira.folha.getByRole("button", { name: "Não são" }).click()
+  check('as palavras aparecem nos dois ecrãs, depois do "apagar" escrito', true)
+  await folhaAna.getByRole("button", { name: "Sim, são iguais" }).click()
+  await primeira.folha.getByRole("button", { name: "Não são iguais" }).click()
   const erro = await folhaAna.getByRole("alert").waitFor({ timeout: 30_000 }).then(() => true, () => false)
   check("a Ana vê que o emparelhamento falhou", erro)
   await ana.page.screenshot({ path: join(CAPTURAS, "juntar-contas-falhou.png") })
@@ -374,8 +373,17 @@ try {
   await ana.page.keyboard.press("Escape").catch(() => {})
   const folhaAna2 = await juntarAteAsPalavras(ana.page, segunda.link)
   await segunda.folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folhaAna2.getByRole("button", { name: "São as mesmas" }).click()
-  await segunda.folha.getByRole("button", { name: "São as mesmas" }).click()
+  await folhaAna2.getByRole("button", { name: "Sim, são iguais" }).click()
+  await segunda.folha.getByRole("button", { name: "Sim, juntar o aparelho" }).click()
+  // The main account's password, checked against the record Dora's device sent.
+  const daConta = folhaAna2.locator('input[name="current-password"]')
+  await daConta.waitFor({ timeout: 60_000 })
+  await daConta.fill(FRASE)
+  await folhaAna2.getByRole("button", { name: "Continuar" }).click()
+  const recusou = await folhaAna2.locator('[role="alert"]', { hasText: /\b140\b/ }).waitFor({ timeout: 30_000 }).then(() => true, () => false)
+  check("a palavra-passe que não é a da conta da Dora é recusada (Erro 140), e nada se apaga", recusou)
+  await daConta.fill(FRASE_NOVA)
+  await folhaAna2.getByRole("button", { name: "Continuar" }).click()
   const juntas = await folhaAna2.getByText("Contas juntas").waitFor({ timeout: 120_000 }).then(() => true, () => false)
   // Dora's sheet lands on "done": it closes, so her bell can open.
   await segunda.folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
@@ -384,14 +392,15 @@ try {
   await ana.page.screenshot({ path: join(CAPTURAS, "juntar-contas-feito.png") })
   check("a palavra-passe da Ana já não abre nada: a chave dela saiu", (await cofreDe(ana.page, FRASE)) === null)
   const novo = await cofreDe(ana.page, FRASE_NOVA)
-  check("a nova abre um cofre de aparelho: chave pública de conta, certificado, sem a privada", novo?.signingPrivateKey === "" && novo?.accountPublicKey?.length === 43 && novo?.deviceCert?.length === 86)
+  // Dora's account password opens it (one password, 1.3.26). Since 1.3.16 the account private key comes with the certificate.
+  check("a palavra-passe da conta da Dora abre um cofre de aparelho: chave pública de conta e certificado", novo?.accountPublicKey?.length === 43 && novo?.deviceCert?.length === 86)
 
   // 3. Bruno: the notification, once, and the ring.
   let sinoDoBruno = { texto: "" }
   // Bruno never saw Dora's profile: the bell tells him by the address.
-  const avisado = await ate(async () => (sinoDoBruno = await sino(bruno.page)).texto.includes(`Ana passou a ser ${dora.address}`), 60_000, 2_000)
+  const avisado = await ate(async () => (sinoDoBruno = await sino(bruno.page)).texto.includes(`Ana passou a ser ${enderecoCurto(dora.address)}`), 60_000, 2_000)
   check('o Bruno vê "Ana passou a ser @dora", com quem o diz', avisado && sinoDoBruno.texto.includes("Quem o diz é a conta Ana"), sinoDoBruno.texto.slice(0, 160))
-  check('e "Adicionar @dora?"', sinoDoBruno.texto.includes(`Adicionar ${dora.address}?`))
+  check('e "Adicionar @dora?"', sinoDoBruno.texto.includes(`Adicionar ${enderecoCurto(dora.address)}`))
   check('o Bruno carrega em "Adicionar"', (await sino(bruno.page, "Adicionar")).carregou)
   const doraAceitou = await ate(async () => (await sino(dora.page, "Aceitar")).carregou, 60_000, 2_000)
   check("a Dora aceita o pedido do Bruno", doraAceitou)
@@ -405,8 +414,8 @@ try {
 
   // 4. Carla: the notice, the invite, and Dora joins on her own.
   let sinoDaCarla = { texto: "" }
-  await ate(async () => (sinoDaCarla = await sino(carla.page)).texto.includes(`Convidar ${dora.address} para`), 60_000, 2_000)
-  check('a Carla vê "Convidar @dora para ...?"', sinoDaCarla.texto.includes(`Convidar ${dora.address} para`), sinoDaCarla.texto.slice(0, 160))
+  await ate(async () => (sinoDaCarla = await sino(carla.page)).texto.includes(`Convidar ${enderecoCurto(dora.address)}`), 60_000, 2_000)
+  check('a Carla vê "Convidar @dora para ...?"', sinoDaCarla.texto.includes(`Convidar ${enderecoCurto(dora.address)}`), sinoDaCarla.texto.slice(0, 160))
   check('a Carla carrega em "Convidar"', (await sino(carla.page, "Convidar")).carregou)
   const doraEntrou = await ate(async () => (await temCanal(dora.page, ETIQUETA)) || (await temCanal(ana.page, ETIQUETA)), 90_000, 3_000)
   check("a Dora entra no canal sem tocar em nada", doraEntrou)

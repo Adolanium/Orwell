@@ -123,7 +123,7 @@ describe("Conta › Sessão, com a memória da sessão", () => {
     setter?.call(nova, "uma frase comprida")
     setter?.call(confirmar, "outra frase comprida")
     fireEvent.submit(nova.closest("form") as HTMLFormElement)
-    expect(await screen.findByText(strings.gate.passphraseMismatch)).toBeTruthy()
+    expect(await screen.findByText(strings.entrada.diferentes)).toBeTruthy()
     expect(chamadas).toEqual([])
 
     // The same, written without an event (like a manager): what is in the field takes precedence.

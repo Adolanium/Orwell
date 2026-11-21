@@ -22,6 +22,10 @@ export class ArmazemEmMemoria implements ArmazemBackend {
   #falhas: Error[] = []
   #selado = false
 
+  dessselar(): void {
+    this.#selado = false
+  }
+
   constructor(opcoes: { quota?: number } = {}) {
     this.#quota = opcoes.quota ?? Number.POSITIVE_INFINITY
   }

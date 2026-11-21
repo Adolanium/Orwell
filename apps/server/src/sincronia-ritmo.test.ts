@@ -33,6 +33,10 @@ import {
  * 150 s Ana had 57. After: 120, one second after the last one left.
  *
  * The cap is lowered so the test does not take minutes: it is static, and it is restored.
+ * So is the window the cap counts in (`Gateway.JANELA_DOS_TECTOS_MS`), from a minute to
+ * ten seconds: every scenario still goes over the cap and has to wait for room, but the
+ * room comes back in seconds. With the minute, the file took three minutes, all of it
+ * waiting for buckets to refill.
  */
 
 const TECTO_ORIGINAL = Gateway.ENVIOS_POR_MINUTO
@@ -41,16 +45,20 @@ const TECTO = 20
 const tectoDosEnvios = (n: number): void => {
   ;(Gateway as unknown as { ENVIOS_POR_MINUTO: number }).ENVIOS_POR_MINUTO = n
 }
+const JANELA_MS = 10_000
+let reporJanela: () => void = () => {}
 let servidor: ServidorDeTeste
 const abertas: ContaDeTeste[] = []
 
 beforeAll(async () => {
   tectoDosEnvios(TECTO)
+  reporJanela = mudarEstatico("JANELA_DOS_TECTOS_MS", JANELA_MS)
   servidor = await levantarServidor()
 }, 30_000)
 afterEach(() => desligarContas(abertas.splice(0)))
 afterAll(async () => {
   tectoDosEnvios(TECTO_ORIGINAL)
+  reporJanela()
   await servidor?.fechar()
 })
 
@@ -82,7 +90,7 @@ describe("S6: o tecto de envios recusa com código, e nunca em silêncio", () =>
     for (const recusa of recusas) {
       expect(recusa["reason"]).toBe("rate-limited")
       expect(recusa["retryAfterMs"]).toBeGreaterThan(0)
-      expect(recusa["retryAfterMs"]).toBeLessThanOrEqual(60_000)
+      expect(recusa["retryAfterMs"]).toBeLessThanOrEqual(JANELA_MS)
     }
   })
 
@@ -117,7 +125,7 @@ describe("S6: o cliente pára, espera e repete", () => {
     for (let i = 0; i < total; i++) await dora!.session.commentOnPost(canal, id, `c${i}`)
     const comentarios = () => ana!.session.history(canal).filter((e) => e.payload["t"] === "post.comment").length
     await ate(() => comentarios() === total, "a Ana tem todos os comentários", 90_000)
-    // The time is what the cap dictates (30 sends at 20 per minute), not a target from §2.3.
+    // The time is what the cap dictates (30 sends at 20 per window), not a target from §2.3.
     const linha = JSON.stringify({ fase: "S6", cenario: "rajada-acima-do-tecto", envios: total, tecto: TECTO, ateIgualarMs: Date.now() - inicio })
     console.log(`MEDIDA-S6 ${linha}`)
     const saida = process.env["MEDIR_SINCRONIA_SAIDA"]

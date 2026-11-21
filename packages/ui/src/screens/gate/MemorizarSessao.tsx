@@ -1,7 +1,6 @@
 import { useContext, useEffect, useState } from "react"
 import type { EnclaveBridge } from "../../bridge.js"
 import { ToastContext } from "../../components/Toast.js"
-import { ehIos } from "../../lib/plataforma.js"
 import { strings } from "../../strings.js"
 
 /** What the gate knows about the vault and the platform. */
@@ -70,14 +69,8 @@ export function CaixaMemorizar({
     <div className="memorizar-sessao">
       <label className="checkbox">
         <input type="checkbox" name="memorizar" checked={ligada} onChange={(event) => onMudar(event.target.checked)} />
-        {strings.gate.memorizar}
+        {strings.entrada.manterSessao}
       </label>
-      {ligada && (
-        <p className="field-note">
-          {strings.gate.memorizarNota}
-          {ehIos() && <> {strings.gate.memorizarNotaIos}</>}
-        </p>
-      )}
     </div>
   )
 }

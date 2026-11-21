@@ -2,10 +2,14 @@ import { moradaDeTeste } from "../../testes/moradas.js"
 import { lembrarFichasDosCanais } from "../lib/tipoDoCanal.js"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook } from "@testing-library/react"
-import { BUZZ_MAX_AGE_MS } from "@enclave/protocol"
 import type { EnclaveBridge } from "../bridge.js"
 import { COTOVELADA_INTERVALO_MS } from "../lib/limiteDaCotovelada.js"
 import { useBuzz } from "./useBuzz.js"
+import { tocarCotoveladaEnviada } from "../lib/sounds.js"
+
+// The engine's own rules are proven in `sons/motor.test.ts`; here, only when the hook asks for the sound.
+vi.mock("../lib/sounds.js", () => ({ tocarCotoveladaEnviada: vi.fn(() => "tocou") }))
+const somEnviado = vi.mocked(tocarCotoveladaEnviada)
 
 const DM_XYZ = moradaDeTeste("directa xyz", "s")
 const DM_OUTRA = moradaDeTeste("directa outra", "s")
@@ -51,7 +55,10 @@ function ponte(): { bridge: EnclaveBridge; buzz: ReturnType<typeof vi.fn>; emiti
   return { bridge, buzz, emitir }
 }
 
-beforeEach(() => vi.useFakeTimers())
+beforeEach(() => {
+  vi.useFakeTimers()
+  somEnviado.mockClear()
+})
 afterEach(() => {
   vi.useRealTimers()
   cleanup()
@@ -178,34 +185,17 @@ describe("o intervalo de um minuto, por conversa", () => {
 })
 
 describe("a receber a cotovelada", () => {
-  it("uma cotovelada abana o ecrã, e o abanão acaba sozinho", () => {
+  // Since 21/11/2026 the shake of a nudge that ARRIVES is the whole app's
+  // (`useNudgeShake`), on every screen and every device. Shaking here too would
+  // be the same shake twice, on the conversation frame.
+  it("a nudge that arrives does not shake here: the app shakes, once (useNudgeShake)", () => {
     const { bridge, emitir } = ponte()
     const { result } = renderHook(() => useBuzz(bridge, DM))
-
     act(() => emitir({ channel: DM, from: "@ana:s", at: Date.now() }))
-    expect(result.current.shaking).toBe(true)
-
-    act(() => vi.advanceTimersByTime(2_000))
     expect(result.current.shaking).toBe(false)
   })
 
-  it("uma cotovelada de outra conversa não abana esta", () => {
-    const { bridge, emitir } = ponte()
-    const { result } = renderHook(() => useBuzz(bridge, DM))
-    act(() => emitir({ channel: DM_OUTRA, from: "@ana:s", at: Date.now() }))
-    expect(result.current.shaking).toBe(false)
-  })
-
-  it("uma cotovelada vinda de um canal de grupo não abana, nem com o canal aberto à frente", () => {
-    // The button only exists in directs, but an altered client can send a nudge
-    // anywhere. The core already drops it; this is the second wall.
-    const { bridge, emitir } = ponte()
-    const { result } = renderHook(() => useBuzz(bridge, ESPACO))
-    act(() => emitir({ channel: ESPACO, from: "@ana:s", at: Date.now() }))
-    expect(result.current.shaking).toBe(false)
-  })
-
-  it("com movimento reduzido o abanão não pára: dura o dobro, como a versão calma no CSS", () => {
+  it("com movimento reduzido o abanão de quem dá não pára: dura o dobro, como a versão calma no CSS", () => {
     // A Windows machine may run with reduced motion. Nothing stops, it moves slower:
     // the calm shake in `screens.css` takes 1.64 s, and the class cannot come off
     // halfway through it.
@@ -217,9 +207,9 @@ describe("a receber a cotovelada", () => {
       removeEventListener: () => {},
     })) as unknown as typeof window.matchMedia
     try {
-      const { bridge, emitir } = ponte()
+      const { bridge } = ponte()
       const { result } = renderHook(() => useBuzz(bridge, DM))
-      act(() => emitir({ channel: DM, from: "@ana:s", at: Date.now() }))
+      act(() => result.current.buzz())
       act(() => vi.advanceTimersByTime(1_200))
       expect(result.current.shaking).toBe(true)
       act(() => vi.advanceTimersByTime(600))
@@ -227,15 +217,6 @@ describe("a receber a cotovelada", () => {
     } finally {
       window.matchMedia = original
     }
-  })
-
-  it("uma cotovelada velha não se sente", () => {
-    // Defense against a replay that slipped past the session cut: without it,
-    // opening the app would shake the screen with yesterday's buzzes.
-    const { bridge, emitir } = ponte()
-    const { result } = renderHook(() => useBuzz(bridge, DM))
-    act(() => emitir({ channel: DM, from: "@ana:s", at: Date.now() - BUZZ_MAX_AGE_MS - 1 }))
-    expect(result.current.shaking).toBe(false)
   })
 
   it("dar uma cotovelada abana também o nosso ecrã, como no MSN", () => {
@@ -269,20 +250,46 @@ describe("a receber a cotovelada", () => {
     act(() => result.current.buzz())
     expect(result.current.shaking).toBe(false)
   })
+})
 
-  it("não rouba o foco a ninguém", () => {
-    // A nudge that brought the app to the front would yank the cursor from
-    // someone typing in another window, and then it stops being a nudge.
-    const { bridge, emitir } = ponte()
-    const caixa = document.createElement("input")
-    document.body.append(caixa)
-    caixa.focus()
-    const focoAntes = document.activeElement
+describe("quem envia também ouve (21/11/2026)", () => {
+  it("o envio aceite toca o som da cotovelada", async () => {
+    const { bridge } = ponte()
+    const { result } = renderHook(() => useBuzz(bridge, DM))
+    await act(async () => result.current.buzz())
+    expect(somEnviado).toHaveBeenCalledTimes(1)
+  })
 
-    renderHook(() => useBuzz(bridge, DM))
-    act(() => emitir({ channel: DM, from: "@ana:s", at: Date.now() }))
+  it("o envio recusado pela sessão não toca", async () => {
+    const { bridge, buzz } = ponte()
+    buzz.mockImplementationOnce(async () => {
+      throw new Error("rate")
+    })
+    const { result } = renderHook(() => useBuzz(bridge, DM))
+    await act(async () => result.current.buzz())
+    expect(buzz).toHaveBeenCalledTimes(1)
+    expect(somEnviado).not.toHaveBeenCalled()
+  })
 
-    expect(document.activeElement).toBe(focoAntes)
-    caixa.remove()
+  it("um envio que responde ok: false não toca", async () => {
+    const { bridge, buzz } = ponte()
+    buzz.mockImplementationOnce(async () => ({ ok: false }))
+    const { result } = renderHook(() => useBuzz(bridge, DM))
+    await act(async () => result.current.buzz())
+    expect(somEnviado).not.toHaveBeenCalled()
+  })
+
+  it("carregar cinco vezes seguidas dá um som", async () => {
+    const { bridge } = ponte()
+    const { result } = renderHook(() => useBuzz(bridge, DM))
+    for (let i = 0; i < 5; i++) await act(async () => result.current.buzz())
+    expect(somEnviado).toHaveBeenCalledTimes(1)
+  })
+
+  it("num canal de grupo não envia nem toca", async () => {
+    const { bridge } = ponte()
+    const { result } = renderHook(() => useBuzz(bridge, ESPACO))
+    await act(async () => result.current.buzz())
+    expect(somEnviado).not.toHaveBeenCalled()
   })
 })

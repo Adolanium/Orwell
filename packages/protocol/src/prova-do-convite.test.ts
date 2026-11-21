@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { toBase64 } from "./canonical.js"
-import { chaveDaProvaDoConvite, provarCodigoDoConvite, verificarProvaDoConvite } from "./prova-do-convite.js"
+import {
+  chaveDaProvaDoConvite,
+  provarCodigoDoConvite,
+  provarConviteNoRegisto,
+  verificarConviteNoRegisto,
+  verificarProvaDoConvite,
+} from "./prova-do-convite.js"
+import { ClientFrame } from "./wire.js"
 
 /**
  * The proof of an invite code (1.0 "Arca", slice 2). What is pinned: the key
@@ -43,5 +50,32 @@ describe("a prova do código do convite", () => {
     expect(verificarProvaDoConvite(codeKey, provarCodigoDoConvite(CODE_HASH, PEDIDO), PEDIDO)).toBe(false)
     expect(verificarProvaDoConvite(codeKey, codeKey, PEDIDO)).toBe(false)
     expect(verificarProvaDoConvite(codeKey, "lixo", PEDIDO)).toBe(false)
+  })
+})
+
+describe("a prova do convite no registo (1.3.26)", () => {
+  const REGISTO = { codeHash: CODE_HASH, address: "@nova:orwell.pt" }
+  const codeKey = toBase64(chaveDaProvaDoConvite(CODIGO).publica)
+
+  it("vale para esta conta e este convite, e para nenhum outro", () => {
+    const prova = provarConviteNoRegisto(CODIGO, REGISTO)
+    expect(verificarConviteNoRegisto(codeKey, prova, REGISTO)).toBe(true)
+    expect(verificarConviteNoRegisto(codeKey, prova, { ...REGISTO, address: "@outra:orwell.pt" })).toBe(false)
+    expect(verificarConviteNoRegisto(codeKey, prova, { ...REGISTO, codeHash: "outro" })).toBe(false)
+    expect(verificarConviteNoRegisto(codeKey, "lixo", REGISTO)).toBe(false)
+  })
+
+  it("não troca com a prova do resgate: domínios diferentes", () => {
+    const pedido = { ...PEDIDO, address: REGISTO.address }
+    expect(verificarConviteNoRegisto(codeKey, provarCodigoDoConvite(CODIGO, pedido), REGISTO)).toBe(false)
+    expect(verificarProvaDoConvite(codeKey, provarConviteNoRegisto(CODIGO, REGISTO), pedido)).toBe(false)
+  })
+
+  it("viaja no auth.finish, e só com hash e prova", () => {
+    const prova = provarConviteNoRegisto(CODIGO, REGISTO)
+    const base = { t: "auth.finish", signature: "AAAA" }
+    expect(ClientFrame.safeParse({ ...base, conviteDeComunidade: { codeHash: CODE_HASH, prova } }).success).toBe(true)
+    expect(ClientFrame.safeParse({ ...base, conviteDeComunidade: { codeHash: CODE_HASH } }).success).toBe(false)
+    expect(ClientFrame.safeParse({ ...base, conviteDeComunidade: { codeHash: "x".repeat(65), prova } }).success).toBe(false)
   })
 })

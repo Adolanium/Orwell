@@ -40,6 +40,8 @@ import { moradaDeSala } from "@enclave/protocol"
 import { chromium } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { irParaEmparelhar } from "./fase7-comum.mjs"
+import { appAberta, irPara, irParaDirectas } from "./separadores.mjs"
+import { colarCodigo, confirmarEAbrir } from "./juntar-aparelho.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const DIST = join(RAIZ, "apps/web/dist")
@@ -189,7 +191,8 @@ function escutar(context, saco) {
 }
 
 const CONTEXTO = { locale: "pt-PT" }
-const dentro = (page) => page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+// The app is open: the rail on a computer, the tabs on a phone (no rail there).
+const dentro = (page) => appAberta(page)
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const SEM_NOME = "Sem nome"
 
@@ -319,7 +322,8 @@ function enderecoDaPrimeiraConta() {
 }
 
 async function separador(page, nome) {
-  await page.getByRole("button", { name: "Amigos", exact: true }).first().click()
+  // On a phone, Friends is its own tab (option B); on a computer, the rail.
+  await irPara(page, "amigos")
   await page.locator(".people-destination").waitFor({ timeout: 15_000 })
   await page.locator(".people-tabs").getByRole("button", { name: nome }).click()
 }
@@ -418,8 +422,8 @@ try {
   // 2. Add device, and the six-word phrase on both screens.
   // ---------------------------------------------------------------------------
   await pc.getByRole("button", { name: "Configurações", exact: true }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await pc.getByRole("button", { name: "Acrescentar aparelho" }).click()
+  await pc.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await pc.getByRole("button", { name: "Juntar um aparelho" }).click()
   const folha = pc.locator(".sheet").first()
   await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
@@ -440,38 +444,30 @@ try {
   const tel = await ctxTel.newPage()
   await tel.goto(APP, { waitUntil: "domcontentloaded" })
   await irParaEmparelhar(tel)
-  await tel.getByRole("heading", { name: "Emparelhar este aparelho" }).waitFor({ timeout: 10_000 })
-  await tel.getByLabel("Ou cola o link").fill(link)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 10_000 })
-  const frases = tel.locator('.gate-card input[type="password"]')
-  await frases.nth(0).fill(FRASE)
-  await frases.nth(1).fill(FRASE)
-  await tel.getByRole("button", { name: "Continuar" }).click()
-  await tel.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  check(
-    "o ecrã das seis palavras do telemóvel diz que ele recebe as conversas antigas",
-    (await tel.locator(".gate-card").innerText()).includes("este aparelho recebe as conversas antigas"),
-  )
-  check(
-    "e o do computador diz que o aparelho novo as recebe",
-    (await folha.innerText()).includes("o aparelho novo recebe as conversas antigas"),
-  )
+  await tel.getByLabel("Ou cola o código").waitFor({ timeout: 10_000 })
+  /*
+    Since the new way in (1.3.26) the six-words screen says nothing about the
+    history: the device with the account says it once the new device is in
+    (`doneHostBody`). The screen is still checked for what it must not have:
+    a box or a question about the history.
+  */
+  await colarCodigo(tel, folha, link)
   check("sem caixa nem pergunta sobre o histórico", (await tel.locator('.gate-card input[type="checkbox"]').count()) === 0)
   await tel.screenshot({ path: join(RAIZ, "capturas/historico-seis-palavras-telemovel.png") })
-  await tel.getByRole("button", { name: "São as mesmas" }).click()
-  await folha.getByRole("button", { name: "São as mesmas" }).click()
-  await tel.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 90_000 })
+  await confirmarEAbrir(tel, folha, FRASE)
+  check(
+    "o computador diz que as conversas antigas passam para o aparelho novo",
+    (await folha.innerText()).includes("As conversas antigas passam daqui para ele"),
+  )
   await folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
-  await tel.getByRole("button", { name: "Entrar", exact: true }).click()
   await dentro(tel)
 
   // ---------------------------------------------------------------------------
   // 3. The banner, the drop midway, and the end.
   // ---------------------------------------------------------------------------
   // The banner sits above the chat: open any chat.
-  await tel.getByRole("button", { name: "Comunidades", exact: true }).first().click().catch(() => {})
+  // On a phone: the Communities tab, then the chosen community's line pushes its conversation.
+  await irPara(tel, "comunidades").catch(() => {})
   await tel.locator(".channel-list .channel-name").first().click().catch(() => {})
   const BARRA = LARGO ? ".topbar .barra-historico-no-topo" : ".barra-historico"
   const barraVista = await ate(async () => (await tel.locator(BARRA).count()) > 0, 90_000, 200)
@@ -525,8 +521,8 @@ try {
   )
 
   // In the interface: the chat with Bruno shows the first message, no reload.
-  await tel.getByRole("button", { name: "Amigos", exact: true }).first().click()
-  // At 390 px the chat list is in a closed drawer: the click goes through the DOM.
+  // On a phone the chat list is the Messages tab; the click still goes through the DOM.
+  await irParaDirectas(tel)
   await tel.locator(".direct-open").first().waitFor({ state: "attached", timeout: 30_000 })
   await tel.evaluate(() => document.querySelector(".direct-open")?.click())
   const naConversa = await ate(async () => (await tel.evaluate(() => document.body.textContent ?? "")).includes("mensagem 1 do Bruno"), 30_000)

@@ -26,6 +26,7 @@ import { Session, Vault } from "@enclave/client-core"
 import { chromium } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { levantarServidor } from "./frente-lenta.mjs"
+import { abrirComunidade, abrirNoTu, appAberta } from "./separadores.mjs"
 
 const RAIZ = fileURLToPath(new URL("..", import.meta.url))
 const CAPTURAS = join(RAIZ, "capturas")
@@ -96,10 +97,9 @@ try {
     await page.goto(casa.app, { waitUntil: "domcontentloaded" })
 
     // ---- signup
-    const campo = page.getByPlaceholder("Como queres aparecer")
-    const naoCriar = page.getByRole("button", { name: "Não, criar conta" })
-    await campo.or(naoCriar).first().waitFor({ timeout: 60_000 })
-    if (await naoCriar.count()) await naoCriar.click()
+    // 21/11/2026: "Bem-vindo ao Orwell", then "Criar conta" with the "Nome" field.
+    const campo = page.locator('.gate input[autocomplete="nickname"]')
+    await page.getByRole("button", { name: "Criar conta", exact: true }).click({ timeout: 60_000 })
     await campo.fill(ANTIGO)
     check(`${largura}: registo, colar 30 corta para 12`, (await campo.inputValue()) === "Maria Eduard", await campo.inputValue())
     check(`${largura}: registo, a frase "${AVISO}"`, await page.getByText(AVISO).isVisible())
@@ -113,10 +113,10 @@ try {
     await page.screenshot({ path: join(CAPTURAS, `nome-12-registo-emojis-${largura}.png`) })
     await campo.fill("")
     await criarConta(page, { nome: `Ana ${largura}`, frase: FRASE, servidor: casa.nome })
-    await page.getByRole("button", { name: "Configurações" }).first().waitFor({ timeout: 90_000 })
+    await appAberta(page)
 
-    // ---- Settings, edit profile
-    await page.getByRole("button", { name: "Configurações", exact: true }).first().click()
+    // ---- Settings, edit profile (on a phone, from the "Tu" tab)
+    await abrirNoTu(page, "Configurações")
     await page.getByRole("button", { name: "Conta", exact: true }).first().click()
     await page.getByRole("button", { name: "Editar perfil" }).first().click()
     const folha = page.locator(".sheet").first()
@@ -133,14 +133,8 @@ try {
 
     // ---- the old name, read
     // The common room, as `abrirCanal` in `fase7-comum.mjs` opens a channel.
-    await page.getByRole("button", { name: "Comunidades", exact: true }).first().click()
-    const gaveta = page.getByRole("button", { name: "Abrir o painel lateral" })
-    const linhaDaSala = page.locator(".channel-name", { hasText: "Orwell" }).first()
-    if (!(await linhaDaSala.isVisible().catch(() => false)) && (await gaveta.getAttribute("aria-expanded").catch(() => null)) !== "true") {
-      await gaveta.click().catch(() => {})
-    }
-    await linhaDaSala.click({ timeout: 90_000 })
-    if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click().catch(() => {})
+    // On a phone: the Communities tab, the face on the rail, the line (no drawer since option B).
+    await abrirComunidade(page, "Orwell", { timeout: 90_000 })
     const caixa = page.locator('textarea[placeholder="Escreve uma mensagem"]').first()
     await caixa.waitFor({ timeout: 60_000 })
     // Bruno is the room's first member, and admits whoever arrives; then says something.

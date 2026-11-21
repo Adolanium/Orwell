@@ -29,6 +29,10 @@ interface No {
   lugar: number
   /** The signals this node put on the wire, in order. */
   sinais: string[]
+  /** Each time the session was asked to publish its own profile whole (`republicarPerfil`). */
+  republicados: number
+  /** The accounts this node was asked to relay profiles of (`perfisParaRelatar`), per call. */
+  relatosPedidos: string[][]
 }
 
 class Rede {
@@ -44,6 +48,16 @@ class Rede {
   relogio: number | null = null
   /** Whether profiles go to third parties here (the common room). */
   perfisATerceiros = false
+  /** Whether a request may ask for portraits here (`r`): not in the common room. */
+  retratosAPedido = true
+  /** Accounts whose leaves do not declare `EXTENSAO_PERFIS_A_PEDIDO` (1.3.25). */
+  semPedido = new Set<string>()
+  /** The signed profiles each node can relay, by name (`perfisParaRelatar`). */
+  paraRelatar = new Map<string, { s: number; a: string; p: Record<string, unknown> }[]>()
+  /** Each node's own profile version (`versaoDoMeuPerfil`), by name. */
+  versoes = new Map<string, number>()
+  /** Accounts left out of `membros` (they left the channel, or were never in it). */
+  foraDosMembros = new Set<string>()
 
   criar(nome: string, indice: number): No {
     const privada = new Uint8Array(32).fill(indice + 1)
@@ -61,7 +75,7 @@ class Rede {
       podeSinalizar: () => true,
       elegivel: () => true,
       ehDirecta: () => false,
-      membros: () => rede.nos.map((n) => n.eu.address),
+      membros: () => rede.nos.map((n) => n.eu.address).filter((address) => !rede.foraDosMembros.has(address)),
       folhas: () => [...rede.nos.map((n) => n.folha), ...rede.fantasmas],
       epocaAtual: () => 1n,
       derivarChave: async () => CHAVE,
@@ -87,8 +101,18 @@ class Rede {
       online: () => true,
       agora: () => rede.relogio ?? Date.now(),
       perfisATerceiros: () => rede.perfisATerceiros,
+      retratosAPedido: () => rede.retratosAPedido,
+      versaoDoMeuPerfil: () => rede.versoes.get(nome) ?? 0,
+      folhaPedeOsPerfis: (_canal, outra) => !rede.semPedido.has(outra.address),
+      perfisParaRelatar: (_canal, contas) => {
+        no.relatosPedidos.push([...contas])
+        return (rede.paraRelatar.get(nome) ?? []).filter((item) => contas.includes(item.a))
+      },
+      republicarPerfil: () => {
+        no.republicados += 1
+      },
     }
-    const no: No = { nome, eu, folha, contents, anti: new AntiEntropia(porta), lugar: -1, sinais: [] }
+    const no: No = { nome, eu, folha, contents, anti: new AntiEntropia(porta), lugar: -1, sinais: [], republicados: 0, relatosPedidos: [] }
     this.nos.push(no)
     return no
   }
@@ -548,5 +572,220 @@ describe("quanto tempo uma conta pedida espera por outro pedido (revisão do 1.3
     expect(ana.anti.contasPorPedir(CANAL, [bruno.eu.address, semResposta])).toEqual([semResposta])
     rede.relogio += 24 * 3_600_000
     expect(ana.anti.contasPorPedir(CANAL, [bruno.eu.address, semResposta]).sort()).toEqual([bruno.eu.address, semResposta].sort())
+  })
+})
+
+describe("the portrait asked for in a profile request (1.3.26)", () => {
+  it("its owner publishes it at once, and no relayer is asked for it", async () => {
+    const rede = new Rede()
+    rede.perfisATerceiros = true
+    const ana = rede.criar("ana", 0)
+    const bruno = rede.criar("bruno", 1)
+    const carla = rede.criar("carla", 2)
+    expect(await ana.anti.pedirPerfis(CANAL, [bruno.eu.address, carla.eu.address], [carla.eu.address])).toBe(true)
+    const pedido = corpoDe(ana.sinais.at(-1)!)
+    expect(pedido["c"]).toEqual([bruno.eu.address, carla.eu.address].sort())
+    expect(pedido["r"]).toEqual([carla.eu.address])
+    await ateSilencio(rede, 400)
+    // Carla does not wait for the relay turns: no relay carries a portrait.
+    expect(carla.republicados).toBe(1)
+    // Relayers are asked for Bruno only, never for Carla's portrait.
+    const pedidos = rede.nos.flatMap((no) => no.relatosPedidos)
+    expect(pedidos.length).toBeGreaterThan(0)
+    for (const contas of pedidos) expect(contas).not.toContain(carla.eu.address)
+  })
+
+  it("in the common room the receiver ignores `r`: a hundred accounts asked make no owner publish before the relay turns", async () => {
+    const rede = new Rede()
+    rede.perfisATerceiros = true
+    rede.retratosAPedido = false
+    const ana = rede.criar("ana", 0)
+    const bruno = rede.criar("bruno", 1)
+    const carla = rede.criar("carla", 2)
+    // A modified client: `r` equal to `c`, a hundred accounts, the most a request carries.
+    const contas = [bruno.eu.address, carla.eu.address, ...Array.from({ length: 98 }, (_, i) => `@outra${i}:orwell.test`)]
+    const sinal = sinalDe(ana, { k: "pp", id: "pedido-hostil-0001", c: contas, r: contas })
+    await Promise.all([bruno, carla].map((no) => no.anti.aoSinal({ channel: CANAL, from: ana.eu.address, sinal })))
+    await ateSilencio(rede, 400)
+    expect(bruno.republicados + carla.republicados).toBe(0)
+    // And relayers are still asked for every account, as for a plain request.
+    expect(rede.nos.flatMap((no) => no.relatosPedidos).some((pedidas) => pedidas.includes(carla.eu.address))).toBe(true)
+  })
+
+  it("a relay of an OLDER version of the owner's profile does not keep the owner quiet", async () => {
+    const rede = new Rede()
+    rede.perfisATerceiros = true
+    const ana = rede.criar("ana", 0)
+    const bruno = rede.criar("bruno", 1)
+    const carla = rede.criar("carla", 2)
+    rede.versoes.set("carla", 10)
+    for (const no of rede.nos) for (const outro of rede.nos) no.anti.notarVivo(outro.folha.aparelho)
+    // Bruno would relay nothing; Carla is named and waits for the relay turns.
+    expect(await ana.anti.pedirPerfis(CANAL, [carla.eu.address])).toBe(true)
+    const id = String(corpoDe(ana.sinais.at(-1)!)["id"])
+    // Bruno relays an old version of Carla's profile (5 < 10), whole, signed by her.
+    const antigo = comAutoria(CANAL, { t: "profile", displayName: "Carla", donations: [], updatedAt: 5 } as never, carla.eu) as unknown as Record<string, unknown>
+    await carla.anti.aoRelatos(CANAL, 200, { v: 1, q: `pf.${id}:1/1`, itens: [{ s: -1, a: carla.eu.address, p: antigo }] }, bruno.folha.aparelho)
+    await new Promise((resolve) => setTimeout(resolve, 2_200))
+    expect(carla.republicados).toBe(1)
+  })
+
+  it("a relay of the owner's current version keeps the owner quiet, as before", async () => {
+    const rede = new Rede()
+    rede.perfisATerceiros = true
+    const ana = rede.criar("ana", 0)
+    const bruno = rede.criar("bruno", 1)
+    const carla = rede.criar("carla", 2)
+    rede.versoes.set("carla", 10)
+    for (const no of rede.nos) for (const outro of rede.nos) no.anti.notarVivo(outro.folha.aparelho)
+    expect(await ana.anti.pedirPerfis(CANAL, [carla.eu.address])).toBe(true)
+    const id = String(corpoDe(ana.sinais.at(-1)!)["id"])
+    const atual = comAutoria(CANAL, { t: "profile", displayName: "Carla", donations: [], updatedAt: 10 } as never, carla.eu) as unknown as Record<string, unknown>
+    await carla.anti.aoRelatos(CANAL, 200, { v: 1, q: `pf.${id}:1/1`, itens: [{ s: -1, a: carla.eu.address, p: atual }] }, bruno.folha.aparelho)
+    await new Promise((resolve) => setTimeout(resolve, 2_200))
+    expect(carla.republicados).toBe(0)
+  })
+
+  it("a forged relay with a very high updatedAt does not keep the owner quiet (N-S3)", async () => {
+    const rede = new Rede()
+    rede.perfisATerceiros = true
+    const ana = rede.criar("ana", 0)
+    const bruno = rede.criar("bruno", 1)
+    const carla = rede.criar("carla", 2)
+    rede.versoes.set("carla", 10)
+    for (const no of rede.nos) for (const outro of rede.nos) no.anti.notarVivo(outro.folha.aparelho)
+    expect(await ana.anti.pedirPerfis(CANAL, [carla.eu.address])).toBe(true)
+    const id = String(corpoDe(ana.sinais.at(-1)!)["id"])
+    // Bruno sends Carla's profile unsigned, with a version far ahead of hers.
+    const forjado = { t: "profile", displayName: "Carla", donations: [], updatedAt: 9e15 }
+    await carla.anti.aoRelatos(CANAL, 200, { v: 1, q: `pf.${id}:1/1`, itens: [{ s: -1, a: carla.eu.address, p: forjado }] }, bruno.folha.aparelho)
+    await new Promise((resolve) => setTimeout(resolve, 2_200))
+    expect(carla.republicados).toBe(1)
+  })
+
+  it("a relay with a copied q and nothing authentic does not stand the honest relayer down (N-S1)", async () => {
+    const rede = new Rede()
+    rede.perfisATerceiros = true
+    const ana = rede.criar("ana", 0)
+    const dora = rede.criar("dora", 1)
+    const bruno = rede.criar("bruno", 2)
+    const carla = rede.criar("carla", 3)
+    for (const no of rede.nos) for (const outro of rede.nos) no.anti.notarVivo(outro.folha.aparelho)
+    // Bruno holds Carla's profile signed by her; Dora, before him in the turns, holds nothing.
+    const daCarla = comAutoria(CANAL, { t: "profile", displayName: "Carla", donations: [], updatedAt: 10 } as never, carla.eu) as unknown as Record<string, unknown>
+    rede.paraRelatar.set("bruno", [{ s: -1, a: carla.eu.address, p: daCarla }])
+    expect(await ana.anti.pedirPerfis(CANAL, [carla.eu.address])).toBe(true)
+    const id = String(corpoDe(ana.sinais.at(-1)!)["id"])
+    // Dora answers first with the request's q: an empty frame, and one with an old unsigned item.
+    await bruno.anti.aoRelatos(CANAL, 200, { v: 1, q: `pf.${id}:1/1`, itens: [] }, dora.folha.aparelho)
+    const velho = { t: "profile", displayName: "Carla", donations: [], updatedAt: 0 }
+    await bruno.anti.aoRelatos(CANAL, 201, { v: 1, q: `pf.${id}:1/1`, itens: [{ s: -1, a: carla.eu.address, p: velho }] }, dora.folha.aparelho)
+    await ateSilencio(rede, 600)
+    expect(bruno.anti.estatisticas.respostasDePerfis).toBe(1)
+  })
+
+  it("a live 1.3.25 leaf does not count as someone who can answer pp (N-S2)", () => {
+    const rede = new Rede()
+    const ana = rede.criar("ana", 0)
+    const velho = rede.criar("velho", 1)
+    ana.anti.notarVivo(velho.folha.aparelho)
+    expect(ana.anti.haQuemResponda(CANAL)).toBe(true)
+    rede.semPedido.add(velho.eu.address)
+    expect(ana.anti.haQuemResponda(CANAL)).toBe(false)
+  })
+
+  it("in the common room, with `r` ignored, an owner a relayer carried stays quiet after the relay turns (B1)", async () => {
+    const rede = new Rede()
+    rede.perfisATerceiros = true
+    rede.retratosAPedido = false
+    const ana = rede.criar("ana", 0)
+    const bruno = rede.criar("bruno", 1)
+    const carla = rede.criar("carla", 2)
+    rede.versoes.set("carla", 10)
+    for (const no of rede.nos) for (const outro of rede.nos) no.anti.notarVivo(outro.folha.aparelho)
+    const daCarla = comAutoria(CANAL, { t: "profile", displayName: "Carla", donations: [], updatedAt: 10 } as never, carla.eu) as unknown as Record<string, unknown>
+    rede.paraRelatar.set("bruno", [{ s: -1, a: carla.eu.address, p: daCarla }])
+    const sinal = sinalDe(ana, { k: "pp", id: "pedido-hostil-0002", c: [carla.eu.address], r: [carla.eu.address] })
+    await Promise.all([bruno, carla].map((no) => no.anti.aoSinal({ channel: CANAL, from: ana.eu.address, sinal })))
+    // Past the relay turns and the owner's own wait.
+    await new Promise((resolve) => setTimeout(resolve, 2_200))
+    expect(bruno.anti.estatisticas.respostasDePerfis).toBe(1)
+    expect(carla.republicados).toBe(0)
+  })
+
+  it("a frame with a copied q and only the sender's own signed profile does not silence the relay of the others (N3-S1)", async () => {
+    const rede = new Rede()
+    rede.perfisATerceiros = true
+    const ana = rede.criar("ana", 0)
+    const dora = rede.criar("dora", 1)
+    const bruno = rede.criar("bruno", 2)
+    const carla = rede.criar("carla", 3)
+    for (const no of rede.nos) for (const outro of rede.nos) no.anti.notarVivo(outro.folha.aparelho)
+    const daCarla = comAutoria(CANAL, { t: "profile", displayName: "Carla", donations: [], updatedAt: 10 } as never, carla.eu) as unknown as Record<string, unknown>
+    rede.paraRelatar.set("bruno", [{ s: -1, a: carla.eu.address, p: daCarla }])
+    expect(await ana.anti.pedirPerfis(CANAL, [carla.eu.address, dora.eu.address])).toBe(true)
+    const id = String(corpoDe(ana.sinais.at(-1)!)["id"])
+    // Dora answers first, with only her own profile, signed by her: authentic, but not Carla.
+    const daDora = comAutoria(CANAL, { t: "profile", displayName: "Dora", donations: [], updatedAt: 3 } as never, dora.eu) as unknown as Record<string, unknown>
+    await bruno.anti.aoRelatos(CANAL, 200, { v: 1, q: `pf.${id}:1/1`, itens: [{ s: -1, a: dora.eu.address, p: daDora }] }, dora.folha.aparelho)
+    await ateSilencio(rede, 600)
+    expect(bruno.anti.estatisticas.respostasDePerfis).toBe(1)
+    expect(bruno.anti.estatisticas.perfisRelatados).toBe(1)
+  })
+
+  it("a request without `r` reads as before: no portrait is asked for", async () => {
+    const rede = new Rede()
+    rede.perfisATerceiros = true
+    const ana = rede.criar("ana", 0)
+    const bruno = rede.criar("bruno", 1)
+    expect(await ana.anti.pedirPerfis(CANAL, [bruno.eu.address])).toBe(true)
+    expect(corpoDe(ana.sinais.at(-1)!)["r"]).toBeUndefined()
+  })
+})
+
+describe("o passado servido pelos membros (D2)", () => {
+  const doPassado = (autor: No, seq: number, corpo: string): Record<string, unknown> => ({
+    s: seq,
+    a: autor.eu.address,
+    p: comAutoria(CANAL, { t: "message", id: `msg-${seq}-0000000`, sentAt: seq, body: corpo } as never, autor.eu) as unknown as Record<string, unknown>,
+  })
+
+  it("LOW-01: um autor que nunca foi do canal é recusado; um ex-membro conhecido passa", async () => {
+    const rede = new Rede()
+    rede.criar("ana", 0)
+    const eva = rede.criar("eva", 1)
+    const carla = rede.criar("carla", 2)
+    rede.foraDosMembros.add(eva.eu.address)
+    const primeira = await carla.anti.aplicarDoPassado(CANAL, [doPassado(eva, 5, "de fora")], 100)
+    expect(primeira.aplicados).toBe(0)
+    expect(primeira.recusados["autor"]).toBe(1)
+    // Eva is in Carla's vault (she wrote here before leaving): a known ex-member.
+    dizer(eva, carla, 200, "antiga")
+    const segunda = await carla.anti.aplicarDoPassado(CANAL, [doPassado(eva, 5, "de fora")], 100)
+    expect(segunda.aplicados).toBe(1)
+  })
+
+  it("LOW-04: no máximo 8 autores fora da árvore por página", async () => {
+    const rede = new Rede()
+    const carla = rede.criar("carla", 0)
+    const antigos = Array.from({ length: 9 }, (_, i) => rede.criar(`antigo${i}`, i + 1))
+    for (const [i, antigo] of antigos.entries()) {
+      rede.foraDosMembros.add(antigo.eu.address)
+      dizer(antigo, carla, 300 + i, "antiga")
+    }
+    const pagina = antigos.map((antigo, i) => doPassado(antigo, 10 + i, `passado ${i}`))
+    const r = await carla.anti.aplicarDoPassado(CANAL, pagina, 100)
+    expect(r.aplicados).toBe(8)
+    expect(r.recusados["autores"]).toBe(1)
+  })
+
+  it("a partir do lugar é do servidor; uma reacção ou um tipo sem janela não passam", async () => {
+    const rede = new Rede()
+    const ana = rede.criar("ana", 0)
+    const carla = rede.criar("carla", 1)
+    const r = await carla.anti.aplicarDoPassado(CANAL, [doPassado(ana, 150, "depois")], 100)
+    expect(r.recusados["servidor-serve"]).toBe(1)
+    const post = { s: 5, a: ana.eu.address, p: comAutoria(CANAL, { t: "post", id: "post-5-00000", postedAt: 5, caption: "x" } as never, ana.eu) }
+    expect((await carla.anti.aplicarDoPassado(CANAL, [post], 100)).recusados["tipo"]).toBe(1)
   })
 })

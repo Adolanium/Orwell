@@ -38,10 +38,12 @@ import {
 } from "../../lib/mentions.js"
 import { comResposta, type RespostaNaCaixa } from "../../lib/respostas.js"
 import { NomeDePessoa } from "../../components/NomeDePessoa.js"
-import { strings, traduzirErro } from "../../strings.js"
+import { strings, translateError, traduzirErro } from "../../strings.js"
 import { ContextMenu } from "../overlays/ContextMenu.js"
 import { BuzzButton } from "./BuzzButton.js"
 import { LinkAttach } from "./LinkAttach.js"
+import { VideoPreviews, withinMs } from "./videoPreviews.js"
+import { youtubeIdOf } from "@enclave/protocol"
 import { MentionPicker } from "./MentionPicker.js"
 import { etiquetaEmCurso, sugerirEtiquetas } from "../../lib/etiquetas.js"
 
@@ -66,6 +68,20 @@ import { etiquetaEmCurso, sugerirEtiquetas } from "../../lib/etiquetas.js"
  * people writing "ok" are not staring at a character count.
  */
 export const MENSAGEM_MAX_CARACTERES = 2000
+
+/**
+ * How long Enter holds a YouTube message whose preview is still on its way.
+ *
+ * People paste a video and press Enter at once, and the preview comes about a
+ * second later. A card sent without its thumbnail stays without it forever:
+ * nothing fills a message after it leaves (21/11/2026, "many YouTube
+ * thumbnails are still blank"). A host that does not answer in this time
+ * costs the thumbnail, never the message: it then leaves with the playable card.
+ */
+export const VIDEO_PREVIEW_WAIT_MS = 5000
+
+/** The key of a held message whose send failed (1.3.26 review, note 9). Error 370. */
+export const ERRO_ENVIO_RETIDO = "the message could not be sent"
 const CONTADOR_A_PARTIR_DE = 1800
 
 const IMAGENS_MAX = 4
@@ -174,6 +190,8 @@ export function Composer({
   onAlternarMencao,
   onCancelarResposta,
   faixa,
+  rodape,
+  avisoDeContaNova,
 }: {
   connection: ConnectionState
   value: string
@@ -191,6 +209,19 @@ export function Composer({
    * height is part of the composer's, reserved.
    */
   faixa?: React.ReactNode
+  /**
+   * A line drawn at the bottom of the form, under the box: "Catching up on this
+   * conversation…" (`AvisoAPorEmDia`, 1.3.26). Inside the form for the same
+   * reasons as `faixa`, and so on the phone it stays above the keyboard.
+   */
+  rodape?: React.ReactNode
+  /**
+   * The account is in its first 24 hours and this is the common room (1.3.26):
+   * the sentence that says so, above the box, and no images, files or link
+   * cards from here. The server refuses large messages there anyway; this says
+   * why before anything is chosen. Absent: as always.
+   */
+  avisoDeContaNova?: string | undefined
   /**
    * Who can be mentioned here, with their name already resolved.
    *
@@ -299,6 +330,35 @@ export function Composer({
   const [files, setFiles] = useState<OutgoingFile[]>([])
   const [aLer, setALer] = useState(false)
   const [card, setCard] = useState<LinkCard | null>(null)
+  /** The video previews of this box, shared by the card and by Enter: one request per video. */
+  const videoPreviews = useRef<VideoPreviews | null>(null)
+  videoPreviews.current ??= new VideoPreviews((alvo) => bridge.social.linkPreview(alvo))
+  /**
+   * The messages that wait for a video preview, in order. A message written
+   * after one of them goes behind it, never in front: the order on screen is
+   * the order of Enter.
+   */
+  const filaDeEnvio = useRef<{ fim: Promise<void>; aEsperar: number }>({ fim: Promise.resolve(), aEsperar: 0 })
+  /**
+   * The held messages not sent yet, in Enter order (1.3.26 review, note 9). On
+   * `pagehide` each leaves at once with the card it has: a reload, a closed
+   * tab or the iOS back-forward cache in those seconds used to lose it.
+   */
+  const retidas = useRef<{ feito: boolean; sairJa: () => void }[]>([])
+  useEffect(() => {
+    const largarRetidas = (): void => {
+      for (const retida of retidas.current.splice(0)) {
+        if (retida.feito) continue
+        retida.feito = true
+        retida.sairJa()
+      }
+    }
+    window.addEventListener("pagehide", largarRetidas)
+    return () => window.removeEventListener("pagehide", largarRetidas)
+  }, [])
+  /** The box's text now, for a held message that fails: it comes back only into an empty box. */
+  const valorActual = useRef(value)
+  valorActual.current = value
   /** An address whose preview the person dismissed. The link still goes through. */
   const [dispensado, setDispensado] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
@@ -543,6 +603,11 @@ export function Composer({
    */
   const escolherImagens = (escolhidasTodas: File[]): void => {
     if (escolhidasTodas.length === 0) return
+    // A first-day account in the common room (1.3.26): pasted or dropped images stop here too.
+    if (avisoDeContaNova !== undefined) {
+      setAviso(avisoDeContaNova)
+      return
+    }
     const espaço = IMAGENS_MAX - images.length
     if (espaço <= 0) {
       setAviso(strings.chat.imagesFull(IMAGENS_MAX))
@@ -642,6 +707,10 @@ export function Composer({
    * on an empty message budget and together bust the frame.
    */
   const escolherFicheiros = async (escolhidos: File[]): Promise<void> => {
+    if (avisoDeContaNova !== undefined) {
+      setAviso(avisoDeContaNova)
+      return
+    }
     const espaço = FICHEIROS_MAX - files.length
     if (espaço <= 0) {
       setAviso(strings.chat.filesFull(FICHEIROS_MAX))
@@ -829,13 +898,21 @@ export function Composer({
           // typing, and what goes out to the group is the address, the only one
           // that does not age and the only one the notification can route.
           const { corpo, mentions } = aplicarMencoesComTodos(body, picks, podeMencionarTodos)
+          // The card of the address in the text. A YouTube video does not depend
+          // on the card in the box having been born yet: paste and Enter can land
+          // before it (it is set from an effect, a render after the text), and the
+          // video then left as plain text. Any other site still waits for the tap.
+          const cartaoActual = card && card.url === endereco ? card : null
+          const mostraCartao = endereco !== null && endereco !== dispensado && avisoDeContaNova === undefined
+          const cartaoDoEnvio: LinkCard | null =
+            cartaoActual ?? (mostraCartao && youtubeIdOf(endereco) ? { url: endereco, kind: "video" } : null)
           // The reply goes in here: the `replyTo` and, with "@ Mention" on, the
           // author of the original in the mentions. See `lib/respostas.ts`.
           const extras: MessageExtras = comResposta(
             {
               ...(images.length > 0 ? { images } : {}),
               ...(files.length > 0 ? { files } : {}),
-              ...(card ? { links: [card] } : {}),
+              ...(cartaoDoEnvio ? { links: [cartaoDoEnvio] } : {}),
               ...(mentions.length > 0 ? { mentions } : {}),
             },
             resposta,
@@ -843,13 +920,73 @@ export function Composer({
           )
           // Without attachments, it is called with one argument: the same
           // call as always, and nothing downstream has to learn a new form.
-          if (extras.images || extras.files || extras.links || extras.mentions || extras.replyTo) onSend(corpo, extras)
-          else onSend(corpo)
+          // `onSend` as it is now: a message held for its preview still goes
+          // to the channel and room of this Enter.
+          const enviar = onSend
+          // What the person typed, as typed: a held send that fails puts it back.
+          const escritoNaCaixa = value
+          const sair = (prontos: MessageExtras): void => {
+            if (prontos.images || prontos.files || prontos.links || prontos.mentions || prontos.replyTo) enviar(corpo, prontos)
+            else enviar(corpo)
+          }
+          /*
+            A held message leaves after the box emptied, so a failure there was
+            swallowed with the text gone (1.3.26 review, note 9). Now it is said
+            (Error 370), and the text comes back if the box is still empty.
+          */
+          const sairRetida = (prontos: MessageExtras): void => {
+            try {
+              sair(prontos)
+            } catch {
+              setAviso(translateError(ERRO_ENVIO_RETIDO))
+              if (valorActual.current === "") onChange(escritoNaCaixa)
+            }
+          }
+          // A YouTube card still without its thumbnail waits for the preview
+          // (see `VIDEO_PREVIEW_WAIT_MS`). The box empties now all the same.
+          const previa =
+            cartaoDoEnvio && cartaoDoEnvio.thumbnail === undefined ? videoPreviews.current?.of(cartaoDoEnvio.url) ?? null : null
+          const fila = filaDeEnvio.current
+          if (!previa && fila.aEsperar === 0) {
+            sair(extras)
+          } else {
+            const cartao = cartaoDoEnvio
+            const retida = { feito: false, sairJa: () => sairRetida(extras) }
+            retidas.current.push(retida)
+            fila.aEsperar++
+            fila.fim = fila.fim
+              .then(async () => {
+                if (retida.feito) return
+                const campos = previa ? await withinMs(previa, VIDEO_PREVIEW_WAIT_MS) : null
+                // Sent already on `pagehide` while it waited.
+                if (retida.feito) return
+                retida.feito = true
+                // What the card already had wins: only what is missing is filled.
+                const completo = cartao && campos ? { ...soDefinidos(campos), ...soDefinidos(cartao) } : cartao
+                sairRetida(completo ? { ...extras, links: [completo as LinkCard] } : extras)
+              })
+              .catch(() => {
+                // Only the preview's wait can land here (`sairRetida` catches its own): send what there is.
+                if (!retida.feito) {
+                  retida.feito = true
+                  sairRetida(extras)
+                }
+              })
+              .finally(() => {
+                fila.aEsperar--
+                retidas.current = retidas.current.filter((cada) => cada !== retida)
+              })
+          }
           onChange("")
           limpar()
         }}
       >
         {faixa}
+        {avisoDeContaNova && (
+          <p className="field-note composer-conta-nova" role="status">
+            {avisoDeContaNova}
+          </p>
+        )}
         {/* The reply announcement, always built: a live region that starts
             with text is not read by all screen readers. Polished: it says who
             is being replied to and how to cancel, once. */}
@@ -982,10 +1119,11 @@ export function Composer({
                 <TextoDeErro texto={aviso} />
               </p>
             )}
-            {endereco && endereco !== dispensado && (
+            {endereco && endereco !== dispensado && avisoDeContaNova === undefined && (
               <LinkAttach
                 url={endereco}
                 card={card}
+                previews={videoPreviews.current}
                 onChange={setCard}
                 onDismiss={() => {
                   setCard(null)
@@ -1061,7 +1199,7 @@ export function Composer({
             accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
             multiple
             hidden
-            disabled={offline || ocupada}
+            disabled={offline || ocupada || avisoDeContaNova !== undefined}
             onChange={(event) => {
               escolherImagens([...(event.target.files ?? [])])
               event.target.value = ""
@@ -1084,7 +1222,7 @@ export function Composer({
             type="file"
             multiple
             hidden
-            disabled={offline || ocupada}
+            disabled={offline || ocupada || avisoDeContaNova !== undefined}
             onChange={(event) => {
               void escolherFicheiros([...(event.target.files ?? [])])
               event.target.value = ""
@@ -1213,6 +1351,7 @@ export function Composer({
             <span className="composer-enviar-texto">{strings.chat.send}</span>
           </Button>
         </div>
+        {rodape}
       </form>
 
       {/*
@@ -1243,4 +1382,9 @@ export function Composer({
       {picking && <EmojiPicker onPick={insert} onClose={() => setPicking(false)} />}
     </>
   )
+}
+
+/** The fields with a value: an `undefined` never covers a value from the other side. */
+function soDefinidos<T extends object>(objecto: T): Partial<T> {
+  return Object.fromEntries(Object.entries(objecto).filter(([, valor]) => valor !== undefined)) as Partial<T>
 }

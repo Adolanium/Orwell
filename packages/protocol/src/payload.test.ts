@@ -1415,3 +1415,11 @@ describe("revogação de aparelho no fio", () => {
     expect(lida).not.toHaveProperty("motivo")
   })
 })
+
+describe("profile bio: the write limit is 300, the read limit stays 1000", () => {
+  it("a 1000-character bio from an older client is still a valid profile", () => {
+    const antigo = { t: "profile", displayName: "Ana", donations: [], updatedAt: 1, bio: "x".repeat(1000) } as Payload
+    const recebido = decodePayload(encodePayload(antigo))
+    expect((recebido as { bio?: string }).bio).toHaveLength(1000)
+  })
+})

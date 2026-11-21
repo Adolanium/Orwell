@@ -159,7 +159,8 @@ describe("juntar contas, de ponta a ponta", () => {
         semIdentidade++
       }
     }, 1)
-    const { address } = await ana.session.juntarTrocar("frase-nova-da-dora").finally(() => clearInterval(sonda))
+    // Since 1.3.26 the swap takes the MAIN account's password (Dora's), checked against her record.
+    const { address } = await ana.session.juntarTrocar("frase-passe-de-teste").finally(() => clearInterval(sonda))
     expect(address).toBe(dora.address)
     expect(semIdentidade).toBe(0)
     await concluidoDora
@@ -194,8 +195,9 @@ describe("juntar contas, de ponta a ponta", () => {
 
     // Ana's key no longer opens it: the disk holds Dora, and since 1.3.16 with
     // DORA's account private key (pairing passes it; Ana's is gone with her account).
-    expect(await contaNoDisco(ana, "frase-passe-de-teste")).toBeNull()
-    const depois = await contaNoDisco(ana, "frase-nova-da-dora")
+    // Since 1.3.26 the disk is sealed with Dora's own key and salt (both harness accounts use the same password).
+    expect(ana.vault.palavraPasseDaConta()?.sal).toBe(dora.vault.palavraPasseDaConta()?.sal)
+    const depois = await contaNoDisco(ana, "frase-passe-de-teste")
     expect(depois?.privada).toBe(true)
     expect(ana.session.temChaveDeConta).toBe(true)
     expect(ana.vault.contents.signingPrivateKey).toBe(dora.vault.contents.signingPrivateKey)

@@ -7,6 +7,7 @@
  * want to prove, that both bridges take you there.
  */
 import { DatabaseSync } from "node:sqlite"
+import { abrirComunidade, abrirDirecta as abrirDirectaEmQualquerLargura, appAberta, irPara, temComunidade } from "./separadores.mjs"
 
 export const espera = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -35,7 +36,8 @@ export async function ate(condicao, ms = 60_000, passo = 300) {
   return -1
 }
 
-export const dentro = (page, timeout = 90_000) => page.getByRole("button", { name: "Configurações", exact: true }).first().waitFor({ timeout })
+/** The app is open: the rail on a computer, the bar of tabs on a phone (`separadores.mjs`). */
+export const dentro = (page, timeout = 90_000) => appAberta(page, timeout)
 
 /** The server accounts, in the order they were born. Read from the database, read-only. */
 export function contasDoServidor(base) {
@@ -71,7 +73,8 @@ export function moradasEstreadas(base) {
 /** The only address that debuted since `before`; fails if there's none or more than one. */
 export async function moradaNova(base, antes, ms = 15_000) {
   let novas = []
-  await ate(() => {
+  // Async: `ate` calls `.catch` on what the condition returns.
+  await ate(async () => {
     novas = [...moradasEstreadas(base)].filter((c) => !antes.has(c))
     return novas.length > 0
   }, ms)
@@ -80,7 +83,8 @@ export async function moradaNova(base, antes, ms = 15_000) {
 }
 
 export async function separador(page, nome) {
-  await page.getByRole("button", { name: "Amigos", exact: true }).first().click()
+  // On the phone, Friends is its own tab; on a computer, the rail button.
+  await irPara(page, "amigos")
   await page.locator(".people-destination").waitFor({ timeout: 15_000 })
   await page.locator(".people-tabs").getByRole("button", { name: nome }).click()
 }
@@ -127,17 +131,9 @@ export async function aceitarAmizade(page, ms = 90_000) {
   return ms1
 }
 
-/** Open the first direct message (or the one with `text`). */
+/** Open the first direct message (or the one with `text`). On the phone, from the Messages tab. */
 export async function abrirDirecta(page, texto) {
-  await page.getByRole("button", { name: "Amigos", exact: true }).first().click()
-  let linha = page.locator(".direct-row button.direct-open")
-  if (texto) linha = linha.filter({ hasText: texto })
-  const botao = linha.first()
-  if (!(await botao.isVisible().catch(() => false))) {
-    await page.getByRole("button", { name: "Abrir o painel lateral" }).click().catch(() => {})
-  }
-  await botao.click({ timeout: 60_000 })
-  await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 60_000 })
+  await abrirDirectaEmQualquerLargura(page, texto)
 }
 
 export async function dizer(page, frase) {
@@ -161,7 +157,8 @@ export async function ouviu(page, frase, timeout = 60_000) {
 }
 
 export async function criarCanal(page, nome) {
-  await page.getByRole("button", { name: "Comunidades", exact: true }).first().click().catch(() => {})
+  // On the phone the "+" lives on the Communities list, under any pushed conversation.
+  await irPara(page, "comunidades").catch(() => {})
   await page.getByRole("button", { name: "Criar canal" }).first().click()
   await page.locator("form.prompt input").first().fill(nome)
   await page.locator("form.prompt button.primary").first().click()
@@ -172,19 +169,13 @@ export async function criarCanal(page, nome) {
 }
 
 export async function abrirCanal(page, nome) {
-  await page.getByRole("button", { name: "Comunidades", exact: true }).first().click().catch(() => {})
-  const linha = page.locator(".channel-name", { hasText: nome }).first()
-  const gaveta = page.getByRole("button", { name: "Abrir o painel lateral" })
-  if (!(await linha.isVisible().catch(() => false))) {
-    if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) !== "true") await gaveta.click().catch(() => {})
-  }
-  await linha.click({ timeout: 60_000 })
-  if ((await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click().catch(() => {})
-  await page.locator('textarea[placeholder="Escreve uma mensagem"]').waitFor({ timeout: 30_000 })
+  // On the phone: the Communities tab, the face on the rail, then the community line pushes the conversation.
+  await abrirComunidade(page, nome)
 }
 
 export async function temCanal(page, nome, timeout = 90_000) {
-  return page.locator(`.channel-name[title="${nome}"]`).first().waitFor({ state: "attached", timeout }).then(() => true, () => false)
+  // The sidebar line, or on a phone the rail face (the sidebar lists only the chosen community there).
+  return temComunidade(page, nome, timeout)
 }
 
 /** Join the voice room "voz" in the open channel (`Session.SALAS_INICIAIS`). */
@@ -215,28 +206,50 @@ export function escutar(alvo, saco, rotulo) {
 }
 
 /**
- * The gate of an app without an account, ready. Since phase 8.1 Setup opens
- * with "Already using Orwell on another device?"; an unpaired host goes
- * straight to the name step. Wait for whichever comes first.
+ * The gate of an app without an account, ready (21/11/2026): "Bem-vindo ao
+ * Orwell" with the three ways in, or the "Criar conta" form already open.
  */
 export async function portaoPronto(page, timeout = 60_000) {
-  const nome = page.getByPlaceholder("Como queres aparecer")
-  const pergunta = page.getByRole("button", { name: "Não, criar conta" })
-  await nome.or(pergunta).first().waitFor({ timeout })
+  const entrada = page.getByRole("heading", { name: "Bem-vindo ao Orwell" })
+  const nome = page.locator('.gate input[autocomplete="nickname"]')
+  await entrada.or(nome).first().waitFor({ timeout })
 }
 
-/** From gate to the name step, where "Import account" lives. */
+/** From the gate to the "Criar conta" form. */
 export async function irParaONome(page, timeout = 60_000) {
   await portaoPronto(page, timeout)
-  const pergunta = page.getByRole("button", { name: "Não, criar conta" })
-  if (await pergunta.count()) await pergunta.click()
-  await page.getByPlaceholder("Como queres aparecer").waitFor({ timeout })
+  const entrada = page.getByRole("heading", { name: "Bem-vindo ao Orwell" })
+  if (await entrada.count()) await page.getByRole("button", { name: "Criar conta", exact: true }).click()
+  await page.locator('.gate input[autocomplete="nickname"]').waitFor({ timeout })
 }
 
-/** From gate to pairing: the "Yes..." button from the question, or the old "Pair" button. */
+/** From the gate to "Entrar com o ficheiro da conta". */
+export async function irParaOFicheiro(page, timeout = 60_000) {
+  await portaoPronto(page, timeout)
+  await page.getByRole("button", { name: "Entrar com o ficheiro da conta" }).click()
+  await page.locator('input[name="import-password"]').waitFor({ timeout })
+}
+
+/** From the gate to "Entrar com outro aparelho". */
 export async function irParaEmparelhar(page, timeout = 60_000) {
   await portaoPronto(page, timeout)
-  const sim = page.getByRole("button", { name: "Sim, emparelhar este aparelho" })
-  if (await sim.count()) await sim.click()
-  else await page.getByRole("button", { name: "Emparelhar", exact: true }).click()
+  await page.getByRole("button", { name: "Entrar com outro aparelho" }).click()
+}
+
+/**
+ * "Entrar com o ficheiro da conta": the file and the password, then "Entrar".
+ * `escolherNaSecretaria` is for the installed app, where the main process opens
+ * the system dialog: pass a function that answers it with the path.
+ */
+export async function importarFicheiro(page, ficheiro, frase, { timeout = 60_000, escolherNaSecretaria = null } = {}) {
+  await irParaOFicheiro(page, timeout)
+  if (escolherNaSecretaria) {
+    await escolherNaSecretaria(ficheiro)
+    await page.locator(".entrada-largar").click()
+  } else {
+    await page.locator('.gate input[type="file"]').setInputFiles(ficheiro)
+  }
+  await page.locator(".entrada-ficheiro-escolhido").waitFor({ timeout })
+  await page.locator('input[name="import-password"]').fill(frase)
+  await page.getByRole("button", { name: "Entrar", exact: true }).click()
 }

@@ -1,9 +1,10 @@
 /**
- * The `+` left of a category's name (1.3.25), in the Dark, Light and Aurora themes,
- * at 1280 px and at 390 px.
+ * The `+` of a category (1.3.25), in the Dark, Light and Aurora themes, at 1280 px
+ * and at 390 px. Right of the name since 1.3.26: `capturar-mais-a-direita.mjs`
+ * measures the edge.
  *
  * One account, the founder of the common channel's copy it creates: it organizes
- * rooms, so the `+` is there. What is checked: the `+` sits left of the name, it
+ * rooms, so the `+` is there. What is checked: the `+` sits right of the name, it
  * opens "New room" with that category chosen, "Create room" in the category menu
  * does the same, and nothing overflows sideways. Captures for the eye.
  *
@@ -91,7 +92,7 @@ for (const nome of ["escuro", "claro", "aurora"]) {
     }, CATEGORIA)
     console.log(`\n  ${nota}: ${JSON.stringify(medida)}`)
     verificar(`${nota}: o + existe`, medida.botao !== null)
-    verificar(`${nota}: o + fica à esquerda do nome`, medida.botao !== null && medida.nomeX !== null && medida.botao.x < medida.nomeX)
+    verificar(`${nota}: o + fica à direita do nome`, medida.botao !== null && medida.nomeX !== null && medida.botao.x > medida.nomeX)
     verificar(`${nota}: a página não rola de lado`, medida.transborda <= 0)
     const cabecalho = page.locator(".room-category", { hasText: CATEGORIA }).first()
     await cabecalho.screenshot({ path: join(CAPTURAS, `${nome}-${largura}-cabecalho.png`) }).catch(() => {})

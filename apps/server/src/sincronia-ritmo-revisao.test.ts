@@ -210,7 +210,7 @@ describe("revisão de S6: a troca de conta (achado 3)", () => {
     bia!.session.disconnect()
     ana!.session.disconnect()
     ana!.session.reset()
-    await ana!.vault.importVault(cofreDaBia, "frase-passe-de-teste")
+    await ana!.vault.importVault(cofreDaBia, "frase-passe-de-teste", { passagem: (pedido) => ana!.session.passagemDoImportar(pedido) })
     await ana!.vault.unlock("frase-passe-de-teste")
     expect(ana!.session.loadIdentity().address).toBe(bia!.address)
     await ana!.session.connect()

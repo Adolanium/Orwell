@@ -89,13 +89,24 @@ export function BarraDoHistorico({
   )
 }
 
-/** The one line for a transfer that stopped short, or `null` while it runs (or ended whole). */
+/**
+ * The one line for a transfer that stopped short, or `null` while it runs (or ended whole).
+ *
+ * 20/11/2026: a stopped transfer only exists while a device can still send
+ * the history (the core drops it when none is left), so "Sync will resume"
+ * is true when it shows. The number is what is missing on THIS device
+ * (`faltam`), exact or absent: without it (a sibling before 1.3.26), the same
+ * line with no number. A fresh device that never got an inventory (no plan,
+ * `total` 0) says its main device does not answer. Between devices already
+ * paired, the same rule as the progress bar: a small sync shows nothing.
+ */
 export function avisoDoHistorico(estado: HistoricoDosIrmaos | null): string | null {
   if (!estado || estado.aTrazer || !estado.razao) return null
-  if (estado.razao === "sem-irmao") return estado.inicial || (estado.perdidas ?? 0) > 0 ? strings.sincronia.historicoSemIrmao : null
-  const perdidas = estado.perdidas ?? 0
-  if (perdidas === 0) return null
-  return estado.razao === "irmao-calado" ? strings.sincronia.historicoParado(perdidas) : strings.sincronia.historicoPerdidas(perdidas)
+  if (estado.razao === "ilegiveis") return (estado.perdidas ?? 0) > 0 ? strings.sincronia.historicoPerdidas(estado.perdidas ?? 0) : null
+  if (!estado.inicial && estado.total < 50) return null
+  if (estado.faltam !== undefined) return estado.faltam > 0 ? strings.sincronia.historicoEmFalta(estado.faltam) : null
+  if (estado.total > 0) return strings.sincronia.historicoEmFaltaSemNumero
+  return estado.razao === "sem-irmao" && estado.inicial ? strings.sincronia.historicoSemIrmao : null
 }
 
 /**

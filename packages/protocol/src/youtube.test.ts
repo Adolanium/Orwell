@@ -60,6 +60,26 @@ describe("youtubeIdOf — as formas que um endereço do YouTube toma", () => {
   })
 })
 
+describe("youtubeIdOf: every form people paste (21/11/2026)", () => {
+  it.each([
+    ["youtu.be with ?si=", "https://youtu.be/jNQXAC9IVRw?si=Xk3vJqPzLm8aB2cD", "jNQXAC9IVRw"],
+    ["youtu.be with ?si= and &t=", "https://youtu.be/jNQXAC9IVRw?si=Xk3vJqPzLm8aB2cD&t=12", "jNQXAC9IVRw"],
+    ["www.youtu.be", "https://www.youtu.be/jNQXAC9IVRw", "jNQXAC9IVRw"],
+    ["watch with ?si= and &t=", "https://www.youtube.com/watch?v=dQw4w9WgXcQ&si=abc&t=42s", "dQw4w9WgXcQ"],
+    ["v= not the first parameter", "https://www.youtube.com/watch?feature=shared&v=dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+    ["shorts with ?si=", "https://youtube.com/shorts/aqz-KE-bpKQ?si=abc123", "aqz-KE-bpKQ"],
+    ["shorts with a trailing slash", "https://www.youtube.com/shorts/aqz-KE-bpKQ/", "aqz-KE-bpKQ"],
+    ["live with ?si=", "https://www.youtube.com/live/aqz-KE-bpKQ?si=abc123&feature=share", "aqz-KE-bpKQ"],
+    ["m.youtube.com with &t=", "https://m.youtube.com/watch?v=kJQP7kiw5Fk&t=10", "kJQP7kiw5Fk"],
+    ["m.youtube.com shorts", "https://m.youtube.com/shorts/aqz-KE-bpKQ", "aqz-KE-bpKQ"],
+    ["music.youtube.com with ?si=", "https://music.youtube.com/watch?v=9bZkp7q19f0&si=abc123", "9bZkp7q19f0"],
+    ["a host in capitals", "https://WWW.YouTube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+    ["a #t= fragment", "https://www.youtube.com/watch?v=dQw4w9WgXcQ#t=30", "dQw4w9WgXcQ"],
+  ])("%s", (_form, url, id) => {
+    expect(youtubeIdOf(url)).toBe(id)
+  })
+})
+
 describe("youtubeWatchUrl", () => {
   it("constrói o endereço a partir do identificador já validado", () => {
     expect(youtubeWatchUrl("dQw4w9WgXcQ")).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ")

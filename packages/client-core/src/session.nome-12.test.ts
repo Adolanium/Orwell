@@ -165,3 +165,40 @@ describe("nome de apresentação: 12 grafemas na escrita", () => {
     session.disconnect()
   }, 60_000)
 })
+
+describe("biografia: 300 grafemas na escrita, o cliente nunca envia mais", () => {
+  /** The `bio` of every `profile` payload this session sends, on any channel. */
+  function espiarBios(session: Session): (string | undefined)[] {
+    const bios: (string | undefined)[] = []
+    const original = session.send.bind(session)
+    session.send = (channel, payload, opcoes) => {
+      if (payload.t === "profile") bios.push(payload.bio)
+      return original(channel, payload, opcoes)
+    }
+    return bios
+  }
+
+  it("uma biografia de 301 grava e publica com 300", async () => {
+    const session = await sessaoLigada()
+    const bios = espiarBios(session)
+    await session.updateProfile({ displayName: "Ana", donations: [], bio: "a".repeat(301) })
+    expect(session.profile.bio).toBe("a".repeat(300))
+    // The publish waits for the edits to stop (1.3.26): send it now, as a close does.
+    await session.publicarPerfilPendente()
+    expect(bios.length).toBeGreaterThan(0)
+    for (const bio of bios) expect(bio).toBe("a".repeat(300))
+    session.disconnect()
+  }, 60_000)
+
+  it("uma biografia antiga de 1000 já guardada sai com 300 ao republicar", async () => {
+    const session = await sessaoLigada()
+    session.vault.contents.profile = { displayName: "Ana", donations: [], bio: "y".repeat(1000), updatedAt: 1 }
+    const bios = espiarBios(session)
+    await session.publishProfile(session.channels, true)
+    expect(bios.length).toBeGreaterThan(0)
+    for (const bio of bios) expect(bio).toBe("y".repeat(300))
+    // The stored text is not rewritten by a publish: only an edit saves it shorter.
+    expect(session.profile.bio).toBe("y".repeat(1000))
+    session.disconnect()
+  }, 60_000)
+})

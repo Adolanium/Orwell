@@ -28,6 +28,7 @@ import { criarConta } from "./conta.mjs"
 import { aceitarConvite, convidar } from "./convite.mjs"
 import { abrirCanal, aceitarAmizade, ate, contasDoServidor, criarCanal, dentro, espera, pedirAmizade, verificador } from "./fase7-comum.mjs"
 import { levantarServidor, RAIZ } from "./servidor-descartavel.mjs"
+import { mostrarLista, noTelemovel, profundidade, voltarAConversa } from "./separadores.mjs"
 
 const ETIQUETA = process.argv[2] ?? "prova"
 const FRASE = "frase-de-verificacao-2026"
@@ -62,16 +63,20 @@ const linhaDaSala = (page, nome) => page.locator(".room-row", { has: page.locato
 const nomesDasSalas = (page) => page.locator(".room-tree .room-row .room-name").allInnerTexts()
 const linhaDoCanal = (page) => page.locator(".channel-row", { has: page.locator(".channel-name", { hasText: CANAL }) }).first()
 
-/** Opens the sidebar on a phone if it is closed, runs `fazer`, and closes it again. */
+/**
+ * On a phone, shows the Communities list (the room tree), runs `fazer`, and
+ * pushes the conversation back if one was on screen. Since option B
+ * (20/11/2026) the list is a tab, not a drawer. On a computer, just `fazer`.
+ */
 async function naGaveta(page, fazer) {
-  const gaveta = page.getByRole("button", { name: "Abrir o painel lateral" })
-  const fechada = (await gaveta.isVisible().catch(() => false)) && (await gaveta.getAttribute("aria-expanded").catch(() => null)) !== "true"
-  if (fechada) await gaveta.click().catch(() => {})
+  const telemovel = await noTelemovel(page)
+  const naConversa = telemovel && (await profundidade(page)) > 0
+  if (telemovel) await mostrarLista(page)
   await espera(400)
   try {
     return await fazer()
   } finally {
-    if (fechada && (await gaveta.getAttribute("aria-expanded").catch(() => null)) === "true") await gaveta.click().catch(() => {})
+    if (naConversa) await voltarAConversa(page)
   }
 }
 

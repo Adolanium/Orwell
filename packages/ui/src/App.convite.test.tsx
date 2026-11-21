@@ -176,10 +176,23 @@ describe("o link de convite com que a página abriu", () => {
     expect(await screen.findByText(strings.invite.gateWaiting)).toBeTruthy()
   })
 
+  it("a quem ainda não tem conta, o convite à espera passa à sessão para o limite de contas por rede (Erro 234)", async () => {
+    const { bridge } = bancada({ cofre: "nao-existe" })
+    const definir = vi.fn(async (_link: string | null) => ({ ok: true }))
+    bridge.session.definirConviteDeComunidade = definir
+    const { unmount } = render(<App bridge={bridge} startupInvite={conviteDeArranque()} />)
+    await waitFor(() => expect(definir).toHaveBeenCalledWith(formatInviteLink("casa.pt", CANAL, CODIGO)))
+    unmount()
+    // The short link, before it resolves, goes as it is.
+    definir.mockClear()
+    render(<App bridge={bridge} startupInvite={conviteDeArranque({ invite: null, curta: CURTA })} />)
+    await waitFor(() => expect(definir).toHaveBeenCalledWith(CURTA))
+  })
+
   it("sem convite, o portão não diz nada sobre convites", async () => {
     const { bridge } = bancada({ cofre: "pede-palavra" })
     render(<App bridge={bridge} />)
-    await screen.findByText(strings.gate.unlockTitle)
+    await screen.findByRole("heading", { name: new RegExp(`^${strings.entrada.olaSemNome}`) })
     expect(screen.queryByText(strings.invite.gateWaiting)).toBeNull()
   })
 
@@ -402,50 +415,7 @@ describe("o link de convite com que a página abriu", () => {
   })
 })
 
-/** The account deletion sheet, open at the gate: type the password and press the button. */
-async function apagarComAPalavra(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  const folha = await screen.findByRole("alertdialog", { name: strings.settings.destroyTitle })
-  await user.type(within(folha).getByLabelText(strings.settings.destroyConfirmLabel), strings.settings.destroyConfirmWord)
-  await user.click(within(folha).getByRole("button", { name: strings.settings.destroyConfirm }))
-}
-
 describe("apagar a conta leva o convite atrás", () => {
-  it("no portão: quem perdeu a palavra-passe e recomeça não herda o convite", async () => {
-    const user = userEvent.setup()
-    const destroy = vi.fn(async () => ({ ok: true }))
-    const { bridge } = bancada({ cofre: "pede-palavra", destroy })
-    const convite = conviteDeArranque()
-    render(<App bridge={bridge} startupInvite={convite} />)
-    expect(await screen.findByText(strings.invite.gateWaiting)).toBeTruthy()
-
-    // The gate makes a silent attempt before showing the footer: we wait for it.
-    await user.click(await screen.findByRole("button", { name: strings.gate.lostAccountAction }))
-    await apagarComAPalavra(user)
-
-    await waitFor(() => expect(destroy).toHaveBeenCalledOnce())
-    await waitFor(() => expect(convite.forget).toHaveBeenCalledOnce())
-    await waitFor(() => expect(screen.queryByText(strings.invite.gateWaiting)).toBeNull())
-  })
-
-  it("se apagar falha, a conta fica de pé e o convite com ela", async () => {
-    const user = userEvent.setup()
-    const destroy = vi.fn(async () => {
-      throw new Error("could not reach the homeserver")
-    })
-    const { bridge } = bancada({ cofre: "pede-palavra", destroy })
-    const convite = conviteDeArranque()
-    render(<App bridge={bridge} startupInvite={convite} />)
-    await screen.findByText(strings.invite.gateWaiting)
-
-    // The gate makes a silent attempt before showing the footer: we wait for it.
-    await user.click(await screen.findByRole("button", { name: strings.gate.lostAccountAction }))
-    await apagarComAPalavra(user)
-
-    await waitFor(() => expect(destroy).toHaveBeenCalledOnce())
-    expect(convite.forget).not.toHaveBeenCalled()
-    expect(screen.getByText(strings.invite.gateWaiting)).toBeTruthy()
-  })
-
   it("bloquear não lhe toca: quem desbloqueia é a mesma pessoa", async () => {
     const user = userEvent.setup()
     const { bridge, ligar } = bancada()

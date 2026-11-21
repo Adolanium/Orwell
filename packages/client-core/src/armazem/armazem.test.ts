@@ -553,6 +553,29 @@ describe("selar (Ruling R17)", () => {
   })
 })
 
+describe("resuming after a seal (the iOS back-forward cache)", () => {
+  it("a resumed store writes again, with a backend that can lift its seal", async () => {
+    const { armazem, backend } = await aberto()
+    armazem.selar()
+    expect(armazem.retomar()).toBe(true)
+    expect(armazem.selado).toBe(false)
+    const a = media()
+    armazem.absorver(a.bytes, a.ref, a.sha)
+    await armazem.drenar()
+    expect(await backend.ler(a.sha)).not.toBeNull()
+  })
+
+  it("a backend without a way to lift its seal stays sealed", async () => {
+    // A backend from the desktop, or older: no `dessselar`.
+    const backend = new ArmazemEmMemoria()
+    Object.assign(backend, { dessselar: undefined })
+    const { armazem } = await aberto(backend)
+    armazem.selar()
+    expect(armazem.retomar()).toBe(false)
+    expect(armazem.selado).toBe(true)
+  })
+})
+
 describe("libertar (Libertar espaço)", () => {
   it("tira todos os originais não fixados, mesmo os recentes; os fixados e as miniaturas ficam", async () => {
     const { armazem, backend, eventos } = await aberto()

@@ -1534,19 +1534,21 @@ describe("a sala de votações é uma sala como as outras", () => {
 })
 
 /**
- * The `+` left of a category's name (1.3.25): a room created already
- * in that category. Only for whoever organizes rooms, the same rule as "New room".
+ * The `+` of a category (1.3.25): a room created already in that category.
+ * Only for whoever organizes rooms, the same rule as "New room". At the right
+ * end of the header since 1.3.26, like the column header's `+`.
  */
 describe("ChannelSidebar — criar sala numa categoria", () => {
-  it("com quem organize, o + à esquerda do nome cria a sala naquela categoria", async () => {
+  it("com quem organize, o + à direita do nome cria a sala naquela categoria", async () => {
     const user = userEvent.setup()
     const onNewRoomInCategory = vi.fn()
     const { container } = render(povoada({ onNewRoom: noop, onNewRoomInCategory }))
     const mais = screen.getByRole("button", { name: strings.sidebar.criarSalaNaCategoriaRotulo("Início") })
     expect(mais.getAttribute("title")).toBe(strings.sidebar.criarSalaNaCategoria)
-    // Left of the name: before the toggle that carries it, in the same header.
+    // Right of the name: after the toggle that carries it, last in the same header.
     const cabecalho = mais.closest(".room-category") as HTMLElement
-    expect(cabecalho.firstElementChild).toBe(mais)
+    expect(cabecalho.lastElementChild).toBe(mais)
+    expect(mais.previousElementSibling?.classList.contains("category-toggle")).toBe(true)
     expect(cabecalho.querySelector(".category-name")?.textContent).toBe("Início")
     await user.click(mais)
     expect(onNewRoomInCategory).toHaveBeenCalledWith("Início")

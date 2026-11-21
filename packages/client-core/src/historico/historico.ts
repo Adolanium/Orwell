@@ -28,6 +28,7 @@ import {
   chaveDoItem,
   entradaValida,
   faltaAqui,
+  faltamDaConversa,
   fichaDoIrmao,
   fundirRegistosDoIrmao,
   inventarioDe,
@@ -148,6 +149,16 @@ export const TECTOS_DO_FIO_DO_HISTORICO = {
   guardadasMs: 5 * 60_000,
   /** Parts of a response, at most. 4096 parts of 8 KiB are 32 MiB. */
   partesMax: 4_096,
+  /**
+   * Layer C (21/11/2026): a response longer than this goes one window at a time. The
+   * responder sends the first window, and each next one only when the requester asks
+   * for it (`hp` with `f`). A device that went away (an iPhone locked mid-photo) then
+   * costs at most one window, under a minute of the budget, instead of the whole response.
+   * Below `sinaisPorMinuto`, so a window fits in one minute's budget.
+   */
+  partesPorJanela: 32,
+  /** A windowed response waits this long without a part before asking again: one minute of the budget, and some. */
+  esperaEntreJanelasMs: 65_000,
   /** The text of a response, after decompression, at most. */
   descomprimidoMax: 64 * 1024 * 1024,
   /** `trazerUm` gives up after this, if no sibling has just answered. */
@@ -213,6 +224,15 @@ export interface EventoDoHistorico {
    */
   perdidas?: number
   razao?: RazaoDoHistorico
+  /**
+   * A stopped plan (`razao` "sem-irmao" or "irmao-calado"), 20/11/2026: how many
+   * conversation messages are missing on THIS device and will come when the
+   * transfer resumes. Never the state log, never an entry already here, never
+   * one the vault cap would drop (`faltamDaConversa`). Absent when it is not
+   * known exactly (a sibling before 1.3.26 sends no `q`): the interface then
+   * gives no number. A stopped plan only exists while a source exists (`#haFonte`).
+   */
+  faltam?: number
   /** History is arriving from a sibling. */
   aTrazer: boolean
   /** Fetched entries and count of remaining entries. */
@@ -255,6 +275,12 @@ interface Cabecalho {
   f?: number[]
   /** On `hi` (16/11/2026): the requester is a freshly paired device. The responder then shows "Keep this device on". */
   ini?: 1
+  /**
+   * On `hr` (layer C, 21/11/2026): this response goes in windows of `w` parts; ask for
+   * the next window with `f`. A requester that ignores it gets the rest when it asks for
+   * the missing parts, as before.
+   */
+  w?: number
 }
 
 type Pedido =
@@ -275,6 +301,9 @@ interface Chegada {
   n: number
   partes: (Uint8Array | undefined)[]
   recebidas: number
+  /** Windowed (`w`): the window size, and the parts asked for so far (`[0, pedidoAte)`). */
+  janela?: number
+  pedidoAte?: number
 }
 
 interface SessaoDeQuemPede {
@@ -289,6 +318,16 @@ interface SessaoDeQuemPede {
   chegada?: Chegada | undefined
 }
 
+/** A response sent, kept to resend missing parts, or to split again smaller. */
+interface Guardada {
+  partes: Uint8Array[]
+  cabecalhos: Cabecalho[]
+  em: number
+  bytes: number
+  selado: Uint8Array
+  passo: number
+}
+
 interface SessaoDeQuemResponde {
   chave: Uint8Array
   para: string
@@ -298,6 +337,22 @@ interface SessaoDeQuemResponde {
 }
 
 const MAGIA = 0x48
+
+/** The smallest part a response splits into when a signal does not fit. */
+const PARTE_MINIMA = 256
+
+/** Which header a signal in the queue carries: a server refusal is answered by what it was. */
+interface DeQuem {
+  k: Cabecalho["k"]
+  s: string
+  id?: string | undefined
+}
+
+interface SinalNaFila {
+  sinal: string
+  ref: string
+  de: DeQuem
+}
 
 function novoId(): string {
   return toBase64(crypto.getRandomValues(new Uint8Array(9)))
@@ -341,13 +396,14 @@ function desembrulhar(bytes: Uint8Array): { cabecalho: Cabecalho; corpo: Uint8Ar
 }
 
 /** Compress (deflate) when the platform supports it. First byte indicates: 1 compressed, 0 raw. */
-async function comprimir(texto: Uint8Array): Promise<Uint8Array> {
+export async function comprimir(texto: Uint8Array): Promise<Uint8Array> {
   if (typeof CompressionStream === "undefined") return juntar(new Uint8Array([0]), texto)
   const fluxo = new Blob([texto as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new CompressionStream("deflate-raw"))
   return juntar(new Uint8Array([1]), new Uint8Array(await new Response(fluxo).arrayBuffer()))
 }
 
-async function descomprimir(bytes: Uint8Array): Promise<Uint8Array | null> {
+/** The reverse of `comprimir`. `null` past `max` bytes of text, or on bad input. */
+export async function descomprimir(bytes: Uint8Array, max = TECTOS_DO_FIO_DO_HISTORICO.descomprimidoMax): Promise<Uint8Array | null> {
   if (bytes.length === 0) return null
   if (bytes[0] === 0) return bytes.subarray(1)
   if (bytes[0] !== 1 || typeof DecompressionStream === "undefined") return null
@@ -361,7 +417,7 @@ async function descomprimir(bytes: Uint8Array): Promise<Uint8Array | null> {
       if (done) break
       total += value.length
       // Compression pump does not fill memory: it stops at the limit.
-      if (total > TECTOS_DO_FIO_DO_HISTORICO.descomprimidoMax) {
+      if (total > max) {
         await leitor.cancel()
         return null
       }
@@ -384,8 +440,7 @@ function juntar(...partes: Uint8Array[]): Uint8Array {
   return saida
 }
 
-function partir(bytes: Uint8Array): Uint8Array[] {
-  const passo = TECTOS_DO_FIO_DO_HISTORICO.bytesPorParte
+function partir(bytes: Uint8Array, passo: number): Uint8Array[] {
   const partes: Uint8Array[] = []
   for (let em = 0; em < bytes.length; em += passo) partes.push(bytes.subarray(em, em + passo))
   if (partes.length === 0) partes.push(new Uint8Array(0))
@@ -397,10 +452,10 @@ export class HistoricoEntreAparelhos {
   #pedinte: SessaoDeQuemPede | null = null
   readonly #respostas = new Map<string, SessaoDeQuemResponde>()
   /** Responses sent, by `s|id`, for any missing parts. */
-  readonly #guardadas = new Map<string, { partes: Uint8Array[]; cabecalhos: Cabecalho[]; em: number; bytes: number }>()
+  readonly #guardadas = new Map<string, Guardada>()
   /** Signal queue and signals in flight awaiting possible rejection. */
-  readonly #fila: { sinal: string; ref: string }[] = []
-  readonly #noAr = new Map<string, { sinal: string; em: number }>()
+  readonly #fila: SinalNaFila[] = []
+  readonly #noAr = new Map<string, { sinal: string; em: number; de: DeQuem }>()
   readonly #gastos: number[] = []
   #recuoAte = 0
   #bomba: ReturnType<typeof setTimeout> | undefined
@@ -427,7 +482,7 @@ export class HistoricoEntreAparelhos {
   /** The `trazerUm` items that arrived while a plan had no media list yet: they join it when it comes. */
   readonly #avulsos: ItemDeMediaDoIrmao[] = []
   /** For tests: how many signals went out and came in. */
-  readonly estatisticas = { enviados: 0, recebidos: 0, recusados: 0, ilegiveis: 0, pedidos: 0, respostas: 0 }
+  readonly estatisticas = { enviados: 0, recebidos: 0, recusados: 0, ilegiveis: 0, pedidos: 0, respostas: 0, descartados: 0, sessoes: 0 }
 
   constructor(porta: PortaDoHistorico) {
     this.#porta = porta
@@ -435,8 +490,19 @@ export class HistoricoEntreAparelhos {
 
   // ----------------------------------------------------------- connection
 
+  /** The account changes or logs out: the kept session goes too. */
+  esquecerSessao(): void {
+    this.#pedinte = null
+  }
+
   aoLigar(): void {
     this.aoDesligar()
+    // A kept session asks again at the first step, for what is missing (see `aoDesligar`).
+    const pedido = this.#pedinte?.pedido
+    if (pedido) {
+      pedido.enviadoEm = 0
+      pedido.ultimaParte = 0
+    }
     this.#ligadoEm = this.#porta.agora()
     this.#progressoEm = this.#ligadoEm
     this.#irmaoRespondeu = false
@@ -446,13 +512,21 @@ export class HistoricoEntreAparelhos {
     queueMicrotask(() => void this.#passo())
   }
 
-  /** Connection dropped: the current session dies with it. The state stays in the vault, the next connection continues. */
+  /**
+   * Connection dropped. The state stays in the vault, and the next connection continues.
+   *
+   * A session that a sibling already answered stays (layer C, 21/11/2026): the parts of the
+   * response that came are kept, and on the next connection the same session asks only for
+   * what is missing. Before, a phone that dropped its connection mid-photo threw away what had
+   * come and asked for the whole response again. A responder that forgot the session answers
+   * `hx`, and a new session opens, as before.
+   */
   aoDesligar(): void {
     if (this.#relogio !== undefined) clearInterval(this.#relogio)
     this.#relogio = undefined
     if (this.#bomba !== undefined) clearTimeout(this.#bomba)
     this.#bomba = undefined
-    this.#pedinte = null
+    if (!this.#pedinte?.chave) this.#pedinte = null
     const enviava = this.#envioEmCurso() !== undefined
     this.#respostas.clear()
     this.#guardadas.clear()
@@ -482,8 +556,7 @@ export class HistoricoEntreAparelhos {
    */
   async trazerUm(item: ItemDeMediaDoIrmao): Promise<DesfechoDoIrmao> {
     if (!this.#porta.conteudo() || !this.#porta.canalDaConta() || !this.#porta.podeSinalizar()) return "sem-irmao"
-    const eu = this.#meuAparelho()
-    if (!this.#porta.folhasDaConta().some((aparelho) => aparelho !== eu)) return "sem-irmao"
+    if (!this.#haFonte()) return "sem-irmao"
     const chave = chaveDoItem(item)
     const desfecho = new Promise<DesfechoDoIrmao>((resolve) => {
       const lista = this.#aEspera.get(chave) ?? []
@@ -584,6 +657,8 @@ export class HistoricoEntreAparelhos {
       // Nobody answered the `hi` (an old sibling, or none connected): another can go out.
       if (agora - pedinte.aberta > TECTOS_DO_FIO_DO_HISTORICO.esperaDoInventarioMs) {
         this.#pedinte = null
+        // This attempt found no sibling: a stopped plan says so from the next step (`#talvezDesistir`).
+        this.#irmaoRespondeu = false
         this.#largarAvulsos("sem-irmao")
       }
       return
@@ -596,24 +671,66 @@ export class HistoricoEntreAparelhos {
    * The deadline: with something to bring and no progress for `desistirAposMs`,
    * give up for now, with the reason. Written to the vault, so a reload does
    * not bring back a notice that already gave up.
+   *
+   * Once stopped, the reason is judged again at every step (20/11/2026): it
+   * stood as "irmao-calado" forever before, even with no sibling left. And with
+   * no source at all (no other device in the account), nothing can ever come:
+   * the plan and the "initial" mark leave, and so does the notice.
    */
   #talvezDesistir(contents: VaultContents, agora: number): void {
     const h = contents.historico
     if (!h) return
-    if (agora - this.#progressoEm < TECTOS_DO_FIO_DO_HISTORICO.desistirAposMs) return
-    if (h.plano && !h.plano.parado) {
+    const parado = h.plano?.parado !== undefined || (!h.plano && h.inicial !== undefined && h.semIrmaoDesde !== undefined)
+    if (!parado) {
+      if (!h.plano && !h.inicial) return
+      if (agora - this.#progressoEm < TECTOS_DO_FIO_DO_HISTORICO.desistirAposMs) return
+    }
+    if (!this.#haFonte()) {
+      this.#semFonte()
+      return
+    }
+    if (h.plano) {
       const razao: RazaoDoHistorico = this.#irmaoRespondeu ? "irmao-calado" : "sem-irmao"
+      if (h.plano.parado?.razao === razao) return
+      const desde = h.plano.parado?.em ?? agora
       this.#porta.gravar((c) => {
-        if (c.historico?.plano) c.historico.plano.parado = { em: agora, razao }
+        if (c.historico?.plano) c.historico.plano.parado = { em: desde, razao }
       })
-      this.#pedinte = null
+      // Only when it first stops: a quiet retry in flight is not cut by a new reason.
+      if (!parado) this.#pedinte = null
       this.#dizer([])
-    } else if (!h.plano && h.inicial && h.semIrmaoDesde === undefined) {
+    } else if (h.inicial && h.semIrmaoDesde === undefined) {
       this.#porta.gravar((c) => {
         if (c.historico?.inicial && !c.historico.plano) c.historico.semIrmaoDesde = agora
       })
       this.#dizer([])
     }
+  }
+
+  /**
+   * Where history can come from. Today only the other devices of the account
+   * (the leaves of the account channel); history from other members of a
+   * channel is a different source, and plugs in HERE: a stopped plan, the
+   * notice and `trazerUm` all ask this, and nothing else, whether a resume is
+   * possible.
+   */
+  #haFonte(): boolean {
+    const eu = this.#meuAparelho()
+    return this.#porta.folhasDaConta().some((aparelho) => aparelho !== eu)
+  }
+
+  /** No source at all: the plan, the "initial" mark and the stopped state leave. What came, stays. */
+  #semFonte(): void {
+    this.#porta.gravar((c) => {
+      const h = c.historico
+      if (!h) return
+      delete h.plano
+      delete h.inicial
+      delete h.semIrmaoDesde
+    })
+    this.#largarAvulsos("sem-irmao")
+    this.#pedinte = null
+    this.#dizer([])
   }
 
   /** The transfer moved: the deadline starts again, and a stopped plan is no longer stopped. */
@@ -631,6 +748,8 @@ export class HistoricoEntreAparelhos {
 
   #querPedir(estado: EstadoDoHistorico | undefined, agora: number): boolean {
     const t = TECTOS_DO_FIO_DO_HISTORICO
+    // Nobody to ask: no `hi` into the void (the deadline then drops the plan, `#talvezDesistir`).
+    if (!this.#haFonte()) return false
     const desdeOUltimo = agora - this.#ultimoHi
     // Stopped: quiet retries, slower. A sibling that connects brings it forward (`#irmaoLigado`).
     if (estado?.plano?.parado || (!estado?.plano && estado?.semIrmaoDesde !== undefined)) return desdeOUltimo >= t.retomarParadoMs
@@ -670,6 +789,7 @@ export class HistoricoEntreAparelhos {
   async #abrirSessao(agora: number): Promise<void> {
     const sessao: SessaoDeQuemPede = { s: novoId(), par: novoParDoHistorico(), aberta: agora }
     this.#pedinte = sessao
+    this.estatisticas.sessoes += 1
     this.#ultimoHi = agora
     const inicial = this.#porta.conteudo()?.historico?.inicial !== undefined
     await this.#enviar(
@@ -681,7 +801,13 @@ export class HistoricoEntreAparelhos {
   async #talvezRepetir(pedinte: SessaoDeQuemPede, agora: number): Promise<void> {
     const pedido = pedinte.pedido as PedidoEmCurso
     const t = TECTOS_DO_FIO_DO_HISTORICO
-    if (agora - Math.max(pedido.enviadoEm, pedido.ultimaParte) < t.esperaDaRespostaMs) return
+    /*
+      A windowed response is paced by the responder's budget: between two windows the
+      wait can reach a minute with nothing lost. Asking again at 30 s queued copies of
+      parts already on their way, and spent the tries (21/11/2026, layer C).
+    */
+    const espera = pedinte.chegada?.janela !== undefined ? Math.max(t.esperaDaRespostaMs, t.esperaEntreJanelasMs) : t.esperaDaRespostaMs
+    if (agora - Math.max(pedido.enviadoEm, pedido.ultimaParte) < espera) return
     if (pedido.tentativas >= t.tentativasPorPedido) {
       // The responder went silent: another session in the next step (maybe with a different sibling).
       this.#pedinte = null
@@ -692,8 +818,14 @@ export class HistoricoEntreAparelhos {
     pedido.ultimaParte = agora
     const chegada = pedinte.chegada
     if (chegada && chegada.id === pedido.id && chegada.recebidas > 0) {
+      // Windowed: only what was asked so far, or the next window if all of that came.
+      const ate = chegada.pedidoAte ?? chegada.n
       const faltam: number[] = []
-      for (let i = 0; i < chegada.n && faltam.length < 512; i++) if (!chegada.partes[i]) faltam.push(i)
+      for (let i = 0; i < Math.min(ate, chegada.n) && faltam.length < 512; i++) if (!chegada.partes[i]) faltam.push(i)
+      if (faltam.length === 0 && chegada.janela !== undefined && ate < chegada.n) {
+        for (let i = ate; i < Math.min(ate + chegada.janela, chegada.n); i++) faltam.push(i)
+        chegada.pedidoAte = ate + chegada.janela
+      }
       await this.#enviar({ v: 1, k: "hp", s: pedinte.s, ap: this.#meuAparelho(), para: pedinte.com as string, id: pedido.id, f: faltam }, new Uint8Array(0))
       return
     }
@@ -764,6 +896,8 @@ export class HistoricoEntreAparelhos {
         }
         pedinte.com = cabecalho.ap
       }
+      // A responder that split again smaller (a part refused as too large) sends a larger `n`: start over with it.
+      if (pedinte.inventario && pedinte.inventario.n < n) pedinte.inventario = undefined
       pedinte.inventario ??= { id: cabecalho.id, n, partes: new Array<Uint8Array | undefined>(n), recebidas: 0 }
       const completo = this.#guardarParte(pedinte.inventario, i, n, corpo)
       if (!completo) return
@@ -782,11 +916,22 @@ export class HistoricoEntreAparelhos {
     // `hr`: a response to the current request.
     const pedido = pedinte.pedido
     if (!pedido || cabecalho.id !== pedido.id || cabecalho.ap !== pedinte.com) return
-    pedido.ultimaParte = this.#porta.agora()
-    // Each part is progress: a 2 MiB media response takes minutes at 40 signals a minute, and must not hit the deadline.
-    this.#progrediu()
+    if (pedinte.chegada && pedinte.chegada.n < n) pedinte.chegada = undefined
     pedinte.chegada ??= { id: pedido.id, n, partes: new Array<Uint8Array | undefined>(n), recebidas: 0 }
-    if (!this.#guardarParte(pedinte.chegada, i, n, corpo)) return
+    // Only a part that was missing counts. A late copy of a part already held (a resend
+    // crossing the original) is not the responder answering: it must not reset the tries
+    // or the deadline, or a part that never comes is never asked for again.
+    if (pedinte.chegada.n === n && !pedinte.chegada.partes[i]) {
+      pedido.ultimaParte = this.#porta.agora()
+      // A part that came: the responder is there. The tries count silences in a row, not silences ever.
+      pedido.tentativas = 0
+      // Each part is progress: a 2 MiB media response takes minutes at 40 signals a minute, and must not hit the deadline.
+      this.#progrediu()
+    }
+    if (!this.#guardarParte(pedinte.chegada, i, n, corpo)) {
+      await this.#pedirJanelaSeguinte(pedinte, pedinte.chegada, cabecalho.w)
+      return
+    }
     const resposta = await this.#abrirResposta<unknown>(pedinte, pedinte.chegada)
     pedinte.chegada = undefined
     pedinte.pedido = undefined
@@ -794,6 +939,23 @@ export class HistoricoEntreAparelhos {
     this.estatisticas.respostas += 1
     this.#aoResposta(pedido.corpo, resposta)
     await this.#proximoPedido(pedinte)
+  }
+
+  /**
+   * A windowed response (`w`, layer C): when every part asked so far came, ask for the next
+   * window. Without `w` (an older responder) the whole response comes on its own.
+   */
+  async #pedirJanelaSeguinte(pedinte: SessaoDeQuemPede, chegada: Chegada, w: number | undefined): Promise<void> {
+    if (typeof w !== "number" || !Number.isSafeInteger(w) || w < 1 || w >= chegada.n) return
+    chegada.janela ??= w
+    chegada.pedidoAte ??= w
+    const ate = chegada.pedidoAte
+    if (ate >= chegada.n) return
+    for (let i = 0; i < ate; i++) if (!chegada.partes[i]) return
+    const f: number[] = []
+    for (let i = ate; i < Math.min(ate + chegada.janela, chegada.n); i++) f.push(i)
+    chegada.pedidoAte = ate + chegada.janela
+    await this.#enviar({ v: 1, k: "hp", s: pedinte.s, ap: this.#meuAparelho(), para: pedinte.com as string, id: chegada.id, f }, new Uint8Array(0))
   }
 
   #guardarParte(chegada: Chegada, i: number, n: number, corpo: Uint8Array): boolean {
@@ -842,6 +1004,8 @@ export class HistoricoEntreAparelhos {
           if (!noPlano) continue
           noPlano.total = Math.max(noPlano.total, canal.n, noPlano.feitas)
           noPlano.resumo = canal.h
+          if (typeof canal.q === "object" && canal.q !== null) noPlano.conversa = canal.q
+          else delete noPlano.conversa
         }
       } else {
         const plano: NonNullable<EstadoDoHistorico["plano"]> = { comecou: agora, canais: {} }
@@ -853,7 +1017,7 @@ export class HistoricoEntreAparelhos {
             continue
           }
           if (!inicial && h.trazidos?.[canal.c] === canal.h) continue
-          plano.canais[canal.c] = { total: canal.n, feitas: 0, cursor: null, resumo: canal.h }
+          plano.canais[canal.c] = { total: canal.n, feitas: 0, cursor: null, resumo: canal.h, ...(typeof canal.q === "object" && canal.q !== null ? { conversa: canal.q } : {}) }
         }
         // No channels and not the initial device: nothing to fetch. The initial device still fetches media.
         if (inicial || Object.keys(plano.canais).length > 0) h.plano = plano
@@ -1073,10 +1237,28 @@ export class HistoricoEntreAparelhos {
     this.#irmaoLigado()
     // One session per device: a new `hi` from the same device replaces the previous one.
     let envioAnterior: EnvioDoHistorico | undefined
+    const substituidas = new Set<string>()
     for (const [s, sessao] of this.#respostas) {
       if (sessao.para !== cabecalho.ap) continue
       envioAnterior ??= sessao.envio
       this.#respostas.delete(s)
+      substituidas.add(s)
+    }
+    /*
+      And what was still queued for the replaced session goes too (21/11/2026). A phone
+      that locks mid-media leaves a large response here, drained at the signal budget
+      (40 a minute): its new session's inventory and pages waited behind minutes of parts
+      no one would read, the phone saw no progress, gave up ("irmao-calado"), and on the
+      next lock left another one. Only the device that asked can open those parts.
+    */
+    if (substituidas.size > 0) {
+      const antes = this.#fila.length
+      for (let i = this.#fila.length - 1; i >= 0; i--) {
+        const s = this.#fila[i]?.de.s
+        if (s !== undefined && substituidas.has(s)) this.#fila.splice(i, 1)
+      }
+      this.estatisticas.descartados += antes - this.#fila.length
+      for (const chave of [...this.#guardadas.keys()]) if (substituidas.has(chave.slice(0, chave.indexOf("|")))) this.#guardadas.delete(chave)
     }
     const par = novoParDoHistorico()
     let chave: Uint8Array
@@ -1104,7 +1286,11 @@ export class HistoricoEntreAparelhos {
           : { mensagens: { feitas: 0, total }, fotografias: null }
     this.#respostas.set(cabecalho.s, { chave, para: cabecalho.ap, ultimo: agora, ...(envio ? { envio } : {}) })
     if (envio) this.#dizer([])
-    await this.#responder(cabecalho.s, "hn", cabecalho.ap, "inv", inventario, toBase64(par.publica))
+    const x = toBase64(par.publica)
+    // An inventory too large for the wire goes again without the conversation bitsets (`q`): the count is then not exact, but the history comes.
+    if (!(await this.#responder(cabecalho.s, "hn", cabecalho.ap, "inv", inventario, x))) {
+      await this.#responder(cabecalho.s, "hn", cabecalho.ap, "inv", inventarioDe(contents, this.#contexto(), { semConversa: true }), x)
+    }
   }
 
   async #aoPedido(cabecalho: Cabecalho, corpo: Uint8Array): Promise<void> {
@@ -1120,6 +1306,8 @@ export class HistoricoEntreAparelhos {
         await this.#enviar({ v: 1, k: "hx", s: cabecalho.s, ap: this.#meuAparelho(), para: cabecalho.ap, id: cabecalho.id }, new Uint8Array(0))
         return
       }
+      // A windowed response lives as long as it is being asked for (layer C).
+      guardada.em = this.#porta.agora()
       for (const i of cabecalho.f.slice(0, 512)) {
         const parte = guardada.partes[i]
         const cab = guardada.cabecalhos[i]
@@ -1157,11 +1345,53 @@ export class HistoricoEntreAparelhos {
     } else {
       return
     }
-    await this.#responder(cabecalho.s, "hr", cabecalho.ap, cabecalho.id, resposta)
+    // A response that does not fit the wire is cut smaller, and at the end says what could not go: never silence (20/11/2026).
+    while (!(await this.#responder(cabecalho.s, "hr", cabecalho.ap, cabecalho.id, resposta))) {
+      const menor = await this.#respostaMenor(contents, pedido, resposta)
+      if (menor === null) return
+      resposta = menor
+    }
     if (sessao.envio) {
       this.#contarEnvio(sessao.envio, pedido.t, resposta)
       this.#dizer([])
     }
+  }
+
+  /**
+   * A smaller response for the same request, when the last one did not fit the
+   * wire (more than `partesMax` parts). Before, the responder went silent and
+   * the requester asked the same thing again, forever.
+   *
+   * - a page: half the entries; one entry that still does not fit goes as lost
+   *   (`p`), and the cursor moves past it;
+   * - media: half the items, the rest asked again (`resto`); one item that
+   *   still does not fit is answered without it ("nao-tem" on the other side).
+   *
+   * `null`: nothing smaller to send (the media list, an already empty answer).
+   */
+  async #respostaMenor(contents: VaultContents, pedido: Pedido, anterior: unknown): Promise<unknown> {
+    if (pedido.t === "pagina") {
+      const pagina = anterior as PaginaDoHistorico
+      if (pagina.e.length > 1) {
+        const desde = typeof pedido.desde === "number" ? pedido.desde : null
+        return paginaDe(contents, pedido.c, desde, this.#porta.armazem.inflar, { maxEntradas: Math.floor(pagina.e.length / 2) })
+      }
+      if (pagina.e.length === 0 && pagina.r === undefined) return null
+      return { c: pagina.c, e: [], ate: pagina.ate, fim: pagina.fim, p: pagina.e.length + (pagina.p ?? 0) } satisfies PaginaDoHistorico
+    }
+    if (pedido.t === "media") {
+      const pedidos = pedido.itens.slice(0, TECTOS_DO_HISTORICO.itensPorPedidoDeMedia)
+      const media = anterior as { itens: unknown[]; resto: number }
+      const tratados = pedidos.length - media.resto
+      if (tratados > 1) {
+        const metade = pedidos.slice(0, Math.floor(tratados / 2))
+        const r = await mediaInteiraDe(contents, this.#porta.eu().address, metade, this.#porta.armazem.inflar)
+        return { itens: r.itens, resto: pedidos.length - metade.length + r.resto }
+      }
+      if (media.itens.length === 0) return null
+      return { itens: [], resto: pedidos.length - 1 }
+    }
+    return null
   }
 
   /** What one response carried, into the counts of "Keep this device on". */
@@ -1196,18 +1426,45 @@ export class HistoricoEntreAparelhos {
     return escolhido?.envio ? structuredClone(escolhido.envio) : undefined
   }
 
-  async #responder(s: string, k: "hn" | "hr", para: string, id: string, resposta: unknown, x?: string): Promise<void> {
+  /** `false`: the response does not fit the wire (more than `partesMax` parts); the caller sends a smaller one. */
+  async #responder(s: string, k: "hn" | "hr", para: string, id: string, resposta: unknown, x?: string): Promise<boolean> {
     const sessao = this.#respostas.get(s)
-    if (!sessao) return
+    if (!sessao) return true
     const texto = await comprimir(new TextEncoder().encode(JSON.stringify(resposta)))
     const selado = selarBloco(sessao.chave, s, `r:${id}`, texto)
-    const partes = partir(selado)
-    if (partes.length > TECTOS_DO_FIO_DO_HISTORICO.partesMax) return
-    const cabecalhos = partes.map(
-      (_, i): Cabecalho => ({ v: 1, k, s, ap: this.#meuAparelho(), para, id, i, n: partes.length, ...(x ? { x } : {}) }),
-    )
-    this.#guardadas.set(`${s}|${id}`, { partes, cabecalhos, em: this.#porta.agora(), bytes: selado.length })
-    for (let i = 0; i < partes.length; i++) await this.#enviar(cabecalhos[i] as Cabecalho, partes[i] as Uint8Array)
+    return this.#mandarPartes(s, k, para, id, selado, x, TECTOS_DO_FIO_DO_HISTORICO.bytesPorParte)
+  }
+
+  /**
+   * A sealed response, in parts of `passo` bytes. A part whose signal passes
+   * `sinalMaxCaracteres` makes the whole response split again, smaller (it
+   * was dropped in silence before, and the requester waited forever). `false`
+   * only when it needs more than `partesMax` parts.
+   */
+  async #mandarPartes(s: string, k: "hn" | "hr", para: string, id: string, selado: Uint8Array, x: string | undefined, passo: number): Promise<boolean> {
+    for (; passo >= PARTE_MINIMA; passo = Math.floor(passo / 2)) {
+      const partes = partir(selado, passo)
+      if (partes.length > TECTOS_DO_FIO_DO_HISTORICO.partesMax) return false
+      // Windowed only when the response is kept for the asks (`guardadasBytes`): otherwise the next window could not be served.
+      const w = TECTOS_DO_FIO_DO_HISTORICO.partesPorJanela
+      const janela = k === "hr" && partes.length > w && selado.length <= TECTOS_DO_FIO_DO_HISTORICO.guardadasBytes ? w : 0
+      const cabecalhos = partes.map(
+        (_, i): Cabecalho => ({ v: 1, k, s, ap: this.#meuAparelho(), para, id, i, n: partes.length, ...(x ? { x } : {}), ...(janela ? { w: janela } : {}) }),
+      )
+      const sinais: string[] = []
+      for (let i = 0; i < partes.length; i++) {
+        const sinal = await this.#selar(cabecalhos[i] as Cabecalho, partes[i] as Uint8Array)
+        if (sinal === null) return true
+        if (sinal === "grande") break
+        sinais.push(sinal)
+      }
+      if (sinais.length < partes.length) continue
+      this.#guardadas.set(`${s}|${id}`, { partes, cabecalhos, em: this.#porta.agora(), bytes: selado.length, selado, passo })
+      for (const sinal of janela ? sinais.slice(0, janela) : sinais) this.#fila.push({ sinal, ref: novoId(), de: { k, s, id } })
+      this.#bombear()
+      return true
+    }
+    return false
   }
 
   #contexto(): ContextoDoIrmao {
@@ -1312,28 +1569,59 @@ export class HistoricoEntreAparelhos {
     if (frame.ref !== undefined) this.#noAr.delete(frame.ref)
     if (frame.code === "sinal-rate-limited" || frame.code === "sinal-channel-busy") {
       this.#recuoAte = Math.max(this.#recuoAte, agora + Math.max(1_000, frame.retryAfterMs ?? 2_000))
-      if (item) this.#fila.unshift({ sinal: item.sinal, ref: frame.ref as string })
+      if (item) this.#fila.unshift({ sinal: item.sinal, ref: frame.ref as string, de: item.de })
       this.#bombear()
       return
     }
-    // Too large or no room in the channel: waiting won't help. The session starts again later.
+    const de = item?.de
+    if (frame.code === "sinal-too-large" && de && (de.k === "hr" || de.k === "hn") && de.id !== undefined) {
+      /*
+        A part of a response this device sends (20/11/2026): split it again,
+        smaller, under the same id. The requester takes the larger `n` and
+        starts that response over. Before, the queue emptied, the part was
+        asked again, refused again, and the requester waited for nothing.
+      */
+      const chave = `${de.s}|${de.id}`
+      const guardada = this.#guardadas.get(chave)
+      for (let i = this.#fila.length - 1; i >= 0; i--) {
+        const naFila = this.#fila[i] as SinalNaFila
+        if (naFila.de.s === de.s && naFila.de.id === de.id) this.#fila.splice(i, 1)
+      }
+      const passo = guardada ? Math.floor(guardada.passo / 2) : 0
+      if (!guardada || passo < PARTE_MINIMA) return
+      const primeiro = guardada.cabecalhos[0] as Cabecalho
+      guardada.passo = passo
+      void this.#emSerie(async () => {
+        await this.#mandarPartes(de.s, de.k as "hn" | "hr", primeiro.para as string, de.id as string, guardada.selado, primeiro.x, passo)
+      })
+      return
+    }
+    // No seat in the channel, or anything else waiting won't help: back off. The session starts again later.
     this.#recuoAte = agora + 30_000
     this.#fila.length = 0
-    this.#pedinte = null
+    // Only a signal of our own request ends our session: a refused part of a response to a sibling says nothing about it.
+    if (!de || de.k === "hi" || de.k === "hp") this.#pedinte = null
   }
 
-  async #enviar(semAssinatura: Omit<Cabecalho, "as">, corpo: Uint8Array): Promise<void> {
+  /** Signs and seals one signal. `"grande"`: over `sinalMaxCaracteres`. `null`: no account channel or key now. */
+  async #selar(semAssinatura: Omit<Cabecalho, "as">, corpo: Uint8Array): Promise<string | "grande" | null> {
     const canal = this.#porta.canalDaConta()
     const chave = await this.#porta.derivarChave()
-    if (!canal || !chave) return
+    if (!canal || !chave) return null
     const eu = this.#porta.eu()
     const cabecalho: Cabecalho = {
       ...semAssinatura,
       as: toBase64(eu.assinar(mensagemDoSinal(canal, eu.address, chave.epoca, semAssinatura, corpo))),
     }
     const sinal = toBase64(selarSinal(chave, canal, embrulhar(cabecalho, corpo)))
-    if (sinal.length > TECTOS_DO_FIO_DO_HISTORICO.sinalMaxCaracteres) return
-    this.#fila.push({ sinal, ref: novoId() })
+    return sinal.length > TECTOS_DO_FIO_DO_HISTORICO.sinalMaxCaracteres ? "grande" : sinal
+  }
+
+  async #enviar(semAssinatura: Omit<Cabecalho, "as">, corpo: Uint8Array): Promise<void> {
+    const sinal = await this.#selar(semAssinatura, corpo)
+    // A header-only signal never passes the cap; a resent part is the size it already went at.
+    if (sinal === null || sinal === "grande") return
+    this.#fila.push({ sinal, ref: novoId(), de: { k: semAssinatura.k, s: semAssinatura.s, id: semAssinatura.id } })
     this.#bombear()
   }
 
@@ -1347,7 +1635,7 @@ export class HistoricoEntreAparelhos {
         this.#fila.length = 0
         return
       }
-      const item = this.#fila.shift() as { sinal: string; ref: string }
+      const item = this.#fila.shift() as SinalNaFila
       try {
         this.#porta.enviarSinal(item.sinal, item.ref)
       } catch {
@@ -1355,7 +1643,7 @@ export class HistoricoEntreAparelhos {
         return
       }
       this.#gastos.push(agora)
-      this.#noAr.set(item.ref, { sinal: item.sinal, em: agora })
+      this.#noAr.set(item.ref, { sinal: item.sinal, em: agora, de: item.de })
       this.estatisticas.enviados += 1
     }
     if (this.#fila.length === 0) return
@@ -1400,7 +1688,8 @@ export class HistoricoEntreAparelhos {
       total += canal.total - (canal.perdidas ?? 0)
     }
     if (plano.parado) {
-      return { aTrazer: false, feitas, total, media: null, canais, inicial, perdidas: Math.max(0, total - feitas), razao: plano.parado.razao }
+      const faltam = this.#faltam(plano)
+      return { aTrazer: false, feitas, total, media: null, canais, inicial, razao: plano.parado.razao, ...(faltam !== null ? { faltam } : {}) }
     }
     return {
       aTrazer: true,
@@ -1410,6 +1699,28 @@ export class HistoricoEntreAparelhos {
       canais,
       inicial,
     }
+  }
+
+  /**
+   * The conversation messages missing on this device, over the plan's channels
+   * (20/11/2026). It was `total - feitas` before: the sibling's count of ALL its
+   * entries (the state log too) less the entries that came, repeated ones
+   * included, which is not what is missing. A finished channel has nothing
+   * missing that will still come. `null` when a channel has no `q` (an older
+   * sibling): the exact number is then unknown.
+   */
+  #faltam(plano: NonNullable<EstadoDoHistorico["plano"]>): number | null {
+    const contents = this.#porta.conteudo()
+    if (!contents) return null
+    let faltam = 0
+    for (const [c, canal] of Object.entries(plano.canais)) {
+      if (canal.fim) continue
+      if (!canal.conversa) return null
+      const aqui = faltamDaConversa(contents, c, canal.conversa)
+      if (aqui === null) return null
+      faltam += aqui
+    }
+    return faltam
   }
 
   #dizer(canais: string[], perfis = false): void {

@@ -229,8 +229,22 @@ export function CallChip({
         )}
       </span>
       <span className="call-chip-labels">
-        <span className="call-chip-name">
-          <NomeDePessoa nome={label} endereco={endereco} />
+        {/* The wave sits right after the name, inside the label, and not in a
+            corner of the card: the top-right corner belongs to the "⋯" (44 px
+            target), and two pieces placed in the same corner by absolute
+            position landed on each other. In the label's own row nothing
+            overlaps: the name takes what is left and ends in an ellipsis, and
+            the wave keeps its width. Who is speaking reads in one place, the
+            name and its voice together.
+
+            Not drawn for someone muted: a still wave next to the muted-mic
+            marker says the same thing twice, and the second time with a shape
+            that suggests it could still move. */}
+        <span className="call-chip-name-row">
+          <span className="call-chip-name">
+            <NomeDePessoa nome={label} endereco={endereco} />
+          </span>
+          {!micCalado && <Onda barras={4} className="call-chip-onda" />}
         </span>
         <span className="call-chip-state">{silenced ? strings.call.silenced : texto}</span>
         {aTocar && musicaCalada && <span className="call-chip-musica-calada">{strings.musicaNaChamada.silenciada}</span>}
@@ -285,18 +299,6 @@ export function CallChip({
           )}
         </span>
       )}
-
-      {/* The waveform sits at the end, next to the volume slider, not stuck to the face.
-
-          This is where this card's audio lives: what we hear from this person, and how
-          loud. Pressed against the avatar pushed the name away from the face, which is
-          the reading this card exists to show. Who is speaking stays obvious without
-          reading anything: the entire card lights up.
-
-          Not drawn for someone muted: a still waveform next to the muted-mic marker
-          says the same thing twice, and the second time with a shape that suggests it
-          could still move. */}
-      {!micCalado && <Onda barras={4} className="call-chip-onda" />}
 
       {/* Live (A): the badge and viewer count, always visible, in the top corner. */}
       {aoVivo && (

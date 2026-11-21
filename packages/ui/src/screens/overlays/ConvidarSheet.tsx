@@ -176,7 +176,7 @@ export function ConvidarSheet({
                 onChange={(event) => setQuem(event.target.value)}
               />
             </Field>
-            <p className="field-note">{modo === "meter" ? strings.convidar.meterHint : strings.convidar.enderecoHint}</p>
+            {modo === "meter" && <p className="field-note">{strings.convidar.meterHint}</p>}
           </>
         )}
       </div>

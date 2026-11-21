@@ -131,6 +131,17 @@ export function deviceKeyAtLeaf(tree: RatchetTree, leafIndex: number): Uint8Arra
 }
 
 /**
+ * Whether the leaf declares this extension type in its capabilities (`enclaveCapabilities`).
+ * `false` for an empty leaf. A leaf carries the capabilities of the client that wrote
+ * it: an old leaf of an updated client still says what the old client said.
+ */
+export function leafDeclares(tree: RatchetTree, leafIndex: number, extensionType: number): boolean {
+  const node = tree[leafIndex * 2]
+  if (node?.nodeType !== "leaf") return false
+  return node.leaf.capabilities.extensions.includes(extensionType)
+}
+
+/**
  * The FIRST leaf a given address occupies.
  *
  * Media keys are per-sender, and the sender id has to be something both ends

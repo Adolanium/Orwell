@@ -20,9 +20,11 @@
  * swapping them. Without signing there's no requirement to save, and the builder
  * throws "Could not get code signature for running application".
  *
- * `electron-builder.yml` says `identity: null` because installers are
- * deliberately unsigned, and the packager shouts it out ("skipped macOS code signing, identity
- * explicitly is set to null"). It's not a missing tuning; it's the machinery refusing.
+ * `electron-builder.yml` signs macOS ad hoc only (`identity: "-"`, since 1.3.26, so
+ * that macOS asks for the microphone). That does not help here: an ad hoc
+ * requirement is the hash of the code itself, and the next version always has
+ * another hash, so Squirrel refuses it as a different app. It's not a missing
+ * tuning; it's the machinery refusing.
  * And it refuses LATE: `electron-updater` only calls `setFeedURL` after downloading
  * the entire ZIP, so what you'd see is a full download followed by an error.
  *

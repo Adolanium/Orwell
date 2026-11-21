@@ -48,6 +48,9 @@ export function NotificationPanel({
   busy = null,
   onAcceptRequest,
   onDeclineRequest,
+  aparelhosNaConta,
+  aparelhoARemover = null,
+  onRemoverAparelho,
   onOpen,
   onMarkAllRead,
   onClose,
@@ -96,6 +99,15 @@ export function NotificationPanel({
   /** Who: the channel resolves in `useAmizade`. */
   onAcceptRequest?: ((address: string) => void) | undefined
   onDeclineRequest?: ((address: string) => void) | undefined
+  /**
+   * The account's devices now, by key (1.3.26). "Remove" on a "new device" entry
+   * shows only while that device is still here: state, not record, like the
+   * friend requests. Absent: no button.
+   */
+  aparelhosNaConta?: ReadonlySet<string> | undefined
+  /** The device whose removal is in progress: its button stays still. */
+  aparelhoARemover?: string | null | undefined
+  onRemoverAparelho?: ((deviceKey: string) => void) | undefined
   onOpen: (entry: AppNotification) => void
   onMarkAllRead: () => void
   onClose: () => void
@@ -282,6 +294,17 @@ export function NotificationPanel({
                         </button>
                         {/* The same request card as the rest of the app, with no title: the
                             line above already says who is requesting. Same two buttons. */}
+                        {entry.kind === "device-new" && entry.aparelho && aparelhosNaConta?.has(entry.aparelho) && onRemoverAparelho && (
+                          <div className="notif-actions">
+                            <Button
+                              variant="ghost"
+                              disabled={aparelhoARemover === entry.aparelho}
+                              onClick={() => onRemoverAparelho(entry.aparelho!)}
+                            >
+                              {strings.notifCenter.removerAparelho}
+                            </Button>
+                          </div>
+                        )}
                         {request && (
                           <div className="notif-actions">
                             <PedidoCard
@@ -376,5 +399,7 @@ function IconeDoTipo({ kind }: { kind: AppNotification["kind"] }): React.JSX.Ele
       return <ChatIcon size={22} />
     case "role-given":
       return <PersonIcon size={22} />
+    case "device-new":
+      return <LockIcon size={22} />
   }
 }

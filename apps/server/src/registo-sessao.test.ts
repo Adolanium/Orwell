@@ -44,6 +44,14 @@ describe("sondarRegisto", () => {
     expect(await session.sondarRegisto(casa)).toBe("convite")
   })
 
+  it("uma app abaixo da versão mínima ouve versao-antiga, antes de haver cofre (21/11/2026)", async () => {
+    const { casa } = await levantar("aberto", { versaoMinimaDoCliente: "9.0.0" })
+    const session = new Session(new Vault(new CofreEmMemoria()), { versaoDaApp: "1.3.25" })
+    expect(await session.sondarRegisto(casa)).toBe("versao-antiga")
+    // And the proof-of-work challenge asks nothing of a server that refuses the version.
+    expect(await session.desafioDeRegisto(casa)).toBeNull()
+  })
+
   it("devolve null quando não há servidor", async () => {
     const session = new Session(new Vault(new CofreEmMemoria()), { versaoDaApp: "1.3.25" })
     expect(await session.sondarRegisto("localhost:1", 2000)).toBeNull()

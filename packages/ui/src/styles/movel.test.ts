@@ -21,9 +21,11 @@ const folha = semComentarios(ler("./movel.css"))
 describe("movel.css", () => {
   it("entra depois das folhas a que acrescenta margem, e antes do fundo", () => {
     const ordem = [...entrada.matchAll(/@import "\.\/styles\/([a-z]+)\.css"/g)].map((m) => m[1])
+    // `telemovel.css` comes last: every rule hangs on `.app.telemovel` and
+    // overrides the computer layout at 840 px or less (option B, 20/11/2026).
     // The Aurora theme is not in `styles.css`: it is its own sheet, loaded after
     // this one only on Aurora (`styles-aurora.css`, `folha-da-aurora.ts`).
-    expect(ordem).toEqual(["fontes", "tokens", "base", "components", "screens", "overlays", "vozes", "pele", "painel", "paineis", "movel", "fundo"])
+    expect(ordem).toEqual(["fontes", "tokens", "base", "components", "screens", "overlays", "vozes", "pele", "painel", "paineis", "movel", "fundo", "telemovel"])
   })
 
   it.each(["top", "right", "bottom", "left"])("a margem de %s vem do aparelho, e vale zero sem entalhe", (lado) => {

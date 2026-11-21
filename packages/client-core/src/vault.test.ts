@@ -1149,24 +1149,36 @@ describe("exportar e importar a conta", () => {
     expect(imported.contents.profile.displayName).toBe("Viajante")
   }, 60_000)
 
-  it("o cofre importado pede a posse do aparelho, e o de origem não", async () => {
-    // Importing copies the device that exported it: the new copy must claim
-    // ownership on first login (`assumirPosse`), otherwise the original keeps
-    // speaking for the account (`scripts/e2e-exportar-importar.mjs`, 27/10/2026).
+  it("the last moment online never travels: not in the file, and dropped on import", async () => {
     const origin = new MemoryBackend()
     const vault = new Vault(origin)
     await vault.create("frase-de-viagem")
     await vault.update((contents) => {
-      contents.posseDoAparelho = 3
+      contents.lastOnlineAt = 1_790_000_000_000
+      contents.profile.displayName = "Viajante"
     })
     const file = await vault.exportVault()
 
-    const imported = new Vault(new MemoryBackend())
-    await imported.importVault(file, "frase-de-viagem")
-    await imported.unlock("frase-de-viagem")
-    expect(imported.contents.assumirPosse).toMatch(/^[A-Za-z0-9_-]{24}$/)
-    expect(imported.contents.posseDoAparelho).toBe(3)
-    expect(vault.contents.assumirPosse).toBeUndefined()
+    // The file's vault, opened as it is (no import): the field is not inside.
+    const envelope = JSON.parse(semCabecalho(file) as string) as { vault: unknown }
+    const soOFicheiro = new MemoryBackend()
+    soOFicheiro.bytes = comCabecalho(JSON.stringify(envelope.vault))
+    const lido = new Vault(soOFicheiro)
+    await lido.unlock("frase-de-viagem")
+    expect(lido.contents.profile.displayName).toBe("Viajante")
+    expect(lido.contents.lastOnlineAt).toBeUndefined()
+    // The device that exported keeps its own.
+    expect(vault.contents.lastOnlineAt).toBe(1_790_000_000_000)
+
+    // A file that still carries it (another build): the import drops it, a new device.
+    const comCampo = comCabecalho(
+      JSON.stringify({ format: "enclave-vault", formatVersion: 1, exportedAt: 1, vault: JSON.parse(semCabecalho(origin.bytes!) as string) }),
+    )
+    const importado = new Vault(new MemoryBackend())
+    await importado.importVault(comCampo, "frase-de-viagem")
+    await importado.unlock("frase-de-viagem")
+    expect(importado.contents.profile.displayName).toBe("Viajante")
+    expect(importado.contents.lastOnlineAt).toBeUndefined()
   }, 60_000)
 
   it("passphrase errada falha limpo e não toca no vault local", async () => {

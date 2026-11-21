@@ -1201,9 +1201,13 @@
 }
 
 /*
-  The `+` left of a category's name (1.3.25): a room created already in it. Only
-  for whoever organizes rooms, so the header is a row only then. Dim like the arrow,
-  and it takes the accent of the name under the pointer.
+  The `+` of a category (1.3.25): a room created already in it. Only for whoever
+  organizes rooms, so the header is a row only then. Dim like the arrow, and it
+  takes the accent of the name under the pointer.
+
+  At the right end of the line (1.3.26): the box reaches the row's edge and the
+  glyph stops `--space-3` short of it, where a room's unread count ends and where
+  the header `+` ends. One right edge for every `+` in the column.
 */
 .room-category.com-criar {
   display: flex;
@@ -1221,10 +1225,10 @@
   display: inline-flex;
   flex: none;
   align-items: center;
-  justify-content: center;
-  width: 18px;
+  justify-content: flex-end;
+  width: 26px;
   height: 18px;
-  padding: 0;
+  padding: 0 var(--space-3) 0 0;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -1236,6 +1240,15 @@
 .category-criar:hover,
 .category-criar:focus-visible {
   color: var(--accent);
+}
+
+/* A finger needs 44 px: the header grows to it on a phone, as a channel row
+   does for `.fold`. The glyph keeps its place, the box grows to the left. */
+@media (pointer: coarse) {
+  .category-criar {
+    width: 44px;
+    min-height: 44px;
+  }
 }
 
 /* Compact: rooms shrink like everything else shrinks. */
@@ -1606,6 +1619,86 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-faint);
+}
+
+/*
+  The column while the channel's history syncs (21/11/2026): a status block at
+  the top, and the rows grey and still (`MemberPanel`, `syncing`). The rows
+  take no pointer here and no key (`inert` on the list). When the sync ends,
+  the rows and the block come back in 360 ms (`MEMBERS_SYNC_EXIT_MS`).
+*/
+.members-syncing {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-2) var(--space-4) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  transition: opacity 360ms var(--ease);
+}
+
+.members-syncing.leaving {
+  opacity: 0;
+}
+
+.members-syncing-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--titulo);
+}
+
+.members-syncing-away {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* The bar: 2 px, the brand on the line colour, running left to right. */
+.members-syncing-track {
+  display: block;
+  height: 2px;
+  margin-top: var(--space-3);
+  border-radius: 1px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.members-syncing-bar {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--acento);
+  animation: members-sync-run 1.6s ease-in-out infinite;
+}
+
+@keyframes members-sync-run {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+.members .member-list {
+  transition: opacity 360ms var(--ease);
+}
+
+.members.syncing .member-list {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* Reduced motion: the bar runs 3 times slower and never stops; the way back
+   keeps its 360 ms. Both against the universal rule in `base.css`. */
+@media (prefers-reduced-motion: reduce) {
+  .members-syncing-bar {
+    animation: members-sync-run 4.8s ease-in-out infinite !important;
+  }
+
+  .members-syncing,
+  .members .member-list {
+    transition: opacity 360ms var(--ease) !important;
+  }
 }
 
 /*
@@ -2933,6 +3026,46 @@ numbers again. */
   pointer-events: none;
 }
 
+/**
+ * "Catching up on this conversation…": a line at the bottom of the composer,
+ * under the box (1.3.26, `AvisoAPorEmDia`).
+ *
+ * It was a paragraph above the composer that came and went with the catch-up,
+ * and each time the conversation and the box jumped. Now the line is always
+ * there while the composer is, 16 px like the typing strip, and only its
+ * opacity changes: the conversation and the box never move. The negative
+ * margins eat into the gap above and the form's bottom padding, so the
+ * reserved line costs 16 px, not 28.
+ */
+.chat-composer .chat-a-recuperar {
+  flex: none;
+  height: 16px;
+  min-width: 0;
+  margin: calc(-1 * var(--space-2)) 0 calc(-1 * var(--space-2));
+  padding: 0 var(--space-2);
+  overflow: hidden;
+  font-size: var(--font-xs);
+  line-height: 16px;
+  color: var(--text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms var(--ease);
+}
+
+.chat-composer .chat-a-recuperar[data-visivel] {
+  opacity: 1;
+}
+
+/* Reduced motion: the fade still runs, slower (600 ms, `A_POR_EM_DIA_SAIDA_REDUZIDA_MS`),
+   against the universal rule in `base.css`. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer .chat-a-recuperar {
+    transition: opacity 600ms var(--ease) !important;
+  }
+}
+
 .chat-a-escrever-texto {
   min-width: 0;
   overflow: hidden;
@@ -3251,6 +3384,8 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
  * The movement is small on purpose, six pixels, fading. A nudge is a tap on the
  * shoulder; an earthquake is something else.
  */
+/* `.app.buzzing`: a nudge that arrives shakes the frame of whatever screen is open (21/11/2026, `useNudgeShake`). */
+.app.buzzing .main,
 .main.buzzing {
   animation: buzz-shake 0.82s cubic-bezier(0.36, 0.07, 0.19, 0.97);
 }
@@ -3298,6 +3433,7 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
  * (`SHAKE_CALMO_MS`): change one, change the other.
  */
 @media (prefers-reduced-motion: reduce) {
+  .app.buzzing .main,
   .main.buzzing {
     animation: buzz-shake-calmo 1.64s cubic-bezier(0.36, 0.07, 0.19, 0.97) !important;
   }
@@ -3477,12 +3613,6 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   color: var(--text);
   background: color-mix(in srgb, var(--warning) 12%, transparent);
   border-left: 3px solid var(--warning);
-}
-
-/* The opening phrase (`FraseDoMomento`), in the panel column: no `flex: none`.
-   In a room full of cards, the panel would shrink it. */
-.call > .frase-do-momento {
-  flex: none;
 }
 
 .call-aviso.grave {
@@ -4121,7 +4251,17 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   background: var(--midia-veu);
 }
 
+/* The name and its wave, in one row: the name shrinks and ends in an
+   ellipsis, the wave keeps its width. */
+.call-chip-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
 .call-chip-name {
+  min-width: 0;
   font-size: var(--font-base);
   font-weight: 600;
   line-height: 1.25;
@@ -4153,12 +4293,10 @@ and 623 tall, and would hit the people panel. Same card, at preview scale. */
   display: none;
 }
 
-/* The wave, top-right corner: the sound coming from this person. */
+/* The wave, right after the name: the sound coming from this person. In
+   the label's row, not in a corner: the top-right corner is the "⋯". */
 .call-chip-onda {
-  --onda-altura: 17px;
-  position: absolute;
-  top: var(--space-4);
-  right: var(--space-4);
+  --onda-altura: 14px;
   color: var(--presenca);
 }
 
@@ -7486,6 +7624,45 @@ button.tag-pill[aria-pressed="true"] {
   .sas-palavras {
     grid-template-columns: 1fr;
   }
+}
+
+/* The short pairing code (1.3.26): "K7P · 4QM" on the new device, and the field that takes it. */
+.short-code {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: center;
+}
+
+.short-code-text {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  user-select: all;
+}
+
+.type-code {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.type-code form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.short-code-field {
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-align: center;
+  text-transform: uppercase;
 }
 
 .sas-actions {
@@ -10995,105 +11172,6 @@ button.message-citacao:focus-visible {
   gap: var(--space-2);
 }
 
-/* ------------------------------------------------------- primeiros passos */
-
-/*
-  The card of someone who just created the account. In the same place as the
-  intro banner for a common channel (the `intro` banner), and with the same
-  tone: a banner, not a full screen. With no conversation open there is no
-  `intro` banner to use, so the card goes to the top of the conversation area,
-  above the empty screen.
-  */
-.primeiros-passos {
-  grid-area: intro;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-5);
-  padding-right: calc(var(--space-5) + 28px);
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--accent) 7%, var(--bg-deep));
-}
-
-.main:not(.with-members) > .primeiros-passos {
-  grid-area: pedido;
-}
-
-.primeiros-passos-texto h2 {
-  font-size: var(--font-md);
-  font-weight: 600;
-  color: var(--text);
-}
-
-.primeiros-passos-texto p {
-  margin-top: var(--space-2);
-  font-size: var(--font-base);
-  line-height: 1.5;
-  color: var(--text-dim);
-  overflow-wrap: anywhere;
-}
-
-.primeiros-passos-accoes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-}
-
-.primeiros-passos-accoes button {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
-  color: var(--text);
-  font-size: var(--font-sm);
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease);
-}
-
-.primeiros-passos-accoes button:hover {
-  background: var(--bg-hover);
-}
-
-.primeiros-passos-fechar {
-  position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.primeiros-passos-fechar:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-/* Narrow: the three buttons one per line, full card width, for the finger. */
-@media (max-width: 640px) {
-  .primeiros-passos {
-    padding: var(--space-4);
-    padding-right: calc(var(--space-4) + 28px);
-  }
-
-  .primeiros-passos-accoes {
-    flex-direction: column;
-  }
-
-  .primeiros-passos-accoes button {
-    justify-content: flex-start;
-  }
-}
-
 /* --------------------------------- Settings › Microphone and camera */
 
 /* Noise reduction and the test. See `screens/settings/ConfiguracoesDeVoz.tsx`. */
@@ -11593,34 +11671,6 @@ button.message-citacao:focus-visible {
 .cf-cx { font-size: 11px; fill: var(--apagado); }
 .cf-sim { fill: var(--presenca); }
 .cf-nao { fill: var(--rosa); }
-
-/*
-  The tagline of the moment (phase 6, layer 1): one line with the accent bar on
-  the left, like the rule in the "How it works" document, and "Got it" next to
-  it. Subtle: it is not a warning, it is the answer to the question the person
-  has not asked yet.
-  */
-.frase-do-momento {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2) var(--space-4);
-  width: 100%;
-  padding: var(--space-3) var(--space-4);
-  border-left: 3px solid var(--acento);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  background: var(--accent-soft);
-  font-size: var(--font-sm);
-  line-height: 1.5;
-  color: var(--text);
-  text-align: left;
-}
-
-.frase-do-momento p {
-  margin: 0;
-  flex: 1 1 16em;
-}
 
 /* Below the empty conversation, at the width of its text. */
 .timeline-frase-do-lugar {

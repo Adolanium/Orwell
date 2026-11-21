@@ -1,8 +1,20 @@
 import {
   CAPACIDADE_EMPARELHAMENTO,
+  CAPABILITY_PAIRING_PAKE,
   CAPACIDADE_ESTADO_DA_CONTA,
   PROTOCOL_VERSION,
+  pairCodeBoxKey,
   chaveDeEmparelhamento,
+  pairCodeCi,
+  encodePake,
+  cpaceStart,
+  cpaceRespond,
+  cpaceFinish,
+  decodePake,
+  generatePairingCode,
+  nameplateOf,
+  pairCodeSasWords,
+  pairCodePrs,
   cifrarPairPayload,
   decifrarPairPayload,
   devicePublicKeyOf,
@@ -19,8 +31,11 @@ import {
   verifyDeviceChain,
   type AccountIdentity,
   type ClientFrame,
+  type CpaceStateA,
+  type CpaceResult,
   type EstadoDeConta,
   type PairPayload,
+  type PalavraPasseDaConta,
   type ServerFrame,
 } from "@enclave/protocol"
 
@@ -93,6 +108,22 @@ export type PairFalha =
   | "cancelado"
   /** A reply did not arrive in time. */
   | "tempo-esgotado"
+  /**
+   * Short code (1.3.26): CPace's key confirmation failed. The code typed is not
+   * the code shown (or someone else answered in the box). The box is closed at
+   * once, and the code is spent.
+   */
+  | "wrong-code"
+  /** Short code: no open box has this code (wrong first characters, expired, or used). The server cannot tell which. */
+  | "unknown-code"
+  /** Short code: the new device's code waited five minutes and nobody typed it. */
+  | "expired-code"
+  /** Short code: what was typed is not six characters of the alphabet. */
+  | "invalid-code"
+  /** Short code: the server does not announce `pairing-pake`. The QR of the device with the account still works. */
+  | "server-without-short-code"
+  /** Short code: the QR read names another server than this account's. */
+  | "code-for-another-server"
 
 /**
  * What the interface hears, in the order it happens.
@@ -106,6 +137,12 @@ export type PairFalha =
  */
 export type PairEvento =
   | { fase: "aguarda"; pairId: string; link: string }
+  /**
+   * Short code, new device only (1.3.26): the box is open and the code can be
+   * shown, as text and in a QR (`link`). Comes again if the code had to be
+   * drawn again (its nameplate was taken).
+   */
+  | { fase: "code"; code: string; link: string }
   | { fase: "ligado" }
   | { fase: "sas"; palavras: string }
   | { fase: "estado" }
@@ -115,7 +152,13 @@ export type PairEvento =
    * deadline passed or the parts did not close. In both cases the device joins;
    * the interface tells you.
    */
-  | { fase: "certificado"; address: string; estado?: "inteiro" | "em-falta" }
+  /**
+   * `palavraPasse` (1.3.26): "conta" when the host sent the account password
+   * record, so the interface asks for the account password; "nova" when it did
+   * not, so the interface asks for a new one. Absent from the core's own event,
+   * filled by the session.
+   */
+  | { fase: "certificado"; address: string; estado?: "inteiro" | "em-falta"; palavraPasse?: "conta" | "nova" }
   | { fase: "concluido" }
   | { fase: "falhou"; razao: PairFalha }
 
@@ -140,6 +183,12 @@ export interface CofreDeAparelho {
    * arrive in time: the new device joins anyway, with empty state.
    */
   estado?: EstadoDeConta
+  /**
+   * The account password record (1.3.26): the new device asks for the account
+   * password after pairing and checks it against this. Absent: a host before
+   * 1.3.26, or one with no password; the new device chooses one.
+   */
+  palavraPasse?: PalavraPasseDaConta
 }
 
 /** How long to wait for the server in each step that has a reply. */
@@ -158,6 +207,15 @@ type Enviar = (frame: ClientFrame) => void
 
 // ------------------------------------------------------------ the host
 
+/** The account side of a short-code pairing, while CPace runs. See `AnfitriaoDeEmparelhamento.#onCpaceFrame`. */
+interface HostCodeState {
+  readonly code: string
+  readonly nameplate: string
+  stage: "joining" | "awaiting-a" | "awaiting-tag" | "done"
+  /** CPace's result, between Yb going out and the new device's tag coming back. */
+  result: CpaceResult | null
+}
+
 /**
  * The side that owns the account. See the file header.
  *
@@ -167,10 +225,21 @@ type Enviar = (frame: ClientFrame) => void
  * and seat devices: `publicarManifestoCom(deviceKey)` and `assentar(deviceKey)`.
  */
 export class AnfitriaoDeEmparelhamento {
-  readonly pairId: string
+  /** The box. With a short code, empty until the server finds the box (`pair.code.joined`). */
+  pairId: string
+  /** The QR link. Empty with a short code: here the code came from the other screen. */
   readonly link: string
-  readonly #segredo: Uint8Array
-  readonly #chave: Uint8Array
+  /**
+   * The box key. With a QR, from the secret, at once; with a short code, from
+   * CPace, only after the new device's confirmation tag verifies.
+   */
+  #chave: Uint8Array | null
+  /**
+   * Short code only (1.3.26): this side is CPace's responder. `transcricao`
+   * goes into the words once CPace is done.
+   */
+  #code: HostCodeState | null = null
+  #transcript: Uint8Array | null = null
   #pubConvidado: Uint8Array | null = null
   /** The guest already said yes. May arrive before this side says yes, and waits for it. */
   #simDoConvidado = false
@@ -203,12 +272,27 @@ export class AnfitriaoDeEmparelhamento {
       estado?: () => EstadoDeConta | null
       /** The new device said in `pronto` what it can do. */
       capacidades?: (deviceKey: Uint8Array, capacidades: readonly string[]) => void
+      /** The account password record, for the new device (1.3.26). `null`: this vault has no password. */
+      palavraPasse?: () => PalavraPasseDaConta | null
     },
+    /**
+     * Short code (1.3.26): the code the person typed, already normalized
+     * (`normalizePairingCode`). Without it, the QR pairing: this
+     * side makes the secret and shows it.
+     */
+    byCode?: { code: string },
   ) {
-    this.#segredo = gerarSegredoDeEmparelhamento()
-    this.pairId = pairIdDe(this.#segredo)
-    this.#chave = chaveDeEmparelhamento(this.#segredo, this.pairId)
-    this.link = formatarLink(servidor, this.#segredo)
+    if (byCode) {
+      this.pairId = ""
+      this.#chave = null
+      this.link = ""
+      this.#code = { code: byCode.code, nameplate: nameplateOf(byCode.code), stage: "joining", result: null }
+      return
+    }
+    const segredo = gerarSegredoDeEmparelhamento()
+    this.pairId = pairIdDe(segredo)
+    this.#chave = chaveDeEmparelhamento(segredo, this.pairId)
+    this.link = formatarLink(servidor, segredo)
   }
 
   get acabou(): boolean {
@@ -216,14 +300,35 @@ export class AnfitriaoDeEmparelhamento {
   }
 
   abrir(): void {
-    this.enviar({ t: "pair.open", pairId: this.pairId })
+    if (this.#code) this.enviar({ t: "pair.code.join", nameplate: this.#code.nameplate })
+    else this.enviar({ t: "pair.open", pairId: this.pairId })
     this.#armarPrazo()
   }
 
   /** A frame from the server. `true` if it was for this vault and got handled. */
   receber(frame: ServerFrame): boolean {
-    if (!frame.t.startsWith("pair.") || !("pairId" in frame) || frame.pairId !== this.pairId) return false
+    const code = this.#code
+    if (code !== null && (frame.t === "pair.code.joined" || frame.t === "pair.code.rejected")) {
+      if (frame.nameplate !== code.nameplate || code.stage !== "joining") return false
+      if (this.#fase === "fim") return true
+      if (frame.t === "pair.code.rejected") {
+        this.#terminar(frame.reason === "unknown" ? "unknown-code" : "recusado:rate-limited")
+        return true
+      }
+      this.pairId = frame.pairId
+      code.stage = "awaiting-a"
+      this.#fase = "ligada"
+      this.emitir({ fase: "ligado" })
+      // The new device speaks first (CPace's initiator): its Ya comes now.
+      this.#armarPrazo()
+      return true
+    }
+    if (!frame.t.startsWith("pair.") || !("pairId" in frame) || this.pairId === "" || frame.pairId !== this.pairId) return false
     if (this.#fase === "fim") return true
+    if (code !== null && code.stage !== "done") {
+      this.#onCpaceFrame(frame, code)
+      return true
+    }
     switch (frame.t) {
       case "pair.opened":
         this.#desarmarPrazo()
@@ -241,6 +346,7 @@ export class AnfitriaoDeEmparelhamento {
         this.#armarPrazo()
         return true
       case "pair.message": {
+        if (this.#chave === null) return true
         const payload = decifrarPairPayload(this.#chave, this.pairId, frame.payload)
         // What does not decrypt is not from our pair: ignore it. A server or
         // someone else in the vault sending garbage does not move forward or back.
@@ -261,6 +367,61 @@ export class AnfitriaoDeEmparelhamento {
     }
   }
 
+  /**
+   * The box during CPace (short code only). This side is the responder:
+   * Ya comes, Yb and our tag go, the new device's tag comes. Anything else, or
+   * a tag that does not verify, closes the box: one code, one guess.
+   */
+  #onCpaceFrame(frame: ServerFrame, code: HostCodeState): void {
+    if (frame.t === "pair.closed") {
+      // The new device closes the box when OUR tag does not verify there: in
+      // the middle of CPace, a close is a wrong code far more often than anything else.
+      this.#terminar(frame.reason === "expired" ? "tempo-esgotado" : "wrong-code")
+      return
+    }
+    if (frame.t !== "pair.message") return
+    const message = decodePake(frame.payload)
+    if (message !== null && message.t === "pake-a" && code.stage === "awaiting-a") {
+      const result = cpaceRespond(pairCodePrs(code.code), pairCodeCi(), { sid: message.sid, y: message.y })
+      if (result === null) {
+        this.#terminar("wrong-code")
+        return
+      }
+      code.result = result
+      code.stage = "awaiting-tag"
+      this.#sendCpace(encodePake({ t: "pake-b", y: result.message.y, tag: result.tag }))
+      this.#armarPrazo()
+      return
+    }
+    if (message !== null && message.t === "pake-tag" && code.stage === "awaiting-tag" && code.result !== null) {
+      if (!code.result.verifyPeerTag(message.tag)) {
+        this.#terminar("wrong-code")
+        return
+      }
+      this.#desarmarPrazo()
+      // The ISK leaves memory here: only the box key, bound to this box, stays.
+      this.#chave = pairCodeBoxKey(code.result.isk, this.pairId)
+      this.#transcript = code.result.transcript
+      code.result = null
+      code.stage = "done"
+      // From here the QR protocol, unchanged: our device key first.
+      this.#mandar({ t: "chave-do-aparelho", deviceKey: toBase64(this.identity.deviceSigningPublicKey) })
+      this.#armarPrazo()
+      return
+    }
+    // Anything else in the middle of CPace (a second Ya, garbage, an encrypted
+    // payload before the key): this is not the protocol, and the box dies.
+    this.#terminar("wrong-code")
+  }
+
+  #sendCpace(payload: string): void {
+    try {
+      this.enviar({ t: "pair.send", pairId: this.pairId, payload })
+    } catch {
+      this.#terminar("sem-ligacao")
+    }
+  }
+
   #aoPayload(payload: PairPayload): void {
     switch (payload.t) {
       case "chave-do-aparelho": {
@@ -270,7 +431,10 @@ export class AnfitriaoDeEmparelhamento {
         this.#fase = "sas"
         this.emitir({
           fase: "sas",
-          palavras: palavrasDoSas(this.pairId, this.identity.deviceSigningPublicKey, this.#pubConvidado),
+          palavras:
+            this.#transcript !== null
+              ? pairCodeSasWords(this.pairId, this.identity.deviceSigningPublicKey, this.#pubConvidado, this.#transcript)
+              : palavrasDoSas(this.pairId, this.identity.deviceSigningPublicKey, this.#pubConvidado),
         })
         return
       }
@@ -352,12 +516,21 @@ export class AnfitriaoDeEmparelhamento {
       deviceCert: toBase64(deviceCert),
       accountPrivateKey: toBase64(this.identity.signingPrivateKey),
       ...(partes.length > 0 ? { estado: partes.length } : {}),
+      ...((): { palavraPasse?: PalavraPasseDaConta } => {
+        try {
+          const registo = this.ganchos.palavraPasse?.() ?? null
+          return registo ? { palavraPasse: registo } : {}
+        } catch {
+          return {}
+        }
+      })(),
     })
     // The snapshot pieces follow the certificate immediately, through the same box and in order,
     // encrypted one by one like everything that passes through it.
     partes.forEach((dados, parte) => this.#mandar({ t: "estado", parte, dados }))
     this.#fase = "certificado"
-    this.#armarPrazo(60_000)
+    // Since 1.3.26 the new device asks for the account password before it connects: time to type it.
+    this.#armarPrazo(5 * 60_000)
   }
 
   /**
@@ -426,6 +599,8 @@ export class AnfitriaoDeEmparelhamento {
   }
 
   #fechar(): void {
+    // A short code the server never found: there is no box to close.
+    if (this.pairId === "") return
     try {
       this.enviar({ t: "pair.close", pairId: this.pairId })
     } catch {
@@ -434,6 +609,8 @@ export class AnfitriaoDeEmparelhamento {
   }
 
   #mandar(payload: PairPayload): void {
+    // No key yet (short code before CPace) means nothing encrypted can leave.
+    if (this.#chave === null) return
     try {
       this.enviar({ t: "pair.send", pairId: this.pairId, payload: cifrarPairPayload(this.#chave, this.pairId, payload) })
     } catch {
@@ -454,6 +631,19 @@ export class AnfitriaoDeEmparelhamento {
 
 // ------------------------------------------------------------ the guest
 
+/** How many codes the new device draws when the server says the nameplate is taken. */
+const CODE_DRAWS = 5
+
+/** The new device's side of a short-code pairing, until the box key exists. */
+interface GuestCodeState {
+  readonly formatLink: (server: string, code: string) => string
+  code: string
+  draws: number
+  /** CPace's initiator state, between Ya going out and Yb coming back. Holds the secret scalar. */
+  state: CpaceStateA | null
+  stage: "opening" | "awaiting-account" | "awaiting-b" | "done"
+}
+
 /**
  * The new side, no account. Opens its own socket to the link server.
  *
@@ -464,9 +654,17 @@ export class AnfitriaoDeEmparelhamento {
  * this device on the channels.
  */
 export class ConvidadoDeEmparelhamento {
-  readonly pairId: string
+  /** The box. With a short code, random, and drawn again with the code if its nameplate was taken. */
+  pairId: string
   readonly servidor: string
-  readonly #chave: Uint8Array
+  /** The box key: from the QR secret at once, or from CPace after the other side's tag verifies. */
+  #chave: Uint8Array | null
+  /**
+   * Short code only (1.3.26): this side makes the code and is CPace's
+   * initiator. `null` in a QR pairing.
+   */
+  #code: GuestCodeState | null = null
+  #transcript: Uint8Array | null = null
   readonly #deviceSigningPrivateKey: Uint8Array
   readonly #deviceSigningPublicKey: Uint8Array
   #socket: WebSocket | null = null
@@ -499,7 +697,12 @@ export class ConvidadoDeEmparelhamento {
   readonly resultado: Promise<CofreDeAparelho>
 
   constructor(
-    link: { server: string; segredo: Uint8Array },
+    /**
+     * A QR pairing: the server and secret read from the other device's link.
+     * A short-code pairing (1.3.26): the server this device uses, and how to
+     * write the code's QR link; the code is drawn here.
+     */
+    link: { server: string; segredo: Uint8Array } | { server: string; byCode: { formatLink: (server: string, code: string) => string } },
     private readonly urlDoGateway: (servidor: string) => string,
     /** Are two server names the same server? The canonical rule lives in the core. */
     private readonly mesmoServidor: (a: string, b: string) => boolean,
@@ -507,8 +710,15 @@ export class ConvidadoDeEmparelhamento {
     deviceSigningPrivateKey: Uint8Array = generateDeviceKey().privateKey,
   ) {
     this.servidor = link.server
-    this.pairId = pairIdDe(link.segredo)
-    this.#chave = chaveDeEmparelhamento(link.segredo, this.pairId)
+    if ("segredo" in link) {
+      this.pairId = pairIdDe(link.segredo)
+      this.#chave = chaveDeEmparelhamento(link.segredo, this.pairId)
+    } else {
+      this.pairId = ""
+      this.#chave = null
+      this.#code = { formatLink: link.byCode.formatLink, code: "", draws: 0, state: null, stage: "opening" }
+      this.#drawCode()
+    }
     this.#deviceSigningPrivateKey = deviceSigningPrivateKey
     this.#deviceSigningPublicKey = devicePublicKeyOf(deviceSigningPrivateKey)
     this.resultado = new Promise((resolve, reject) => {
@@ -521,6 +731,26 @@ export class ConvidadoDeEmparelhamento {
 
   get deviceSigningPublicKey(): Uint8Array {
     return this.#deviceSigningPublicKey
+  }
+
+  /** The short code this device shows, or `null` in a QR pairing. */
+  get code(): string | null {
+    return this.#code?.code ?? null
+  }
+
+  /** A fresh code and a fresh box id, both from the CSPRNG. */
+  #drawCode(): void {
+    const code = this.#code
+    if (!code) return
+    code.code = generatePairingCode()
+    code.draws++
+    this.pairId = pairIdDe(globalThis.crypto.getRandomValues(new Uint8Array(32)))
+  }
+
+  #openByCode(): void {
+    const code = this.#code
+    if (!code) return
+    this.#enviar({ t: "pair.code.open", nameplate: nameplateOf(code.code), pairId: this.pairId })
   }
 
   /**
@@ -569,6 +799,16 @@ export class ConvidadoDeEmparelhamento {
     if (this.#fase === "fim") return
     if (frame.t === "hello.ok") {
       if (this.#fase !== "a-ligar") return
+      if (this.#code) {
+        // A server that does not know short codes: the person uses the QR of the other device.
+        if (!frame.capabilities.includes(CAPABILITY_PAIRING_PAKE)) {
+          this.#terminar("server-without-short-code")
+          return
+        }
+        this.#fase = "a-juntar"
+        this.#openByCode()
+        return
+      }
       if (!frame.capabilities.includes(CAPACIDADE_EMPARELHAMENTO)) {
         this.#terminar("servidor-sem-emparelhamento")
         return
@@ -585,6 +825,11 @@ export class ConvidadoDeEmparelhamento {
       return
     }
     if (!frame.t.startsWith("pair.") || !("pairId" in frame) || frame.pairId !== this.pairId) return
+    const code = this.#code
+    if (code !== null && code.stage !== "done") {
+      this.#onCodeFrame(frame, code)
+      return
+    }
     switch (frame.t) {
       case "pair.rejected":
         this.#terminar(`recusado:${frame.reason}`)
@@ -597,6 +842,7 @@ export class ConvidadoDeEmparelhamento {
         this.#armarPrazo()
         return
       case "pair.message": {
+        if (this.#chave === null) return
         const payload = decifrarPairPayload(this.#chave, this.pairId, frame.payload)
         if (payload === null) return
         this.#aoPayload(payload)
@@ -617,6 +863,72 @@ export class ConvidadoDeEmparelhamento {
     }
   }
 
+  /**
+   * The box before the key, with a short code: open, wait for the account,
+   * then CPace as the initiator. One guess per box: a tag that does not
+   * verify, or anything out of order, closes it.
+   */
+  #onCodeFrame(frame: ServerFrame, code: GuestCodeState): void {
+    switch (frame.t) {
+      case "pair.opened":
+        if (code.stage !== "opening") return
+        this.#desarmarPrazo()
+        code.stage = "awaiting-account"
+        // No deadline here: the server's five minutes are the code's life.
+        this.emitir({ fase: "code", code: code.code, link: code.formatLink(this.servidor, code.code) })
+        return
+      case "pair.rejected":
+        // Another code waiting has this nameplate (or the id is taken): draw again, a few times.
+        if (frame.reason === "exists" && code.stage === "opening" && code.draws < CODE_DRAWS) {
+          this.#drawCode()
+          this.#openByCode()
+          return
+        }
+        this.#terminar(`recusado:${frame.reason}`)
+        return
+      case "pair.closed":
+        if (code.stage === "awaiting-account") this.#terminar(frame.reason === "expired" ? "expired-code" : `fechado:${frame.reason}`)
+        // In the middle of CPace the other side closed: it saw our tag fail.
+        else this.#terminar("wrong-code")
+        return
+      case "pair.joined": {
+        if (code.stage !== "awaiting-account") return
+        code.state = cpaceStart(pairCodePrs(code.code), pairCodeCi())
+        code.stage = "awaiting-b"
+        this.emitir({ fase: "ligado" })
+        this.#enviar({ t: "pair.send", pairId: this.pairId, payload: encodePake({ t: "pake-a", ...code.state.message }) })
+        this.#armarPrazo()
+        return
+      }
+      case "pair.message": {
+        const message = decodePake(frame.payload)
+        const state = code.state
+        if (message === null || message.t !== "pake-b" || code.stage !== "awaiting-b" || state === null) {
+          this.#terminar("wrong-code")
+          return
+        }
+        const result = cpaceFinish(state, { y: message.y })
+        code.state = null
+        if (result === null || !result.verifyPeerTag(message.tag)) {
+          this.#terminar("wrong-code")
+          return
+        }
+        this.#desarmarPrazo()
+        // Our tag first, so the other side can check it; then the key, and the QR protocol from here.
+        this.#enviar({ t: "pair.send", pairId: this.pairId, payload: encodePake({ t: "pake-tag", tag: result.tag }) })
+        this.#chave = pairCodeBoxKey(result.isk, this.pairId)
+        this.#transcript = result.transcript
+        code.stage = "done"
+        this.#fase = "ligada"
+        this.#mandar({ t: "chave-do-aparelho", deviceKey: toBase64(this.#deviceSigningPublicKey) })
+        this.#armarPrazo()
+        return
+      }
+      default:
+        return
+    }
+  }
+
   #aoPayload(payload: PairPayload): void {
     switch (payload.t) {
       case "chave-do-aparelho":
@@ -624,7 +936,13 @@ export class ConvidadoDeEmparelhamento {
         this.#desarmarPrazo()
         this.#pubAnfitriao = fromBase64(payload.deviceKey)
         this.#fase = "sas"
-        this.emitir({ fase: "sas", palavras: palavrasDoSas(this.pairId, this.#pubAnfitriao, this.#deviceSigningPublicKey) })
+        this.emitir({
+          fase: "sas",
+          palavras:
+            this.#transcript !== null
+              ? pairCodeSasWords(this.pairId, this.#pubAnfitriao, this.#deviceSigningPublicKey, this.#transcript)
+              : palavrasDoSas(this.pairId, this.#pubAnfitriao, this.#deviceSigningPublicKey),
+        })
         return
       case "certificado": {
         // Only after the person has confirmed HERE, and the host signs only after the
@@ -699,6 +1017,7 @@ export class ConvidadoDeEmparelhamento {
       deviceCert,
       deviceSigningPrivateKey: this.#deviceSigningPrivateKey,
       ...(accountPrivateKey ? { accountPrivateKey } : {}),
+      ...(payload.palavraPasse ? { palavraPasse: payload.palavraPasse } : {}),
     }
     /*
       The snapshot comes after, in pieces, if the host sends it (phase 5). A
@@ -731,6 +1050,11 @@ export class ConvidadoDeEmparelhamento {
     this.#fase = "certificado"
     this.emitir({ fase: "certificado", address: certificado.address, ...(chegou ? { estado: chegou } : {}) })
     this.#resolver(certificado)
+  }
+
+  /** The account password record that came with the certificate (1.3.26), or `null`. */
+  get palavraPasseRecebida(): PalavraPasseDaConta | null {
+    return this.#certificado?.palavraPasse ?? null
   }
 
   /** The person confirmed the words on THIS screen. Tell the host and wait for the certificate. */
@@ -784,7 +1108,7 @@ export class ConvidadoDeEmparelhamento {
   }
 
   #fecharCaixa(): void {
-    if (this.#socket?.readyState === 1) this.#enviar({ t: "pair.close", pairId: this.pairId })
+    if (this.#socket?.readyState === 1 && this.pairId !== "") this.#enviar({ t: "pair.close", pairId: this.pairId })
   }
 
   #fecharSocket(): void {
@@ -806,6 +1130,7 @@ export class ConvidadoDeEmparelhamento {
   }
 
   #mandar(payload: PairPayload): void {
+    if (this.#chave === null) return
     this.#enviar({ t: "pair.send", pairId: this.pairId, payload: cifrarPairPayload(this.#chave, this.pairId, payload) })
   }
 

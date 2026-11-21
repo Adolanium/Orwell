@@ -35,6 +35,7 @@ import { chromium, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { ate, contasDoServidor, dentro, espera, irParaEmparelhar, separador, verificador } from "./fase7-comum.mjs"
 import { levantarServidor, RAIZ } from "./servidor-descartavel.mjs"
+import { juntarComPalavras } from "./juntar-aparelho.mjs"
 
 const FRASE = "frase-de-verificacao-2026"
 const CAPTURAS = join(RAIZ, ".verify-data/prova-membros-aparelho-novo", new Date().toISOString().replace(/[:.]/g, "-"))
@@ -122,28 +123,16 @@ async function abrir(motor, rotulo, contexto = {}) {
 /** Pair a new browser page with the main one, by the link, through both screens. */
 async function emparelhar(pc, novo) {
   await pc.getByRole("button", { name: "Configurações", exact: true }).first().click()
-  await pc.getByRole("button", { name: "Aparelhos", exact: true }).click()
-  await pc.getByRole("button", { name: "Acrescentar aparelho" }).click()
+  await pc.getByRole("button", { name: "Conta e segurança", exact: true }).click()
+  await pc.getByRole("button", { name: "Juntar um aparelho" }).click()
   const folha = pc.locator(".sheet").first()
   await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
   await irParaEmparelhar(novo)
-  await novo.getByRole("heading", { name: "Emparelhar este aparelho" }).waitFor({ timeout: 10_000 })
-  await novo.getByLabel("Ou cola o link").fill(link)
-  await novo.getByRole("button", { name: "Continuar" }).click()
-  await novo.getByRole("heading", { name: "Palavra-passe deste aparelho" }).waitFor({ timeout: 10_000 })
-  const frases = novo.locator('.gate-card input[type="password"]')
-  await frases.nth(0).fill(FRASE)
-  await frases.nth(1).fill(FRASE)
-  await novo.getByRole("button", { name: "Continuar" }).click()
-  await novo.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await folha.locator(".sas-palavras").waitFor({ timeout: 30_000 })
-  await novo.getByRole("button", { name: "São as mesmas" }).click()
-  await folha.getByRole("button", { name: "São as mesmas" }).click()
-  await novo.getByRole("heading", { name: "Este aparelho já é da conta" }).waitFor({ timeout: 120_000 })
+  await novo.getByLabel("Ou cola o código").waitFor({ timeout: 10_000 })
+  await juntarComPalavras(novo, folha, link, FRASE)
   await folha.getByRole("button", { name: "Fechar" }).first().click().catch(() => {})
   await pc.keyboard.press("Escape").catch(() => {})
-  await novo.getByRole("button", { name: "Entrar", exact: true }).click()
   await dentro(novo)
 }
 

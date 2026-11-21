@@ -35,8 +35,23 @@
 	encode zstd gzip
 
 	# Gateway (WebSocket), federation and health all live under /_enclave/.
+	#
+	# A server restart (a deploy) is a wait, not an error (1.3.26). While the server
+	# container is down or still opening its port, every dial fails at once with
+	# "connection refused" (or "no such host" while compose recreates it). Without
+	# these two lines Caddy answered each of those with 502, for the whole 1 min 45 s of
+	# the 1.3.25 deploy. Now it holds the request and dials again every 250 ms for up
+	# to 30 s, and the client sees a slow answer instead of a failed one. WebSocket
+	# upgrades included: the retry happens before any byte goes upstream. Dial
+	# failures are retried for every method; a GET that already reached the server
+	# may be retried too (Caddy's default lb_retry_match), which is safe because every
+	# GET here is a read. 30 s is well under the 1 h read timeout
+	# of the front nginx (infra/nginx-enclave.conf), so nginx waits too.
 	handle /_enclave/* {
-		reverse_proxy server:8448
+		reverse_proxy server:8448 {
+			lb_try_duration 30s
+			lb_try_interval 250ms
+		}
 	}
 
 	# The app, at /app/. Static files with fallback to index.

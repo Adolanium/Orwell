@@ -92,14 +92,14 @@ describe("Configurações — uma secção de cada vez", () => {
     renderSettings()
 
     expect(screen.getByRole("heading", { name: strings.settings.account })).toBeTruthy()
-    expect(screen.queryByRole("heading", { name: strings.settings.device })).toBeNull()
+    expect(screen.queryByRole("heading", { name: strings.contaESeguranca.titulo })).toBeNull()
     expect(screen.queryByLabelText(strings.settings.micMuted)).toBeNull()
   })
 
   it("a secção que vem de fora é a que se vê, e só ela", () => {
     renderSettings({ seccao: "aparelhos" })
 
-    expect(screen.getByRole("heading", { name: strings.settings.device })).toBeTruthy()
+    expect(screen.getByRole("heading", { name: strings.contaESeguranca.titulo })).toBeTruthy()
     // And the previous one leaves: it is not scrolling to it, it is replacing it.
     expect(screen.queryByRole("heading", { name: strings.settings.account })).toBeNull()
   })
@@ -123,12 +123,11 @@ describe("Configurações — uma secção de cada vez", () => {
     expect(screen.getByRole("button", { name: strings.settings.lockNow })).toBeTruthy()
   })
 
-  it('Aparelhos tem, por baixo da lista, "Este aparelho", e a zona de perigo num cartão à parte', () => {
+  it("Conta e segurança é uma lista, e a zona de perigo fica num cartão à parte", async () => {
     renderSettings({ seccao: "aparelhos" })
-    const este = screen.getByRole("heading", { name: strings.settings.device }).closest("section")!
-    expect(within(este).queryByText(strings.settings.zonaDePerigo)).toBeNull()
-    // Own card, highlighted title, full button.
-    // The delete button is the only one on the card.
+    const lista = screen.getByRole("heading", { name: strings.contaESeguranca.titulo }).closest("section")!
+    expect(within(lista).getByRole("button", { name: new RegExp(strings.contaESeguranca.aparelhos) })).toBeTruthy()
+    expect(within(lista).queryByText(strings.settings.zonaDePerigo)).toBeNull()
     const perigo = screen.getByRole("heading", { name: strings.settings.zonaDePerigo }).closest("section")!
     expect(perigo.classList.contains("zona-de-perigo")).toBe(true)
     const botoes = within(perigo).getAllByRole("button")
@@ -180,17 +179,6 @@ describe("Configurações — uma secção de cada vez", () => {
     expect(strings.definicoesNovas.bloquearSozinho).toBe("Expirar sessão")
     expect(screen.queryByText(strings.settings.lockNote)).toBeNull()
   })
-
-  it("o aviso de que exportar muda a conta de aparelho continua lá, que esse não é explicação nenhuma", () => {
-    // The paragraphs explaining each switch below it left here. This one stays: it
-    // is a fact that the person has no way to guess from a label alone. It no
-    // longer says "one device at a time", which stopped being true with pairing: it
-    // says that export and import MOVE the account elsewhere.
-    renderSettings({ seccao: "aparelhos" })
-
-    expect(screen.getByText(strings.settings.importReplacesDevice)).toBeTruthy()
-    expect(strings.settings.importReplacesDevice).toContain("Acrescentar aparelho")
-  })
 })
 
 /**
@@ -207,9 +195,7 @@ describe("Configurações: exportar num aparelho sem a chave da conta", () => {
     renderSettings({ seccao: "aparelhos", bridge: ponteComChave(false) })
 
     await screen.findByText(strings.settings.exportNeedsAccountKey)
-    // The device list says the same fact above: the phrase may appear twice.
-    expect(screen.getAllByText(strings.pairing.noAccountKey).length).toBeGreaterThan(0)
-    expect(screen.queryByRole("button", { name: strings.settings.exportAction })).toBeNull()
+    expect(screen.queryByRole("button", { name: new RegExp(strings.contaESeguranca.guardarFicheiro) })).toBeNull()
     // The rest of the section stays: deleting is from this device.
     expect(screen.getByRole("button", { name: strings.settings.destroyAction })).toBeTruthy()
   })
@@ -217,7 +203,7 @@ describe("Configurações: exportar num aparelho sem a chave da conta", () => {
   it("com a chave da conta o botão está lá, como sempre esteve", async () => {
     renderSettings({ seccao: "aparelhos", bridge: ponteComChave(true) })
 
-    expect(await screen.findByRole("button", { name: strings.settings.exportAction })).toBeTruthy()
+    expect(await screen.findByRole("button", { name: new RegExp(strings.contaESeguranca.guardarFicheiro) })).toBeTruthy()
     expect(screen.queryByText(strings.settings.exportNeedsAccountKey)).toBeNull()
   })
 })
@@ -252,6 +238,7 @@ describe("Configurações: exportar com as imagens", () => {
   it("a caixa vem desmarcada, e a nota diz o tamanho das imagens", async () => {
     const { ponte } = ponteDeExportar()
     renderSettings({ seccao: "aparelhos", bridge: ponte })
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(strings.contaESeguranca.guardarFicheiro) }))
     const caixa = await screen.findByRole("checkbox", { name: strings.settings.exportImagens })
     expect((caixa as HTMLInputElement).checked).toBe(false)
     expect(await screen.findByText(strings.settings.exportImagensNota("42 MB"))).toBeTruthy()
@@ -260,17 +247,20 @@ describe("Configurações: exportar com as imagens", () => {
   it("desmarcada, a ponte exporta como sempre; marcada, recebe { incluirImagens: true }", async () => {
     const { ponte, exportar } = ponteDeExportar({ ficheiro: new Blob([new Uint8Array([1, 2, 3])]) })
     renderSettings({ seccao: "aparelhos", bridge: ponte })
-    const botao = await screen.findByRole("button", { name: strings.settings.exportAction })
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(strings.contaESeguranca.guardarFicheiro) }))
+    const botao = await screen.findByRole("button", { name: strings.entrada.guardarFicheiro })
 
     fireEvent.click(botao)
     await vi.waitFor(() => expect(exportar).toHaveBeenCalledTimes(1))
     expect(exportar).toHaveBeenLastCalledWith(undefined)
 
-    fireEvent.click(screen.getByRole("checkbox", { name: strings.settings.exportImagens }))
+    // The sheet closes once the file is out; open it again for the second file.
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(strings.contaESeguranca.guardarFicheiro) }))
+    fireEvent.click(await screen.findByRole("checkbox", { name: strings.settings.exportImagens }))
     await vi.waitFor(() => expect((screen.getByRole("checkbox", { name: strings.settings.exportImagens }) as HTMLInputElement).checked).toBe(true))
     // The previous export ends outside this tick: wait for the guard to release it.
     await vi.waitFor(async () => {
-      fireEvent.click(botao)
+      fireEvent.click(screen.getByRole("button", { name: strings.entrada.guardarFicheiro }))
       expect(exportar).toHaveBeenCalledTimes(2)
     })
     expect(exportar).toHaveBeenLastCalledWith(undefined, { incluirImagens: true })

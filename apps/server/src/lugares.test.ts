@@ -189,6 +189,8 @@ describe("P8: GET /_interno/canais", () => {
     expect(corpo.contagens.pedidosSemOuvintes.ultimaHora).toBe(0)
     expect(corpo.contagens.respondidos).toEqual({ ultimaHora: 1, ultimas24h: 1 })
     expect(corpo.contagens.semChave).toEqual({ ultimaHora: 1, ultimas24h: 1 })
+    // The claim came right after the account's seat request (1.3.26).
+    expect(corpo.contagens.semChaveEmPedido).toEqual({ ultimaHora: 1, ultimas24h: 1 })
     expect(corpo.contagens.recusasPorEpoca).toEqual({ ultimaHora: 1, ultimas24h: 1 })
     // Two logins at 0 keys, and the phone after the empty claim.
     expect(corpo.contagens.avisosDeChaves.ultimaHora).toBeGreaterThanOrEqual(3)
@@ -208,7 +210,55 @@ describe("P8: GET /_interno/canais", () => {
   }, 30_000)
 })
 
+describe("P8, mais claro (1.3.26)", () => {
+  it("a mesma reclamação vazia três vezes seguidas (as tentativas do cliente) conta uma vez e escreve uma linha", async () => {
+    const s = await levantar()
+    const linhas: string[] = []
+    vi.spyOn(process.stderr, "write").mockImplementation((texto: string | Uint8Array) => {
+      linhas.push(String(texto))
+      return true
+    })
+    const pc = generateIdentity(s.casa)
+    const telemovel = identityFromPrivateKey(pc.signingPrivateKey, s.casa)
+    const ligPc = await Cliente.ligarComCadeia(s.url, pc)
+    await publicarManifesto(ligPc, pc, [pc, telemovel])
+    for (let i = 0; i < 3; i++) {
+      ligPc.enviar({ t: "keypackage.claim", address: pc.address, bundle: true, devices: [toBase64(telemovel.deviceSigningPublicKey)] })
+      expect((await ligPc.proximoDe("keypackage.claimed")).keyPackages).toEqual([])
+    }
+    const corpo = (await contagem(s)).json() as ContagemDosLugares
+    expect(corpo.contagens.semChave.ultimaHora).toBe(1)
+    // Nobody asked for a seat: not the P3 kind.
+    expect(corpo.contagens.semChaveEmPedido.ultimaHora).toBe(0)
+    expect(linhas.filter((l) => l.includes("reseat-failed"))).toHaveLength(1)
+    ligPc.fechar()
+  }, 20_000)
+})
+
 describe("ContadoresDosLugares", () => {
+  it("uma tentativa repetida não conta, outra reclamação sim, e só a que vem depois de um pedido da conta é `semChaveEmPedido`", () => {
+    const contadores = new ContadoresDosLugares(() => {})
+    const t = 90_000_000
+    const de = (quem: string, alvo: string, aparelhos?: string[]) => ({ quem, alvo, aparelhos })
+    contadores.semChave("reseat", 1, 0, t, de("c1", "@x", ["b", "a"]))
+    contadores.semChave("reseat", 1, 0, t + 1_500, de("c1", "@x", ["a", "b"]))
+    contadores.semChave("reseat", 1, 0, t + 3_000, de("c1", "@x", ["a", "b"]))
+    // Another connection, another account, other devices: other claims.
+    contadores.semChave("reseat", 1, 0, t + 3_000, de("c2", "@x", ["a", "b"]))
+    contadores.semChave("reseat", 1, 0, t + 3_000, de("c1", "@x", ["a"]))
+    contadores.semChave("convite", 0, 0, t + 3_000, de("c1", "@y"))
+    // The same claim long after: a new claim.
+    contadores.semChave("reseat", 1, 0, t + 3_000 + ContadoresDosLugares.REPETICAO_MS, de("c1", "@x", ["a", "b"]))
+    // `@y` asks for a seat; a claim for `@y` 10 s later is the P3 kind, one 40 s later is not.
+    contadores.pedido("!a", "@y", 1, t + 20_000)
+    contadores.semChave("convite", 0, 0, t + 30_000, de("c3", "@y"))
+    contadores.semChave("convite", 0, 0, t + 60_000, de("c4", "@y"))
+    const c = contadores.contagem(Math.floor((t + 60_000) / 60_000)).contagens
+    expect(c.semChave.ultimaHora).toBe(7)
+    expect(c.semChaveEmPedido.ultimaHora).toBe(1)
+  })
+
+
   it("janela de uma hora e de 24 horas, e o que passou das 24 horas sai", () => {
     const contadores = new ContadoresDosLugares(() => {}, 1_000)
     contadores.notar("pedidos", 1_000)
@@ -248,5 +298,25 @@ describe("ContadoresDosLugares", () => {
     expect(linhas).toHaveLength(LINHAS_DE_REGISTO_POR_MINUTO + 2)
     expect(linhas[LINHAS_DE_REGISTO_POR_MINUTO]).toBe(`enclave: no-key-package: 5 more in minute ${t / 60_000}, not written`)
     expect(contadores.contagem(t / 60_000 + 1).contagens.semChave.ultimaHora).toBe(LINHAS_DE_REGISTO_POR_MINUTO + 6)
+  })
+})
+
+describe("stale-epoch tied to the claim before it (layer A, 21/11/2026)", () => {
+  it("counts the packages served, and a stale-epoch refusal on the connection that claimed within the window, with one line and no address", () => {
+    const linhas: string[] = []
+    const contadores = new ContadoresDosLugares((linha) => linhas.push(linha), 1_000)
+    const agora = 1_000 * 60_000
+    contadores.reclamou("ligacao-a", 2, agora)
+    contadores.recusaPorEpoca("ligacao-a", agora + 5_000)
+    // Another connection, with no claim behind it: a plain refusal.
+    contadores.recusaPorEpoca("ligacao-b", agora + 6_000)
+    // The same connection, past the window: plain too.
+    contadores.recusaPorEpoca("ligacao-a", agora + ContadoresDosLugares.RECUSA_DEPOIS_DE_RECLAMAR_MS + 10_000)
+    const { contagens } = contadores.contagem(1_001)
+    expect(contagens.pacotesServidos.ultimaHora).toBe(2)
+    expect(contagens.recusasPorEpoca.ultimaHora).toBe(3)
+    expect(contagens.recusasDepoisDeReclamar.ultimaHora).toBe(1)
+    expect(linhas).toEqual(["enclave: stale-epoch-after-claim: commit refused 5 s after 2 key package(s) were claimed on the same connection"])
+    expect(linhas.join("\n")).not.toMatch(/ligacao|@|\d+\.\d+\.\d+\.\d+/)
   })
 })
