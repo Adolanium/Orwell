@@ -39,6 +39,8 @@
  * this is adapted from: its own homeserver in a temp folder, a front end acting
  * as Caddy, free ports chosen by the system, and no way to point it at production.
  */
+// Every page is watched: the centre of the screen stays inside the app (1.3.27).
+import "./screen-guard.mjs"
 import { spawn } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
 import http from "node:http"

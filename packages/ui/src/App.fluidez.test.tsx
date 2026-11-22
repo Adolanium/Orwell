@@ -56,8 +56,10 @@ function bancada(
     aplicacaoInstalada?: boolean
     destroy?: () => Promise<{ ok: boolean }>
     exportar?: boolean
-    /** The account's devices, for the file banner and the new-device card. */
-    aparelhos?: () => number
+    /** The account's devices, for the file banner and the new-device card. `null`: the manifest did not read. */
+    aparelhos?: () => number | null
+    /** This device came in by importing the account file (`pairing.status().entrouPorFicheiro`). */
+    entrouPorFicheiro?: boolean
     revogar?: (deviceKey: string) => Promise<{ ok: boolean }>
   } = {},
 ): Bancada {
@@ -153,9 +155,17 @@ function bancada(
     ...(opcoes.aparelhos
       ? {
           pairing: {
-            status: async () => ({ temChaveDeConta: true, servidorSuporta: true, servidorRevoga: true }),
-            devices: async () =>
-              Array.from({ length: opcoes.aparelhos!() }, (_, i) => ({ deviceKey: `aparelho-${i}`, addedAt: i, esteAparelho: i === 0 })),
+            status: async () => ({
+              temChaveDeConta: true,
+              servidorSuporta: true,
+              servidorRevoga: true,
+              ...(opcoes.entrouPorFicheiro ? { entrouPorFicheiro: true } : {}),
+            }),
+            devices: async () => {
+              const quantos = opcoes.aparelhos!()
+              if (quantos === null) return null
+              return Array.from({ length: quantos }, (_, i) => ({ deviceKey: `aparelho-${i}`, addedAt: i, esteAparelho: i === 0 }))
+            },
             ...(opcoes.revogar ? { revoke: opcoes.revogar } : {}),
           },
         }
@@ -439,6 +449,26 @@ describe("à espera de entrada", () => {
     await waitFor(() => expect(screen.queryByText(strings.sidebar.aEsperaDeEntrada)).toBeNull())
   })
 
+  it("a channel of the account that waits for this device's seat stays in the list as joining, with no Cancel, until it opens", async () => {
+    const { bridge, ligar, canais } = bancada()
+    const OPACO = moradaDeTeste("canal da conta", "casa.pt")
+    let pendentes = [OPACO]
+    bridge.channels.pending = async () => pendentes
+    bridge.channels.meta = (canal: string) => (canal === OPACO ? { name: "Clube de Leitura", updatedAt: 1 } : null)
+    render(<App bridge={bridge} />)
+    await dentro()
+    ligar()
+
+    expect(await screen.findByText(strings.sidebar.aEntrarNoCanal)).toBeTruthy()
+    expect(screen.getByText("Clube de Leitura")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: strings.sidebar.cancelarEspera("Clube de Leitura") })).toBeNull()
+
+    // The seat arrives: the channel enters the list and the line gives way to it.
+    pendentes = []
+    canais([FEED, OPACO])
+    await waitFor(() => expect(screen.queryByText(strings.sidebar.aEntrarNoCanal)).toBeNull())
+  })
+
   it('"Cancelar" tira a linha e diz que o canal ainda pode aparecer', async () => {
     const user = userEvent.setup()
     const { bridge, ligar } = bancada()
@@ -550,6 +580,54 @@ describe("um aparelho que entrou noutro sítio (21/11/2026)", () => {
     quantos = 2
     estado(entrou("chave-nova"))
     await waitFor(() => expect(screen.queryByText(strings.entrada.faixa)).toBeNull())
+  })
+
+  it("a device that came in by the account file never sees the banner, even with no mark here and the manifest unread (hotfix 1.3.26-2)", async () => {
+    // Control: the same device, not imported, sees it (no mark in this browser, devices unknown).
+    const antes = bancada({ exportar: true, aparelhos: () => null })
+    render(<App bridge={antes.bridge} />)
+    antes.ligar()
+    expect((await screen.findAllByText(strings.entrada.faixa)).length).toBeGreaterThan(0)
+    cleanup()
+    const importado = bancada({ exportar: true, aparelhos: () => null, entrouPorFicheiro: true })
+    render(<App bridge={importado.bridge} />)
+    importado.ligar()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(screen.queryByText(strings.entrada.faixa)).toBeNull()
+  })
+
+  it("never in the phone layout, also with no file saved; on the desktop, only when the file was never saved nor imported (hotfix 1.3.26-2)", async () => {
+    const nada = (): void => {}
+    const telemovel = vi.fn(
+      (consulta: string) =>
+        ({ matches: consulta === "(max-width: 840px)", media: consulta, addEventListener: nada, removeEventListener: nada, addListener: nada, removeListener: nada }) as unknown as MediaQueryList,
+    )
+    const original = window.matchMedia
+    window.matchMedia = telemovel as unknown as typeof window.matchMedia
+    try {
+      // The phone: an account with no file saved and one device, the case the desktop shows it for.
+      const { bridge, ligar } = bancada({ exportar: true, aparelhos: () => 1 })
+      render(<App bridge={bridge} />)
+      ligar()
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(document.querySelector(".app.telemovel")).not.toBeNull()
+      expect(screen.queryByText(strings.entrada.faixa)).toBeNull()
+    } finally {
+      window.matchMedia = original
+    }
+    cleanup()
+    // The desktop, never saved nor imported: it shows.
+    const nunca = bancada({ exportar: true, aparelhos: () => 1 })
+    render(<App bridge={nunca.bridge} />)
+    nunca.ligar()
+    expect((await screen.findAllByText(strings.entrada.faixa)).length).toBeGreaterThan(0)
+    cleanup()
+    // The desktop, imported: it does not.
+    const importado = bancada({ exportar: true, aparelhos: () => 1, entrouPorFicheiro: true })
+    render(<App bridge={importado.bridge} />)
+    importado.ligar()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(screen.queryByText(strings.entrada.faixa)).toBeNull()
   })
 })
 

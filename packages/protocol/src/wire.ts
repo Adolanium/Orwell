@@ -147,6 +147,14 @@ export const CAPABILITY_PAIRING_PAKE = "pairing-pake"
 export const CAPACIDADE_MANIFESTO_AO_VIVO = "manifest-push"
 
 /**
+ * The capability that says "this client posts the common room card again when the
+ * server says the room has none" (hotfix of 22/11/2026). See
+ * `channel.groupinfo.missing`. The server tells it only to connections that
+ * announce this: an older client would not read the frame.
+ */
+export const CAPABILITY_CARD_MISSING = "common-room-card-missing"
+
+/**
  * The capability that says "this server routes ephemeral channel signals"
  * (`channel.sinal`): a frame encrypted by the client, which the server passes to
  * other members connected at that moment and does not store.
@@ -1776,6 +1784,14 @@ const TramasDoServidorSemCofre = z.discriminatedUnion("t", [
    * ask members for entry and try again.
    */
   z.object({ t: z.literal("channel.groupinfo"), channel: z.string(), info: z.string().optional() }),
+
+  /**
+   * The common room has no card (hotfix of 22/11/2026): someone took it and its
+   * external commit never came, so the epoch did not move and no member posted the
+   * next one. Sent to the seated connections that announce
+   * `CAPABILITY_CARD_MISSING`; each posts one, capped on its side.
+   */
+  z.object({ t: z.literal("channel.groupinfo.missing"), channel: z.string() }),
 
   /**
    * The server roster of a channel (P7, 1.3.26). See `CAPACIDADE_MEMBROS_DO_CANAL`.

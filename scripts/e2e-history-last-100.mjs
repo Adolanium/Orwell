@@ -20,6 +20,8 @@
  * ALL LOCAL AND DISPOSABLE: ports 8646 and 8647 (`E2E_PORTA_DA_FRENTE`,
  * `E2E_PORTA_DO_SERVIDOR`). Captures in `.verify-data/prova-history-last-100/<label>-<date>/`.
  */
+// Every page is watched: the centre of the screen stays inside the app (1.3.27).
+import "./screen-guard.mjs"
 import { mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { moradaDeSala } from "@enclave/protocol"

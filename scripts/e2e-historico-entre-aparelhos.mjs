@@ -25,6 +25,8 @@
  * its own homeserver in a temp folder, a frontend that acts as Caddy, ports
  * 8484 and 8485 (this script only), and no way to point it at production.
  */
+// Every page is watched: the centre of the screen stays inside the app (1.3.27).
+import "./screen-guard.mjs"
 import { spawn } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
 import http from "node:http"
@@ -37,7 +39,7 @@ import { argon2id } from "@noble/hashes/argon2.js"
 import { DatabaseSync } from "node:sqlite"
 import { ArmazemDeMedia, ArmazemEmMemoria, Session, Vault, chaveDoEvento, dobrarConversa, inflarPayload, ticketsOf } from "@enclave/client-core"
 import { moradaDeSala } from "@enclave/protocol"
-import { chromium } from "playwright"
+import { chromium, firefox, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { irParaEmparelhar } from "./fase7-comum.mjs"
 import { appAberta, irPara, irParaDirectas } from "./separadores.mjs"
@@ -428,7 +430,8 @@ try {
   await folha.locator(".qr-code").waitFor({ timeout: 20_000 })
   const link = await folha.locator("code[data-link]").getAttribute("data-link")
 
-  browserTel = await chromium.launch({ headless: true })
+  // `E2E_TELEMOVEL=webkit` (or `firefox`) runs the phone in that engine: iOS is WebKit.
+  browserTel = await ({ chromium, firefox, webkit }[process.env.E2E_TELEMOVEL ?? "chromium"] ?? chromium).launch({ headless: true })
   const redeTel = []
   /*
     `E2E_LARGO=1` pairs a WIDE device instead (1280 px, mouse): the history

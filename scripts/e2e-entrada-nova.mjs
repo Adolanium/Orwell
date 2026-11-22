@@ -24,6 +24,8 @@
  *
  * ALL LOCAL AND DISPOSABLE: four servers on ports 8493 to 8500, never production.
  */
+// Every page is watched: the centre of the screen stays inside the app (1.3.27).
+import "./screen-guard.mjs"
 import { execFileSync } from "node:child_process"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"

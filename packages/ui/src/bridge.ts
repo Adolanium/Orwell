@@ -348,12 +348,21 @@ export interface HistoricoDosIrmaos {
   aTrazer: boolean
   feitas: number
   total: number
-  media: { feitas: number; total: number } | null
+  /** `perdidas` (1.3.27): files that did not come; they count in `feitas` too. */
+  media: { feitas: number; total: number; perdidas?: number } | null
   canais: string[]
   inicial: boolean
   perfis?: true
   /** What did not come, and why (12/11/2026). See `EventoDoHistorico` in the core. */
   perdidas?: number
+  /** Files that did not come, at the end of the transfer (1.3.27). */
+  ficheirosPerdidos?: number
+  /** Messages this device gave up on after a page failed three times (22/11/2026). See `EventoDoHistorico.notReceived` in the core. */
+  notReceived?: number
+  /** When the history last moved here, part by part (1.3.27). See `EventoDoHistorico.progressAt` in the core. */
+  progressAt?: number
+  /** Once per real failure of a page, for the diagnostic log. See `EventoDoHistorico.pageFailure` in the core. */
+  pageFailure?: { reason: string; attempt: number; notReceived?: number }
   razao?: "sem-irmao" | "irmao-calado" | "ilegiveis"
   /** A stopped transfer: messages missing on this device, when known exactly (20/11/2026). See `EventoDoHistorico.faltam`. */
   faltam?: number
@@ -595,6 +604,11 @@ export interface EnclaveBridge {
        * (1.3.26). Absent (old host) reads as no.
        */
       serverKnowsShortCode?: boolean
+      /**
+       * This device came in by importing the account file (hotfix 1.3.26-2): the
+       * file counts as saved, and the banner never shows. Absent (old host) reads as no.
+       */
+      entrouPorFicheiro?: boolean
     }>
     host: () => Promise<{ pairId: string; link: string }>
     join: (link: string) => Promise<{ ok: boolean }>
@@ -928,6 +942,12 @@ export interface EnclaveBridge {
      * it.
      */
     archived?: () => Promise<{ channel: string; archivedAt: number }[]>
+    /**
+     * The channels where the account is a member and this device still waits for
+     * its seat (hotfix of 22/11/2026). See `seatsPending` in the core. The sidebar
+     * shows them as "joining". Optional: an old bridge does not have it.
+     */
+    pending?: () => Promise<string[]>
     /**
      * Create a channel with initial rooms. `name` is the name the person typed
      * (1.0 "Arca", slice 3): the address is random, and the name goes encrypted

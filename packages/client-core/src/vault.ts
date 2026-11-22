@@ -534,6 +534,15 @@ export interface VaultContents {
    * the next opening when the app closed first. See `Session.publicarPerfilPendente`.
    */
   perfilPorPublicar?: number
+  /**
+   * This device came in by importing the account file (hotfix 1.3.26-2). Whoever
+   * holds this vault had the file in hand, so the "You have not saved the account
+   * file yet" banner never shows here. In the vault and not only in the
+   * browser's mark (`ficheiroDaConta.ts` in the interface): that mark is per
+   * browser and can be lost (cleared site data, another profile), and the count
+   * of devices it falls back to is unknown when the manifest does not read.
+   */
+  entrouPorFicheiro?: true
   /** F10: when we last replied to a request for profiles in each channel. At most once a day. */
   perfisDadosEm?: Record<string, number>
   /**
@@ -1034,7 +1043,33 @@ export interface CanalNoPlano {
    * total, so the counter can reach it, and the notice says they were lost.
    */
   perdidas?: number
+  /**
+   * Real failures of the page at `cursor` (22/11/2026): the sibling silent but still
+   * there, its `hx` for the request, a response that did not open or did not merge,
+   * a page that did not move the cursor. Reset by a page that moves. At
+   * `tentativasPorItem` the channel ends here: what is missing goes to `naoVieram`.
+   */
+  failures?: number
+  /** The reason of the last failure, for the diagnostic log. */
+  failureReason?: PageFailureReason
+  /**
+   * Entries this device gave up on (22/11/2026): the rest of the channel after a
+   * page that failed `tentativasPorItem` times. Counted in `perdidas` too, so the
+   * total leaves them; kept apart so the notice says which side could not do it.
+   */
+  notReceived?: number
 }
+
+/**
+ * Why a page of history failed (22/11/2026). Codes for the diagnostic log.
+ *
+ * - `silent`: the sibling did not answer the request, but answered the next `hi`.
+ * - `hx`: the sibling knows the session, not the response (it no longer keeps it).
+ * - `unreadable`: the response arrived whole and did not open.
+ * - `merge-failed`: the response opened and this device could not merge it.
+ * - `no-progress`: the page did not move the cursor.
+ */
+export type PageFailureReason = "silent" | "hx" | "unreadable" | "merge-failed" | "no-progress"
 
 /**
  * Why the history from a sibling stopped short (12/11/2026). Codes, never
@@ -1057,8 +1092,17 @@ export interface EstadoDoHistorico {
   plano?: {
     comecou: number
     canais: Record<string, CanalNoPlano>
-    /** The phase for media: absent until we ask for the list; `porTrazer` shrinks. */
-    media?: { total: number; feitas: number; porTrazer: ItemDeMediaDoIrmao[] }
+    /**
+     * The phase for media: absent until we ask for the list; `porTrazer` shrinks.
+     *
+     * `tentativas` (1.3.27): per item key, the real failures of a request that
+     * led with it (the sibling's `hx`, a request given up after its tries, a
+     * response that did not open). A reload, a suspension or closing the app
+     * are not failures and never count. At `tentativasPorItem` the item leaves
+     * as lost: it counts in `feitas`, so the bar reaches the end, and in
+     * `perdidas`, so the bar says how many files did not come.
+     */
+    media?: { total: number; feitas: number; porTrazer: ItemDeMediaDoIrmao[]; tentativas?: Record<string, number>; perdidas?: number }
     /**
      * The plan gave up for now (12/11/2026): no progress for
      * `TECTOS_DO_FIO_DO_HISTORICO.desistirAposMs`. The notice closes with the
@@ -2957,6 +3001,8 @@ export function devolverComoAparelhoNovo(
   conteudo.lastSeq = {}
   conteudo.deadWelcomes = []
   conteudo.lugaresPorPedir = lugares
+  // The file was in this person's hands: it counts as saved here (hotfix 1.3.26-2).
+  conteudo.entrouPorFicheiro = true
   for (const campo of [
     "sframeReservas",
     "posseDoAparelho",
@@ -2971,6 +3017,12 @@ export function devolverComoAparelhoNovo(
     "reenvioAnunciado",
     "permissoesAnunciadas",
     "aparelhosConhecidos",
+    /*
+      A profile edit of the device that exported, still waiting for its debounce
+      (hotfix 1.3.26-2). That device still exists and publishes it; here it would
+      only send the file's profile again, maybe older than what the account says now.
+    */
+    "perfilPorPublicar",
   ] as const) {
     delete conteudo[campo]
   }

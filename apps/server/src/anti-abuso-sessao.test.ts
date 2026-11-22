@@ -189,6 +189,32 @@ describe("os limites da conta nova na sessão", () => {
     expect(media.avisos.some((a) => a.code === "new-account")).toBe(false)
   })
 
+  it("a device that imports the file of an old account is not a new account: the age is the account's (hotfix 1.3.26-2)", async () => {
+    await levantar({ contaNova: LIMITES })
+    const antiga = await ligada({ horas: 100 })
+    await antiga.session.flush()
+    const ficheiro = await antiga.vault.exportVault()
+    // The new device, born now, with a device key the server never saw.
+    const vault = new Vault(new CofreEmMemoria())
+    const session = new Session(vault, { armazem: new ArmazemEmMemoria() })
+    sessoes.push(session)
+    const avisos: string[] = []
+    session.on("status", (evento) => {
+      if (evento.code) avisos.push(evento.code)
+    })
+    await vault.importVault(ficheiro, "frase-passe-de-teste", { passagem: (pedido) => session.passagemDoImportar(pedido) })
+    await vault.unlock("frase-passe-de-teste")
+    session.loadIdentity()
+    await session.connect()
+    expect(session.contaNova).toBeNull()
+    expect(session.faseDaContaNova).toBeNull()
+    expect(avisos).not.toContain("new-account")
+    // And the signed age, as every member reads it, is the account's, not the new device's.
+    const criadaEm = await session.idadeDaConta(antiga.address)
+    expect(criadaEm).not.toBeNull()
+    expect(Date.now() - criadaEm!).toBeGreaterThan(3 * 24 * 60 * 60 * 1000)
+  })
+
   it("a terceira pessoa num dia (limite 1 por dia): abrir a conversa lança o aviso da conta nova", async () => {
     await levantar({ contaNova: LIMITES })
     const conta = await ligada()

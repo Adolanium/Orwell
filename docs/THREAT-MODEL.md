@@ -810,3 +810,7 @@ Read SECURITY.md. In short: write to orwell.eu@proton.me before telling anyone
 else, and do not open a public issue for anything that exposes messages,
 accounts or a server. Things admitted here are not findings, but an argument
 that the reasoning is wrong is welcome.
+
+**The auto-lock waits for a history sync that moves (from 1.3.27, accepted risk).** A locked vault stops the history between devices, so a long sync on a phone left alone used to stand still. From 1.3.27 the auto-lock waits only while that history really moves on a visible page, for at most 60 minutes per sync. A stopped sync, a hidden page or the cap lock as always, and "Lock now" always locks at once. The risk: an unwatched device stays unlocked up to 60 minutes longer while its sync moves. Each lock goes to the diagnostic log with its reason.
+
+**The common room card (from 1.3.27).** When the card is taken and no commit follows, the server tells the seated members (`channel.groupinfo.missing`), and one posts the card again, at most once a minute each. The server learns only that the card is missing, which it already knew.

@@ -244,6 +244,7 @@ import {
   CAPACIDADE_LIMITE_DE_CANAIS,
   CAPACIDADE_LIMITES_DE_CONTA_NOVA,
   CAPACIDADE_MANIFESTO_AO_VIVO,
+  CAPABILITY_CARD_MISSING,
   CAPACIDADE_PROVA_DE_TRABALHO,
   CODIGO_PROVA_EM_FALTA,
   CODIGO_PROVA_INVALIDA,
@@ -319,6 +320,7 @@ import {
   perfilQueViaja,
   perfisParaOsIrmaos,
   adoptarPerfil,
+  type PerfilQueChega,
   aplicarAtribuicao,
   empateDepoisDe,
   seqDoEmpate,
@@ -486,6 +488,8 @@ const GARANTIAS_DO_CLIENTE = [
   CAPABILITY_ROOM_LIMIT,
   // 1.3.26: this client reads its account's new manifest, sent unasked (the new-device notice).
   CAPACIDADE_MANIFESTO_AO_VIVO,
+  // Hotfix of 22/11/2026: this client posts the common room card again when told it is missing.
+  CAPABILITY_CARD_MISSING,
 ]
 
 /** Finds a nonce for a proof-of-work challenge. The hosts give one that runs in a worker. See `prova-worker.ts`. */
@@ -832,6 +836,9 @@ export const CAPACIDADE_PEDE_PERFIS = "pede-perfis"
  * because a 1.0.x or a 1.1.0 does not accept what they assign.
  */
 export const CAPACIDADE_PERMISSOES = "permissoes-v1"
+
+/** Our own profile heard from another device of the account. `semBytesDoRetrato`: it had a portrait whose bytes did not come. */
+type PerfilProprioQueChega = PerfilQueChega & { semBytesDoRetrato?: true }
 
 /**
  * The rejection of the three admin doors in a one-to-one conversation.
@@ -3247,6 +3254,7 @@ export class Session extends Emitter<SessionEvents> {
      * one frame somebody on the other side is blocked on.
      */
     this.#send({ t: "welcome.resync" })
+    this.#subscribeSeatsToAsk()
 
     if (restored.length > 0) {
       /**
@@ -3584,6 +3592,7 @@ export class Session extends Emitter<SessionEvents> {
     this.#libertarVezes()
     // Periodic reconciliation and this connection's keys die with it.
     this.#desarmarSincronia()
+    this.#disarmSeatRequests()
     this.#desarmarCaixa()
     // And anti-entropy requests in flight (S4): responses came on this connection.
     this.#antiEntropia?.aoDesligar()
@@ -3701,6 +3710,7 @@ export class Session extends Emitter<SessionEvents> {
     this.#listaEspera = []
     for (const quem of esperavamPelaLista) quem.reject(new Error("the session ended"))
     this.#desarmarSincronia()
+    this.#disarmSeatRequests()
     this.#desarmarCaixa()
     /*
       A profile edit still waiting does not go out from a closed session: the vault
@@ -3780,6 +3790,7 @@ export class Session extends Emitter<SessionEvents> {
     this.#aberturaCuidada = null
     this.#retratoProprio = null
     this.#desarmarSincronia()
+    this.#disarmSeatRequests()
     this.#desarmarCaixa()
     this.#pararRevezamentos()
     this.#salasOuvidas.clear()
@@ -5511,8 +5522,40 @@ What was left behind:
 
   #esquecerPacotesVelhos(agora = Date.now()): void {
     for (const [chave, guardado] of this.#pacotesPorGastar) {
-      if (agora - guardado.em > Session.PACOTE_POR_GASTAR_MS) this.#pacotesPorGastar.delete(chave)
+      if (agora - guardado.em > Session.PACOTE_POR_GASTAR_MS) {
+        this.#pacotesPorGastar.delete(chave)
+        this.#noteWasted(chave, agora)
+      }
     }
+  }
+
+  /**
+   * Key packages of each target device this session claimed and never used, by
+   * `address|device` (hotfix of 22/11/2026). Memory only. A package kept by layer A
+   * that expires, or that another kept one replaces, was spent on the server for
+   * nothing. Past `WASTED_CLAIMS_MAX` in `WASTED_CLAIMS_WINDOW_MS`, this session stops
+   * claiming that device for the rest of the window: in production two devices of one
+   * account went to zero packages in a night of refused commits, and each new claim
+   * of an empty pool also nudges the device to mint more (`keypackage.low`).
+   */
+  readonly #wastedClaims = new Map<string, number[]>()
+  static WASTED_CLAIMS_MAX = 3
+  static WASTED_CLAIMS_WINDOW_MS = 30 * 60_000
+
+  #noteWasted(key: string, agora = Date.now()): void {
+    const recent = (this.#wastedClaims.get(key) ?? []).filter((em) => agora - em < Session.WASTED_CLAIMS_WINDOW_MS)
+    recent.push(agora)
+    this.#wastedClaims.set(key, recent)
+    if (this.#wastedClaims.size > Session.PACOTES_POR_GASTAR_MAXIMO) {
+      const first = this.#wastedClaims.keys().next().value
+      if (first !== undefined) this.#wastedClaims.delete(first)
+    }
+  }
+
+  /** Whether this session wasted too many packages of `address|device` lately. See `#wastedClaims`. */
+  #claimCapped(address: string, device: string, agora = Date.now()): boolean {
+    const recent = (this.#wastedClaims.get(`${address}|${device}`) ?? []).filter((em) => agora - em < Session.WASTED_CLAIMS_WINDOW_MS)
+    return recent.length >= Session.WASTED_CLAIMS_MAX
   }
 
   /**
@@ -5533,7 +5576,8 @@ What was left behind:
     const agora = Date.now()
     for (const pacote of pacotes) {
       const chave = `${address}|${pacote.deviceKey}`
-      this.#pacotesPorGastar.delete(chave)
+      // A kept package replaced by another is one that will never be used.
+      if (this.#pacotesPorGastar.delete(chave)) this.#noteWasted(chave, agora)
       this.#pacotesPorGastar.set(chave, { pacote, manifesto, em: agora })
     }
     while (this.#pacotesPorGastar.size > Session.PACOTES_POR_GASTAR_MAXIMO) {
@@ -5581,6 +5625,16 @@ What was left behind:
     // Kept from a commit that lost its epoch: no claim, no package spent (layer A).
     const guardados = this.#tirarPorGastar(address, pedidos, manifestoPrevio)
     if (guardados) return guardados
+    /*
+      The cap on wasted claims (hotfix of 22/11/2026): no claim for a device whose
+      packages this session already wasted too often lately. Read as "no keys" by
+      every caller, which is what it is for the next half hour: the seat waits, and
+      the device's own requests, or the next pass, bring it.
+    */
+    const alvos = pedidos ?? manifestoPrevio?.devices.map((device) => toBase64(device.deviceKey))
+    if (alvos !== undefined && alvos.length > 0 && alvos.every((device) => this.#claimCapped(address, device))) {
+      throw new AparelhoSemChaves(address, alvos)
+    }
     // A short retry, because "no key packages" is often just a race: someone
     // who connected a moment ago is still publishing their pool while we are
     // already claiming from it. Three attempts over ~3 s turns that race into
@@ -12091,6 +12145,11 @@ What was left behind:
     return this.#identity !== null && temChaveDeConta(this.#identity)
   }
 
+  /** This device came in by importing the account file (hotfix 1.3.26-2). See `entrouPorFicheiro` in the vault. */
+  get entrouPorFicheiro(): boolean {
+    return this.vault.unlocked && this.vault.contents.entrouPorFicheiro === true
+  }
+
   /**
    * How many days the connected server keeps events, if it said so.
    *
@@ -13675,6 +13734,84 @@ What was left behind:
     }, Session.PERFIS_RAJADA_MS)
   }
 
+  /**
+   * A `profile` of OUR account, sent by ANOTHER device of it, as a profile to
+   * adopt (hotfix 1.3.26-2); `null` for anything else.
+   *
+   * Any channel counts, not only the account channel: a device that came in by
+   * importing the account file is born with the file's profile, and until it
+   * sits in the account channel (or when that channel misses one) the newer
+   * profile of its siblings reaches it only in the rooms, live or in a catch-up.
+   * Before this, that profile went to the directory and `contents.profile` kept
+   * the old name for ever.
+   *
+   * The sender is the MLS credential, whose chain the group verified against
+   * the account key: only a device of this account says `sender === us`. A
+   * device this vault knows was removed does not count, as in `#aoEstado`.
+   * Our own device is left out (our echo is our own profile already).
+   */
+  #perfilProprioQueChega(sender: string, senderDeviceKey: Uint8Array, payload: Payload): PerfilProprioQueChega | null {
+    if (payload.t !== "profile" || this.#identity === null || sender !== this.identity.address) return null
+    const aparelho = toBase64(senderDeviceKey)
+    if (aparelho === toBase64(this.identity.deviceSigningPublicKey)) return null
+    if (estaRevogado(this.vault.contents, sender, aparelho)) return null
+    return {
+      displayName: payload.displayName,
+      activity: payload.activity,
+      donations: payload.donations,
+      statusText: payload.statusText,
+      bio: payload.bio,
+      email: payload.email,
+      avatarDataUrl: payload.avatar?.inline,
+      ...(payload.avatar !== undefined && !payload.avatar.inline ? { semBytesDoRetrato: true } : {}),
+      updatedAt: payload.updatedAt,
+    }
+  }
+
+  /**
+   * Adopt our own profile from another device, inside a vault write. The newest
+   * `updatedAt` wins (`adoptarPerfil`), so an older profile heard later never
+   * takes the place of a newer one. Returns whether the vault changed.
+   *
+   * - A portrait whose bytes did not come (a light profile of an old history
+   *   page) keeps the portrait this device has: the rest of the profile is
+   *   still the newer one.
+   * - A local edit still waiting for the debounce (`perfilPorPublicar`) that is
+   *   OLDER than the adopted one lost ("the last one wins"): nothing of ours is
+   *   left to publish, and the armed timer finds nothing to send.
+   */
+  #adoptarPerfilProprio(contents: VaultContents, perfil: PerfilProprioQueChega): boolean {
+    const { avatarDataUrl, avatarRef } = contents.profile
+    if (!adoptarPerfil(contents, perfil)) return false
+    if (perfil.semBytesDoRetrato) {
+      contents.profile = {
+        ...contents.profile,
+        ...(avatarDataUrl !== undefined ? { avatarDataUrl } : {}),
+        ...(avatarRef !== undefined ? { avatarRef } : {}),
+      }
+    }
+    this.#absorverPerfilProprio(contents)
+    if (contents.perfilPorPublicar !== undefined && contents.perfilPorPublicar <= perfil.updatedAt) delete contents.perfilPorPublicar
+    return true
+  }
+
+  /**
+   * After adopting our own profile: the screen shows it, and every channel where
+   * this device published an older version gets the new one (`publishProfile`
+   * skips the channels that already have it). This is also what keeps the old
+   * profile off the wire: from here on, `this.profile` is the new one.
+   */
+  #depoisDeAdoptarPerfil(): void {
+    queueMicrotask(() => {
+      if (!this.vault.unlocked) return
+      this.emit("perfil", { profile: this.vault.contents.profile })
+      void this.publishProfile().catch(() => {})
+    })
+  }
+
+  /** Our own profiles from other devices, heard in a channel, for the next batch write. See `#perfilProprioQueChega`. */
+  #pendingPerfisProprios: PerfilProprioQueChega[] = []
+
   /** Profiles waiting for the burst, for siblings, in `estado.fichas` (see the schema). */
   #anunciarPerfis(): void {
     const enderecos = [...this.#perfisPorAnunciar]
@@ -13911,30 +14048,20 @@ What was left behind:
         }
         break
       }
-      case "profile":
+      case "profile": {
         /*
           The profile another account device edited (phase 1e). The most recent wins
           (`adoptarPerfil`); whoever adopts it republishes it on channels, so a channel
-          where the other device didn't publish sees the same face.
+          where the other device didn't publish sees the same face. The same rule as
+          in any other channel: see `#perfilProprioQueChega`.
         */
-        if (
-          adoptarPerfil(c, {
-            displayName: payload.displayName,
-            activity: payload.activity,
-            donations: payload.donations,
-            statusText: payload.statusText,
-            bio: payload.bio,
-            email: payload.email,
-            avatarDataUrl: payload.avatar?.inline,
-            updatedAt: payload.updatedAt,
-          })
-        ) {
-          this.#absorverPerfilProprio(c)
+        const perfil = this.#perfilProprioQueChega(sender, senderDeviceKey, payload)
+        if (perfil && this.#adoptarPerfilProprio(c, perfil)) {
           mudou = true
-          this.emit("perfil", { profile: c.profile })
-          void this.publishProfile().catch(() => {})
+          this.#depoisDeAdoptarPerfil()
         }
         break
+      }
       default:
         // Another `t` in the account channel (the device signal, a newer version):
         // nothing to merge.
@@ -14898,6 +15025,15 @@ What was left behind:
    * deafness (`surdezConfirmada`), not one frame that did not open: a member could
    * send one on purpose and stop everybody answering.
    */
+  /** The deaf half of `#naoPossoResponder`: confirmed deafness, not a catch-up. */
+  #naoPossoResponderSurdo(channel: string): boolean {
+    const falhas = this.#undecryptable.get(channel)
+    return falhas !== undefined && surdezConfirmada(falhas, Date.now())
+  }
+
+  /** How long a member still catching up waits to answer a seat request. See `#answerRejoinAgora`. */
+  static CATCH_UP_BEFORE_ANSWER_MS = 30_000
+
   #naoPossoResponder(channel: string, grupo: GroupSession): boolean {
     if (this.#atrasadoEm(channel, grupo)) return true
     const falhas = this.#undecryptable.get(channel)
@@ -14970,8 +15106,22 @@ What was left behind:
   }
 
   async #answerRejoinAgora(channel: string, address: string, device?: string, chegada?: ChegadaDoPedido): Promise<void> {
-    const group = this.#groups.get(channel)
+    let group = this.#groups.get(channel)
     if (!group) return
+    /*
+      Only behind, not deaf: wait for the catch-up, then answer (hotfix of 22/11/2026).
+      A member that comes online is the one a waiting device asks at that very
+      moment (its presence), and it is always still catching up then: the request
+      was dropped, and the next one came a minute later, or ten.
+    */
+    if (this.#atrasadoEm(channel, group) && !this.#naoPossoResponderSurdo(channel)) {
+      const limit = Date.now() + Session.CATCH_UP_BEFORE_ANSWER_MS
+      while (Date.now() < limit && group !== undefined && this.#atrasadoEm(channel, group) && this.#connection === "online") {
+        await new Promise((resolve) => setTimeout(resolve, 250))
+        group = this.#groups.get(channel)
+      }
+      if (!group) return
+    }
     // Behind or deaf here: no answer (1.3.25 review, finding 2).
     if (this.#naoPossoResponder(channel, group)) return
     const desde: ChegadaDoPedido = chegada ?? {
@@ -15256,8 +15406,36 @@ What was left behind:
    * is sure, and nobody has to know it happened.
    */
   async repairChannel(channel: string): Promise<void> {
+    /*
+      The common room first takes the card (hotfix 1.3.26-2), as a newcomer
+      enters: an external commit that takes our own dead leaf out (resync) and
+      seats this device again, with nobody's help. A deaf device has a group
+      there, so `ensureCommonRoom` (the card's only other caller) returns at once;
+      the account's own devices never repair the common room
+      (`#repararAparelhosDaConta`); and the request below waits for ANOTHER
+      account that is online, not deaf, and whose turn comes. With the room
+      asleep, the request was never answered, and the room said Erro 390 for
+      good. Without a card (or a server without cards), the request as before.
+    */
+    if (channel === this.#commonRoom && (await this.#voltarPeloCartao(channel))) return
     await this.resyncWelcomes(channel)
     this.requestRejoin(channel)
+  }
+
+  /**
+   * A deaf device back in the common room by the card. `true` when it is in
+   * again; then the room hears (`#ouveDeNovo`): the series of failures ends and
+   * the seat requests stop. One attempt at a time: a second request while one
+   * runs gets its answer, and never takes a second card for the same device.
+   * `ensureCommonRoom` does not race it: with a group here it returns at once.
+   */
+  async #voltarPeloCartao(sala: string): Promise<boolean> {
+    return this.#umaDeCadaVez("sala-comum-cartao", async () => {
+      if (!this.#groups.has(sala) || !this.#undecryptable.has(sala)) return false
+      if (!(await this.#entrarComCartao(sala))) return false
+      this.#ouveDeNovo(sala)
+      return true
+    })
   }
 
   /**
@@ -17479,6 +17657,7 @@ What was left behind:
       return grupo !== undefined && leavesOf(grupo.state.ratchetTree, address as UserAddress).length > 0
     })
     if (surdosComEle.length > 0) this.#pedidosDeLugar.adiantar(surdosComEle)
+    this.#askSeatsOnPresence()
     if (!this.#podeAgora(this.#presencasReparadas, address, REPARAR_PAR_MS)) return
     void this.#reconciliarAmizades(address).catch(() => {})
     this.#pedirLugares(address)
@@ -17500,11 +17679,12 @@ What was left behind:
     if (!this.vault.unlocked) return
     const canais = new Set<string>()
     const agora = Date.now()
-    const guardados = this.vault.contents.lugaresPorPedir ?? {}
     // Only what CHANGES, and what leaves: the rest stays as `update` finds it (N5).
     const proximos: Record<string, LugarPorPedir> = {}
     const expirados: string[] = []
     let mudou = false
+    const perdidos = soPar === null ? this.#lostGroupStates(agora) : {}
+    const guardados = { ...perdidos, ...this.vault.contents.lugaresPorPedir }
     for (const [canal, bruto] of Object.entries(guardados)) {
       // A vault from version 1 of this stored only the time. Read it as a first attempt.
       const lugar: LugarPorPedir = typeof bruto === "number" ? { desde: bruto, tentativas: 0, proxima: 0 } : bruto
@@ -17554,7 +17734,135 @@ What was left behind:
       if (feed && !this.#groups.has(feed)) canais.add(feed)
     }
     for (const canal of canais) this.#pedirLugar(canal)
+    this.#armSeatRequests(guardados, proximos, expirados)
   }
+
+  /**
+   * Fire the seat requests' back-off on its own clock (hotfix of 22/11/2026).
+   *
+   * "One minute, two, four" above was only read on connect and in the ten-minute
+   * pass. A new device (import, pairing) whose first requests reached nobody
+   * stayed without the channels for up to ten minutes, and up to half an hour after
+   * a few rounds, with a member online again seconds later: the account in the
+   * member list, the channel out of the device's list. Now a timer runs this again
+   * at the earliest `proxima`. One timer, re-armed by each run.
+   */
+  #armSeatRequests(
+    stored: Record<string, LugarPorPedir | number>,
+    next: Record<string, LugarPorPedir>,
+    expired: readonly string[],
+  ): void {
+    this.#disarmSeatRequests()
+    if (this.#connection !== "online") return
+    let earliest = Number.POSITIVE_INFINITY
+    for (const [channel, raw] of Object.entries(stored)) {
+      if (expired.includes(channel) || this.#groups.has(channel)) continue
+      const when = next[channel]?.proxima ?? (typeof raw === "number" ? 0 : raw.proxima)
+      if (when < earliest) earliest = when
+    }
+    if (!Number.isFinite(earliest)) return
+    // Never sooner than the per-channel floor of `#pedirLugar`: a request inside it is dropped.
+    const wait = Math.max(earliest - Date.now(), REJOIN_TURN_MS * 20)
+    this.#seatRequestTimer = soltar(
+      setTimeout(() => {
+        this.#seatRequestTimer = null
+        if (this.#connection === "online") this.#pedirLugares(null)
+      }, wait + 50),
+    )
+  }
+
+  #disarmSeatRequests(): void {
+    if (this.#seatRequestTimer === null) return
+    clearTimeout(this.#seatRequestTimer)
+    this.#seatRequestTimer = null
+  }
+
+  #seatRequestTimer: ReturnType<typeof setTimeout> | null = null
+
+  /**
+   * Channels this device has a past in (history or channel state) and no group,
+   * that it did not leave, and that are not yet in `lugaresPorPedir` (hotfix of
+   * 22/11/2026). The group state was lost on this device while its leaf may still
+   * be in the tree: nothing else asked for a seat there. `desde` is the newest line
+   * of its history, so a channel silent for longer than `LUGAR_POR_PEDIR_MS` is
+   * not asked, like any other request past that age.
+   */
+  #lostGroupStates(agora: number): Record<string, LugarPorPedir> {
+    const contents = this.vault.contents
+    const pending = contents.lugaresPorPedir ?? {}
+    const left = contents.canaisArquivados ?? {}
+    const lost: Record<string, LugarPorPedir> = {}
+    for (const channel of new Set([...Object.keys(contents.history ?? {}), ...Object.keys(contents.estadoDoCanal ?? {})])) {
+      if (this.#groups.has(channel) || pending[channel] !== undefined || left[channel] !== undefined) continue
+      // The account channel and the common room have their own ways back (`#cuidarDoCanalDaConta`, `ensureCommonRoom`).
+      if (channel === this.canalDaConta || channel === this.#commonRoom) continue
+      let newest = 0
+      for (const entry of contents.history?.[channel] ?? []) if (entry.at > newest) newest = entry.at
+      if (newest === 0 || agora - newest > LUGAR_POR_PEDIR_MS) continue
+      lost[channel] = { desde: Math.min(newest, agora), tentativas: 0, proxima: 0 }
+    }
+    return lost
+  }
+
+  /**
+   * The channels where this account is a member and this device still waits for its
+   * seat (hotfix of 22/11/2026): a new device (import, pairing), or a group state
+   * lost here. They are not in `channels` (no group yet), and the interface shows
+   * them as "joining" so a channel of the account never leaves the list.
+   */
+  seatsPending(): string[] {
+    return this.#seatsToAsk()
+  }
+
+  /** The channels of `lugaresPorPedir` this device has no group in yet, and has not left. */
+  #seatsToAsk(): string[] {
+    if (!this.vault.unlocked) return []
+    const left = this.vault.contents.canaisArquivados ?? {}
+    const known = { ...this.#lostGroupStates(Date.now()), ...this.vault.contents.lugaresPorPedir }
+    return Object.keys(known).filter(
+      (channel) => !this.#groups.has(channel) && left[channel] === undefined && channel !== this.canalDaConta,
+    )
+  }
+
+  /**
+   * Subscribe the channels this device still asks a seat in (hotfix of 22/11/2026).
+   *
+   * The account is a member there (the server keeps its subscription), so the
+   * server allows it. Nothing here decrypts (no group): the point is presence. The
+   * server only tells presence between connections that share a subscribed channel,
+   * and without this a new device never heard that a member of its channels came
+   * online, so `#aoVerOnline` never asked for the seat at that moment.
+   */
+  #subscribeSeatsToAsk(): void {
+    const channels = this.#seatsToAsk()
+    if (channels.length === 0) return
+    try {
+      this.#send({ t: "channel.subscribe", channels })
+    } catch {
+      // Offline: the next connection subscribes again.
+    }
+  }
+
+  /**
+   * A member came online: ask again now for the seats still missing (hotfix of
+   * 22/11/2026). The presence comes only from someone who shares a subscribed
+   * channel (`#subscribeSeatsToAsk`), so the request has someone to answer it.
+   * The back-off does not move (no `tentativas` added). The one-minute floor of
+   * `#pedirLugar` would hold back exactly this request (the one at login went
+   * out seconds before), so presence has its own, shorter floor per channel: a
+   * busy room still asks at most once in `SEAT_ON_PRESENCE_MS`, well inside the
+   * server's six per channel per minute.
+   */
+  #askSeatsOnPresence(): void {
+    for (const channel of this.#seatsToAsk()) {
+      if (!this.#podeAgora(this.#seatsAskedOnPresence, channel, Session.SEAT_ON_PRESENCE_MS)) continue
+      this.#lugaresPedidos.set(channel, Date.now())
+      this.requestRejoin(channel)
+    }
+  }
+
+  static SEAT_ON_PRESENCE_MS = 15_000
+  readonly #seatsAskedOnPresence = new Map<string, number>()
 
   /** A seat request, at most one per channel per minute. */
   #pedirLugar(channel: string): void {
@@ -22111,6 +22419,10 @@ What was left behind:
     // A name that arrived is no longer one to wait ten minutes for: see `esquecerPedidos`.
     if (comNome.length > 0) this.#anti.esquecerPedidos(comNome)
     this.#pendingDirectory = []
+    let perfilAdoptado = false
+    for (const perfil of this.#pendingPerfisProprios) if (this.#adoptarPerfilProprio(contents, perfil)) perfilAdoptado = true
+    this.#pendingPerfisProprios = []
+    if (perfilAdoptado) this.#depoisDeAdoptarPerfil()
     for (const { channel, address, u, autoria, mural } of this.#pendingAutoriasDosPerfis) {
       const doCanal = contents.autoriasDosPerfis?.[channel] ?? {}
       // The most recent version, like the directory.
@@ -22469,6 +22781,7 @@ What was left behind:
     const apelidosRecuperados: ({ subject: string } & RegistoDeApelido)[] = []
     const sucessoesRecuperadas: SucessaoRecebida[] = []
     const profiles: { address: string; at: number; payload: StoredChatMessage["payload"] }[] = []
+    const perfisProprios: PerfilProprioQueChega[] = []
     const listas: { author: string; shown: string[]; updatedAt: number }[] = []
 
     for (const event of [...page.events].sort((a, b) => a.seq - b.seq)) {
@@ -22598,6 +22911,9 @@ What was left behind:
           recovered.push({ seq: event.seq, sender: result.sender, at, payload })
         } else if (payload.t === "profile") {
           profiles.push({ address: result.sender, at: payload.updatedAt || 0, payload })
+          // Our own, from another device of the account (hotfix 1.3.26-2). See `#perfilProprioQueChega`.
+          const proprio = this.#perfilProprioQueChega(result.sender, result.senderDeviceKey, payload)
+          if (proprio) perfisProprios.push(proprio)
         } else if (payload.t === "friends.shown" && this.#donoDoFeed(channel) === result.sender) {
           // By the same guard as the live path. See `#recordPayload`.
           listas.push({ author: result.sender, shown: [...payload.shown], updatedAt: payload.updatedAt })
@@ -22626,6 +22942,9 @@ What was left behind:
           this.#perfilQueMudou(contents, address, antes)
         }
         for (const lista of listas) guardarListaMostrada(contents, lista)
+        let perfilAdoptado = false
+        for (const perfil of perfisProprios) if (this.#adoptarPerfilProprio(contents, perfil)) perfilAdoptado = true
+        if (perfilAdoptado) this.#depoisDeAdoptarPerfil()
       })
       if (sucessoesMudaram) this.#avisarSucessoes()
     }
@@ -23045,6 +23364,30 @@ What was left behind:
     */
     this.#salaComumTemCartao = true
   }
+
+  /**
+   * The server says the common room has no card (hotfix of 22/11/2026): a card was
+   * taken and its external commit never came. Post one for the epoch we are in,
+   * even if this device already posted one for it (that one was the card taken).
+   * At most once per `CARD_AGAIN_MS`, after a short random wait so the members told
+   * at once do not all send the whole tree: the first card in makes the others
+   * harmless, and the server keeps one.
+   */
+  #cardMissing(channel: string): void {
+    if (channel !== this.#commonRoom || !this.#groups.has(channel)) return
+    if (!this.#podeAgora(this.#cardsAgain, channel, Session.CARD_AGAIN_MS)) return
+    this.#salaComumTemCartao = false
+    this.#cartaoPublicadoNaEpoca = null
+    soltar(
+      setTimeout(() => {
+        void this.#publicarCartao(channel).catch(() => {})
+      }, Math.floor(Math.random() * Session.CARD_AGAIN_JITTER_MS)),
+    )
+  }
+
+  static CARD_AGAIN_MS = 60_000
+  static CARD_AGAIN_JITTER_MS = 3_000
+  readonly #cardsAgain = new Map<string, number>()
 
   /** A blank was not posted because we are behind. See `#publicarCartao`. */
   #cartaoAdiado = false
@@ -23707,6 +24050,9 @@ None of this touches the deafness counter: whoever reads it is the next
       // stored, not shown. Decided NOW, in server order, so what was written
       // before the room became read-only stays. See `#escritaRecusada`.
       if (this.#escritaRecusada(channel, result.sender, result.payload)) return
+      // Our own profile from another device of the account, in any channel (hotfix 1.3.26-2).
+      const perfilProprio = this.#perfilProprioQueChega(result.sender, result.senderDeviceKey, result.payload)
+      if (perfilProprio) this.#pendingPerfisProprios.push(perfilProprio)
       // A poll from someone without `votacoes`: kept, and read as a plain message. See `#votacaoSemPoder`.
       const semVotacao = this.#votacaoSemPoder(channel, result.sender, result.payload, minuto)
       // Before recording: what we had is what the vault still says. See `#cargosNovosParaMim`.
@@ -24316,6 +24662,11 @@ None of this touches the deafness counter: whoever reads it is the next
         // waking and then connects fine, so it would be a toast for nothing.
         route: frame.fatal && frame.code !== "login-timeout" ? "toast" : "log",
       })
+      return
+    }
+
+    if (frame.t === "channel.groupinfo.missing") {
+      this.#cardMissing(frame.channel)
       return
     }
 

@@ -352,6 +352,7 @@ export async function buildServer(config: ServerConfig, opcoes: OpcoesDoServidor
       push?.carteiro.parar()
       clearInterval(outboxTimer)
       clearInterval(suspensasTimer)
+      gateway.stopCardWatches()
       if (saidaTimer) clearInterval(saidaTimer)
       pararQuota?.()
       pararCampanha?.()

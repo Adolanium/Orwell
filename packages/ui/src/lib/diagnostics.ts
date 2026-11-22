@@ -22,7 +22,7 @@ import { strings } from "../strings.js"
 
 export interface DiagnosticEntry {
   at: number
-  kind: "status" | "connection" | "channels" | "epoch" | "message" | "action"
+  kind: "status" | "connection" | "channels" | "epoch" | "message" | "action" | "error"
   /** A stable name for what happened, when the source has one. */
   code?: string | undefined
   channel?: string | undefined

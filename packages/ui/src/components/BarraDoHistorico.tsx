@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react"
 import { useBridge } from "../App.js"
 import type { HistoricoDosIrmaos } from "../bridge.js"
+import { recordDiagnostic } from "../lib/diagnostics.js"
+import { marcarSincronia } from "../lib/falhas.js"
 import { strings } from "../strings.js"
 
 /**
@@ -16,16 +18,35 @@ export function useHistoricoDosIrmaos(): HistoricoDosIrmaos | null {
     void bridge.sincronia
       ?.historico?.()
       .then((agora) => {
-        if (vivo) setEstado((antes) => antes ?? agora)
+        if (!vivo) return
+        setEstado((antes) => antes ?? agora)
+        marcarSincronia("history", agora?.aTrazer === true)
       })
       .catch(() => {})
-    const largar = bridge.on.historico?.((novo) => setEstado(novo))
+    const largar = bridge.on.historico?.((novo) => {
+      // For the diagnostic log: a crash says whether the sync was running (`lib/falhas.ts`).
+      marcarSincronia("history", novo.aTrazer)
+      // A page of history that failed (22/11/2026): the reason, the attempt, and what was skipped.
+      if (novo.pageFailure) logPageFailure(novo.pageFailure)
+      setEstado(novo)
+    })
     return () => {
       vivo = false
       largar?.()
     }
   }, [bridge])
   return estado
+}
+
+/** One line in the diagnostic log per real failure of a page of history. Codes and counts only. */
+export function logPageFailure(failure: NonNullable<HistoricoDosIrmaos["pageFailure"]>): void {
+  const skipped = failure.notReceived !== undefined
+  recordDiagnostic({
+    kind: "action",
+    code: "history-page-failed",
+    detail: `${failure.reason} attempt=${failure.attempt}${skipped ? ` skipped=${failure.notReceived}` : ""}`,
+    outcome: skipped ? "skipped" : "retry",
+  })
 }
 
 /**
@@ -73,9 +94,14 @@ export function BarraDoHistorico({
   const nasMensagens = estado.feitas < estado.total
   const media = estado.media
   if (!nasMensagens && (!media || media.total === 0)) return null
+  const notReceived = estado.notReceived ? [strings.sincronia.historyNotReceived(estado.notReceived)] : []
   const texto = nasMensagens
-    ? strings.sincronia.historico(estado.feitas, estado.total)
-    : strings.sincronia.historicoMedia(media?.feitas ?? 0, media?.total ?? 0)
+    ? [strings.sincronia.historico(estado.feitas, estado.total), ...notReceived].join(" ")
+    : [
+        strings.sincronia.historicoMedia(media?.feitas ?? 0, media?.total ?? 0),
+        ...notReceived,
+        ...(media?.perdidas ? [strings.sincronia.historicoFicheirosPerdidos(media.perdidas)] : []),
+      ].join(" ")
   return (
     <div className={noTopo ? "barra-historico-no-topo" : "barra-sincronia barra-historico"} role="status" aria-live="polite">
       <span className="barra-sincronia-texto">{texto}</span>
@@ -102,7 +128,14 @@ export function BarraDoHistorico({
  */
 export function avisoDoHistorico(estado: HistoricoDosIrmaos | null): string | null {
   if (!estado || estado.aTrazer || !estado.razao) return null
-  if (estado.razao === "ilegiveis") return (estado.perdidas ?? 0) > 0 ? strings.sincronia.historicoPerdidas(estado.perdidas ?? 0) : null
+  if (estado.razao === "ilegiveis") {
+    const linhas = [
+      ...((estado.perdidas ?? 0) > 0 ? [strings.sincronia.historicoPerdidas(estado.perdidas ?? 0)] : []),
+      ...((estado.notReceived ?? 0) > 0 ? [strings.sincronia.historyNotReceived(estado.notReceived ?? 0)] : []),
+      ...((estado.ficheirosPerdidos ?? 0) > 0 ? [strings.sincronia.historicoFicheirosPerdidos(estado.ficheirosPerdidos ?? 0)] : []),
+    ]
+    return linhas.length > 0 ? linhas.join(" ") : null
+  }
   if (!estado.inicial && estado.total < 50) return null
   if (estado.faltam !== undefined) return estado.faltam > 0 ? strings.sincronia.historicoEmFalta(estado.faltam) : null
   if (estado.total > 0) return strings.sincronia.historicoEmFaltaSemNumero

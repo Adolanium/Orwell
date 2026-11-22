@@ -16,6 +16,7 @@ import {
   CAPACIDADE_BUNDLE,
   CAPACIDADE_COFRE_CIFRADO,
   CAPACIDADE_MANIFESTO_AO_VIVO,
+  CAPABILITY_CARD_MISSING,
   CAPACIDADE_EMPARELHAMENTO,
   CAPABILITY_PAIRING_PAKE,
   CAPACIDADE_ENVIO_RECUSADO,
@@ -215,6 +216,8 @@ interface Connection {
    * connection of the same account publishes one.
    */
   manifestoAoVivo: boolean
+  /** Posts the common room card again when told it is missing (`CAPABILITY_CARD_MISSING`). */
+  cardMissing: boolean
   /**
    * The abuse brake (1.3.26). The connection's network as the per-network limit
    * sees it: HMAC keys, never the address. `null` when that limit is off.
@@ -678,6 +681,7 @@ export class Gateway {
       historicoRecusado: false,
       cofreCifrado: false,
       manifestoAoVivo: false,
+      cardMissing: false,
       rede: null,
       deLoopback: ip !== undefined && ehLoopback(ip) && this.config.travaoEmLoopback !== true,
       sabeProvaDeTrabalho: false,
@@ -1254,6 +1258,7 @@ export class Gateway {
         connection.historicoRecusado = frame.capabilities?.includes(CAPACIDADE_HISTORICO_RECUSADO) ?? false
         connection.cofreCifrado = frame.capabilities?.includes(CAPACIDADE_COFRE_CIFRADO) ?? false
         connection.manifestoAoVivo = frame.capabilities?.includes(CAPACIDADE_MANIFESTO_AO_VIVO) ?? false
+        connection.cardMissing = frame.capabilities?.includes(CAPABILITY_CARD_MISSING) ?? false
         connection.sabeProvaDeTrabalho = frame.capabilities?.includes(CAPACIDADE_PROVA_DE_TRABALHO) ?? false
         connection.sabeContaNova = frame.capabilities?.includes(CAPACIDADE_LIMITES_DE_CONTA_NOVA) ?? false
         connection.sabeLimiteDeCanais = frame.capabilities?.includes(CAPACIDADE_LIMITE_DE_CANAIS) ?? false
@@ -1845,6 +1850,7 @@ export class Gateway {
         */
         connection.lugaresTemporarios.set(frame.channel, Date.now() + Gateway.LUGAR_TEMPORARIO_MS)
         this.#send(connection, { t: "channel.groupinfo", channel: frame.channel, info: toBase64(info) })
+        this.#watchTakenCard(frame.channel)
         return
       }
 
@@ -4219,6 +4225,41 @@ export class Gateway {
    * make it impossible to ever be invited to anything.
    */
   /** @returns how many connections received it. See `channel.rejoin.sent`. */
+  /**
+   * A card was taken: if its external commit never comes, the room is left without
+   * one (hotfix of 22/11/2026). The epoch does not move, so no member posts the
+   * next card, and every newcomer after that waits for a member to admit them.
+   * When the taker's temporary seat ends with still no card, the seated
+   * connections that can (`cardMissing`) are told, and they post one.
+   */
+  #watchTakenCard(channel: string): void {
+    const timer = setTimeout(() => {
+      this.#cardWatches.delete(timer)
+      try {
+        if (this.store.hasGroupInfo(channel)) return
+      } catch {
+        // The store is closing: nobody to tell.
+        return
+      }
+      const frame: ServerFrame = { t: "channel.groupinfo.missing", channel }
+      for (const connection of this.#connections) {
+        if (!connection.address || !connection.cardMissing || connection.janela !== null) continue
+        if (!connection.channels.has(channel)) continue
+        this.#send(connection, frame)
+      }
+    }, Gateway.LUGAR_TEMPORARIO_MS + 1_000)
+    timer.unref?.()
+    this.#cardWatches.add(timer)
+  }
+
+  readonly #cardWatches = new Set<ReturnType<typeof setTimeout>>()
+
+  /** Stop the watches of taken cards. The server calls it when it closes. */
+  stopCardWatches(): void {
+    for (const timer of this.#cardWatches) clearTimeout(timer)
+    this.#cardWatches.clear()
+  }
+
   broadcast(channel: string, message: ServerFrame, recipient?: string | undefined): number {
     let servidas = 0
     // Serialised once for every recipient, and only if there is one (12/11/2026): 34 % less CPU on a large commit to 400 sockets.

@@ -4,6 +4,8 @@ export { App } from "./App.js"
 // The screen of a channel member who is not the account owner. Only the web uses this: see
 // `apps/web/src/posse-do-separador.ts`.
 export { OutroSeparador } from "./screens/gate/OutroSeparador.js"
+// The crash card, for the screens the web draws outside `App` (1.3.27).
+export { ErrorBoundary } from "./components/ErrorBoundary.js"
 // The splash screen, which the web draws on startup before the gate decides: it matches what
 // the gate shows next, with no jump between them.
 export { Splash } from "./screens/gate/Splash.js"

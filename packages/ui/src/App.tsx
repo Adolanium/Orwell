@@ -41,7 +41,8 @@ import { useSucessoes } from "./hooks/useSucessoes.js"
 import { useCriarCanais } from "./hooks/useCriarCanais.js"
 import { useRoomQuota } from "./hooks/useRoomQuota.js"
 import { chaveDaOferta, escondidasPorSucessao, ofertasDeSucessao, type OfertaDeSucessao } from "./lib/sucessoes.js"
-import { useBloqueioAutomatico } from "./hooks/useBloqueioAutomatico.js"
+import { useBloqueioAutomatico, type AutoLockReason, type HistoryForLock } from "./hooks/useBloqueioAutomatico.js"
+import { useHistoryForLock } from "./hooks/useHistoryForLock.js"
 import { useChamadaEmSegundoPlano } from "./hooks/useChamadaEmSegundoPlano.js"
 import { useCotoveladaPorVer } from "./hooks/useCotoveladaPorVer.js"
 import { useNudgeShake } from "./hooks/useNudgeShake.js"
@@ -139,6 +140,7 @@ import { corDosPapeis, hexDaCor } from "./lib/roleColours.js"
 import { strings, translateError, traduzirErro } from "./strings.js"
 import { AvisoDeActualizacao } from "./components/AvisoDeActualizacao.js"
 import { ErrorBoundary } from "./components/ErrorBoundary.js"
+import { capturarErrosGlobais } from "./lib/falhas.js"
 import { LigacaoContext, type LigacaoDaFaixa } from "./components/ConnectionBanner.js"
 import { ToastProvider, useDispensarToast, useToast } from "./components/Toast.js"
 import { ConfirmarProvider, useConfirmar } from "./hooks/useConfirmar.js"
@@ -620,7 +622,27 @@ export function useBridge(): EnclaveBridge {
 /** No last activity: what `presenceFor` reads when the server relays live presence. */
 const SEM_ACTIVIDADE: ReturnType<typeof lastActivityOf> = new Map()
 
-export function App({
+/**
+ * The root, behind the last line of defence (1.3.27). A throw in the body or an
+ * effect of `AppSemProteccao` or the `Shell` unmounted the whole root: `#root`
+ * empty, the dark background, and only the version banner from `main.tsx` on
+ * top (the black screen on Android, iOS and Opera GX during the sync). Now the
+ * crash card shows instead ("Error 901", Reload, Report a bug). The session and
+ * the vault live outside React, so the sync goes on and a reload continues it.
+ */
+export function App(props: Parameters<typeof AppSemProteccao>[0]): React.JSX.Element {
+  // `window.onerror` and `unhandledrejection` to the diagnostic log, once per page (`lib/falhas.ts`).
+  useEffect(() => {
+    capturarErrosGlobais()
+  }, [])
+  return (
+    <ErrorBoundary bridge={props.bridge}>
+      <AppSemProteccao {...props} />
+    </ErrorBoundary>
+  )
+}
+
+function AppSemProteccao({
   bridge,
   startupInvite,
   startupPairing,
@@ -644,6 +666,23 @@ export function App({
   // decrypted state — messages, drafts, names — dies with it, and the fresh
   // mount finds an existing vault and lands on the unlock gate.
   const [generation, setGeneration] = useState(0)
+  /*
+    The history sync between devices, read by the auto-lock (1.3.27). Here and not
+    in the shell: the lock remounts the shell, and the gate still says the history
+    waits for the unlock.
+  */
+  const historyForLock = useHistoryForLock(bridge)
+  const [lockedMidSync, setLockedMidSync] = useState(false)
+  const relock = useCallback(
+    (reason: AutoLockReason = "manual") => {
+      const running = historyForLock.read() !== null
+      // The moment and the reason of each lock, for the diagnostic log (1.3.27).
+      recordDiagnostic({ kind: "action", code: "vault-locked", detail: `reason=${reason} history=${running ? "running" : "idle"}` })
+      setLockedMidSync(running)
+      setGeneration((current) => current + 1)
+    },
+    [historyForLock.read],
+  )
   // Taps on Service Worker alerts (installable web only, Android only) are heard
   // from startup, gate included, and not just with the vault open: see
   // `listenForSystemNoticeClicks`.
@@ -772,7 +811,9 @@ export function App({
           <Shell
             key={generation}
             lotePorQuadro={lotePorQuadro}
-            onRelock={() => setGeneration((current) => current + 1)}
+            onRelock={relock}
+            historyForLock={historyForLock}
+            lockedMidSync={lockedMidSync}
             conviteAEspera={conviteAEspera}
             conviteCurtoAEspera={conviteCurtoAEspera}
             onCurtaResolvida={curtaResolvida}
@@ -802,6 +843,8 @@ interface SitioDoAviso {
 function Shell({
   lotePorQuadro = false,
   onRelock,
+  historyForLock,
+  lockedMidSync = false,
   conviteAEspera,
   conviteCurtoAEspera = null,
   onCurtaResolvida,
@@ -815,7 +858,12 @@ function Shell({
 }: {
   /** See `App`'s `lotePorQuadro`. */
   lotePorQuadro?: boolean
-  onRelock: () => void
+  /** Lock and remount, with the reason for the diagnostic log. */
+  onRelock: (reason?: AutoLockReason) => void
+  /** The history sync for the auto-lock (1.3.27). See `useHistoryForLock`. */
+  historyForLock?: { active: boolean; read: () => HistoryForLock | null }
+  /** The vault locked during a history sync: the gate says the history waits for the unlock. */
+  lockedMidSync?: boolean
   conviteAEspera: ConviteLido | null
   /** The startup short link, waiting to be resolved on the server. */
   conviteCurtoAEspera?: string | null
@@ -5985,10 +6033,11 @@ function Shell({
     minutos: sessaoSemExpirar ? 0 : prefsDoSilencio.bloqueioAutomatico,
     activo: stage === "ready",
     emChamada: callChannel !== null,
-    aoBloquear: () => {
+    ...(historyForLock ? { history: historyForLock.read, historyActive: historyForLock.active } : {}),
+    aoBloquear: (reason) => {
       void bridge.vault
         .lock()
-        .then(onRelock)
+        .then(() => onRelock(reason))
         .catch((error: Error) => pushToast(traduzirErro(error), "error"))
     },
   })
@@ -6613,7 +6662,29 @@ function Shell({
 
   // Here, and not next to `labelFor`: the "awaiting entry" lines already need the
   // published names.
-  const { spaceMeta: spaceMetaEmBruto, refresh: refreshSpaceMeta } = useSpaceMeta(bridge, channels, messages)
+  /*
+    The channels where the account is a member and this device still waits for its
+    seat (hotfix of 22/11/2026): a new device, or a channel whose state was lost
+    here. Read again whenever the list changes: a seat that arrives moves the
+    channel from here into `channels`.
+  */
+  const [aEntrar, setAEntrar] = useState<readonly string[]>([])
+  useEffect(() => {
+    const ler = bridge.channels.pending
+    if (stage !== "ready" || !ler) return
+    let vivo = true
+    void ler()
+      .then((lista) => {
+        if (vivo) setAEntrar((antes) => (antes.length === lista.length && antes.every((c, i) => c === lista[i]) ? antes : lista))
+      })
+      .catch(() => {})
+    return () => {
+      vivo = false
+    }
+  }, [bridge, stage, channels])
+  const canaisComNome = useMemo(() => [...channels, ...aEntrar.filter((canal) => !channels.includes(canal))], [channels, aEntrar])
+
+  const { spaceMeta: spaceMetaEmBruto, refresh: refreshSpaceMeta } = useSpaceMeta(bridge, canaisComNome, messages)
   // The same map while no channel's banner changed (1.3.15): `labelFor` and `iconFor` depend on it.
   const spaceMeta = useMesmoValor(spaceMetaEmBruto)
   nomePublicado.current = (canal) => spaceMeta.get(canal)?.name
@@ -6625,7 +6696,7 @@ function Shell({
    * filter. One channel only once, even if there is both a link and invite for it.
    */
   const aEsperaDeEntrada = useMesmoValor(useMemo(() => {
-    const linhas: { canal: string; nome: string; deLink: boolean; nota?: string }[] = []
+    const linhas: { canal: string; nome: string; deLink: boolean; nota?: string; aEntrar?: true }[] = []
     if (entradaAEspera && !channels.includes(entradaAEspera)) {
       linhas.push({
         canal: entradaAEspera,
@@ -6644,8 +6715,14 @@ function Shell({
         : (canalAEsperaParaMostrar(tie.target, null, spaceMeta.get(tie.target)?.name) ?? strings.sidebar.canalDoConvite)
       linhas.push({ canal: tie.target, nome, deLink: false })
     }
+    // A channel of the account that waits for this device's seat: it never leaves the list.
+    for (const canal of aEntrar) {
+      if (channels.includes(canal) || linhas.some((linha) => linha.canal === canal)) continue
+      const nome = canalAEsperaParaMostrar(canal, null, spaceMeta.get(canal)?.name) ?? strings.sidebar.canalAEntrar
+      linhas.push({ canal, nome, deLink: false, nota: strings.sidebar.aEntrarNoCanal, aEntrar: true })
+    }
     return linhas
-  }, [entradaAEspera, nomeDaEntradaAEspera, entradaComOutroNome, channels, convites, conhecidosOuFeitos, spaceMeta]))
+  }, [entradaAEspera, nomeDaEntradaAEspera, entradaComOutroNome, channels, convites, conhecidosOuFeitos, spaceMeta, aEntrar]))
 
   /*
     "Ainda não guardaste o ficheiro da conta." (21/11/2026): the banner stays at
@@ -6694,6 +6771,8 @@ function Shell({
       if (!(await ficheiroPorTratar(address))) return false
       const estado = await bridge.pairing?.status().catch(() => null)
       if (estado?.temChaveDeConta === false) return false
+      // In by the account file: the file was in hand, whatever this browser's mark says (hotfix 1.3.26-2).
+      if (estado?.entrouPorFicheiro === true) return false
       const aparelhos = await bridge.pairing?.devices().catch(() => null)
       return !(aparelhos && aparelhos.length >= 2)
     })().then((mostrar) => {
@@ -6704,9 +6783,14 @@ function Shell({
     }
     // A device that joined elsewhere (`device-new`) is a second device too: count again at once.
   }, [stage, address, bridge, voltaDoFicheiro, aparelhosQueEntraram])
+  /*
+    Never in the phone layout (hotfix 1.3.26-2): the PWA, the
+    phone browser, iOS and Android. The export stays in Settings there, with no
+    banner. The phone is the layout's own test (`useTelemovel`), not another one.
+  */
   const faixaDoFicheiro = useMemo(
-    () => (ficheiroPorGuardar ? { guardar: () => setFolhaDoFicheiro(true) } : null),
-    [ficheiroPorGuardar],
+    () => (ficheiroPorGuardar && !telemovel ? { guardar: () => setFolhaDoFicheiro(true) } : null),
+    [ficheiroPorGuardar, telemovel],
   )
 
   /**
@@ -8146,7 +8230,7 @@ function Shell({
         canal: linha.canal,
         nome: linha.nome,
         ...(linha.nota ? { nota: linha.nota } : {}),
-        onCancelar: () => cancelarEspera(linha.canal, linha.deLink),
+        ...(linha.aEntrar ? {} : { onCancelar: () => cancelarEspera(linha.canal, linha.deLink) }),
       })),
     [aEsperaDeEntrada, cancelarEspera],
   )
@@ -8353,7 +8437,9 @@ function Shell({
     // The removed device has its own screen; only a pairing that never finished keeps the line.
     const avisoDoConvite = aparelhoRevogado && emparelhamentoPorAcabar && stage !== "removido"
       ? translateError("pairing-unfinished")
-      : conviteInvalido
+      : lockedMidSync && stage === "unlock"
+        ? strings.sincronia.historyLockedMidSync
+        : conviteInvalido
         ? strings.invite.gateInvalid
         : conviteAEspera || conviteCurtoAEspera
           ? strings.invite.gateWaiting
@@ -9262,7 +9348,7 @@ function Shell({
             address={address}
             connection={connection}
             connectionDetail={connectionDetail}
-            onLock={onRelock}
+            onLock={() => onRelock("manual")}
             onSessaoMudou={lerSessaoSemExpirar}
             /* The same pair the sidebar card and the call panel get, for the same
                reason: one source. See `SettingsScreen`. */

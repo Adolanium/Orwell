@@ -18,6 +18,8 @@
  *     a new tab only the new password opens it;
  *  8. all three still write, and Bruno reads them.
  */
+// Every page is watched: the centre of the screen stays inside the app (1.3.27).
+import "./screen-guard.mjs"
 import { chromium, firefox, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { aceitarConvite, convidar } from "./convite.mjs"

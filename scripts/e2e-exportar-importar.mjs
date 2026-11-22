@@ -24,6 +24,8 @@
  *  7. a second tab of the destination says the app is open in another tab and
  *     does not act, while the first keeps reading.
  */
+// Every page is watched: the centre of the screen stays inside the app (1.3.27).
+import "./screen-guard.mjs"
 import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"

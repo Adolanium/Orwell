@@ -616,6 +616,14 @@ export const pt = {
     headerProfile: "Eu",
     /** A grey line for each requested channel that has not arrived yet. */
     aEsperaDeEntrada: "à espera de alguém do canal",
+    /**
+     * A channel where the account is a member and this device still waits for its
+     * seat: a new device, or a channel whose state this device lost. It never leaves
+     * the list; this line shows until the channel opens.
+     */
+    aEntrarNoCanal: "a entrar no canal",
+    /** The name of that line when the channel has no published name on this device. */
+    canalAEntrar: "O teu canal",
     /** The link said one name and another channel arrived. See `invite.arrivedMismatch`. */
     chegouOutroNome: "o canal que chegou tem outro nome",
     cancelar: "Cancelar",
@@ -2408,7 +2416,15 @@ export const pt = {
       perdidas === 1
         ? "1 mensagem antiga não chegou: o aparelho principal não a conseguiu enviar."
         : `${perdidas} mensagens antigas não chegaram: o aparelho principal não as conseguiu enviar.`,
+    /* Files that failed three times and were skipped (1.3.27): during the transfer and at its end. */
+    historicoFicheirosPerdidos: (n: number): string =>
+      n === 1 ? "1 ficheiro não chegou: o aparelho principal não o conseguiu enviar." : `${n} ficheiros não chegaram: o aparelho principal não os conseguiu enviar.`,
+    /* A page of history that failed three times (22/11/2026): its channel's rest is skipped, and the sync continues. */
+    historyNotReceived: (n: number): string =>
+      n === 1 ? "1 mensagem não chegou. A sincronização continuou sem ela." : `${n} mensagens não chegaram. A sincronização continuou sem elas.`,
     historicoFechar: "Fechar o aviso do histórico",
+    /* On the gate, when the vault locked during a history sync (1.3.27). */
+    historyLockedMidSync: "Trancado. O histórico continua quando desbloqueares.",
     /**
      * On the device that sends the history to a freshly paired one.
      * Approved text. The photo count appears after the messages:
@@ -4902,6 +4918,7 @@ export const errosPt: Record<string, FraseDeErro> = {
   "the account password is missing": "Escreve a palavra-passe da conta para acabar.",
   "sync this device before you change the password": "Sincronize o aparelho antes de mudar a password",
   "the system did not confirm that it is you": "O sistema não confirmou que és tu. Tenta outra vez.",
+  "the app screen stopped working": "O ecrã da app parou. As tuas mensagens estão seguras. Recarrega para continuar. Se a sincronização estava a decorrer, continua depois de recarregares.",
   "there is no such account on this device": "Esta conta já não está neste aparelho.",
   "could not reach the homeserver": "Não foi possível contactar o servidor.",
   // «Enviar registo» (phase 4): the refusal and the cap of the `/_enclave/relato` route.

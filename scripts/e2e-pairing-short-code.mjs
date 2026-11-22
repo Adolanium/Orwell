@@ -30,6 +30,8 @@
  *
  * LOCAL AND DISPOSABLE: `servidor-descartavel.mjs`, its own ports, 127.0.0.1.
  */
+// Every page is watched: the centre of the screen stays inside the app (1.3.27).
+import "./screen-guard.mjs"
 import { chromium, firefox, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { contasDoServidor, dentro, escutar, irParaEmparelhar, verificador } from "./fase7-comum.mjs"

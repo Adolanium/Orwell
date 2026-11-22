@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { HistoricoDosIrmaos } from "../bridge.js"
+import { clearDiagnostics, diagnosticsSnapshot } from "../lib/diagnostics.js"
 import { strings } from "../strings.js"
-import { BarraDoHistorico } from "./BarraDoHistorico.js"
+import { BarraDoHistorico, logPageFailure } from "./BarraDoHistorico.js"
 
 /**
  * The history notice (12/11/2026): "402 of 420" stood still for hours. When the
@@ -59,6 +60,44 @@ describe("BarraDoHistorico", () => {
   it("entradas que o aparelho principal não conseguiu enviar: dá-as como perdidas", () => {
     render(<BarraDoHistorico estado={{ ...base, aTrazer: false, feitas: 0, total: 0, perdidas: 2, razao: "ilegiveis" }} />)
     expect(screen.getByRole("status").textContent).toContain(strings.sincronia.historicoPerdidas(2))
+  })
+
+  it("files that did not come (1.3.27): the bar reaches the end and says how many", () => {
+    render(<BarraDoHistorico estado={{ ...base, feitas: base.total, media: { feitas: 5, total: 5, perdidas: 2 } }} />)
+    const texto = screen.getByRole("status").textContent ?? ""
+    expect(texto).toContain(strings.sincronia.historicoMedia(5, 5))
+    expect(texto).toContain(strings.sincronia.historicoFicheirosPerdidos(2))
+    expect((screen.getByRole("progressbar", { hidden: true }) as HTMLProgressElement).value).toBe(5)
+  })
+
+  it("the transfer ended with files that did not come (1.3.27): one closable line", () => {
+    render(<BarraDoHistorico estado={{ ...base, aTrazer: false, feitas: 0, total: 0, ficheirosPerdidos: 1, razao: "ilegiveis" }} />)
+    expect(screen.getByRole("status").textContent).toContain(strings.sincronia.historicoFicheirosPerdidos(1))
+  })
+
+  it("a page that failed three times (22/11/2026): the bar reaches the end and says how many messages did not come", () => {
+    render(<BarraDoHistorico estado={{ ...base, feitas: 1437, total: 1437, notReceived: 66, media: { feitas: 3, total: 9 } }} />)
+    const texto = screen.getByRole("status").textContent ?? ""
+    expect(texto).toContain(strings.sincronia.historicoMedia(3, 9))
+    expect(texto).toContain(strings.sincronia.historyNotReceived(66))
+    expect(texto).not.toContain(strings.sincronia.historico(1437, 1503))
+  })
+
+  it("the transfer ended with messages this device gave up on: one closable line", () => {
+    render(<BarraDoHistorico estado={{ ...base, aTrazer: false, feitas: 0, total: 0, notReceived: 66, razao: "ilegiveis" }} />)
+    expect(screen.getByRole("status").textContent).toContain(strings.sincronia.historyNotReceived(66))
+    expect(strings.sincronia.historyNotReceived(1)).toMatch(/^(1 message did not come|1 mensagem não chegou)\./)
+  })
+
+  it("each real failure of a page writes the reason to the diagnostic log", () => {
+    clearDiagnostics()
+    logPageFailure({ reason: "silent", attempt: 2 })
+    logPageFailure({ reason: "silent", attempt: 3, notReceived: 66 })
+    const linhas = diagnosticsSnapshot().filter((d) => d.code === "history-page-failed")
+    expect(linhas.map((d) => [d.detail, d.outcome])).toEqual([
+      ["silent attempt=2", "retry"],
+      ["silent attempt=3 skipped=66", "skipped"],
+    ])
   })
 
   it("um aparelho novo sem ninguém a responder: diz porquê, nunca um ecrã sem nada", () => {

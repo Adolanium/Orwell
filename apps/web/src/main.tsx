@@ -2,7 +2,7 @@ import { mostrarFaixa } from "./faixa.js"
 import { marcarArranque } from "@enclave/client-core"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
-import { App, arrancarLingua, folhaDaAuroraPronta, OutroSeparador, Splash, strings, tocarSomDeActualizacao } from "@enclave/ui"
+import { App, arrancarLingua, ErrorBoundary, folhaDaAuroraPronta, OutroSeparador, Splash, strings, tocarSomDeActualizacao } from "@enclave/ui"
 import "@enclave/ui/styles.css"
 import { createBrowserBridge, ouvirBloqueios, type PonteDoBrowser } from "./bridge.js"
 import { armazenamentoDoSeparador, lerAmigoDeArranque, lerConviteDeArranque, lerEmparelhamentoDeArranque } from "./convite-arranque.js"
@@ -310,7 +310,9 @@ function desenhar(estado: EstadoDaPosse): void {
       return
     case "espera":
       esperou = true
+      // Outside `App`, so behind its own crash card (1.3.27): never an empty root.
       raiz.render(
+        <ErrorBoundary>
         <OutroSeparador
           aPedir={estado.aPedir}
           semResposta={estado.semResposta}
@@ -319,7 +321,8 @@ function desenhar(estado: EstadoDaPosse): void {
           // Old, the tab does not take over: the button reloads, which brings the new code.
           onUsar={() => (versaoVelha ? window.location.reload() : posse.pedir())}
           onForcar={() => (versaoVelha ? window.location.reload() : posse.pedir({ forcar: true }))}
-        />,
+        />
+        </ErrorBoundary>,
       )
       return
     case "cedido":

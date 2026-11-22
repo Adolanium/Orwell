@@ -54,6 +54,7 @@ import { votacaoDe, type Apuramento } from "../../lib/votacoes.js"
 import type { EstadoDaProcura } from "../../hooks/useProcura.js"
 import type { Achado } from "../../lib/procura.js"
 import { BarraDeSincronia } from "../../components/BarraDeSincronia.js"
+import { marcarSincronia } from "../../lib/falhas.js"
 import { AvisoDoEnvio, BarraDoHistorico, useHistoricoDosIrmaos } from "../../components/BarraDoHistorico.js"
 import { useSincronia } from "../../hooks/useSincronia.js"
 import { podeResponder, type Citacao, type RespostaPendente } from "../../lib/respostas.js"
@@ -683,7 +684,15 @@ export function ChatScreen({
 
   /** The channels catching up now. See `bridge.on.recuperacao`. */
   const [aRecuperarCanais, setARecuperarCanais] = useState<ReadonlySet<string>>(() => new Set())
-  useEffect(() => bridge.on.recuperacao?.((evento) => setARecuperarCanais(new Set(evento.canais))), [bridge])
+  useEffect(
+    () =>
+      bridge.on.recuperacao?.((evento) => {
+        // For the diagnostic log: a crash says whether the catch-up was running (`lib/falhas.ts`).
+        marcarSincronia("recovery", evento.canais.length > 0)
+        setARecuperarCanais(new Set(evento.canais))
+      }),
+    [bridge],
+  )
   const aRecuperar = active !== null && aRecuperarCanais.has(active)
   /**
    * The lines of the deaf-room notice: "Error 390", then the sentence. Once per

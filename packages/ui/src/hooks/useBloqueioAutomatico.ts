@@ -9,6 +9,35 @@ import { useEffect, useRef } from "react"
  */
 export const GESTOS_DE_USO = ["keydown", "pointerdown", "pointermove", "wheel", "touchstart"] as const
 
+/** Why the vault locked, for the diagnostic log. `manual` is "Lock now". */
+export type AutoLockReason = "inactivity" | "sync-cap" | "manual"
+
+/** The history sync, as the auto-lock reads it: when it started, and when it last moved. */
+export interface HistoryForLock {
+  startedAt: number
+  progressAt: number
+}
+
+/** The history moved this recently: the auto-lock waits. */
+export const HISTORY_PROGRESS_WINDOW_MS = 2 * 60_000
+/** At most this long per sync: past it, the auto-lock locks as always. */
+export const HISTORY_HOLD_CAP_MS = 60 * 60_000
+/** While the history holds the lock, how often the timer looks again. */
+const HISTORY_CHECK_MS = 30_000
+
+/**
+ * Whether a history sync holds the auto-lock now. `hold`: it moved in the last
+ * `HISTORY_PROGRESS_WINDOW_MS`, the page is visible, and the sync is younger than
+ * `HISTORY_HOLD_CAP_MS`. `cap`: the sync is older than the cap (the reason in the
+ * log). `null`: no hold.
+ */
+export function historyHoldsLock(history: HistoryForLock | null, now: number, visible: boolean): "hold" | "cap" | null {
+  if (!history) return null
+  if (now - history.startedAt >= HISTORY_HOLD_CAP_MS) return "cap"
+  if (!visible || now - history.progressAt >= HISTORY_PROGRESS_WINDOW_MS) return null
+  return "hold"
+}
+
 /**
  * "Lock on its own": closes the vault after `minutes` without use.
  *
@@ -26,32 +55,50 @@ export const GESTOS_DE_USO = ["keydown", "pointerdown", "pointermove", "wheel", 
  * and locks right away. And the tab that becomes visible again checks at once,
  * so the vault doesn't stay open until the next tick.
  *
- * `aoBloquear` is the same path as "Sign out" (see `App.tsx`).
+ * **The history between devices (1.3.27).** A phone left alone during a long
+ * history sync locked at 15 min, and the sync stopped there: with the vault
+ * locked nothing asks for the next part, and nothing counts as a failure. The
+ * lock now waits while the history really moves (`historyHoldsLock`): progress
+ * in the last `HISTORY_PROGRESS_WINDOW_MS`, the page visible, and never more than
+ * `HISTORY_HOLD_CAP_MS` for one sync. A stopped sync, a hidden page or the cap
+ * lock as always. The end of the sync counts as use, like the end of a call.
+ * The accepted risk is in `docs/THREAT-MODEL.md`.
+ *
+ * `aoBloquear` is the same path as "Sign out" (see `App.tsx`), with the reason.
  */
 export function useBloqueioAutomatico({
   minutos,
   activo,
   emChamada,
   aoBloquear,
+  history,
+  historyActive = false,
 }: {
   /** 0 means "Never". */
   minutos: number
   /** Only when the vault is open: at the gate there is nothing to close. */
   activo: boolean
   emChamada: boolean
-  aoBloquear: () => void
+  aoBloquear: (reason: AutoLockReason) => void
+  /** The history sync now, read when the timer wakes. Absent: no history hold. */
+  history?: () => HistoryForLock | null
+  /** A history sync is running. Its start and its end are both use. */
+  historyActive?: boolean
 }): void {
   const aoBloquearRef = useRef(aoBloquear)
   aoBloquearRef.current = aoBloquear
   const emChamadaRef = useRef(emChamada)
   emChamadaRef.current = emChamada
+  const historyRef = useRef(history)
+  historyRef.current = history
   const ultimo = useRef(Date.now())
 
   // Joining and leaving a call are both use. Without this, someone hanging up
   // after an hour of voice chat would see the vault lock the instant after.
+  // The same for the end of a history sync.
   useEffect(() => {
     ultimo.current = Date.now()
-  }, [emChamada])
+  }, [emChamada, historyActive])
 
   useEffect(() => {
     if (!activo || minutos <= 0 || typeof window === "undefined") return
@@ -74,10 +121,17 @@ export function useBloqueioAutomatico({
         agendar(limite)
         return
       }
-      const passou = Date.now() - ultimo.current
+      const agora = Date.now()
+      const passou = agora - ultimo.current
       if (passou >= limite) {
+        const hold = historyHoldsLock(historyRef.current?.() ?? null, agora, document.visibilityState === "visible")
+        if (hold === "hold") {
+          // Look again soon: the hold ends when the history stops moving.
+          agendar(HISTORY_CHECK_MS)
+          return
+        }
         fechado = true
-        aoBloquearRef.current()
+        aoBloquearRef.current(hold === "cap" ? "sync-cap" : "inactivity")
         return
       }
       agendar(limite - passou)

@@ -373,6 +373,8 @@ export const en: Traducao = {
 
   sidebar: {
     aEsperaDeEntrada: "waiting for someone in the channel",
+    aEntrarNoCanal: "joining the channel",
+    canalAEntrar: "Your channel",
     chegouOutroNome: "the channel that arrived has another name",
     cancelar: "Cancel",
     cancelarEspera: (nome: string): string => `Stop waiting for ${nome}`,
@@ -1237,7 +1239,15 @@ export const en: Traducao = {
       perdidas === 1
         ? "1 older message did not come: the main device could not send it."
         : `${perdidas} older messages did not come: the main device could not send them.`,
+    /* Files that failed three times and were skipped (1.3.27): during the transfer and at its end. */
+    historicoFicheirosPerdidos: (n: number): string =>
+      n === 1 ? "1 file did not come: the main device could not send it." : `${n} files did not come: the main device could not send them.`,
+    /* A page of history that failed three times (22/11/2026): its channel's rest is skipped, and the sync continues. */
+    historyNotReceived: (n: number): string =>
+      n === 1 ? "1 message did not come. The sync continued without it." : `${n} messages did not come. The sync continued without them.`,
     historicoFechar: "Close the history notice",
+    /* On the gate, when the vault locked during a history sync (1.3.27). */
+    historyLockedMidSync: "Locked. The history continues after you unlock.",
     /* On the device that sends the history to a freshly paired one. Approved text. */
     envioTitulo: "Keep this device on",
     envioCorpo: "Your phone is getting your message history from this device. Do not close Orwell here until it is done.",
@@ -2911,6 +2921,7 @@ export const errosEn: Record<string, FraseDeErro> = {
   "the account password is missing": "Type the account password to finish.",
   "sync this device before you change the password": "Sync this device before you change the password",
   "the system did not confirm that it is you": "The system did not confirm that it is you. Try again.",
+  "the app screen stopped working": "The app screen stopped. Your messages are safe. Reload to continue. If a sync was in progress, it continues after you reload.",
   "there is no such account on this device": "This account is no longer on this device.",
   "could not reach the homeserver": "Could not reach the server.",
   "the server did not take the log": "The server did not take the log. Copy it and paste it in the report.",

@@ -849,6 +849,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
         servidorSuporta: session.suportaEmparelhamento,
         servidorRevoga: session.serverCapabilities.includes(CAPACIDADE_REVOGACAO),
         serverKnowsShortCode: session.serverCapabilities.includes(CAPABILITY_PAIRING_PAKE),
+        entrouPorFicheiro: session.entrouPorFicheiro,
       }),
       host: () => session.emparelharComoAnfitriao(),
       join: async (link) => {
@@ -1063,6 +1064,7 @@ export function createBrowserBridge(opcoes: OpcoesDaPonte = {}): PonteDoBrowser 
     channels: {
       list: async () => session.channels,
       archived: async () => session.archivedChannels(),
+      pending: async () => session.seatsPending(),
       create: async (channel, nome) => {
         // `createSpace`, not `createSpaceChannel`: a people channel is born with the rooms that define it.
         // See `SALAS_INICIAIS`.

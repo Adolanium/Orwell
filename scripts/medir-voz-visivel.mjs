@@ -25,6 +25,8 @@
  * get the right streams (`CallPanel.voz.test.tsx`, `CallDock.voz.test.tsx`).
  * Here we measure what you see and what you pay.
  */
+// Every page is watched: the centre of the screen stays inside the app (1.3.27).
+import "./screen-guard.mjs"
 import { build } from "esbuild"
 import { chromium } from "playwright"
 import { mkdirSync, writeFileSync } from "node:fs"

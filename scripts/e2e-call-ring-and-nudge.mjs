@@ -23,6 +23,8 @@
  * the fundamental frequencies of each sound the engine renders, and each
  * `AudioBufferSourceNode.start`. A MutationObserver logs each shake.
  */
+// Every page is watched: the centre of the screen stays inside the app (1.3.27).
+import "./screen-guard.mjs"
 import { chromium, firefox, webkit } from "playwright"
 import { criarConta } from "./conta.mjs"
 import { abrirDirecta, aceitarAmizade, ate, contasDoServidor, dentro, espera, irParaEmparelhar, pedirAmizade, verificador } from "./fase7-comum.mjs"

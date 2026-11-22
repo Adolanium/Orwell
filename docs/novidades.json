@@ -1,5 +1,72 @@
 [
   {
+    "versao": "1.3.27",
+    "nome": "Carmelo",
+    "data": "2026-11-22",
+    "itens": [
+      {
+        "tipo": "fix",
+        "texto": "A crash in the app shell no longer leaves a black screen. The whole app now sits behind the crash card: \"Error 901\", Reload and Report a bug. The sync state is in the vault, so a reload resumes the sync."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Crashes, uncaught errors and unhandled promise rejections go to the diagnostic log with the version, a short stack and whether a sync was running. Addresses, links and message text are stripped. A crash survives the reload, so the log after Reload still has it."
+      },
+      {
+        "tipo": "fix",
+        "texto": "History between devices: a media response larger than the responder's 16 MiB buffer (a 25 MiB video) is now windowed and kept, so a lost part can be asked again instead of failing forever."
+      },
+      {
+        "tipo": "fix",
+        "texto": "History between devices: a media item that fails 3 times (the sender cannot serve it, or goes silent while still online) is skipped, so the sync ends. Reloads, sleep and a closed sender do not count. The progress bar reaches the end and says how many files did not come."
+      },
+      {
+        "tipo": "fix",
+        "texto": "History between devices: a page that never arrives (an older sender that cannot send it, or no longer keeps it) is asked at most 3 times. The rest of that channel then counts as not received and leaves the total, so the sync goes on with the other channels. The bar says how many messages did not come."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Lock on its own no longer stops the history between devices: it waits while the history really moves (a part in the last 2 min) on a visible page, for at most 60 min per sync. A stopped sync or a hidden page locks as before, Lock now always locks, and the unlock screen says \"Locked. The history continues after you unlock.\""
+      },
+      {
+        "tipo": "fix",
+        "texto": "Own profile: a device that came in by the account file now takes a newer profile from your other devices in any channel, live or in history, not only in the account channel, and publishes it again. An older local edit still waiting to go out loses; a portrait whose bytes did not come keeps the one on this device."
+      },
+      {
+        "tipo": "fix",
+        "texto": "\"You have not saved the account file yet\" no longer shows on a device that came in by the file, and never shows in the phone layout. Export stays in Settings."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Common room: a device that can no longer read it (Error 390) now takes the room's join card and seats itself again, with no other member online."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Seat requests from a new device (import or pairing) now run on their own timer, at 1, 2, 4 and up to 30 min, instead of waiting for the next 10-minute pass."
+      },
+      {
+        "tipo": "fix",
+        "texto": "A device waiting for a seat asks again as soon as a member of that channel comes online. That member first finishes its own catch-up (up to 30 s), then answers."
+      },
+      {
+        "tipo": "fix",
+        "texto": "A channel whose group state was lost on this device (history, but no group) now asks for its seat, signed, like a new device does."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Common room join card: when a card is taken and the join never lands, the server tells the seated members and one of them posts the card again, at most once a minute. A newcomer can no longer be left waiting for a member to let them in."
+      },
+      {
+        "tipo": "fix",
+        "texto": "Key packages: after wasting 3 of another device's packages in 30 minutes, a session stops claiming that device until the window ends, so a run of refused commits can no longer drain a device to zero."
+      },
+      {
+        "tipo": "melhoria",
+        "texto": "Sidebar: a channel waiting for this device's seat shows with its name and \"joining the channel\" until it opens, instead of being missing from the list."
+      }
+    ]
+  },
+  {
     "versao": "1.3.26",
     "nome": "Carmelo",
     "data": "2026-11-21",

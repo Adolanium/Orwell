@@ -19,6 +19,7 @@ import {
   juntarMediaDoIrmao,
   type EstadoDoHistorico,
   type ItemDeMediaDoIrmao,
+  type PageFailureReason,
   type RazaoDoHistorico,
   type StoredChatMessage,
   type StoredPayload,
@@ -114,6 +115,16 @@ export const TECTOS_DO_FIO_DO_HISTORICO = {
   esperaDaRespostaMs: 30_000,
   /** Times to request the same thing again before dropping the session. */
   tentativasPorPedido: 3,
+  /**
+   * Real failures of a media request led by the same item before that item
+   * counts as lost (1.3.27): the sibling's `hx`, a request given up after
+   * `tentativasPorPedido` silences, a response that did not open. A reload, a
+   * suspension or closing the app do not count (`#falhouOPedido`).
+   *
+   * The same number for a page of history at one cursor (22/11/2026): after it,
+   * the rest of that channel counts as not received and the sync goes on.
+   */
+  tentativasPorItem: 3,
   /** Without an inventory in response to a `hi` during this time, another `hi` can go out. */
   esperaDoInventarioMs: 20_000,
   /** A newly paired device requests history every `esperaDoInventarioMs`; after that, only every ten minutes. */
@@ -163,6 +174,12 @@ export const TECTOS_DO_FIO_DO_HISTORICO = {
   descomprimidoMax: 64 * 1024 * 1024,
   /** `trazerUm` gives up after this, if no sibling has just answered. */
   trazerUmMs: 60_000,
+  /**
+   * `progressAt` moves at most this often (1.3.27): a part-level mark for the
+   * interface, which holds the auto-lock while the history moves. Two extra
+   * events a minute at most, however fast the parts come.
+   */
+  progressStepMs: 30_000,
 }
 
 /** What the module needs from the session. */
@@ -238,8 +255,32 @@ export interface EventoDoHistorico {
   /** Fetched entries and count of remaining entries. */
   feitas: number
   total: number
-  /** Media items after the text. `null` until the count is known. */
-  media: { feitas: number; total: number } | null
+  /**
+   * Media items after the text. `null` until the count is known. `perdidas`
+   * (1.3.27): items that failed `tentativasPorItem` times and left; they count
+   * in `feitas` too, so the bar reaches the end.
+   */
+  media: { feitas: number; total: number; perdidas?: number } | null
+  /** The transfer ended with files that did not come (1.3.27), with `razao` "ilegiveis". */
+  ficheirosPerdidos?: number
+  /**
+   * Entries this device gave up on (22/11/2026): the rest of a channel whose page
+   * failed `tentativasPorItem` times. Out of `total` already, so the bar reaches
+   * the end; during the transfer and at its end (then with `razao` "ilegiveis").
+   */
+  notReceived?: number
+  /**
+   * Once per real failure of a page, for the diagnostic log: the reason and the
+   * attempt; on the last one, `notReceived` says how many entries left with it.
+   */
+  pageFailure?: { reason: PageFailureReason; attempt: number; notReceived?: number }
+  /**
+   * When the history last moved on this device (1.3.27): a part received, or a
+   * part of a response sent. Updated at most every `progressStepMs`. Only while
+   * a sync runs (`aTrazer` or `envio`). One large media item keeps `feitas`
+   * still for minutes: this mark is what says the sync still moves.
+   */
+  progressAt?: number
   /** Channels whose history changed in this step: the interface reloads them. */
   canais: string[]
   /** This is the history of a device that just paired (not a sync between siblings). */
@@ -474,15 +515,29 @@ export class HistoricoEntreAparelhos {
   #irmaoRespondeu = false
   /** The "Keep this device on" counts last told to the interface, to tell only changes. */
   #envioDito = "null"
+  /** See `EventoDoHistorico.progressAt`. */
+  #progressAt = 0
   /** Entries lost on the way in the plan that just finished, for the last event. */
   #perdidasNoFim = 0
+  /** The same for files (1.3.27): media items that left as lost (`media.perdidas`). */
+  #ficheirosPerdidosNoFim = 0
+  /** The same for entries this device gave up on (22/11/2026): `notReceived`. */
+  #notReceivedAtEnd = 0
+  /**
+   * A media request given up after `tentativasPorPedido` silences (1.3.27). It
+   * counts as a failure only if the sibling answers the next `hi` before
+   * `ate`: then it is there and did not deliver. A sibling that closed or
+   * slept does not answer it, and a reload or a dropped connection here clears
+   * this, so none of those count. In memory only.
+   */
+  #suspeita: { pedido: PedidoEmCurso; ate: number } | null = null
   /** For tests: signal count sent and received. */
   /** Who is waiting for a `trazerUm` item, by item key. */
   readonly #aEspera = new Map<string, ((desfecho: DesfechoDoIrmao) => void)[]>()
   /** The `trazerUm` items that arrived while a plan had no media list yet: they join it when it comes. */
   readonly #avulsos: ItemDeMediaDoIrmao[] = []
   /** For tests: how many signals went out and came in. */
-  readonly estatisticas = { enviados: 0, recebidos: 0, recusados: 0, ilegiveis: 0, pedidos: 0, respostas: 0, descartados: 0, sessoes: 0 }
+  readonly estatisticas = { enviados: 0, recebidos: 0, recusados: 0, ilegiveis: 0, pedidos: 0, respostas: 0, descartados: 0, sessoes: 0, mediaPerdida: 0, pagesLost: 0 }
 
   constructor(porta: PortaDoHistorico) {
     this.#porta = porta
@@ -522,6 +577,8 @@ export class HistoricoEntreAparelhos {
    * `hx`, and a new session opens, as before.
    */
   aoDesligar(): void {
+    // Our own connection dropped: a silence before it says nothing about the item.
+    this.#suspeita = null
     if (this.#relogio !== undefined) clearInterval(this.#relogio)
     this.#relogio = undefined
     if (this.#bomba !== undefined) clearTimeout(this.#bomba)
@@ -746,6 +803,53 @@ export class HistoricoEntreAparelhos {
     }
   }
 
+  /**
+   * A real failure of a media request (1.3.27): the sibling answered `hx` for
+   * this request, the request was given up after `tentativasPorPedido`
+   * silences with the sibling still there (`#suspeita`), or the response did
+   * not open. Charged, in the vault, to the item that led the request; at
+   * `tentativasPorItem` that item leaves as lost (`#proximoPedido`). A reload,
+   * a suspension or closing the app drop the session without coming here, so
+   * they never count: on a phone that sleeps every minute, a large video is
+   * not lost for that.
+   *
+   * A page of history follows the same rule since 22/11/2026 (`#pageFailed`), with
+   * the reason for the diagnostic log.
+   */
+  #falhouOPedido(pedido: PedidoEmCurso | undefined, reason: PageFailureReason): void {
+    if (pedido?.corpo.t === "pagina") return this.#pageFailed(pedido.corpo.c, pedido.corpo.desde, reason)
+    if (pedido?.corpo.t !== "media") return
+    const primeiro = pedido.corpo.itens[0]
+    if (!primeiro) return
+    const chave = chaveDoItem(primeiro)
+    this.#porta.gravar((c) => {
+      const m = c.historico?.plano?.media
+      if (!m || !m.porTrazer.some((x) => chaveDoItem(x) === chave)) return
+      m.tentativas = { ...m.tentativas, [chave]: (m.tentativas?.[chave] ?? 0) + 1 }
+    })
+  }
+
+  /**
+   * A real failure of the page at `desde` of channel `c` (22/11/2026), the same
+   * rule as a media item: charged in the vault, and at `tentativasPorItem` the
+   * channel ends (`#proximoPedido`). Only while the plan still waits for that page.
+   * Before, the requester asked the same page forever: a 1.3.25 sibling answers
+   * nothing when a response needs more than `partesMax` parts, each new session's
+   * inventory counted as progress, the deadline never came, and the channels
+   * after that page never came either.
+   */
+  #pageFailed(c: string, desde: number | null, reason: PageFailureReason): void {
+    let attempt = 0
+    this.#porta.gravar((contents) => {
+      const canal = contents.historico?.plano?.canais[c]
+      if (!canal || canal.fim || canal.cursor !== desde) return
+      canal.failures = (canal.failures ?? 0) + 1
+      canal.failureReason = reason
+      attempt = canal.failures
+    })
+    if (attempt > 0) this.#dizer([], false, { reason, attempt })
+  }
+
   #querPedir(estado: EstadoDoHistorico | undefined, agora: number): boolean {
     const t = TECTOS_DO_FIO_DO_HISTORICO
     // Nobody to ask: no `hi` into the void (the deadline then drops the plan, `#talvezDesistir`).
@@ -810,6 +914,8 @@ export class HistoricoEntreAparelhos {
     if (agora - Math.max(pedido.enviadoEm, pedido.ultimaParte) < espera) return
     if (pedido.tentativas >= t.tentativasPorPedido) {
       // The responder went silent: another session in the next step (maybe with a different sibling).
+      // A failure only if the sibling answers that next `hi` (`#suspeita`): one that closed or slept never counts.
+      if (pedido.corpo.t !== "media?") this.#suspeita = { pedido, ate: agora + t.esperaDoInventarioMs }
       this.#pedinte = null
       this.#ultimoHi = 0
       return
@@ -842,6 +948,10 @@ export class HistoricoEntreAparelhos {
     }
     for (const [c, canal] of Object.entries(plano.canais)) {
       if (canal.fim) continue
+      if ((canal.failures ?? 0) >= TECTOS_DO_FIO_DO_HISTORICO.tentativasPorItem) {
+        this.#giveUpChannel(c)
+        continue
+      }
       await this.#pedir(pedinte, { t: "pagina", c, desde: canal.cursor })
       return
     }
@@ -851,10 +961,55 @@ export class HistoricoEntreAparelhos {
       return
     }
     if (plano.media.porTrazer.length > 0) {
-      await this.#pedir(pedinte, { t: "media", itens: plano.media.porTrazer.slice(0, TECTOS_DO_HISTORICO.itensPorPedidoDeMedia) })
+      const primeiro = plano.media.porTrazer[0] as ItemDeMediaDoIrmao
+      const chave = chaveDoItem(primeiro)
+      const falhas = plano.media.tentativas?.[chave] ?? 0
+      if (falhas >= TECTOS_DO_FIO_DO_HISTORICO.tentativasPorItem) {
+        // A unit that never completes: counted as done and lost, so the sync ends (diagnostic: `mediaPerdida`).
+        this.#porta.gravar((c) => {
+          const m = c.historico?.plano?.media
+          if (!m) return
+          m.porTrazer = m.porTrazer.filter((x) => chaveDoItem(x) !== chave)
+          m.feitas = Math.min(m.total, m.feitas + 1)
+          m.perdidas = (m.perdidas ?? 0) + 1
+          if (m.tentativas) delete m.tentativas[chave]
+        })
+        this.estatisticas.mediaPerdida += 1
+        this.#resolver(chave, "nao-tem")
+        this.#dizer([])
+        return this.#proximoPedido(pedinte)
+      }
+      // An item that failed before goes alone: it does not take the seven behind it down with it.
+      const itens = falhas > 0 ? [primeiro] : plano.media.porTrazer.slice(0, TECTOS_DO_HISTORICO.itensPorPedidoDeMedia)
+      await this.#pedir(pedinte, { t: "media", itens })
       return
     }
     this.#acabar()
+  }
+
+  /**
+   * A page that failed `tentativasPorItem` real times: the rest of the channel
+   * counts as not received (`notReceived`, and out of the total through
+   * `perdidas`), and the channel ends here, so the sync goes on to the next one.
+   */
+  #giveUpChannel(c: string): void {
+    let skipped = 0
+    let reason: PageFailureReason = "silent"
+    let attempt = 0
+    this.#porta.gravar((contents) => {
+      const canal = contents.historico?.plano?.canais[c]
+      if (!canal || canal.fim) return
+      skipped = Math.max(0, canal.total - (canal.perdidas ?? 0) - canal.feitas)
+      reason = canal.failureReason ?? reason
+      attempt = canal.failures ?? 0
+      canal.perdidas = (canal.perdidas ?? 0) + skipped
+      canal.notReceived = (canal.notReceived ?? 0) + skipped
+      canal.fim = true
+      delete canal.failures
+      delete canal.failureReason
+    })
+    this.estatisticas.pagesLost += 1
+    this.#dizer([], false, { reason, attempt, notReceived: skipped })
   }
 
   async #pedir(pedinte: SessaoDeQuemPede, corpo: Pedido, tentativas = 0): Promise<void> {
@@ -908,6 +1063,10 @@ export class HistoricoEntreAparelhos {
         return
       }
       this.#progrediu()
+      // The sibling that went silent on a media request answers at once: it is there, and the request failed.
+      const suspeita = this.#suspeita
+      this.#suspeita = null
+      if (suspeita && this.#porta.agora() <= suspeita.ate) this.#falhouOPedido(suspeita.pedido, "silent")
       this.#aoInventario(inventario)
       await this.#proximoPedido(pedinte)
       return
@@ -935,9 +1094,18 @@ export class HistoricoEntreAparelhos {
     const resposta = await this.#abrirResposta<unknown>(pedinte, pedinte.chegada)
     pedinte.chegada = undefined
     pedinte.pedido = undefined
-    if (resposta === null) return
+    if (resposta === null) {
+      this.#falhouOPedido(pedido, "unreadable")
+      return
+    }
     this.estatisticas.respostas += 1
-    this.#aoResposta(pedido.corpo, resposta)
+    try {
+      this.#aoResposta(pedido.corpo, resposta)
+    } catch (error) {
+      // A page this device cannot merge is a failure of that page, not a silent retry forever.
+      if (pedido.corpo.t !== "pagina") throw error
+      this.#falhouOPedido(pedido, "merge-failed")
+    }
     await this.#proximoPedido(pedinte)
   }
 
@@ -963,6 +1131,7 @@ export class HistoricoEntreAparelhos {
     if (!chegada.partes[i]) {
       chegada.partes[i] = corpo.slice()
       chegada.recebidas += 1
+      this.#moved()
     }
     return chegada.recebidas === chegada.n
   }
@@ -1002,7 +1171,12 @@ export class HistoricoEntreAparelhos {
         for (const canal of canais) {
           const noPlano = h.plano.canais[canal.c]
           if (!noPlano) continue
-          noPlano.total = Math.max(noPlano.total, canal.n, noPlano.feitas)
+          /*
+            A channel already finished is not asked again in this plan: what the sibling
+            gained there since comes in the next sync. Grown, its total stood above what
+            could ever come, and the bar showed "1437 of 1503 messages" to the end of the plan.
+          */
+          if (!noPlano.fim) noPlano.total = Math.max(noPlano.total, canal.n, noPlano.feitas)
           noPlano.resumo = canal.h
           if (typeof canal.q === "object" && canal.q !== null) noPlano.conversa = canal.q
           else delete noPlano.conversa
@@ -1043,17 +1217,28 @@ export class HistoricoEntreAparelhos {
   }
 
   #aoResposta(corpo: Pedido, resposta: unknown): void {
-    if (corpo.t === "pagina") return this.#aoPagina(corpo.c, resposta as PaginaDoHistorico)
+    if (corpo.t === "pagina") return this.#aoPagina(corpo.c, corpo.desde, resposta as PaginaDoHistorico)
     if (corpo.t === "media?") return this.#aoListaDeMedia(resposta as { itens?: MediaNoIrmao[] })
     return this.#aoMedia(corpo.itens, resposta as { itens?: MediaInteira[]; resto?: number })
   }
 
-  #aoPagina(c: string, pagina: PaginaDoHistorico): void {
-    if (typeof pagina !== "object" || pagina === null || pagina.c !== c || !Array.isArray(pagina.e)) return
+  #aoPagina(c: string, desde: number | null, pagina: PaginaDoHistorico): void {
+    if (typeof pagina !== "object" || pagina === null || pagina.c !== c || !Array.isArray(pagina.e)) {
+      this.#pageFailed(c, desde, "unreadable")
+      return
+    }
+    // A page that is not the end and does not move the cursor would be asked again forever.
+    const empty = pagina.e.length === 0 && !pagina.p
+    if (!pagina.fim && !empty && (typeof pagina.ate !== "number" || (desde !== null && pagina.ate <= desde))) {
+      this.#pageFailed(c, desde, "no-progress")
+      return
+    }
     let mudou = false
     this.#porta.gravar((contents) => {
       const canal = contents.historico?.plano?.canais[c]
       if (!canal) return
+      delete canal.failures
+      delete canal.failureReason
       const entradas = pagina.e.filter(entradaValida).filter((entrada) => !this.#porta.bloqueado(c, entrada.sender))
       // What comes in with bytes (a sibling always sends `inline`) moves to the store, in the same mutation.
       if (fundirEntradasDoIrmao(contents, c, this.#absorverNovas(contents, c, entradas)) > 0) mudou = true
@@ -1153,6 +1338,7 @@ export class HistoricoEntreAparelhos {
       }
       const antes = media.porTrazer.length
       media.porTrazer = media.porTrazer.filter((item) => !tratados.has(chaveDoItem(item)))
+      if (media.tentativas) for (const chave of tratados) delete media.tentativas[chave]
       media.feitas = Math.min(media.total, media.feitas + (antes - media.porTrazer.length))
     })
     this.#progrediu()
@@ -1212,10 +1398,16 @@ export class HistoricoEntreAparelhos {
   #acabar(): void {
     const agora = this.#porta.agora()
     this.#perdidasNoFim = 0
+    this.#ficheirosPerdidosNoFim = 0
+    this.#notReceivedAtEnd = 0
     this.#porta.gravar((contents) => {
       const h = contents.historico
       if (!h?.plano) return
-      for (const canal of Object.values(h.plano.canais)) this.#perdidasNoFim += canal.perdidas ?? 0
+      for (const canal of Object.values(h.plano.canais)) {
+        this.#perdidasNoFim += (canal.perdidas ?? 0) - (canal.notReceived ?? 0)
+        this.#notReceivedAtEnd += canal.notReceived ?? 0
+      }
+      this.#ficheirosPerdidosNoFim = h.plano.media?.perdidas ?? 0
       for (const [c, canal] of Object.entries(h.plano.canais)) (h.trazidos ??= {})[c] = canal.resumo
       delete h.plano
       delete h.inicial
@@ -1226,6 +1418,8 @@ export class HistoricoEntreAparelhos {
     this.#ultimaReposicao = agora
     this.#dizer([])
     this.#perdidasNoFim = 0
+    this.#ficheirosPerdidosNoFim = 0
+    this.#notReceivedAtEnd = 0
   }
 
   // -------------------------------------------------------- responder
@@ -1445,9 +1639,14 @@ export class HistoricoEntreAparelhos {
     for (; passo >= PARTE_MINIMA; passo = Math.floor(passo / 2)) {
       const partes = partir(selado, passo)
       if (partes.length > TECTOS_DO_FIO_DO_HISTORICO.partesMax) return false
-      // Windowed only when the response is kept for the asks (`guardadasBytes`): otherwise the next window could not be served.
+      /*
+        Windowed past one window, always (1.3.27). Before, only a response that fit
+        `guardadasBytes`: a larger one (a 25 MiB video) went whole, the cap dropped it
+        from `#guardadas`, and every ask for a lost part was answered `hx`, forever.
+        The newest response is now kept whatever its size (`#esquecerVelhas`).
+      */
       const w = TECTOS_DO_FIO_DO_HISTORICO.partesPorJanela
-      const janela = k === "hr" && partes.length > w && selado.length <= TECTOS_DO_FIO_DO_HISTORICO.guardadasBytes ? w : 0
+      const janela = k === "hr" && partes.length > w ? w : 0
       const cabecalhos = partes.map(
         (_, i): Cabecalho => ({ v: 1, k, s, ap: this.#meuAparelho(), para, id, i, n: partes.length, ...(x ? { x } : {}), ...(janela ? { w: janela } : {}) }),
       )
@@ -1480,11 +1679,14 @@ export class HistoricoEntreAparelhos {
       if (agora - sessao.ultimo > TECTOS_DO_FIO_DO_HISTORICO.sessaoCaladaMs) this.#respostas.delete(s)
     }
     let bytes = 0
+    // The newest response is never dropped for its bytes (1.3.27): it is the one being asked for, even when it alone is above the cap.
+    let maisNova = true
     for (const [chave, guardada] of [...this.#guardadas].reverse()) {
       bytes += guardada.bytes
-      if (agora - guardada.em > TECTOS_DO_FIO_DO_HISTORICO.guardadasMs || bytes > TECTOS_DO_FIO_DO_HISTORICO.guardadasBytes) {
+      if (agora - guardada.em > TECTOS_DO_FIO_DO_HISTORICO.guardadasMs || (!maisNova && bytes > TECTOS_DO_FIO_DO_HISTORICO.guardadasBytes)) {
         this.#guardadas.delete(chave)
       }
+      maisNova = false
     }
     for (const [ref, item] of this.#noAr) if (agora - item.em > 30_000) this.#noAr.delete(ref)
   }
@@ -1551,6 +1753,11 @@ export class HistoricoEntreAparelhos {
       case "hx":
         if (this.#pedinte?.s === cabecalho.s && this.#pedinte.com === cabecalho.ap) {
           // The responder no longer knows the session (reopened): another in the next step.
+          // With the id of the request in flight, it knows the session but not the response: a
+          // real failure of that request (1.3.27). Without it, the responder restarted or slept,
+          // which never counts against an item.
+          const pedido = this.#pedinte.pedido
+          if (pedido && cabecalho.id === pedido.id) this.#falhouOPedido(pedido, "hx")
           this.#pedinte = null
           this.#ultimoHi = 0
         }
@@ -1645,6 +1852,8 @@ export class HistoricoEntreAparelhos {
       this.#gastos.push(agora)
       this.#noAr.set(item.ref, { sinal: item.sinal, em: agora, de: item.de })
       this.estatisticas.enviados += 1
+      // A part of a response going out is the sender's progress; a request is not.
+      if (item.de.k === "hr" || item.de.k === "hn") this.#moved()
     }
     if (this.#fila.length === 0) return
     const proximo = Math.max(
@@ -1668,7 +1877,16 @@ export class HistoricoEntreAparelhos {
   #evento(canais: string[]): EventoDoHistorico {
     const evento = this.#eventoDeQuemPede(canais)
     const envio = this.#envioEmCurso()
-    return envio ? { ...evento, envio } : evento
+    const comEnvio = envio ? { ...evento, envio } : evento
+    return (comEnvio.aTrazer || envio) && this.#progressAt > 0 ? { ...comEnvio, progressAt: this.#progressAt } : comEnvio
+  }
+
+  /** The history moved here: mark it, at most every `progressStepMs`, and say it. */
+  #moved(): void {
+    const agora = this.#porta.agora()
+    if (this.#progressAt > 0 && agora - this.#progressAt < TECTOS_DO_FIO_DO_HISTORICO.progressStepMs) return
+    this.#progressAt = agora
+    this.#dizer([])
   }
 
   #eventoDeQuemPede(canais: string[]): EventoDoHistorico {
@@ -1677,15 +1895,30 @@ export class HistoricoEntreAparelhos {
     const inicial = h?.inicial !== undefined
     if (!plano) {
       if (h?.inicial && h.semIrmaoDesde !== undefined) return { aTrazer: false, feitas: 0, total: 0, media: null, canais, inicial, razao: "sem-irmao" }
-      if (this.#perdidasNoFim > 0) return { aTrazer: false, feitas: 0, total: 0, media: null, canais, inicial, perdidas: this.#perdidasNoFim, razao: "ilegiveis" }
+      if (this.#perdidasNoFim > 0 || this.#ficheirosPerdidosNoFim > 0 || this.#notReceivedAtEnd > 0) {
+        return {
+          aTrazer: false,
+          feitas: 0,
+          total: 0,
+          media: null,
+          canais,
+          inicial,
+          ...(this.#perdidasNoFim > 0 ? { perdidas: this.#perdidasNoFim } : {}),
+          ...(this.#ficheirosPerdidosNoFim > 0 ? { ficheirosPerdidos: this.#ficheirosPerdidosNoFim } : {}),
+          ...(this.#notReceivedAtEnd > 0 ? { notReceived: this.#notReceivedAtEnd } : {}),
+          razao: "ilegiveis",
+        }
+      }
       return { aTrazer: false, feitas: 0, total: 0, media: null, canais, inicial }
     }
     let feitas = 0
     let total = 0
+    let skipped = 0
     for (const canal of Object.values(plano.canais)) {
       feitas += canal.feitas
       // The total counts only what can be got: what the sibling could not send leaves it.
       total += canal.total - (canal.perdidas ?? 0)
+      skipped += canal.notReceived ?? 0
     }
     if (plano.parado) {
       const faltam = this.#faltam(plano)
@@ -1695,9 +1928,12 @@ export class HistoricoEntreAparelhos {
       aTrazer: true,
       feitas,
       total,
-      media: plano.media ? { feitas: plano.media.feitas, total: plano.media.total } : null,
+      media: plano.media
+        ? { feitas: plano.media.feitas, total: plano.media.total, ...(plano.media.perdidas ? { perdidas: plano.media.perdidas } : {}) }
+        : null,
       canais,
       inicial,
+      ...(skipped > 0 ? { notReceived: skipped } : {}),
     }
   }
 
@@ -1723,13 +1959,14 @@ export class HistoricoEntreAparelhos {
     return faltam
   }
 
-  #dizer(canais: string[], perfis = false): void {
+  #dizer(canais: string[], perfis = false, pageFailure?: EventoDoHistorico["pageFailure"]): void {
     const evento = this.#evento(canais)
     this.#envioDito = JSON.stringify(evento.envio ?? null)
     const assinatura = JSON.stringify({ ...evento, perfis })
-    if (canais.length === 0 && !perfis && assinatura === this.#ultimoEvento) return
+    // A page failure always goes out, once: the diagnostic log writes each one.
+    if (canais.length === 0 && !perfis && !pageFailure && assinatura === this.#ultimoEvento) return
     this.#ultimoEvento = assinatura
-    this.#porta.emitir(perfis ? { ...evento, perfis: true } : evento)
+    this.#porta.emitir({ ...evento, ...(perfis ? { perfis: true as const } : {}), ...(pageFailure ? { pageFailure } : {}) })
   }
 }
 

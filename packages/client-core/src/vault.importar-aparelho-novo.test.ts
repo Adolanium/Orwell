@@ -109,6 +109,9 @@ describe("importar o ficheiro da conta faz um aparelho novo", () => {
     expect(Object.keys(c.lugaresPorPedir ?? {}).sort()).toEqual(["#sala:localhost"])
     const lugar = c.lugaresPorPedir?.["#sala:localhost"]
     expect(typeof lugar === "object" && lugar.tentativas).toBe(0)
+
+    // The file was in hand: the account file counts as saved on this device (hotfix 1.3.26-2).
+    expect(c.entrouPorFicheiro).toBe(true)
   })
 
   it("o ficheiro de origem não muda: o aparelho que exportou continua o mesmo", async () => {

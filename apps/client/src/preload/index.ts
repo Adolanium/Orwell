@@ -259,6 +259,7 @@ contextBridge.exposeInMainWorld("enclaveHost", {
   channels: {
     list: () => ipcRenderer.invoke("channel:list"),
     archived: () => ipcRenderer.invoke("channel:archived"),
+    pending: () => ipcRenderer.invoke("channel:pending"),
     create: (channel: string, nome?: string) => ipcRenderer.invoke("channel:create", channel, nome),
     invite: (channel: string, address: string, note?: string) =>
       ipcRenderer.invoke("channel:invite", channel, address, note),

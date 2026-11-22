@@ -25,6 +25,7 @@
  *   7xx  devices and pairing
  *   8xx  updates of the desktop app (1.3.20)
  *   900  any error not in this table
+ *   901+ the interface itself (1.3.27): the screen stopped
  *
  * A code is never reused. When an error ships, the number is free and stays
  * free forever: an old report with "Error 104" must still mean the same thing.
@@ -466,6 +467,9 @@ export const CODIGOS_DE_ERRO: Readonly<Record<string, number>> = {
   // "Install updates" in Settings (Windows, `InstalarActualizacoes.tsx`): the
   // choice did not reach `userData` (disk full, folder without permissions).
   "could not save the update choice": 801,
+  // The screen stopped (1.3.27): a crash in the interface, caught by `ErrorBoundary`
+  // instead of a black page. Reloading opens the vault again and the sync continues.
+  "the app screen stopped working": 901,
 }
 
 /**

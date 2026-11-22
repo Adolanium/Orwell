@@ -491,7 +491,7 @@ function ChannelSidebarInteira({
    * link, or an invite accepted while the inviter was offline. They draw in
    * gray, at the end of the list, with the name the link or invite said.
    */
-  aEsperaDeEntrada?: { canal: string; nome: string; nota?: string; onCancelar: () => void }[] | undefined
+  aEsperaDeEntrada?: { canal: string; nome: string; nota?: string; onCancelar?: (() => void) | undefined }[] | undefined
   /** Display name for a channel: the other person for a DM, else its slug. */
   labelFor: (channel: string) => string
   /** Published icon for the channel, if any. See `space.meta`. */
@@ -1389,19 +1389,22 @@ function ChannelSidebarInteira({
                       <span className="a-espera-nota">{espera.nota ?? strings.sidebar.aEsperaDeEntrada}</span>
                     </span>
                   </span>
-                  <button
-                    type="button"
-                    className="a-espera-cancelar"
-                    aria-label={
-                      // No name (opaque address and no badge), the button states just the gesture.
-                      espera.nome === strings.sidebar.canalDoConvite
-                        ? strings.sidebar.cancelarEsperaSemNome
-                        : strings.sidebar.cancelarEspera(espera.nome)
-                    }
-                    onClick={espera.onCancelar}
-                  >
-                    {strings.sidebar.cancelar}
-                  </button>
+                  {/* A channel of the account that waits for its seat has nothing to cancel: it stays. */}
+                  {espera.onCancelar && (
+                    <button
+                      type="button"
+                      className="a-espera-cancelar"
+                      aria-label={
+                        // No name (opaque address and no badge), the button states just the gesture.
+                        espera.nome === strings.sidebar.canalDoConvite
+                          ? strings.sidebar.cancelarEsperaSemNome
+                          : strings.sidebar.cancelarEspera(espera.nome)
+                      }
+                      onClick={espera.onCancelar}
+                    >
+                      {strings.sidebar.cancelar}
+                    </button>
+                  )}
                 </div>
               </li>
             ))}

@@ -82,6 +82,7 @@ interface CanaisDoAnfitriao {
   // -------------------------------------------------------- the requests
   list?: CanaisDaInterface["list"]
   archived?: NonNullable<CanaisDaInterface["archived"]>
+  pending?: NonNullable<CanaisDaInterface["pending"]>
   create?: CanaisDaInterface["create"]
   invite?: CanaisDaInterface["invite"]
   expel?: NonNullable<CanaisDaInterface["expel"]>
@@ -465,6 +466,7 @@ function ligarCanais(host: HostApi): { canais: EnclaveBridge["channels"]; esquec
     // ------------------------------------------------------- what was already there
     list: pedido("list", canais.list),
     archived: pedido("archived", canais.archived),
+    pending: pedido("pending", canais.pending),
     create: pedido("create", canais.create),
     invite: pedido("invite", canais.invite),
     channelInvites: pedido("channelInvites", canais.channelInvites),

@@ -1395,6 +1395,7 @@ function registerIpc(window: BrowserWindow): void {
     servidorSuporta: session.suportaEmparelhamento,
     servidorRevoga: session.serverCapabilities.includes(CAPACIDADE_REVOGACAO),
     serverKnowsShortCode: session.serverCapabilities.includes(CAPABILITY_PAIRING_PAKE),
+    entrouPorFicheiro: session.entrouPorFicheiro,
   }))
   tratar("pairing:host", () => session.emparelharComoAnfitriao())
   // Short code (1.3.26): the new device shows it, the device with the account types it.
@@ -1609,6 +1610,7 @@ function registerIpc(window: BrowserWindow): void {
 
   tratar("channel:list", () => session.channels)
   tratar("channel:archived", () => session.archivedChannels())
+  tratar("channel:pending", () => session.seatsPending())
 
   tratar("channel:create", async (_event, channel: string, nome?: unknown) => {
     // See `createSpace` in the core: a channel is born with three rooms alongside
