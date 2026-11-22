@@ -1,5 +1,16 @@
 [
   {
+    "versao": "1.3.28",
+    "nome": "Carmelo",
+    "data": "2026-11-22",
+    "itens": [
+      {
+        "tipo": "fix",
+        "texto": "The channel list no longer shows feeds and direct conversations that wait for a seat as \"Your channel, joining the channel\". They still ask for their seats, and a community that waits for one still shows as joining."
+      }
+    ]
+  },
+  {
     "versao": "1.3.27",
     "nome": "Carmelo",
     "data": "2026-11-22",

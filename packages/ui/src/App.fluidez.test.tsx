@@ -469,6 +469,20 @@ describe("à espera de entrada", () => {
     await waitFor(() => expect(screen.queryByText(strings.sidebar.aEntrarNoCanal)).toBeNull())
   })
 
+  it("a feed or a direct that waits for a seat is never a joining line in the channel list", async () => {
+    const { bridge, ligar } = bancada()
+    const ROOM = moradaDeTeste("room that waits", "casa.pt")
+    const ANA_FEED = moradaDeTeste("mural ana", "casa.pt")
+    bridge.channels.pending = async () => [DM_ANA, ANA_FEED, ROOM]
+    bridge.channels.fichas = () => ({ ...FICHAS(), [ANA_FEED]: { tipo: "mural", dono: "@ana:casa.pt" } })
+    render(<App bridge={bridge} />)
+    await dentro()
+    ligar()
+
+    // The room alone: the feed and the direct still ask for their seats, out of this list.
+    await waitFor(() => expect(screen.getAllByText(strings.sidebar.aEntrarNoCanal)).toHaveLength(1))
+  })
+
   it('"Cancelar" tira a linha e diz que o canal ainda pode aparecer', async () => {
     const user = userEvent.setup()
     const { bridge, ligar } = bancada()

@@ -6675,7 +6675,10 @@ function Shell({
     let vivo = true
     void ler()
       .then((lista) => {
-        if (vivo) setAEntrar((antes) => (antes.length === lista.length && antes.every((c, i) => c === lista[i]) ? antes : lista))
+        if (!vivo) return
+        // The type of each channel comes before the lines that ask for it, as with the list.
+        lembrarFichasDosCanais(bridge.channels.fichas?.())
+        setAEntrar((antes) => (antes.length === lista.length && antes.every((c, i) => c === lista[i]) ? antes : lista))
       })
       .catch(() => {})
     return () => {
@@ -6718,6 +6721,8 @@ function Shell({
     // A channel of the account that waits for this device's seat: it never leaves the list.
     for (const canal of aEntrar) {
       if (channels.includes(canal) || linhas.some((linha) => linha.canal === canal)) continue
+      // The same cut as `rooms`: feeds and directs ask for seats too, and are not channels in this list.
+      if (isFeed(canal) || isDirect(canal)) continue
       const nome = canalAEsperaParaMostrar(canal, null, spaceMeta.get(canal)?.name) ?? strings.sidebar.canalAEntrar
       linhas.push({ canal, nome, deLink: false, nota: strings.sidebar.aEntrarNoCanal, aEntrar: true })
     }
