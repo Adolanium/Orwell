@@ -87,6 +87,17 @@ const REPETIDA_MS = 2_000
 let ultima: { chave: string; em: number } | null = null
 
 const CHAVE_GUARDADA = "orwell.ultimaFalha"
+let lastCrash = ""
+
+/**
+ * The last screen crash, for "Report a bug" on the crash card. Someone in a crash
+ * loop never reaches Settings to send the log, and the report's details carry
+ * only codes: this is the one way their stack gets out. No personal data
+ * (`semDadosPessoais`), and the person reads it in the box before sending it.
+ */
+export function crashForReport(): string {
+  return lastCrash === "" ? "" : `screen-crash ${lastCrash}`
+}
 
 function armazenamento(): Storage | null {
   try {
@@ -111,6 +122,8 @@ export function registarFalha(origem: OrigemDaFalha, erro: unknown, pilhaDeCompo
     const onde = componentes(pilhaDeComponentes)
     if (onde) partes.push(`in=${onde}`)
     const detail = partes.join(" ")
+    // A JSON error quotes what it could not read, and that can be somebody's text: cut at the first quote.
+    if (origem === "screen-crash") lastCrash = detail.replace(mensagem, () => mensagem.replace(/".*$/, "…"))
     recordDiagnostic({ at: agora, kind: "error", code: origem, detail })
     if (origem === "screen-crash") armazenamento()?.setItem(CHAVE_GUARDADA, JSON.stringify({ at: agora, code: origem, detail }))
   } catch {
@@ -154,6 +167,7 @@ export function capturarErrosGlobais(alvo: Window = window): () => void {
 /** For tests. */
 export function esquecerFalhas(): void {
   ultima = null
+  lastCrash = ""
   aSincronizarAgora.clear()
   armazenamento()?.removeItem(CHAVE_GUARDADA)
 }

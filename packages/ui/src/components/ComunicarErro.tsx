@@ -2,7 +2,9 @@ import { useEffect, useId, useState } from "react"
 import { DESCRICAO_DO_BUG_MAX, type DetalhesDoBug } from "@enclave/protocol"
 import type { ConnectionState, EnclaveBridge } from "../bridge.js"
 import { detalhesDoBug } from "../lib/detalhesDoBug.js"
+import { diagnosticsSnapshot } from "../lib/diagnostics.js"
 import { formatStamp } from "../lib/format.js"
+import { fittingLog, reportLog, withReportLog } from "../lib/reportLog.js"
 import { strings, traduzirErro } from "../strings.js"
 import { Button } from "./Button.js"
 import { Field } from "./Field.js"
@@ -41,14 +43,19 @@ export function ComunicarErro({
   bridge,
   connection,
   onClose,
+  initialText = "",
 }: {
   bridge: EnclaveBridge
   connection: ConnectionState
   onClose: () => void
+  /** What the box starts with: the crash, from the crash card. */
+  initialText?: string | undefined
 }): React.JSX.Element {
   const heading = useId()
   const t = strings.comunicarErro
-  const [descricao, setDescricao] = useState("")
+  const [descricao, setDescricao] = useState(() => initialText.slice(0, DESCRICAO_DO_BUG_MAX))
+  // Read once, when the form opens: what it shows is what it sends.
+  const [logLines] = useState(() => reportLog(diagnosticsSnapshot()))
   const [comDetalhes, setComDetalhes] = useState(true)
   const [contacto, setContacto] = useState(false)
   const [detalhes, setDetalhes] = useState<DetalhesDoBug | null>(null)
@@ -71,7 +78,7 @@ export function ComunicarErro({
     try {
       await bridge.bugs.enviar({
         v: 1,
-        descricao: descricao.trim().slice(0, DESCRICAO_DO_BUG_MAX),
+        descricao: withReportLog(descricao.trim(), comDetalhes ? logLines : [], DESCRICAO_DO_BUG_MAX),
         ...(comDetalhes && detalhes ? { detalhes } : {}),
         contacto,
       })
@@ -82,6 +89,8 @@ export function ComunicarErro({
       setAEnviar(false)
     }
   }
+
+  const logShown = comDetalhes ? fittingLog(logLines, DESCRICAO_DO_BUG_MAX - descricao.trim().length) : ""
 
   return (
     <Modal
@@ -145,6 +154,14 @@ export function ComunicarErro({
                   <li>{t.ligacao(detalhes.ligacao)}</li>
                   <li>{t.sincronia(detalhes.sincronia)}</li>
                 </ul>
+              </div>
+            )}
+            {logShown !== "" && (
+              <div className="comunicar-erro-lista">
+                <p className="field-note">{t.registo}</p>
+                <pre className="comunicar-erro-registo" tabIndex={0}>
+                  {logShown}
+                </pre>
               </div>
             )}
             <p className="field-note">{t.nuncaVai}</p>

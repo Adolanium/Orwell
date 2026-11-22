@@ -611,6 +611,12 @@ export const pt = {
       quantas === 1 ? "1 conversa por ler" : `${quantas} conversas por ler`,
   },
 
+  mobileNotice: {
+    title: "Estamos a optimizar o Orwell para telemóvel.",
+    body: "Para a melhor experiência, usa o Orwell no computador.",
+    close: "Fechar o aviso",
+  },
+
   sidebar: {
     /* The rail's same names, said 60px from it. See the note in `rail`. */
     headerProfile: "Eu",
@@ -1218,10 +1224,6 @@ export const pt = {
       knowing where you are depends on nothing.
     */
     openChannel: "Canal comum. Qualquer conta deste servidor entra sem convite e lê.",
-    afastados: (n: number): string =>
-      n === 1
-        ? "Mais 1 conta ainda tem as chaves deste canal. O servidor diz que saiu."
-        : `Mais ${n} contas ainda têm as chaves deste canal. O servidor diz que saíram.`,
     verifyHint: (name: string): string => `Verificar a segurança com ${name}`,
     /* The column while a channel's history syncs (21/11/2026). Approved text. */
     syncingTitle: "A sincronizar",
@@ -4257,6 +4259,7 @@ export const pt = {
     erros: (n: number): string => (n === 0 ? "Códigos de erro: nenhum" : `Códigos de erro (últimos ${n}):`),
     ligacao: (l: string): string => `Ligação: ${l}`,
     sincronia: (s: string): string => `Sincronia: ${s}`,
+    registo: "O registo também vai: horas, códigos de eventos e o local dos erros.",
     nuncaVai: "Nunca vai: o texto das mensagens, os nomes dos canais, os endereços de outras pessoas, as chaves, o conteúdo do cofre.",
     contacto: "Podem contactar-me",
     contactoAjuda: "Com isto marcado, vai também o teu endereço, para te podermos responder.",

@@ -39,11 +39,11 @@
   display: none;
 }
 
-/* Each list and each pushed screen: the whole first row. */
+/* Each list and each pushed screen: the whole first row (the second, under the mobile notice). */
 :root .app.telemovel > *,
 :root .app.telemovel > .vista-guardada > * {
   grid-column: 1 / -1;
-  grid-row: 1;
+  grid-row: var(--screen-row, 1);
   min-width: 0;
   min-height: 0;
 }
@@ -623,4 +623,54 @@
   left: calc(var(--seguro-esquerda) + var(--space-2));
   width: auto;
   max-width: none;
+}
+
+/* ---------------------------------------------------- the mobile notice */
+
+/* A row of its own above the list, never a layer: the list gets shorter and
+   the tabs stay where they are. It exists only while the tabs do. */
+:root .app.telemovel:has(> .mobile-notice) {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  --screen-row: 2;
+}
+
+:root .app.telemovel:has(> .mobile-notice) > .separadores {
+  grid-row: 3;
+}
+
+:root .app.telemovel:has(> .mobile-notice) > .mobile-notice {
+  grid-row: 1;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-left: var(--space-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-rail);
+  color: var(--secundario);
+  font-size: var(--font-sm);
+}
+
+:root .app.telemovel .mobile-notice p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-2) 0;
+}
+
+:root .app.telemovel .mobile-notice strong {
+  color: var(--titulo);
+}
+
+:root .app.telemovel .mobile-notice button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }

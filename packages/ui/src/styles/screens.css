@@ -12475,6 +12475,15 @@ button.message-citacao:focus-visible {
 }
 
 /* "Report a bug": the exact list of what goes, small and quiet under the box. */
+.comunicar-erro-registo {
+  max-height: 9rem;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+
 .comunicar-erro-lista ul {
   margin: 4px 0 8px;
   padding-left: 18px;

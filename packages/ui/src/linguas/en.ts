@@ -371,6 +371,12 @@ export const en: Traducao = {
       quantas === 1 ? "1 unread conversation" : `${quantas} unread conversations`,
   },
 
+  mobileNotice: {
+    title: "We are optimizing Orwell for mobile.",
+    body: "For the best experience, use Orwell on a computer.",
+    close: "Close the notice",
+  },
+
   sidebar: {
     aEsperaDeEntrada: "waiting for someone in the channel",
     aEntrarNoCanal: "joining the channel",
@@ -630,11 +636,6 @@ export const en: Traducao = {
     empty: "Nobody here yet.",
     inviteSomeone: "Invite…",
     openChannel: "Common channel. Any account on this server can join without an invitation and read.",
-    // P7 (1.3.26): not in the count, but not hidden either. They can read until a member removes them.
-    afastados: (n: number): string =>
-      n === 1
-        ? "1 more account still has the keys of this channel. The server says it left."
-        : `${n} more accounts still have the keys of this channel. The server says they left.`,
     verifyHint: (name: string): string => `Verify security with ${name}`,
     /* The column while a channel's history syncs (21/11/2026). Approved text. */
     syncingTitle: "Now syncing",
@@ -2393,6 +2394,7 @@ export const en: Traducao = {
     erros: (n: number): string => (n === 0 ? "Error codes: none" : `Error codes (last ${n}):`),
     ligacao: (l: string): string => `Connection: ${l}`,
     sincronia: (s: string): string => `Sync: ${s}`,
+    registo: "The log goes too: times, event codes and error locations.",
     nuncaVai: "Never sent: message text, channel names, other people's addresses, keys, vault content.",
     contacto: "Let us contact you",
     contactoAjuda: "With this checked, your address goes too, so we can answer you.",

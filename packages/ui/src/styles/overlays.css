@@ -443,6 +443,8 @@ the same column as what it names reads like a separate thing. */
 }
 
 .donations {
+  /* A fieldset does not shrink below its content by itself: the window slid sideways. */
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   padding: var(--space-4);
@@ -480,8 +482,36 @@ the same column as what it names reads like a separate thing. */
 
 .donation-row {
   display: grid;
-  grid-template-columns: 108px 1fr 1.4fr 32px;
+  grid-template-columns: 108px minmax(0, 1fr) minmax(0, 1.4fr) 44px;
   gap: var(--space-3);
+}
+
+.donation-row input,
+.donation-row select {
+  min-width: 0;
+  width: 100%;
+}
+
+.donation-row button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+
+/* No room for four in a line: the kind and the remove on top, each field on a line of its own. */
+@media (max-width: 600px) {
+  .donation-row {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .donation-row input {
+    grid-column: 1 / -1;
+  }
+
+  .donation-row button {
+    grid-column: 2;
+    grid-row: 1;
+  }
 }
 
 .sheet-actions {

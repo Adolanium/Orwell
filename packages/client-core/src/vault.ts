@@ -30,6 +30,7 @@ import { acabarSelo, comecarSelo, comprimentoDoFim, type SeloEmCurso, type SeloP
 import type { ArmazemDeMedia } from "./armazem/armazem.js"
 import type { PaginaDoArquivo } from "./armazem/conversaArquivada.js"
 import { decifrarBlob } from "./armazem/blob.js"
+import { inflarRef } from "./armazem/referencias.js"
 import {
   cabecaDoContentor,
   cabecaDoRegisto,
@@ -3052,8 +3053,12 @@ function contaDoFicheiro(conteudo: Partial<VaultContents>): { address: string; a
  * opens, locks when the vault locks, and is destroyed with the account. It is
  * the `ArmazemDeMedia`; the vault only knows these three doors.
  */
+/** The portrait and the icons in an account file, together: far below the plain file's ceiling. */
+const CARD_IMAGES_MAX_CHARS = 16_000_000
+
 export interface ArmazemDoCofre {
   abrir(): Promise<void>
+  obter?(sha: string, ref: RefDeMedia): Promise<Uint8Array | null>
   trancar(): void
   destruir(): Promise<void>
 }
@@ -4146,6 +4151,50 @@ export class Vault {
     })()
   }
 
+  /**
+   * What the account file always carries, with or without the images (1.3.29):
+   * our own portrait and the icons of the channels, back inline. With only the
+   * reference, an imported device never showed them. The import migrates them
+   * to its store. Null when there is nothing to carry; the vault is not touched.
+   */
+  async #withCardImages(): Promise<Partial<VaultContents> | null> {
+    const store = this.#armazem
+    if (!store?.obter) return null
+    await this.armazemPronto()
+    const contents = this.#contents
+    let room = CARD_IMAGES_MAX_CHARS
+    const inline = async (sha: unknown): Promise<string | null> => {
+      if (typeof sha !== "string" || !contents.media?.[sha]) return null
+      try {
+        const text = await inflarRef(contents, sha, store as unknown as ArmazemDeMedia)
+        if (!text || text.length > room) return null
+        room -= text.length
+        return text
+      } catch {
+        // One damaged image never stops the export of an account.
+        return null
+      }
+    }
+    const { avatarRef, ...profile } = contents.profile
+    const portrait = await inline(avatarRef)
+    const spaceMeta = { ...contents.spaceMeta }
+    let icons = 0
+    for (const [channel, meta] of Object.entries(contents.spaceMeta)) {
+      const icon = (meta.payload as { icon?: { ref?: unknown } }).icon
+      const image = await inline(icon?.ref)
+      if (!image) continue
+      const { ref: _ref, ...rest } = icon as Record<string, unknown>
+      spaceMeta[channel] = { ...meta, payload: { ...meta.payload, icon: { ...rest, inline: image } } as StoredPayload }
+      icons++
+    }
+    if (!portrait && icons === 0) return null
+    return {
+      ...(portrait ? { profile: { ...profile, avatarDataUrl: portrait } } : {}),
+      spaceMeta,
+      armazem: { ...contents.armazem, porMigrar: true },
+    }
+  }
+
   /** The account file envelope, the same with and without the images. */
   async #envelopeDeExportacao(passphrase?: string): Promise<{ format: "enclave-vault"; formatVersion: 1; exportedAt: number; vault: VaultFile }> {
     // With a provisional open, the file on disk is the OLD account: exporting it
@@ -4157,13 +4206,14 @@ export class Vault {
     if (!raw) throw new Error("no vault to open")
     const file = this.#lerFicheiro(raw)
 
+    const cards = this.#key ? await this.#withCardImages() : null
     let payload: VaultFile
-    if (file.protection === "passphrase" && this.#key && this.#protection === "passphrase" && this.#contents.lastOnlineAt !== undefined) {
+    if (file.protection === "passphrase" && this.#key && this.#protection === "passphrase" && (cards || this.#contents.lastOnlineAt !== undefined)) {
       // The disk bytes carry this device's last moment online, which never travels
       // (`lastOnlineAt`): re-sealed without it, under the same key and salt, with a new nonce.
       this.aoSerializar?.(this.#contents)
       const nonce = crypto.getRandomValues(new Uint8Array(24))
-      const ciphertext = xchacha20poly1305(this.#key, nonce).encrypt(new TextEncoder().encode(JSON.stringify(paraExportar(this.#contents))))
+      const ciphertext = xchacha20poly1305(this.#key, nonce).encrypt(new TextEncoder().encode(JSON.stringify(paraExportar({ ...this.#contents, ...cards }))))
       payload = { ...file, salt: toBase64(this.#salt), nonce: toBase64(nonce), ciphertext: bytesParaBase64(ciphertext) }
       delete payload.wrappedKey
     } else if (file.protection === "passphrase") {
@@ -4179,7 +4229,7 @@ export class Vault {
       const nonce = crypto.getRandomValues(new Uint8Array(24))
       this.aoSerializar?.(this.#contents)
       const ciphertext = xchacha20poly1305(key, nonce).encrypt(
-        new TextEncoder().encode(JSON.stringify(paraExportar(this.#contents))),
+        new TextEncoder().encode(JSON.stringify(paraExportar({ ...this.#contents, ...cards }))),
       )
       key.fill(0)
       payload = {
@@ -4767,6 +4817,19 @@ export function adoptarPerfil(contents: VaultContents, perfil: PerfilQueChega): 
     ...(perfil.avatarDataUrl !== undefined ? { avatarDataUrl: perfil.avatarDataUrl } : {}),
     updatedAt: perfil.updatedAt,
   }
+  return true
+}
+
+/**
+ * The same version of our own profile, with the portrait this device has only
+ * by reference (an account file before 1.3.29): take the bytes. A version that
+ * differs, or a portrait that is here, is left alone.
+ */
+export function recoverOwnPortrait(contents: VaultContents, perfil: PerfilQueChega, hasBytes: (sha: string) => boolean): boolean {
+  const { avatarRef, ...rest } = contents.profile
+  if (!avatarRef || rest.avatarDataUrl || !perfil.avatarDataUrl) return false
+  if (perfil.updatedAt !== rest.updatedAt || hasBytes(avatarRef)) return false
+  contents.profile = { ...rest, avatarDataUrl: perfil.avatarDataUrl }
   return true
 }
 

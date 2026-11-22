@@ -120,7 +120,6 @@ export function ChatScreen({
   onDraftChange,
   activeRoom = "",
   members,
-  membrosAfastados,
   membersState,
   onRetryMembers,
   directory,
@@ -301,7 +300,6 @@ export function ChatScreen({
   activeRoom?: string
   members: string[]
   /** Accounts with keys that the server says are gone (P7). See `MemberPanel`. */
-  membrosAfastados?: number
   membersState: "loading" | "error" | "ready"
   onRetryMembers: () => void
   directory: Map<string, Profile>
@@ -1303,7 +1301,6 @@ export function ChatScreen({
             onClose={fecharMembros}
             onVoltar={onVoltar ? fecharMembros : undefined}
             members={members}
-            afastados={membrosAfastados}
             state={membersState}
             onRetry={onRetryMembers}
             me={address}

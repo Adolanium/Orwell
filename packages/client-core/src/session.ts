@@ -320,6 +320,7 @@ import {
   perfilQueViaja,
   perfisParaOsIrmaos,
   adoptarPerfil,
+  recoverOwnPortrait,
   type PerfilQueChega,
   aplicarAtribuicao,
   empateDepoisDe,
@@ -2914,6 +2915,7 @@ export class Session extends Emitter<SessionEvents> {
     this.#autenticado = false
     const socket = new WebSocket(gatewayUrl(identity))
     this.#socket = socket
+    this.#resyncSent = new Promise((resolve) => (this.#markResyncSent = resolve))
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -3254,6 +3256,7 @@ export class Session extends Emitter<SessionEvents> {
      * one frame somebody on the other side is blocked on.
      */
     this.#send({ t: "welcome.resync" })
+    this.#markResyncSent()
     this.#subscribeSeatsToAsk()
 
     if (restored.length > 0) {
@@ -3962,6 +3965,10 @@ export class Session extends Emitter<SessionEvents> {
   /** Key packages this session ever minted. Read before and after a nudge's top-up. */
   #cunhadasAoTodo = 0
 
+  /** Resolves when this connection has sent `welcome.resync`. See `#resetRingAtLogin`. */
+  #resyncSent: Promise<void> = Promise.resolve()
+  #markResyncSent: () => void = () => {}
+
   /**
    * Answer the server's `keypackage.low`, once at a time (17/11/2026).
    *
@@ -3977,6 +3984,8 @@ export class Session extends Emitter<SessionEvents> {
     if (this.#anelPreso(remaining) && !this.#chavesProntas) {
       // At login: the handshake decides once the vault is restored (see `#handshake`).
       this.#anelPresoNoLogin = true
+      // Not awaited: the pong it waits for comes through the same frames as this call.
+      void this.#resetRingAtLogin().catch(() => {})
       return Promise.resolve()
     }
     if (this.#reposicaoDeChaves) return this.#reposicaoDeChaves
@@ -4011,6 +4020,28 @@ export class Session extends Emitter<SessionEvents> {
         this.#reposicaoDeChaves = null
       })
     return this.#reposicaoDeChaves
+  }
+
+  /**
+   * A stuck ring at login does not wait for the recovery of the channels.
+   *
+   * The key step of `#handshake` runs after `#catchUp`. A deaf device's recovery
+   * cannot end without a new seat, and nobody can seat a device with no keys: the
+   * two waited for each other for good (production, 22/11/2026, Error 390 for
+   * hours with `keypackage.low remaining=0` and never a publish). A full ring is
+   * a restored one, so all this needs first is the Welcomes in flight (R1).
+   */
+  async #resetRingAtLogin(): Promise<void> {
+    const socket = this.#socket
+    // Only a pong after `welcome.resync` says that the stored Welcomes were read: before it, their keys would go.
+    await this.#resyncSent
+    if (this.#socket !== socket) return
+    await this.#welcomesLidos()
+    // Another connection, or the handshake got there first.
+    if (this.#socket !== socket || !this.#anelPresoNoLogin) return
+    this.#anelPresoNoLogin = false
+    if (this.#keyPackages.size >= Session.KEY_PACKAGES_LOCAIS_MAX) await this.#reiniciarAnel()
+    else await this.topUpKeyPackages(20)
   }
 
   /**
@@ -13782,7 +13813,12 @@ What was left behind:
    */
   #adoptarPerfilProprio(contents: VaultContents, perfil: PerfilProprioQueChega): boolean {
     const { avatarDataUrl, avatarRef } = contents.profile
-    if (!adoptarPerfil(contents, perfil)) return false
+    if (!adoptarPerfil(contents, perfil)) {
+      // The same version, with the portrait this device lost (an account file before 1.3.29): take the bytes.
+      if (!this.#armazem.aberto || !recoverOwnPortrait(contents, perfil, (sha) => this.#armazem.tem(sha))) return false
+      this.#absorverPerfilProprio(contents)
+      return true
+    }
     if (perfil.semBytesDoRetrato) {
       contents.profile = {
         ...contents.profile,

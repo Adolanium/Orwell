@@ -34,7 +34,6 @@ export interface ChannelRole {
  * an eternal "A carregar…" over a fetch that already failed is a lie.
  */
 function MemberPanelInteira({
-  afastados = 0,
   channel,
   open = false,
   onClose,
@@ -81,11 +80,6 @@ function MemberPanelInteira({
    */
   onClose?: (() => void) | undefined
   members: string[]
-  /**
-   * How many accounts hold the keys but the server says are gone (P7). Not in
-   * `members` and not in the count; said in one line, so nobody who can read is hidden.
-   */
-  afastados?: number | undefined
   /**
    * Ask for the names of these accounts (the common room). Called only for the
    * rows of the offline list that are on screen. Absent: an older host.
@@ -415,7 +409,6 @@ function MemberPanelInteira({
             cannot invite, and knowing where you are does not depend on any
             right. */}
         {oficial && <p className="members-open field-note">{strings.members.openChannel}</p>}
-        {state === "ready" && afastados > 0 && <p className="members-afastados field-note">{strings.members.afastados(afastados)}</p>}
 
         <ul className="member-list" inert={syncing || undefined}>
           {state === "loading" &&

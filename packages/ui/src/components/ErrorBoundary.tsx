@@ -1,6 +1,6 @@
 import { comChaveDoBrowser } from "@enclave/client-core"
 import { Component, type ErrorInfo, type ReactNode } from "react"
-import { registarFalha } from "../lib/falhas.js"
+import { crashForReport, registarFalha } from "../lib/falhas.js"
 import type { ConnectionState, EnclaveBridge } from "../bridge.js"
 import { ComunicarErro, useComunicarErro } from "./ComunicarErro.js"
 import { TextoDeErro } from "./TextoDeErro.js"
@@ -74,7 +74,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             {bridge && <BotaoComunicarErro bridge={bridge} connection={connection} onClick={() => this.setState({ comunicar: true })} />}
           </div>
           {bridge && this.state.comunicar && (
-            <ComunicarErro bridge={bridge} connection={connection} onClose={() => this.setState({ comunicar: false })} />
+            <ComunicarErro bridge={bridge} connection={connection} initialText={crashForReport()} onClose={() => this.setState({ comunicar: false })} />
           )}
         </div>
       )

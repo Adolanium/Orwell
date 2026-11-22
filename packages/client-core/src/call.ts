@@ -2429,6 +2429,16 @@ export class Call extends Emitter<CallEvents> {
   static readonly PERGUNTA_MINIMO_MS = PRESENCA_REAFIRMADA_MS
 
   /**
+   * Over this many channels nobody asks: the heartbeat fills the lists.
+   *
+   * The question is a stored MLS message and a vault write per channel, and
+   * `#perguntasFeitas` does not survive a reload. Measured in production on
+   * 22/11/2026: an account with 106 channels on a phone that reopened sent about
+   * 300 messages a minute, and the send cap then refused everything else.
+   */
+  static readonly QUESTION_MAX_CHANNELS = 10
+
+  /**
    * When we last queried in each channel.
    *
    * Per channel and not one clock only: queries go out in a batch, but a channel
@@ -2663,6 +2673,7 @@ export class Call extends Emitter<CallEvents> {
    * wait for it.
    */
   perguntarQuemEsta(channels: readonly string[]): void {
+    if (channels.length > Call.QUESTION_MAX_CHANNELS) return
     const agora = Date.now()
     for (const channel of channels) {
       if (channel === this.#channel) continue

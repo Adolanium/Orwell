@@ -49,4 +49,61 @@ describe("o anel de key packages no tecto", () => {
     await canalComTodos(servidor, bruno!, [ana!])
     expect(ana!.session.keyPackagesLocais).toBeLessThanOrEqual(Session.KEY_PACKAGES_LOCAIS_MAX)
   }, 180_000)
+
+  it("an empty pool with a full ring publishes while the recovery of the channels still runs", async () => {
+    const [carla, david] = await contasDeTeste(servidor, ["Carla", "David"])
+    abertas.push(carla!, david!)
+    await canalComTodos(servidor, david!, [carla!])
+    const claimer = await Cliente.ligar(servidor.url, generateIdentity(servidor.casa))
+    for (let i = 0; i < 220; i++) {
+      claimer.enviar({ t: "keypackage.claim", address: carla!.address })
+      await claimer.proximoDe("keypackage.claimed")
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    carla!.session.disconnect()
+    // Offline, so nothing refills: whoever claims now empties the pool.
+    for (let i = 0; i < 25; i++) {
+      claimer.enviar({ t: "keypackage.claim", address: carla!.address })
+      await claimer.proximoDe("keypackage.claimed")
+    }
+
+    // A recovery that does not end: the pages never arrive (22/11/2026, a deaf device in the common room).
+    const send = WebSocket.prototype.send
+    let recovering = 0
+    let published = 0
+    // A slow vault: the low-reserve warning arrives while the channels still load.
+    // On the instance: the test client loads `Session` from the package, not from this file's module.
+    const restore = carla!.session.restore.bind(carla!.session)
+    carla!.session.restore = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1_500))
+      return restore()
+    }
+    let resynced = false
+    let pingedTooSoon = false
+    WebSocket.prototype.send = function (this: WebSocket, data: Parameters<WebSocket["send"]>[0]) {
+      const text = String(data)
+      if (text.includes('"t":"keypackage.publish"')) published = Date.now()
+      if (text.includes('"t":"welcome.resync"')) resynced = true
+      if (text.includes('"t":"ping"') && !resynced) pingedTooSoon = true
+      if (text.includes('"t":"channel.backfill"')) {
+        if (recovering === 0) recovering = Date.now()
+        return
+      }
+      send.call(this, data)
+    }
+    try {
+      const connecting = carla!.session.connect()
+      const until = Date.now() + 25_000
+      while (published === 0 && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100))
+      // A pong for an earlier ping says nothing about the stored Welcomes: their keys would be dropped.
+      expect(pingedTooSoon, "pinged before asking for the stored Welcomes").toBe(false)
+      expect(recovering, "the recovery started").toBeGreaterThan(0)
+      expect(published, "keys went out").toBeGreaterThan(0)
+      expect(published - recovering, "ms the keys waited for the recovery").toBeLessThan(5_000)
+      await connecting
+    } finally {
+      WebSocket.prototype.send = send
+      carla!.session.restore = restore
+    }
+  }, 180_000)
 })

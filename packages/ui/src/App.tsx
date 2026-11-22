@@ -161,6 +161,7 @@ import { ChannelSidebar, type PresenteNaVoz } from "./screens/chat/ChannelSideba
 import { ChatScreen } from "./screens/chat/ChatScreen.js"
 import { FolhaDoFicheiroDaConta } from "./components/FicheiroDaConta.js"
 import { FaixaDoFicheiroContext } from "./components/FaixaDoFicheiro.js"
+import { MobileNotice } from "./components/MobileNotice.js"
 import { activeAccountId, forgetAccountName, rememberAccountName } from "./lib/accountNames.js"
 import { CartaoDeAparelhoNovo } from "./components/CartaoDeAparelhoNovo.js"
 import { APARELHOS_MUDARAM, FICHEIRO_GUARDADO, ficheiroPorTratar, marcarFicheiroTratado } from "./lib/ficheiroDaConta.js"
@@ -1332,7 +1333,6 @@ function Shell({
   const [members, setMembers] = useState<string[]>([])
   const [membersState, setMembersState] = useState<"loading" | "error" | "ready">("loading")
   /** Accounts in the open channel with keys that the server says are gone (P7). */
-  const [membrosAfastados, setMembrosAfastados] = useState(0)
   /** Channel → people currently in a call there. */
   const [ringing, setRinging] = useState<Map<string, Map<string, number>>>(new Map())
   /** The social composer's unpublished post. Held here, like the chat drafts,
@@ -2491,16 +2491,6 @@ function Shell({
         if (requestedChannel.current !== requested) return
         setMembersState("error")
       })
-    void Promise.resolve()
-      .then(() => bridge.channels.afastados?.(requested) ?? [])
-      .then(
-        (lista) => {
-          if (requestedChannel.current === requested) setMembrosAfastados(lista.length)
-        },
-        () => {
-          if (requestedChannel.current === requested) setMembrosAfastados(0)
-        },
-      )
   }, [active])
 
   /** The channel the member panel is currently asking about. */
@@ -2511,7 +2501,6 @@ function Shell({
   useEffect(() => {
     requestedChannel.current = active
     setMembers([])
-    setMembrosAfastados(0)
     setMembersState("loading")
   }, [active])
 
@@ -8747,7 +8736,6 @@ function Shell({
       cameraOff={cameraOff}
       onToggleCamera={alternarCamara}
       members={membrosDaSalaAberta}
-      membrosAfastados={membrosAfastados}
       membersState={membersState}
       onRetryMembers={retryMembers}
       directory={directory}
@@ -9640,6 +9628,8 @@ function Shell({
             )
           })()}
 
+        {/* The phone notice: a grid row over a list, only where the tabs are. */}
+        {mostrarSeparadores && <MobileNotice />}
         {/* The phone: the four tabs at the bottom, only on a list (option B). */}
         {mostrarSeparadores && (
           <Separadores actual={separador} avisos={avisosDosSeparadores} onEscolher={escolherSeparador} />

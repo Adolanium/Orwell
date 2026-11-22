@@ -172,6 +172,15 @@ describe("quem chega pergunta", () => {
     for (const saiu of bridge.sent) expect(ehPerguntaDePresenca(saiu.payload)).toBe(true)
   })
 
+  it("an account with many channels asks in none: one MLS message per channel on each opening is a storm", () => {
+    const bridge = ponte(ALICE)
+    const call = new Call(bridge)
+
+    call.perguntarQuemEsta(Array.from({ length: 106 }, (_, i) => CANAL.replace("!", `!c${i}`)))
+
+    expect(bridge.sent).toHaveLength(0)
+  })
+
   it("e vai com uma sala que não pode ser sala nenhuma", () => {
     /*
       The sentinel, and it is what protects clients that do not know the
