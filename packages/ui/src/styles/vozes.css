@@ -86,6 +86,24 @@ main thread (measured in `Onda`, see `scripts/medir-voz-visivel.mjs`). */
   }
 }
 
+/* The voice-room list uses the same level as the call cards. Paint the ring
+   once, and change only its opacity as the level moves. */
+.voice-member-avatar {
+  display: inline-flex;
+  flex: none;
+  position: relative;
+}
+
+.voice-member-avatar::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 2px solid var(--presence-online);
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: min(1, var(--voz, 0) * 3);
+}
+
 /* ------------------------------------------------------ person badges */
 
 /* Muted by her and muted by us are two designs (see `components/MarcaDeChamada.tsx`),

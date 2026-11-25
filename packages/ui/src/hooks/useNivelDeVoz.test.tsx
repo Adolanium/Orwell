@@ -47,9 +47,11 @@ async function montarCartao(stream: MediaStream | null): Promise<HTMLElement> {
  * stream feeding the media element mutes it, and a meter that mutes what it
  * measures is worse than not existing.
  */
-function comSom(): { stream: MediaStream; clones: { parada: boolean }[] } {
+function comSom(): { stream: MediaStream; clones: { parada: boolean }[]; silenciar: (sim: boolean) => void } {
   const clones: { parada: boolean }[] = []
   const faixa = {
+    enabled: true,
+    readyState: "live",
     clone(): unknown {
       const clone = { parada: false, stop(): void { clone.parada = true } }
       clones.push(clone)
@@ -60,7 +62,7 @@ function comSom(): { stream: MediaStream; clones: { parada: boolean }[] } {
     getAudioTracks: () => [faixa],
     getVideoTracks: () => [],
   } as unknown as MediaStream
-  return { stream, clones }
+  return { stream, clones, silenciar: (sim) => { faixa.enabled = !sim } }
 }
 
 /**
@@ -159,6 +161,24 @@ describe("useNivelDeVoz — o nível que sai", () => {
     expect(cartao.style.getPropertyValue("--voz")).toBe("1.000")
     // And it keeps measuring: the cycle reschedules itself.
     expect(frames.pendente()).toBe(true)
+  })
+
+  it("a luz só aparece enquanto a faixa original deixa passar som", async () => {
+    webAudioFalso(100)
+    const frames = relogioDeFrames()
+    const microfone = comSom()
+    microfone.silenciar(true)
+    const cartao = await montarCartao(microfone.stream)
+    frames.correrUm()
+    expect(cartao.style.getPropertyValue("--voz")).toBe("0.000")
+
+    microfone.silenciar(false)
+    frames.correrUm()
+    expect(cartao.style.getPropertyValue("--voz")).toBe("1.000")
+
+    microfone.silenciar(true)
+    frames.correrUm()
+    expect(cartao.style.getPropertyValue("--voz")).toBe("0.000")
   })
 
   it("uma sala calada escreve zero, e não fica a meio", async () => {
