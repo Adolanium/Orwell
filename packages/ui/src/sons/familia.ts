@@ -51,6 +51,8 @@ export type TipoDeSom =
   | "actualizacao"
   | "mic-silenciado"
   | "mic-ligado"
+  | "ptt-inicio"
+  | "ptt-fim"
   | "tudo-silenciado"
   | "tudo-ligado"
   | "amigo-online"
@@ -80,6 +82,8 @@ export const TIPOS_DE_SOM: readonly TipoDeSom[] = [
   "actualizacao",
   "mic-silenciado",
   "mic-ligado",
+  "ptt-inicio",
+  "ptt-fim",
   "tudo-silenciado",
   "tudo-ligado",
   "amigo-online",
@@ -315,6 +319,10 @@ export const SONS: Record<TipoDeSom, DescricaoDeSom> = {
 
   /** Unmute the microphone: E5 → A5, the same figure rising. */
   "mic-ligado": { notas: duas("E5", "A5", 0.07, 0.1, 0.06), presenca: 0.5 },
+
+  /** Short rising and falling cues for a push-to-talk hold. */
+  "ptt-inicio": { notas: duas("B4", "F#5", 0.065, 0.08, 0.045), presenca: 0.43 },
+  "ptt-fim": { notas: duas("F#5", "B4", 0.065, 0.08, 0.045), presenca: 0.38 },
 
   /** Mute all (microphone and sound): D5 → A4, lower. */
   "tudo-silenciado": { notas: duas("D5", "A4", 0.07, 0.12, 0.07), presenca: 0.5 },

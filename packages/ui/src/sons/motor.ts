@@ -110,7 +110,7 @@ export interface Saida {
   /** Stops any sound currently playing (the call ring). */
   calar(tipo: TipoDeSom): void
   vibrar(padrao: readonly number[]): void
-  /** Called on first gesture: creates the context and prepares sounds. */
+  /** Called on first gesture: creates the playback context. */
   preparar(): void
 }
 
@@ -176,6 +176,9 @@ export const RAJADA_MS: Record<TipoDeSom, number> = {
   // The 150 ms only stops a key held down repeating.
   "mic-silenciado": 150,
   "mic-ligado": 150,
+  // One cue per gate transition, even for quick successive holds.
+  "ptt-inicio": 0,
+  "ptt-fim": 0,
   "tudo-silenciado": 150,
   "tudo-ligado": 150,
   "amigo-online": 2000,
@@ -242,6 +245,8 @@ export const VIBRACAO: Record<TipoDeSom, readonly number[]> = {
   // A gesture from the user themselves, phone in hand: the sound plays.
   "mic-silenciado": [],
   "mic-ligado": [],
+  "ptt-inicio": [],
+  "ptt-fim": [],
   "tudo-silenciado": [],
   "tudo-ligado": [],
   // No one needs to feel in their pocket that a friend turned on their computer.
@@ -544,11 +549,13 @@ function contextoDoBrowser(): AudioContext | null {
 /**
  * Playback via Web Audio.
  *
- * Sounds render once on first gesture and stay in memory as `AudioBuffer`.
+ * Sounds render once and stay in memory as `AudioBuffer`.
  * Playing is just starting a buffer: cheap and with no delay. Never breaks:
  * without Web Audio, everything returns `false` silently.
  */
-export function criarSaidaWebAudio(opcoes: OpcoesDaSaida = {}): Saida {
+export function criarSaidaWebAudio(opcoes: OpcoesDaSaida = {}): Saida & {
+  precarregar(...tipos: TipoDeSom[]): void
+} {
   const criarContexto = opcoes.criarContexto ?? contextoDoBrowser
   const renderizar = opcoes.renderizar ?? ((tipo: TipoDeSom) => renderizarDaFamilia(tipo))
   const agora = opcoes.agora ?? (() => Date.now())
@@ -607,6 +614,9 @@ export function criarSaidaWebAudio(opcoes: OpcoesDaSaida = {}): Saida {
   }
 
   return {
+    precarregar(...tipos) {
+      for (const tipo of tipos) void buffer(tipo)
+    },
     tocar(tipo, amplitude) {
       const audio = garantir()
       if (!audio) return false
@@ -677,9 +687,15 @@ export function estadoDoAparelho(): EstadoDoSom {
  * context can wait for the next task. See `OpcoesDaSaida.prepararDepois`.
  */
 const contextoSoNoGesto = typeof globalThis !== "undefined" && "webkitAudioContext" in globalThis
+const saidaWebAudio = criarSaidaWebAudio({ prepararDepois: !contextoSoNoGesto })
+
+/** Render before Windows can minimize the renderer and delay the first cue. */
+export function prepararSonsDeFala(): void {
+  saidaWebAudio.precarregar("ptt-inicio", "ptt-fim")
+}
 
 export const motor: Motor = criarMotor({
-  saida: criarSaidaWebAudio({ prepararDepois: !contextoSoNoGesto }),
+  saida: saidaWebAudio,
   lerEstado: estadoDoAparelho,
 })
 

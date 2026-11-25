@@ -177,6 +177,8 @@ const SONS_DA_CHAMADA: ReadonlySet<TipoDeSom> = new Set([
   "ligado",
   "mic-silenciado",
   "mic-ligado",
+  "ptt-inicio",
+  "ptt-fim",
   "tudo-silenciado",
   "tudo-ligado",
   // Those matching Discord parity (3/11/2026): they all happen inside a

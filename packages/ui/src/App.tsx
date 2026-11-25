@@ -227,7 +227,7 @@ import {
   SALA_VAZIA_MS,
   windowIsFocused,
 } from "./lib/sounds.js"
-import { motor, TOQUE_MAXIMO_MS } from "./sons/motor.js"
+import { motor, prepararSonsDeFala, TOQUE_MAXIMO_MS } from "./sons/motor.js"
 import {
   comecaAChamar,
   criarVigiaDaQueda,
@@ -1448,6 +1448,7 @@ function Shell({
   const { micMuted, soundOff, modoDoMicrofone } = audio
   const [micCalado, setMicCalado] = useState(() => microfoneCalado(audio, false))
   const teclaDeFalaPremida = useRef<Record<"janela" | "fundo", string | null>>({ janela: null, fundo: null })
+  const falaAberta = useRef(false)
   /** Guards persistence until the stored log has been loaded. */
   const notifLoaded = useRef(false)
   /** Channels this device opened itself: their appearance is not news. */
@@ -1677,6 +1678,9 @@ function Shell({
   // Audio may only start after a gesture, so the engine waits for the first
   // click or keypress and builds its context there — never on mount.
   useEffect(() => armSounds(), [])
+  useEffect(() => {
+    if (modoDoMicrofone === "carregar") prepararSonsDeFala()
+  }, [modoDoMicrofone])
 
   /*
     "Show when I am online" (Privacy), off: presence goes out as
@@ -1710,13 +1714,22 @@ function Shell({
     [profile],
   )
 
-  const aplicarSilencio = useCallback(() => {
+  const confirmarFala = useCallback((comSom: boolean) => {
+    const aberta = audioEscolhido.current.modoDoMicrofone === "carregar" &&
+      bridge.call.localStream?.getAudioTracks().some((faixa) => faixa.enabled && faixa.readyState === "live") === true
+    if (aberta === falaAberta.current) return
+    falaAberta.current = aberta
+    if (comSom) motor.tocar({ tipo: aberta ? "ptt-inicio" : "ptt-fim" })
+  }, [bridge])
+
+  const aplicarSilencio = useCallback((comSom = false) => {
     const tecla = readPrefs().atalhosDeVoz.falar
     const { janela, fundo } = teclaDeFalaPremida.current
     const calado = microfoneCalado(audioEscolhido.current, tecla !== null && (tecla === janela || tecla === fundo))
     bridge.call.setMuted(calado)
     setMicCalado(calado)
-  }, [bridge])
+    confirmarFala(comSom)
+  }, [bridge, confirmarFala])
 
   const escolherAudio = useCallback((patch: Partial<EscolhasDeAudio>) => {
     const proximo = { ...audioEscolhido.current, ...patch }
@@ -2366,7 +2379,7 @@ function Shell({
       if (aCarregar && (callChannel === null || tecla === null || audioEscolhido.current.soundOff)) return
       teclaDeFalaPremida.current[origem] = aCarregar ? tecla : null
       if (aCarregar) actividadeAfk()
-      aplicarSilencio()
+      aplicarSilencio(true)
     },
     [aplicarSilencio, callChannel, actividadeAfk],
   )
@@ -3563,7 +3576,11 @@ function Shell({
       }
     },
     onCallParticipants: setParticipants,
-    onCallLocalStream: setLocalStream,
+    onCallLocalStream: (stream) => {
+      setLocalStream(stream)
+      // A hold can start before the microphone is ready. Ending the call has its own sound.
+      confirmarFala(stream !== null)
+    },
     onCallScreen: setScreenStream,
     onCallEnded: () => {
       teclaDeFalaPremida.current = { janela: null, fundo: null }
