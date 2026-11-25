@@ -379,6 +379,7 @@ export interface PedidoDeAtalhosGlobais {
   som: string | null
   /** Show or hide the game overlay. Optional: an old main process does not know it. */
   overlay?: string | null
+  falar?: string | null
 }
 
 /** The commands that can be global in the desktop app. */
@@ -1939,6 +1940,8 @@ export interface EnclaveBridge {
     abrirAcessibilidade: () => Promise<{ ok: boolean }>
     /** A global shortcut was pressed. */
     aoAccionar: (handler: (accao: ComandoGlobal) => void) => () => void
+    /** Push-to-talk key transitions while another app is focused. Windows only. */
+    aoFalar?: (handler: (premida: boolean) => void) => () => void
   }
   /**
    * The game overlay for the desktop app: a pill on top of the game showing the

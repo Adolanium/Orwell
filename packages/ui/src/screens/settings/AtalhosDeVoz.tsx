@@ -46,6 +46,7 @@ export function AtalhosDeVoz({
   const toast = useToast()
   const plataforma = plataformaDoTeclado()
   const naSecretaria = atalhosGlobais !== undefined
+  const falaNoFundo = atalhosGlobais?.aoFalar !== undefined
 
   /*
     While recording, the globals stop. Without this, during a call, the key
@@ -75,7 +76,8 @@ export function AtalhosDeVoz({
       setAGravar(null)
       const aviso = avisoDaCombinacao(combinacao)
       const global = naSecretaria && (ACCOES_GLOBAIS as readonly AccaoDeVoz[]).includes(accao)
-      if (aviso === "escreve" && global) toast(strings.settings.atalhoAvisoEscreve, "info")
+      if (aviso !== null && accao === "falar" && falaNoFundo) toast(strings.settings.atalhoAvisoFalarWindows, "info")
+      else if (aviso === "escreve" && global) toast(strings.settings.atalhoAvisoEscreve, "info")
       else if (aviso !== null) toast(strings.settings.atalhoAvisoComum, "info")
     }
     const aoCarregar = (event: KeyboardEvent): void => {
@@ -116,7 +118,7 @@ export function AtalhosDeVoz({
       document.removeEventListener("mouseup", engolirORato, true)
       document.removeEventListener("auxclick", engolirORato, true)
     }
-  }, [aGravar, mapa, onMudar, toast, naSecretaria])
+  }, [aGravar, mapa, onMudar, toast, naSecretaria, falaNoFundo])
 
   // On macOS, a global media key requires Accessibility permission.
   const pedeAcessibilidade =
@@ -130,7 +132,10 @@ export function AtalhosDeVoz({
   return (
     <section className="card settings-card" aria-label={strings.settings.atalhos}>
       <h2>{strings.settings.atalhos}</h2>
-      <p className="settings-note">{naSecretaria ? strings.settings.atalhosNotaSecretaria : strings.settings.atalhosNota}</p>
+      <p className="settings-note">{
+        falaNoFundo ? strings.settings.atalhosNotaWindows :
+          naSecretaria ? strings.settings.atalhosNotaSecretaria : strings.settings.atalhosNota
+      }</p>
       {pedeAcessibilidade && (
         <p className="settings-note" data-aviso="acessibilidade">
           {strings.settings.atalhoSemAcessibilidade}{" "}

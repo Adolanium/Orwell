@@ -1608,6 +1608,8 @@ export const en: Traducao = {
     atalhosNota: "They work only when the page is in front. Any key works, or mouse buttons 4 and 5.",
     atalhosNotaSecretaria:
       "During a call, the microphone and sound shortcuts also work when the app is minimised or behind another app. The other shortcuts and the mouse buttons work only when the app is in front.",
+    atalhosNotaWindows: "During a call, mute, sound and Talk while held also work when Orwell is in the background. Keep the mic muted between presses.",
+    atalhoAvisoFalarWindows: "This key can open your mic while you type in another app. Pick a function key such as F8 to avoid that.",
     atalhoAccao: {
       microfone: "Mute or unmute the microphone",
       som: "Turn the sound off or on",

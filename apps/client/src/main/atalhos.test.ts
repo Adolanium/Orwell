@@ -95,14 +95,17 @@ describe("a combinação como acelerador do Electron", () => {
 })
 
 describe("o pedido do renderer, que não é de confiança", () => {
-  it("só passam o microfone, o som e a overlay, em texto curto", () => {
+  it("só passam os atalhos globais conhecidos, em texto curto", () => {
     expect(lerPedido(null)).toBeNull()
     expect(lerPedido("Mod+M")).toBeNull()
-    expect(lerPedido({ microfone: "F13", som: 7, camara: "F14" })).toEqual({ microfone: "F13", som: null, overlay: null })
+    expect(lerPedido({ microfone: "F13", som: 7, camara: "F14", falar: "F8" })).toEqual({
+      microfone: "F13", som: null, overlay: null, falar: "F8",
+    })
     expect(lerPedido({ microfone: "x".repeat(65), som: "", overlay: "Alt+Shift+O" })).toEqual({
       microfone: null,
       som: null,
       overlay: "Alt+Shift+O",
+      falar: null,
     })
   })
 })

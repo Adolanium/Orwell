@@ -42,6 +42,7 @@ import {
   ipcMain,
   Menu,
   nativeTheme,
+  powerMonitor,
   session as electronSession,
   shell,
   systemPreferences,
@@ -83,6 +84,7 @@ import { codigoDoEstado, CORES_DO_ARRANQUE, htmlDoArranque } from "./ecra-de-arr
 import { type LinguaDoAnfitriao, linguaDoAnfitriao, linguasDoSistemaElectron, textosDoAnfitriao } from "./lingua-do-anfitriao.js"
 import { escreverTema, FICHEIRO_DO_TEMA, FUNDO_DA_JANELA, lerTemaGuardado, temaValido, temaVisto, type TemaEscolhido } from "./tema-da-janela.js"
 import { CANAIS_DE_ATALHOS, DEFINICOES_DE_ACESSIBILIDADE, criarAtalhosGlobais } from "./atalhos.js"
+import { abrirTecladoDoWindows, vigiarFalaNoFundo } from "./falar-no-windows.js"
 import { montarBandeja, sanearAviso, type Bandeja } from "./bandeja.js"
 import { ligarCanais, type RegistarLeitura, type Resposta } from "./canais.js"
 import { embrulharErros } from "./envelope.js"
@@ -1105,8 +1107,22 @@ function registerIpc(window: BrowserWindow): void {
     decision lives in `atalhos.ts`; here we only wire the real gates. Registered
     only during a call: the UI asks for them on entry and drops them on exit.
   */
+  const teclado = process.platform === "win32" ? abrirTecladoDoWindows() : null
+  let sessaoBloqueada = false
+  let aDormir = false
   const atalhos = criarAtalhosGlobais({
     porta: globalShortcut,
+    ...(teclado && {
+      vigiarFala: (combinacao, permitido) => vigiarFalaNoFundo(
+        combinacao, teclado,
+        () => permitido() && !aDormir && !sessaoBloqueada && !window.isDestroyed() && !window.isFocused(),
+        (premida) => {
+          if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+            window.webContents.send(CANAIS_DE_ATALHOS.falar, premida)
+          }
+        },
+      ),
+    }),
     plataforma: process.platform,
     // `false`: ask without opening the system dialog. The dialog opens only
     // when the user clicks the button (`atalhos:abrir-acessibilidade`).
@@ -1115,6 +1131,37 @@ function registerIpc(window: BrowserWindow): void {
       if (!window.isDestroyed()) window.webContents.send(CANAIS_DE_ATALHOS.accionado, accao)
     },
   })
+  if (teclado) {
+    const bloquear = (): void => {
+      sessaoBloqueada = true
+      atalhos.relerFala()
+    }
+    const desbloquear = (): void => {
+      sessaoBloqueada = false
+      atalhos.relerFala()
+    }
+    const dormir = (): void => {
+      aDormir = true
+      atalhos.relerFala()
+    }
+    const acordar = (): void => {
+      aDormir = false
+      atalhos.relerFala()
+    }
+    window.on("focus", atalhos.relerFala)
+    window.on("blur", atalhos.relerFala)
+    powerMonitor.on("lock-screen", bloquear)
+    powerMonitor.on("unlock-screen", desbloquear)
+    powerMonitor.on("suspend", dormir)
+    powerMonitor.on("resume", acordar)
+    window.once("closed", () => {
+      powerMonitor.off("lock-screen", bloquear)
+      powerMonitor.off("unlock-screen", desbloquear)
+      powerMonitor.off("suspend", dormir)
+      powerMonitor.off("resume", acordar)
+      atalhos.libertar()
+    })
+  }
   tratar(CANAIS_DE_ATALHOS.definir, (_event, pedido: unknown) => atalhos.definir(pedido))
   tratar(CANAIS_DE_ATALHOS.suspender, (_event, sim: unknown) => {
     atalhos.suspender(sim === true)

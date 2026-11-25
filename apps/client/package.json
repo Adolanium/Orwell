@@ -36,5 +36,8 @@
     "vite": "^7.2.4"
   },
   "productName": "Orwell",
-  "license": "AGPL-3.0-only"
+  "license": "AGPL-3.0-only",
+  "optionalDependencies": {
+    "koffi": "3.3.8"
+  }
 }

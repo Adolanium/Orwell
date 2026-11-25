@@ -34,6 +34,7 @@ export function useAtalhosGlobais(opcoes: {
   mapa: MapaDeAtalhos
   /** `overlay` only when there is a game overlay: without it, its shortcut is not requested from the system. */
   accoes: { microfone: () => void; som: () => void; overlay?: (() => void) | undefined }
+  falar?: (premida: boolean) => void
   /** What the main process managed to register, after each request made during a call. */
   aoRegistar?: (estado: EstadoDosAtalhosGlobais) => void
 }): () => ReadonlySet<AccaoDeVoz> {
@@ -41,6 +42,8 @@ export function useAtalhosGlobais(opcoes: {
   const globais = useRef<ReadonlySet<AccaoDeVoz>>(NENHUM)
   const accoes = useRef(opcoes.accoes)
   accoes.current = opcoes.accoes
+  const falar = useRef(opcoes.falar)
+  falar.current = opcoes.falar
   const aoRegistar = useRef(opcoes.aoRegistar)
   aoRegistar.current = opcoes.aoRegistar
   // If there are globals requested from the main process. Without this, every mount outside a
@@ -52,6 +55,16 @@ export function useAtalhosGlobais(opcoes: {
     return ponte.aoAccionar((accao) => accoes.current[accao]?.())
   }, [ponte])
 
+  useEffect(() => {
+    if (!emChamada || !ponte?.aoFalar) return
+    const desligar = ponte.aoFalar((premida) => falar.current?.(premida))
+    return () => {
+      desligar()
+      falar.current?.(false)
+    }
+  }, [ponte, emChamada])
+
+  const teclaDaFala = ponte?.aoFalar ? opcoes.mapa.falar : null
   const microfone = opcoes.mapa.microfone
   const som = opcoes.mapa.som
   const comOverlay = opcoes.accoes.overlay !== undefined
@@ -63,7 +76,11 @@ export function useAtalhosGlobais(opcoes: {
     if (!emChamada) globais.current = NENHUM
     let vivo = true
     ponte
-      .definir(emChamada ? { microfone, som, ...(comOverlay ? { overlay } : {}) } : null)
+      .definir(emChamada ? {
+        microfone, som,
+        ...(comOverlay ? { overlay } : {}),
+        ...(teclaDaFala !== null ? { falar: teclaDaFala } : {}),
+      } : null)
       .then((cru) => {
         if (!vivo) return
         const estado = estadoDe(cru)
@@ -78,7 +95,7 @@ export function useAtalhosGlobais(opcoes: {
     return () => {
       vivo = false
     }
-  }, [ponte, emChamada, microfone, som, comOverlay, overlay])
+  }, [ponte, emChamada, microfone, som, comOverlay, overlay, teclaDaFala])
 
   // On unmount (session close) releases the key if it was requested.
   useEffect(() => {

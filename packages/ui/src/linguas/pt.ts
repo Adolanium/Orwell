@@ -2965,6 +2965,8 @@ export const pt = {
     atalhosNota: "Funcionam só com a página à frente. Serve qualquer tecla, ou os botões 4 e 5 do rato.",
     atalhosNotaSecretaria:
       "Durante uma chamada, os atalhos do microfone e do som funcionam também com a app minimizada ou atrás de outra app. Os outros atalhos e os botões do rato funcionam só com a app à frente.",
+    atalhosNotaWindows: "Durante uma chamada, os atalhos do microfone, do som e de falar também funcionam com o Orwell em segundo plano. Mantém o microfone silenciado entre pressões.",
+    atalhoAvisoFalarWindows: "Esta tecla pode abrir o microfone enquanto escreves noutra aplicação. Para evitar isso, escolhe uma tecla de função, como F8.",
     atalhoAccao: {
       microfone: "Silenciar ou ligar o microfone",
       som: "Desligar ou ligar o som",

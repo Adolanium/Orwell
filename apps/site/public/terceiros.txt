@@ -434,6 +434,86 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
 IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ==============================================================================
+@koromix/koffi-android-arm64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-android-x64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-darwin-arm64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-darwin-x64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-freebsd-arm64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-freebsd-ia32 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-freebsd-x64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-linux-arm 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-linux-arm64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-linux-ia32 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-linux-loong64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-linux-ppc64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-linux-riscv64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-linux-x64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-openbsd-arm64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-openbsd-ia32 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-openbsd-x64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-win32-arm64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-win32-ia32 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
+@koromix/koffi-win32-x64 3.3.8
+Licence: MIT
+Used in: desktop app
+==============================================================================
 @lukeed/csprng 1.1.0
 Licence: MIT
 Used in: desktop app, web
@@ -1873,6 +1953,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+==============================================================================
+koffi 3.3.8
+Licence: MIT
+Used in: desktop app
 ==============================================================================
 light-my-request 6.6.0
 Licence: BSD-3-Clause

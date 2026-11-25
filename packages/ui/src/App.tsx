@@ -1434,6 +1434,7 @@ function Shell({
    * yesterday does not want to be heard today because the app forgot.
    */
   const [micMuted, setMicMuted] = useState(() => readPrefs().micMuted)
+  const teclaDeFalaPremida = useRef({ janela: false, fundo: false })
   const [soundOff, setSoundOff] = useState(() => readPrefs().soundOff)
   /** Guards persistence until the stored log has been loaded. */
   const notifLoaded = useRef(false)
@@ -1719,6 +1720,9 @@ function Shell({
        * the microphone. The user's choice (`micMuted`) stays intact on disk, so
        * unmuting returns the microphone to the state they left it in.
        */
+      if (proximo.soundOff || patch.micMuted === true) {
+        teclaDeFalaPremida.current = { janela: false, fundo: false }
+      }
       bridge.call.setMuted(proximo.micMuted || proximo.soundOff)
     },
     [bridge],
@@ -2352,12 +2356,14 @@ function Shell({
    * screen toggle: it is a gesture, not a choice.
    */
   const falar = useCallback(
-    (aCarregar: boolean) => {
-      if (callChannel === null) return
+    (aCarregar: boolean, origem: "janela" | "fundo") => {
+      const guardadas = readPrefs()
+      if (aCarregar && (callChannel === null || guardadas.soundOff)) return
+      teclaDeFalaPremida.current[origem] = aCarregar
       // Push to talk means you are here: the AFK timer restarts.
       if (aCarregar) actividadeAfk()
-      const guardadas = readPrefs()
-      bridge.call.setMuted(aCarregar ? false : guardadas.micMuted || guardadas.soundOff)
+      const { janela, fundo } = teclaDeFalaPremida.current
+      bridge.call.setMuted(guardadas.soundOff || (guardadas.micMuted && !janela && !fundo))
     },
     [bridge, callChannel, actividadeAfk],
   )
@@ -3558,6 +3564,9 @@ function Shell({
     onCallLocalStream: setLocalStream,
     onCallScreen: setScreenStream,
     onCallEnded: () => {
+      teclaDeFalaPremida.current = { janela: false, fundo: false }
+      const guardadas = readPrefs()
+      bridge.call.setMuted(guardadas.micMuted || guardadas.soundOff)
       setCallChannel(null)
       setCallRoom("")
       setParticipants([])
@@ -6484,6 +6493,7 @@ function Shell({
     ponte: bridge.atalhosGlobais,
     emChamada: callChannel !== null,
     mapa: prefsDaPresenca.atalhosDeVoz,
+    falar: (premida) => falar(premida, "fundo"),
     accoes: {
       microfone: alternarMicrofone,
       som: alternarSom,
@@ -6511,7 +6521,7 @@ function Shell({
     alternarCamara,
     alternarEcra,
     sairDaChamada,
-    falar,
+    falar: (premida) => falar(premida, "janela"),
     canalAnterior: () => {
       if (rooms.length === 0) return
       const onde = canal ? rooms.indexOf(canal) : -1
@@ -7155,7 +7165,8 @@ function Shell({
     // Silence is a microphone choice like the others, and it also has to
     // be in the core BEFORE the first capture: without this, someone who reloaded the
     // page with the microphone muted entered the next call speaking.
-    bridge.call.setMuted(guardadas.micMuted || guardadas.soundOff)
+    const { janela, fundo } = teclaDeFalaPremida.current
+    bridge.call.setMuted(guardadas.soundOff || (guardadas.micMuted && !janela && !fundo))
   }, [bridge, view])
 
   /**

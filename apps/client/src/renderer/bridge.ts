@@ -344,8 +344,9 @@ interface HostApi {
   /**
    * The global shortcuts. Optional for the same reason. `aoAccionar` delivers what crossed the IPC as-is; the shape is validated in the bridge.
    */
-  atalhosGlobais?: Omit<NonNullable<EnclaveBridge["atalhosGlobais"]>, "aoAccionar"> & {
+  atalhosGlobais?: Omit<NonNullable<EnclaveBridge["atalhosGlobais"]>, "aoAccionar" | "aoFalar"> & {
     aoAccionar: (handler: (payload: unknown) => void) => () => void
+    aoFalar?: (handler: (payload: unknown) => void) => () => void
   }
   /** The game overlay. Optional for the same reason: an old `preload` doesn't provide it. */
   overlay?: NonNullable<EnclaveBridge["overlay"]>
@@ -704,6 +705,7 @@ const AVISOS_POR_ABRIR = 50
 function atalhosGlobaisDe(
   anfitriao: NonNullable<HostApi["atalhosGlobais"]>,
 ): NonNullable<EnclaveBridge["atalhosGlobais"]> {
+  const { aoFalar } = anfitriao
   return {
     definir: (pedido) => anfitriao.definir(pedido),
     suspender: (sim) => anfitriao.suspender(sim),
@@ -712,6 +714,11 @@ function atalhosGlobaisDe(
       anfitriao.aoAccionar((cru) => {
         if (cru === "microfone" || cru === "som" || cru === "overlay") handler(cru)
       }),
+    ...(aoFalar && {
+      aoFalar: (handler: (premida: boolean) => void) => aoFalar((cru) => {
+        if (typeof cru === "boolean") handler(cru)
+      }),
+    }),
   }
 }
 
