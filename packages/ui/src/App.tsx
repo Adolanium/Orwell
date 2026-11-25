@@ -7963,7 +7963,12 @@ function Shell({
     the pill on top of the game. The rules for when it appears and what it overlays are
     in `hooks/useOverlayDeJogo.ts` and `apps/client/src/main/overlay.ts`.
   */
-  const audioDaChamadaParaAOverlay = (bridge.call as Partial<typeof bridge.call>).audio
+  const audioDaChamada = (bridge.call as Partial<typeof bridge.call>).audio
+  const dbDaEntradaDaChamada = useCallback((): number | null => {
+    const medidas = audioDaChamada?.medir()
+    if (medidas === undefined || medidas.entradaDb <= -119) return null
+    return medidas.anelDb ?? medidas.entradaDb
+  }, [audioDaChamada])
   useOverlayDeJogo({
     ponte: bridge.overlay,
     sala:
@@ -7990,12 +7995,7 @@ function Shell({
     }),
     micMuted,
     soundOff,
-    dbDaEntrada: () => {
-      // `anelDb`: with the manual microphone slider, the ring follows the gate (see `CallPanel`).
-      const medidas = audioDaChamadaParaAOverlay?.medir()
-      if (medidas === undefined || medidas.entradaDb <= -119) return null
-      return medidas.anelDb ?? medidas.entradaDb
-    },
+    dbDaEntrada: dbDaEntradaDaChamada,
     ligada: prefsDaPresenca.overlayDeJogoLigada,
     opacidade: prefsDaPresenca.opacidadeDaOverlay,
     textos: { entrou: strings.overlayDeJogo.entrou, saiu: strings.overlayDeJogo.saiu },
@@ -8284,6 +8284,8 @@ function Shell({
                 ...(euTransmito ? { transmite: euTransmito } : {}),
                 calado: micMuted,
                 semSom: soundOff,
+                voz: localStream,
+                dbDaEntrada: dbDaEntradaDaChamada,
               },
             ]
           : []
@@ -8304,7 +8306,10 @@ function Shell({
                 profile: directory.get(quem),
                 presence: presenceFor(quem),
                 ...(transmite ? { transmite } : {}),
-                ...(participante ? { calado: participante.micMuted } : {}),
+                ...(participante ? {
+                  calado: participante.micMuted,
+                  voz: participante.micMuted ? null : participante.stream,
+                } : {}),
               }
             }),
         ]
@@ -8329,7 +8334,7 @@ function Shell({
           }
         })
     },
-    [active, callChannel, callRoom, screenStream, minhaMusica, micMuted, soundOff, address, nameFor, directory, presenceFor, naSalaDaChamada, participants, vozPorSala, transmitePorSala],
+    [active, callChannel, callRoom, localStream, dbDaEntradaDaChamada, screenStream, minhaMusica, micMuted, soundOff, address, nameFor, directory, presenceFor, naSalaDaChamada, participants, vozPorSala, transmitePorSala],
   )
   /** "New room" already in a category: its `+` in the sidebar, or its menu (1.3.25). */
   const abrirNovaSalaNaCategoria = (category: string): void => {

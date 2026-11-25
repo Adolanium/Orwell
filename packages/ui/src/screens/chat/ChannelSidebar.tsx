@@ -14,6 +14,7 @@ import { ChevronIcon, RoomGlyph } from "../../components/SidebarIcons.js"
 import { MarcaDeSilencio } from "../../components/MarcaDeSilencio.js"
 import { MarcaDeChamada, MarcaDeTransmissao, type Transmissao } from "../../components/MarcaDeChamada.js"
 import { useVolumes } from "../../hooks/useVolumes.js"
+import { useNivelDeVoz } from "../../hooks/useNivelDeVoz.js"
 import { chaveDoSilencio } from "../../lib/silenciados.js"
 import { RoomIcon } from "../../components/RoomIcon.js"
 import { SeloOficial } from "../../components/SeloOficial.js"
@@ -103,6 +104,19 @@ export interface PresenteNaVoz {
   calado?: boolean | undefined
   /** Sound off (deafened). Known only for ourselves: the wire does not carry it. */
   semSom?: boolean | undefined
+  /** Only the room this device has joined supplies audio for a speaking indicator. */
+  voz?: MediaStream | null | undefined
+  dbDaEntrada?: (() => number | null) | undefined
+}
+
+function CaraNaVoz({ pessoa }: { pessoa: PresenteNaVoz }): React.JSX.Element {
+  const alvo = useRef<HTMLSpanElement>(null)
+  useNivelDeVoz(alvo, pessoa.voz ?? null, { dbDaEntrada: pessoa.dbDaEntrada })
+  return (
+    <span className="voice-member-avatar" ref={alvo}>
+      <Avatar profile={pessoa.profile} fallback={pessoa.name[0] ?? "?"} />
+    </span>
+  )
 }
 
 /**
@@ -326,7 +340,7 @@ function RoomRow({
                     column. Being in a voice room means being
                     in a call by definition, and the room already says that; the
                     ring was extra noise in a short list. */}
-                <Avatar profile={quem.profile} fallback={quem.name[0] ?? "?"} />
+                <CaraNaVoz pessoa={quem} />
                 <span className="voice-member-name">{quem.name}</span>
                 {quem.transmite && <MarcaDeTransmissao transmite={quem.transmite} />}
                 {/* The call marks, live (12/11/2026): the same ones as the member list. */}

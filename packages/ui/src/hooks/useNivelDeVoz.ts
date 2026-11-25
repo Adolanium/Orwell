@@ -117,11 +117,11 @@ export function useNivelDeVoz(
      */
     const faixas: MediaStreamTrack[] = []
     const fontes: MediaStreamAudioSourceNode[] = []
-    const analisadores: AnalyserNode[] = []
+    const analisadores: { no: AnalyserNode; audio: MediaStreamTrack[] }[] = []
 
     const largar = (): void => {
       for (const fonte of fontes) fonte.disconnect()
-      for (const analisador of analisadores) analisador.disconnect()
+      for (const { no } of analisadores) no.disconnect()
       // The cloned tracks are ours: stopping them is mandatory, or one remains per
       // person per call, all consuming from the same source.
       for (const faixa of faixas) faixa.stop()
@@ -134,6 +134,9 @@ export function useNivelDeVoz(
       const audio = entrada.getAudioTracks()
       if (audio.length === 0) continue
       const clones = audio.map((faixa) => faixa.clone())
+      // The original can be muted and then opened by push-to-talk while this meter stays mounted.
+      // Keep the clones ready and read the originals' enabled state on each frame.
+      for (const clone of clones) clone.enabled = true
       try {
         const fonte = ctx.createMediaStreamSource(new MediaStream(clones))
         const analisador = ctx.createAnalyser()
@@ -144,7 +147,7 @@ export function useNivelDeVoz(
         fonte.connect(analisador)
         faixas.push(...clones)
         fontes.push(fonte)
-        analisadores.push(analisador)
+        analisadores.push({ no: analisador, audio })
       } catch {
         // A video-only stream, already closed, or an engine without `clone`. There is
         // no level to measure on THIS one, and not measuring never cost a call
@@ -165,9 +168,11 @@ export function useNivelDeVoz(
       It was the other half of "sound coming in with no animation". Bytes stay
       only for an engine without `getFloatTimeDomainData`.
     */
-    const comFloat = typeof analisadores[0]!.getFloatTimeDomainData === "function"
-    const amostras = new Float32Array(analisadores[0]!.fftSize)
-    const bytes = new Uint8Array(analisadores[0]!.fftSize)
+    const comFloat = typeof analisadores[0]!.no.getFloatTimeDomainData === "function"
+    const amostras = new Float32Array(analisadores[0]!.no.fftSize)
+    const bytes = new Uint8Array(analisadores[0]!.no.fftSize)
+    const ligada = ({ audio }: { audio: MediaStreamTrack[] }): boolean =>
+      audio.some((faixa) => faixa.enabled !== false && faixa.readyState !== "ended")
     let suavizado = 0
     let anterior = -1
     let frame = 0
@@ -182,10 +187,15 @@ export function useNivelDeVoz(
       // speaking, and three speaking at once do not blow the scale.
       let nivel = 0
       const deFora = dbDaEntrada?.() ?? null
-      if (deFora !== null && Number.isFinite(deFora)) {
+      if (!analisadores.some(ligada)) {
+        // An explicit mute clears the ring immediately; the usual decay is for pauses in speech.
+        suavizado = 0
+      } else if (deFora !== null && Number.isFinite(deFora)) {
         nivel = 10 ** (deFora / 20)
       } else {
-        for (const analisador of analisadores) {
+        for (const entrada of analisadores) {
+          if (!ligada(entrada)) continue
+          const analisador = entrada.no
           // Root mean square (RMS), not the peak: the peak spikes on a keystroke and
           // an entire sentence spoken quietly never gets there.
           let soma = 0

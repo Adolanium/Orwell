@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event"
 import type { ChannelRoom, Profile } from "../../bridge.js"
 import { ToastContext } from "../../components/Toast.js"
 import { readCollapsed } from "../../hooks/usePrefs.js"
+import { montarWebAudioFalso, vozFalsa } from "../../hooks/vozFalsa.js"
 import type { RoomGroup } from "../../hooks/useRooms.js"
 import { strings } from "../../strings.js"
 import { seccoes } from "../settings/seccoes.js"
@@ -302,6 +303,30 @@ describe("ChannelSidebar — quem está nos canais de voz", () => {
     expect(container.querySelectorAll(".room-voice-members .message-avatar")).toHaveLength(2)
     // With faces showing, the number would be the same information written twice.
     expect(container.querySelector(".room-list .room-count")).toBeNull()
+  })
+
+  it("o áudio recebido acende só a cara da pessoa a falar, na lista de voz", () => {
+    const audio = montarWebAudioFalso()
+    try {
+      const ana = vozFalsa("sidebar-ana", 100)
+      const { getByText, rerender } = render(povoada({
+        voicePresence: (room) => room === "v1" ? [
+          { address: "@ana:s", name: "Ana Rita", voz: ana.stream },
+          { address: "@bru:s", name: "Bruno" },
+        ] : [],
+      }))
+      const nivel = (nome: string) => getByText(nome).parentElement
+        ?.querySelector<HTMLElement>(".voice-member-avatar")?.style.getPropertyValue("--voz")
+      audio.correrUm()
+      expect(nivel("Ana Rita")).toBe("1.000")
+      expect(nivel("Bruno")).toBe("")
+
+      rerender(povoada())
+      expect(nivel("Ana Rita")).toBe("")
+    } finally {
+      cleanup()
+      vi.unstubAllGlobals()
+    }
   })
 
   it("minimizada, as caras saem e fica o número de quem lá está", async () => {
