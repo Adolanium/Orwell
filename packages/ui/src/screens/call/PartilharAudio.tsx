@@ -504,6 +504,13 @@ export function MusicaQueChega({
   calado: boolean
 }): React.JSX.Element {
   const elemento = useRef<HTMLAudioElement>(null)
+  // Apply the listener's settings before attaching a stream that can autoplay.
+  useEffect(() => {
+    const audio = elemento.current
+    if (!audio) return
+    audio.volume = Math.min(1, Math.max(0, volume))
+    audio.muted = calado
+  }, [volume, calado])
   useEffect(() => {
     const audio = elemento.current
     if (!audio || audio.srcObject === stream) return
@@ -512,11 +519,5 @@ export function MusicaQueChega({
       // No gesture yet: plays when the browser allows, like the voice.
     })
   }, [stream])
-  useEffect(() => {
-    const audio = elemento.current
-    if (!audio) return
-    audio.volume = Math.min(1, Math.max(0, volume))
-    audio.muted = calado
-  }, [volume, calado])
   return <audio ref={elemento} className="call-musica-que-chega" autoPlay data-musica="1" />
 }

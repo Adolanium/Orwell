@@ -143,8 +143,7 @@ export function CallDock({
   onToggleMic?: (() => void) | undefined
 }): React.JSX.Element {
   const [position, setPosition] = useState<{ x: number; y: number } | null>(readPosition)
-  // Read on mount, which is when the panel just unmounted: it always catches the
-  // most recent choice, because the two never are on screen at the same time.
+  // The side dock is mounted alongside the call panel and receives its volume changes.
   const { volumeDe } = useVolumes()
   const volumeDeSaida = useVolumeDeSaida()
   /* The dock plays music when the panel is off: it mutes the same one it does. */
