@@ -143,6 +143,8 @@ export interface Prefs {
    * device preference.
    */
   micMuted: boolean
+  /** Push to talk keeps the microphone quiet between presses of the assigned key. */
+  modoDoMicrofone: "aberto" | "carregar"
   /**
    * Hear nobody-and as a result, be heard by nobody.
    *
@@ -392,6 +394,7 @@ export const DEFAULT_PREFS: Prefs = {
   /** Off by factory default: entering a call and nobody hearing us is a fault,
    *  not a factory state. */
   micMuted: false,
+  modoDoMicrofone: "aberto",
   soundOff: false,
   /** No choice: the system opens whichever microphone it wants, as it always has. */
   inputDeviceId: "",
@@ -585,6 +588,7 @@ export function readPrefs(storage: Pick<Storage, "getItem"> = localStorage): Pre
       // did not expect it-bad-but the reverse is a person speaking to empty air
       // and losing the conversation with nothing to explain it.
       micMuted: parsed?.micMuted === true,
+      modoDoMicrofone: parsed?.modoDoMicrofone === "carregar" ? "carregar" : "aberto",
       soundOff: parsed?.soundOff === true,
       inputDeviceId: typeof parsed?.inputDeviceId === "string" ? parsed.inputDeviceId : "",
       // Outside the range, or not a number, defaults to 1: capture as the system

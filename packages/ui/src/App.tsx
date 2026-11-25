@@ -67,7 +67,7 @@ import type { CargoDoMembro } from "./lib/agruparMembros.js"
 import { prefsDeMediaParaONucleo } from "./lib/mediaPrefs.js"
 import { presencasVivas, quemEstaNaSala, semAPessoa } from "./lib/presenca.js"
 import { chaveDaSala, salaDaChamadaDe, salaUnicaDaChamadaDe } from "./lib/salaDaChamada.js"
-import { applyPrefs, estaEmPausa, marcarEsperasFeitas, readEsperasFeitas, readPrefs, usePrefs, writePrefs } from "./hooks/usePrefs.js"
+import { applyPrefs, estaEmPausa, marcarEsperasFeitas, readEsperasFeitas, readPrefs, usePrefs, writePrefs, type Prefs } from "./hooks/usePrefs.js"
 import { usePushFechada } from "./hooks/usePushFechada.js"
 import { useSessionEvents } from "./hooks/useSessionEvents.js"
 import { useSinoAvisa } from "./hooks/useSinoAvisa.js"
@@ -622,6 +622,13 @@ export function useBridge(): EnclaveBridge {
 
 /** No last activity: what `presenceFor` reads when the server relays live presence. */
 const SEM_ACTIVIDADE: ReturnType<typeof lastActivityOf> = new Map()
+
+type EscolhasDeAudio = Pick<Prefs, "micMuted" | "soundOff" | "modoDoMicrofone">
+
+function microfoneCalado({ micMuted, soundOff, modoDoMicrofone }: EscolhasDeAudio, aFalar: boolean): boolean {
+  if (soundOff) return true
+  return modoDoMicrofone === "carregar" ? micMuted || !aFalar : micMuted && !aFalar
+}
 
 /**
  * The root, behind the last line of defence (1.3.27). A throw in the body or an
@@ -1433,9 +1440,14 @@ function Shell({
    * Read from preferences on startup, like activity: someone who muted themselves
    * yesterday does not want to be heard today because the app forgot.
    */
-  const [micMuted, setMicMuted] = useState(() => readPrefs().micMuted)
-  const teclaDeFalaPremida = useRef({ janela: false, fundo: false })
-  const [soundOff, setSoundOff] = useState(() => readPrefs().soundOff)
+  const [audio, setAudio] = useState<EscolhasDeAudio>(() => {
+    const { micMuted, soundOff, modoDoMicrofone } = readPrefs()
+    return { micMuted, soundOff, modoDoMicrofone }
+  })
+  const audioEscolhido = useRef(audio)
+  const { micMuted, soundOff, modoDoMicrofone } = audio
+  const [micCalado, setMicCalado] = useState(() => microfoneCalado(audio, false))
+  const teclaDeFalaPremida = useRef<Record<"janela" | "fundo", string | null>>({ janela: null, fundo: null })
   /** Guards persistence until the stored log has been loaded. */
   const notifLoaded = useRef(false)
   /** Channels this device opened itself: their appearance is not news. */
@@ -1698,35 +1710,28 @@ function Shell({
     [profile],
   )
 
-  /**
-   * An audio choice: recorded, applied to the screen and sent to the core.
-   *
-   * Merges over what is ON DISK and never over the React snapshot, for the same
-   * reason as `chooseActivity`: preferences are written from more than one place,
-   * and recording an old snapshot would undo the choice someone just made on another
-   * screen.
-   */
-  const escolherAudio = useCallback(
-    (patch: { micMuted?: boolean; soundOff?: boolean }) => {
-      const proximo = { ...readPrefs(), ...patch }
-      writePrefs(proximo)
-      setMicMuted(proximo.micMuted)
-      setSoundOff(proximo.soundOff)
-      /**
-       * To the core goes the EFFECT, not the choice.
-       *
-       * Without sound you do not talk: answering a conversation you are not hearing
-       * is the worse of two evils, and that is why muting the sound also silences
-       * the microphone. The user's choice (`micMuted`) stays intact on disk, so
-       * unmuting returns the microphone to the state they left it in.
-       */
-      if (proximo.soundOff || patch.micMuted === true) {
-        teclaDeFalaPremida.current = { janela: false, fundo: false }
-      }
-      bridge.call.setMuted(proximo.micMuted || proximo.soundOff)
-    },
-    [bridge],
-  )
+  const aplicarSilencio = useCallback(() => {
+    const tecla = readPrefs().atalhosDeVoz.falar
+    const { janela, fundo } = teclaDeFalaPremida.current
+    const calado = microfoneCalado(audioEscolhido.current, tecla !== null && (tecla === janela || tecla === fundo))
+    bridge.call.setMuted(calado)
+    setMicCalado(calado)
+  }, [bridge])
+
+  const escolherAudio = useCallback((patch: Partial<EscolhasDeAudio>) => {
+    const proximo = { ...audioEscolhido.current, ...patch }
+    // Keep the live choice even if localStorage refuses a write.
+    audioEscolhido.current = proximo
+    teclaDeFalaPremida.current = { janela: null, fundo: null }
+    aplicarSilencio()
+    setAudio(proximo)
+    writePrefs({ ...readPrefs(), ...proximo })
+  }, [aplicarSilencio])
+
+  const escolherModoDoMicrofone = useCallback((premirParaFalar: boolean) => {
+    // Selecting push to talk arms the key immediately, including for someone previously muted.
+    escolherAudio(premirParaFalar ? { modoDoMicrofone: "carregar", micMuted: false } : { modoDoMicrofone: "aberto" })
+  }, [escolherAudio])
 
   /**
    * A gesture in muting: the choice, and the sound that confirms it (point 3).
@@ -1737,7 +1742,7 @@ function Shell({
    */
   const silenciarComSom = useCallback(
     (patch: { micMuted?: boolean; soundOff?: boolean }) => {
-      const antes = readPrefs()
+      const antes = audioEscolhido.current
       escolherAudio(patch)
       const som = somDoSilencio(antes, { ...antes, ...patch })
       if (som) motor.tocar({ tipo: som })
@@ -1749,12 +1754,13 @@ function Shell({
     // With sound off the microphone is muted as a side effect, and changing only
     // `micMuted` would give a button that you click, changes state inside and stays
     // red, looks broken. This returns both.
-    if (readPrefs().soundOff) silenciarComSom({ micMuted: false, soundOff: false })
-    else silenciarComSom({ micMuted: !readPrefs().micMuted })
+    const { micMuted, soundOff } = audioEscolhido.current
+    if (soundOff) silenciarComSom({ micMuted: false, soundOff: false })
+    else silenciarComSom({ micMuted: !micMuted })
   }, [silenciarComSom])
 
   const alternarSom = useCallback(() => {
-    silenciarComSom({ soundOff: !readPrefs().soundOff })
+    silenciarComSom({ soundOff: !audioEscolhido.current.soundOff })
   }, [silenciarComSom])
 
   /**
@@ -1780,8 +1786,8 @@ function Shell({
       movidoPara.current = null
       return
     }
-    const guardadas = readPrefs()
-    if (guardadas.entrarSilenciado && !guardadas.micMuted) escolherAudio({ micMuted: true })
+    const { micMuted, modoDoMicrofone } = audioEscolhido.current
+    if (readPrefs().entrarSilenciado && !micMuted && modoDoMicrofone === "aberto") escolherAudio({ micMuted: true })
   }, [entradaNaChamada, escolherAudio])
 
   /**
@@ -2351,21 +2357,18 @@ function Shell({
     : null
 
   /**
-   * Push to talk: while the key is down the microphone opens; releasing it
-   * returns to what the preferences say. Does not touch preferences or the
-   * screen toggle: it is a gesture, not a choice.
+   * Local and Windows background presses both drive the same microphone gate.
+   * Tie each hold to its binding so changing the key closes the mic.
    */
   const falar = useCallback(
     (aCarregar: boolean, origem: "janela" | "fundo") => {
-      const guardadas = readPrefs()
-      if (aCarregar && (callChannel === null || guardadas.soundOff)) return
-      teclaDeFalaPremida.current[origem] = aCarregar
-      // Push to talk means you are here: the AFK timer restarts.
+      const tecla = readPrefs().atalhosDeVoz.falar
+      if (aCarregar && (callChannel === null || tecla === null || audioEscolhido.current.soundOff)) return
+      teclaDeFalaPremida.current[origem] = aCarregar ? tecla : null
       if (aCarregar) actividadeAfk()
-      const { janela, fundo } = teclaDeFalaPremida.current
-      bridge.call.setMuted(guardadas.soundOff || (guardadas.micMuted && !janela && !fundo))
+      aplicarSilencio()
     },
-    [bridge, callChannel, actividadeAfk],
+    [aplicarSilencio, callChannel, actividadeAfk],
   )
 
   /** "New post", from anywhere: the composer lives in the Social tab. */
@@ -2731,7 +2734,7 @@ function Shell({
           peers: soundRef.current.participants,
           temSala: !isDirect(callChannel),
           mediaPronta: soundRef.current.mediaPronta,
-          deafened: readPrefs().soundOff,
+          deafened: audioEscolhido.current.soundOff,
         },
         Date.now(),
       )
@@ -2758,8 +2761,7 @@ function Shell({
         peers: participants,
         temSala: !isDirect(callChannel),
         mediaPronta: localStream !== null,
-        // Read from disk, not from the React snapshot, as in `onCallActivity`.
-        deafened: readPrefs().soundOff,
+        deafened: audioEscolhido.current.soundOff,
       },
       Date.now(),
     )
@@ -2781,7 +2783,7 @@ function Shell({
         eu: address ?? "",
         euPartilho: screenStream !== null,
         pares: participants,
-        ensurdecido: readPrefs().soundOff,
+        ensurdecido: audioEscolhido.current.soundOff,
         naSalaAfk: chamadaNaSalaAfk,
       },
       Date.now(),
@@ -2831,7 +2833,7 @@ function Shell({
    * each heartbeat that arrives from another room.
    */
   useEffect(() => {
-    const partiu = vozOuvida.current.vePresentes(naSalaDaChamada, readPrefs().soundOff)
+    const partiu = vozOuvida.current.vePresentes(naSalaDaChamada, audioEscolhido.current.soundOff)
     if (partiu) playSound(partiu)
   }, [naSalaDaChamada])
 
@@ -3564,9 +3566,8 @@ function Shell({
     onCallLocalStream: setLocalStream,
     onCallScreen: setScreenStream,
     onCallEnded: () => {
-      teclaDeFalaPremida.current = { janela: false, fundo: false }
-      const guardadas = readPrefs()
-      bridge.call.setMuted(guardadas.micMuted || guardadas.soundOff)
+      teclaDeFalaPremida.current = { janela: null, fundo: null }
+      aplicarSilencio()
       setCallChannel(null)
       setCallRoom("")
       setParticipants([])
@@ -3717,9 +3718,8 @@ function Shell({
           who: event.from,
           isMe: event.from === notifyRef.current.me,
           connected: soundRef.current.participants.some((quem) => quem.address === event.from),
-          // Read from disk and not from the React snapshot: `escolherAudio` saves before
-          // changing state, so this is always on time.
-          deafened: readPrefs().soundOff,
+          // Read the live choice, which changes as soon as the user toggles sound.
+          deafened: audioEscolhido.current.soundOff,
         },
         Date.now(),
       )
@@ -7162,12 +7162,14 @@ function Shell({
   useEffect(() => {
     const guardadas = readPrefs()
     bridge.applyMediaPrefs?.(prefsDeMediaParaONucleo(guardadas))
-    // Silence is a microphone choice like the others, and it also has to
-    // be in the core BEFORE the first capture: without this, someone who reloaded the
-    // page with the microphone muted entered the next call speaking.
-    const { janela, fundo } = teclaDeFalaPremida.current
-    bridge.call.setMuted(guardadas.soundOff || (guardadas.micMuted && !janela && !fundo))
   }, [bridge, view])
+
+  const teclaDaFala = prefsDaPresenca.atalhosDeVoz.falar
+  useEffect(() => {
+    // Set the gate before the first capture, and close it if the binding changes.
+    teclaDeFalaPremida.current = { janela: null, fundo: null }
+    aplicarSilencio()
+  }, [teclaDaFala, aplicarSilencio])
 
   /**
    * The name of a channel on the screen.
@@ -7999,7 +8001,7 @@ function Shell({
         micCalado: par?.micMuted ?? false,
       }
     }),
-    micMuted,
+    micMuted: micCalado,
     soundOff,
     dbDaEntrada: () => {
       // `anelDb`: with the manual microphone slider, the ring follows the gate (see `CallPanel`).
@@ -8734,9 +8736,8 @@ function Shell({
       tituloDaChamada={callChannel === null ? undefined : (salaDaDoca ?? labelFor(callChannel))}
       soPalco={soPalco}
       onSoPalco={() => setSoPalco((aberto) => !aberto)}
-      /* The same two states that the sidebar card draws.
-         One source only: the panel shows, never decides. */
       micMuted={micMuted}
+      micCalado={micCalado}
       soundOff={soundOff}
       onToggleMic={alternarMicrofone}
       onToggleSound={alternarSom}
@@ -9360,6 +9361,7 @@ function Shell({
             soundOff={soundOff}
             onToggleMic={alternarMicrofone}
             onToggleSound={alternarSom}
+            premirParaFalar={{ ligado: modoDoMicrofone === "carregar", onMudar: escolherModoDoMicrofone }}
             onEditProfile={() => setEditingProfile(true)}
             bloqueados={amizade.bloqueados}
             nomeDe={nameFor}

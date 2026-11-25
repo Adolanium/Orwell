@@ -105,6 +105,7 @@ export function ChatScreen({
   soPalco = false,
   onSoPalco,
   micMuted = false,
+  micCalado,
   soundOff = false,
   onToggleMic,
   onToggleSound,
@@ -271,6 +272,7 @@ export function ChatScreen({
   /** The microphone and speaker, passed to the call panel. The App holds them,
    *  and the sidebar card reads the same ones. */
   micMuted?: boolean | undefined
+  micCalado?: boolean | undefined
   soundOff?: boolean | undefined
   onToggleMic?: (() => void) | undefined
   onToggleSound?: (() => void) | undefined
@@ -1140,6 +1142,7 @@ export function ChatScreen({
           presenceFor={presenceFor}
           presencaPropria={address ? presenceFor?.(address) : undefined}
           micMuted={micMuted}
+          micCalado={micCalado}
           soundOff={soundOff}
           onToggleMic={onToggleMic}
           onToggleSound={onToggleSound}

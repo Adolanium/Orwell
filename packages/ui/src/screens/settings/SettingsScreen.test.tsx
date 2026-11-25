@@ -59,6 +59,7 @@ function renderSettings(
           soundOff={audio.soundOff ?? false}
           onToggleMic={audio.onToggleMic ?? ((): void => {})}
           onToggleSound={audio.onToggleSound ?? ((): void => {})}
+          premirParaFalar={{ ligado: false, onMudar: () => {} }}
           seccao={audio.seccao ?? "conta"}
         />
       </ToastProvider>
@@ -438,6 +439,7 @@ describe("SettingsScreen — Bloqueados", () => {
             soundOff={false}
             onToggleMic={() => {}}
             onToggleSound={() => {}}
+            premirParaFalar={{ ligado: false, onMudar: () => {} }}
             seccao="privacidade"
             bloqueados={lista}
             nomeDe={(quem) => (quem === "@rui:casa.pt" ? "Rui" : quem)}

@@ -65,6 +65,7 @@ export function CallPanel({
   nameFor,
   directory,
   micMuted = false,
+  micCalado,
   soundOff = false,
   onToggleMic,
   onToggleSound,
@@ -130,6 +131,8 @@ export function CallPanel({
    * capture runs, and is not a preference that crosses calls.
    */
   micMuted?: boolean | undefined
+  /** Whether our audio is actually going out, including push to talk. */
+  micCalado?: boolean | undefined
   soundOff?: boolean | undefined
   onToggleMic?: (() => void) | undefined
   onToggleSound?: (() => void) | undefined
@@ -230,6 +233,7 @@ export function CallPanel({
   const cameraOff = cameraOffDeCima ?? cameraOffLocal
   /** No sound, mic is muted by drag. See `escolherAudio`. */
   const muted = micMuted || soundOff
+  const caladoLocal = micCalado ?? muted
   /**
    * How loud each person sounds, saved on the device, not just this call.
    *
@@ -519,7 +523,7 @@ export function CallPanel({
               /* Our voice, measured from capture. `muted` not `micMuted`: muting the sound
                  silences the microphone as a side effect. */
               stream={localStream}
-              micCalado={muted}
+              micCalado={caladoLocal}
               camara={camaraLocal}
               dbDaEntrada={dbDaEntrada}
               aTocar={musica.musica?.aTocar ?? null}
@@ -675,7 +679,7 @@ export function CallPanel({
               sobreposicao={
                 <PresentesNoPalco
                   pessoas={[
-                    { chave: "eu", nome: selfLabel, voz: localStream, calado: muted, semSom: soundOff },
+                    { chave: "eu", nome: selfLabel, voz: localStream, calado: caladoLocal, semSom: soundOff },
                     ...participants.map((participant) => ({
                       chave: participant.address,
                       nome: nameFor(participant.address),
@@ -696,7 +700,7 @@ export function CallPanel({
       {/* The audio boxes, always mounted and always hidden. Camera images go to the
           cards above. `muted` always on ours (echo), and `micCalado` per state. */}
       <div className={showingVideo ? "call-video com-imagem" : "call-video hidden"}>
-        <VideoTile stream={localStream} muted micCalado={muted} mostrarVoz={false} label={selfLabel} profile={selfProfile} connected proprio />
+        <VideoTile stream={localStream} muted micCalado={caladoLocal} mostrarVoz={false} label={selfLabel} profile={selfProfile} connected proprio />
         {/* `muted` on the element, not `volume={0}`: per-person volume is a choice we
             want to keep intact when sound returns. See `VideoTile`. */}
         {participants.map((participant) => (

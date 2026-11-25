@@ -2949,7 +2949,7 @@ export const pt = {
       nivel: "Nível do microfone",
       db: (db: number): string => `${db} dB`,
       aAbrir: "A abrir o microfone.",
-      carregarParaFalar: 'Com o atalho "Falar enquanto carregas", a linha também vale enquanto carregas na tecla.',
+      carregarParaFalar: 'Com o modo Premir para falar, a linha também vale enquanto carregas na tecla.',
     },
     /*
       Keyboard shortcuts for the voice controls, chosen by each person.
@@ -2965,7 +2965,7 @@ export const pt = {
     atalhosNota: "Funcionam só com a página à frente. Serve qualquer tecla, ou os botões 4 e 5 do rato.",
     atalhosNotaSecretaria:
       "Durante uma chamada, os atalhos do microfone e do som funcionam também com a app minimizada ou atrás de outra app. Os outros atalhos e os botões do rato funcionam só com a app à frente.",
-    atalhosNotaWindows: "Durante uma chamada, os atalhos do microfone, do som e de falar também funcionam com o Orwell em segundo plano. Mantém o microfone silenciado entre pressões.",
+    atalhosNotaWindows: "Durante uma chamada, os atalhos do microfone, do som e de premir para falar também funcionam com o Orwell em segundo plano.",
     atalhoAvisoFalarWindows: "Esta tecla pode abrir o microfone enquanto escreves noutra aplicação. Para evitar isso, escolhe uma tecla de função, como F8.",
     atalhoAccao: {
       microfone: "Silenciar ou ligar o microfone",
@@ -2973,7 +2973,7 @@ export const pt = {
       camara: "Ligar ou desligar a câmara",
       ecra: "Partilhar ou parar o ecrã",
       sair: "Sair da chamada",
-      falar: "Falar enquanto carregas, com o microfone silenciado",
+      falar: "Tecla para premir e falar",
       overlay: "Mostrar ou esconder a overlay de jogo",
     },
     atalhoMudar: "Mudar",
@@ -2995,6 +2995,9 @@ export const pt = {
       is where people come looking for microphone options, and this is where
       they were missing. It is the SAME toggle, not a second copy: see the notes.
     */
+    pushToTalk: "Premir para falar",
+    pushToTalkNote: "Mantém a tecla escolhida premida para enviar o som do microfone.",
+    pushToTalkNoKey: "O microfone fica silenciado até escolheres uma tecla para falar nos Atalhos de teclado.",
     micMuted: "Silenciar o microfone",
     soundOff: "Desligar o som",
     echoCancellation: "Cancelar eco",

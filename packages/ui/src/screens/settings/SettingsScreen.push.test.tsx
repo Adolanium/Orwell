@@ -64,6 +64,7 @@ function montar(push: ReturnType<typeof ponteDoPush> | undefined): void {
           soundOff={false}
           onToggleMic={() => {}}
           onToggleSound={() => {}}
+          premirParaFalar={{ ligado: false, onMudar: () => {} }}
           seccao="avisos"
         />
       </ToastProvider>
