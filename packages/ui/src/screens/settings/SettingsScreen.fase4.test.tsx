@@ -32,6 +32,7 @@ function montar(seccao: string, ponte: Partial<EnclaveBridge> = {}, extra: Recor
           soundOff={false}
           onToggleMic={() => {}}
           onToggleSound={() => {}}
+          premirParaFalar={{ ligado: false, onMudar: () => {} }}
           seccao={seccao}
           {...extra}
         />

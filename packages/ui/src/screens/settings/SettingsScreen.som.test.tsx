@@ -43,6 +43,7 @@ function montar(applyMediaPrefs: EnclaveBridge["applyMediaPrefs"]): void {
           soundOff={false}
           onToggleMic={() => {}}
           onToggleSound={() => {}}
+          premirParaFalar={{ ligado: false, onMudar: () => {} }}
           seccao="media"
         />
       </ToastProvider>

@@ -78,6 +78,7 @@ export function SettingsScreen({
   soundOff,
   onToggleMic,
   onToggleSound,
+  premirParaFalar,
   onEditProfile,
   seccao: pedida,
   onSeccao,
@@ -93,23 +94,12 @@ export function SettingsScreen({
   onLock: () => void
   /** "Remember session" changed on the "Session" card: whoever expires the session re-reads the state. */
   onSessaoMudou?: (() => void) | undefined
-  /**
-   * Microphone and sound come from above, not from `usePrefs()` here.
-   *
-   * The other options in this section are preferences and nothing else: they
-   * write to disk and are read when someone requests a track. These two do not
-   *, changing them must reach the engine via `bridge.call.setMuted`, right
-   * now, or the user taps the toggle during a call and keeps being heard.
-   *
-   * The `usePrefs()` of this screen does not know the bridge, so a toggle
-   * written with it would be a second path to the same state, that is how two
-   * buttons that disagree with each other are born. What arrives here is the
-   * same pair that the sidebar card and the call panel use.
-   */
+  /** The shell applies microphone and sound choices to the live call immediately. */
   micMuted: boolean
   soundOff: boolean
   onToggleMic: () => void
   onToggleSound: () => void
+  premirParaFalar: { ligado: boolean; onMudar: (ligado: boolean) => void }
   /**
    * Opens the profile editor. The Account section had the address and little
    * else, and someone who came here to change their name could not find where.
@@ -630,6 +620,12 @@ export function SettingsScreen({
                   <input type="checkbox" checked={soundOff} onChange={onToggleSound} />
                   {strings.settings.soundOff}
                 </label>
+                <Interruptor {...premirParaFalar} rotulo={strings.settings.pushToTalk} />
+                {premirParaFalar.ligado && (
+                  <p className="field-note">{prefs.atalhosDeVoz.falar
+                    ? strings.settings.pushToTalkNote
+                    : strings.settings.pushToTalkNoKey}</p>
+                )}
               </div>
 
               {/*

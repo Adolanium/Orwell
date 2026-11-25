@@ -50,6 +50,7 @@ function Ecra(): React.JSX.Element {
           soundOff={false}
           onToggleMic={() => {}}
           onToggleSound={() => {}}
+          premirParaFalar={{ ligado: false, onMudar: () => {} }}
           seccao={seccao}
           onSeccao={setSeccao}
         />

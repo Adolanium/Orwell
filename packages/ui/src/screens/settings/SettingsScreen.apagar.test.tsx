@@ -40,6 +40,7 @@ function renderComDestroy(destroy: () => Promise<{ ok: boolean }>): void {
           soundOff={false}
           onToggleMic={() => {}}
           onToggleSound={() => {}}
+          premirParaFalar={{ ligado: false, onMudar: () => {} }}
           seccao="aparelhos"
         />
       </ToastProvider>

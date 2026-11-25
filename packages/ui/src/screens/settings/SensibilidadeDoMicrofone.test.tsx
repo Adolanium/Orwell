@@ -175,6 +175,7 @@ describe("sensibilidade do microfone", () => {
             soundOff={false}
             onToggleMic={() => {}}
             onToggleSound={() => {}}
+            premirParaFalar={{ ligado: false, onMudar: () => {} }}
             seccao="media"
           />
         </ToastProvider>
