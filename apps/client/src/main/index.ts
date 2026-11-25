@@ -1117,9 +1117,9 @@ function registerIpc(window: BrowserWindow): void {
         combinacao, teclado,
         () => permitido() && !aDormir && !sessaoBloqueada && !window.isDestroyed() && !window.isFocused(),
         (premida) => {
-          if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
-            window.webContents.send(CANAIS_DE_ATALHOS.falar, premida)
-          }
+          if (window.isDestroyed()) return
+          const destino = window.webContents
+          if (!destino.isDestroyed() && !destino.isCrashed()) destino.send(CANAIS_DE_ATALHOS.falar, premida)
         },
       ),
     }),
@@ -1177,11 +1177,16 @@ function registerIpc(window: BrowserWindow): void {
     hotkeys, and won't come back to say `definir(null)`. Without this the key would stay
     stolen from other apps until the app closes.
   */
-  window.webContents.on("render-process-gone", () => atalhos.libertar())
+  const reiniciarAtalhos = (): void => {
+    atalhos.libertar()
+    // A dead key recorder cannot send its usual resume request.
+    atalhos.suspender(false)
+  }
+  window.webContents.on("render-process-gone", reiniciarAtalhos)
   // Nor will it answer the thumbnails it was asked for: they fail now, not at the deadline.
   window.webContents.on("render-process-gone", () => pedidosDeMiniatura.fecharTodos())
   window.webContents.on("did-start-navigation", (detalhes) => {
-    if (detalhes.isMainFrame && !detalhes.isSameDocument) atalhos.libertar()
+    if (detalhes.isMainFrame && !detalhes.isSameDocument) reiniciarAtalhos()
   })
   app.on("will-quit", () => atalhos.libertar())
 
