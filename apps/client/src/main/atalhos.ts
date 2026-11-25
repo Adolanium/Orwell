@@ -9,11 +9,13 @@
  *
  *  - Global: "mute microphone", "unmute" and "show or hide the game overlay". These are the ones used when another app is in front (a game, a document). The overlay one came with it (see `overlay-janela.ts`).
  *  - Never global, by choice: a common key (letter, digit, space, arrows) without Ctrl/Cmd or Alt. A global shortcut steals the key from the entire system; an "M" that stops typing in email during a call is worse than a shortcut that only works with the app in focus.
- *  - Never global, by Electron's limit: "speak while holding down" and mouse buttons. `globalShortcut` only signals when the key goes DOWN (no signal on release), and it doesn't know about the mouse. For both you'd need a native keyboard and mouse hook (for example `uiohook-napi`), which is a new native dependency, compiled per platform, and on macOS it asks for Accessibility permission for everything. It is a product decision, not a technical default.
+ *  - Windows push to talk uses the separate key-state reader in `falar-no-windows.ts`. Electron only reports presses.
  *
  * **When they're registered: only during a call.** It's the rule of least surprise. Outside a call the two commands do nothing (see `alternarMicrofone` in the UI), and a global shortcut that does nothing just steals the key from other apps. Someone who chooses `` ` `` para silenciar não quer
  * perder o `` ` `` in the code editor all day, only while speaking. The UI calls `definir` when entering the call and `definir(null)` when leaving; `index.ts` frees everything too if the renderer crashes or reloads, and on exit.
  */
+
+import type { VigiaDaFala } from "./falar-no-windows.js"
 
 export const ACCOES_GLOBAIS = ["microfone", "som", "overlay"] as const
 export type AccaoGlobal = (typeof ACCOES_GLOBAIS)[number]
@@ -25,6 +27,7 @@ export const CANAIS_DE_ATALHOS = {
   abrirAcessibilidade: "atalhos:abrir-acessibilidade",
   /** From main to renderer: a global shortcut was triggered. */
   accionado: "event:atalho-global",
+  falar: "event:atalho-falar",
 } as const
 
 /** The Accessibility panel on macOS. Constant, like the one for screen recording. */
@@ -131,18 +134,18 @@ export function pedeAcessibilidade(acelerador: string, plataforma: string): bool
 
 /**
  * The request from the renderer, sanitized. The renderer displays what other
- * people wrote, so what it sends is treated as untrusted: only `microfone`,
- * `som`, and `overlay`, each one short text or `null`.
+ * people wrote, so accept only the known shortcuts as short strings.
  */
-export function lerPedido(pedido: unknown): Record<AccaoGlobal, string | null> | null {
+export function lerPedido(pedido: unknown): Record<AccaoGlobal | "falar", string | null> | null {
   if (pedido === null || typeof pedido !== "object") return null
-  const cru = pedido as Record<string, unknown>
-  const saida: Record<AccaoGlobal, string | null> = { microfone: null, som: null, overlay: null }
-  for (const accao of ACCOES_GLOBAIS) {
-    const valor = cru[accao]
-    saida[accao] = typeof valor === "string" && valor.length > 0 && valor.length <= 64 ? valor : null
+  const curto = (valor: unknown): string | null =>
+    typeof valor === "string" && valor.length > 0 && valor.length <= 64 ? valor : null
+  return {
+    microfone: curto("microfone" in pedido ? pedido.microfone : null),
+    som: curto("som" in pedido ? pedido.som : null),
+    overlay: curto("overlay" in pedido ? pedido.overlay : null),
+    falar: curto("falar" in pedido ? pedido.falar : null),
   }
-  return saida
 }
 
 const VAZIO = (): EstadoDosAtalhosGlobais => ({ globais: [], soComAJanela: [], ocupados: [], faltaAcessibilidade: [] })
@@ -158,14 +161,20 @@ export function criarAtalhosGlobais(opcoes: {
   /** `systemPreferences.isTrustedAccessibilityClient(false)`, lido no momento. */
   temAcessibilidade: () => boolean
   aoAccionar: (accao: AccaoGlobal) => void
+  vigiarFala?: (combinacao: string, permitido: () => boolean) => VigiaDaFala | null
 }): {
   definir: (pedido: unknown) => EstadoDosAtalhosGlobais
   suspender: (sim: boolean) => void
   libertar: () => void
+  relerFala: () => void
 } {
+  let suspensos = false
+  let fala: VigiaDaFala | null = null
   const registados = new Map<string, AccaoGlobal>()
 
   const libertar = (): void => {
+    fala?.parar()
+    fala = null
     for (const acelerador of registados.keys()) {
       try {
         opcoes.porta.unregister(acelerador)
@@ -183,6 +192,7 @@ export function criarAtalhosGlobais(opcoes: {
     const estado = VAZIO()
     const lido = lerPedido(pedido)
     if (!lido) return estado
+    if (lido.falar !== null) fala = opcoes.vigiarFala?.(lido.falar, () => !suspensos) ?? null
     for (const accao of ACCOES_GLOBAIS) {
       const combinacao = lido[accao]
       if (combinacao === null) continue
@@ -222,7 +232,12 @@ export function criarAtalhosGlobais(opcoes: {
 
   return {
     definir,
-    suspender: (sim) => opcoes.porta.setSuspended(sim === true),
+    suspender: (sim) => {
+      suspensos = sim
+      fala?.reler()
+      opcoes.porta.setSuspended(sim)
+    },
     libertar,
+    relerFala: () => fala?.reler(),
   }
 }

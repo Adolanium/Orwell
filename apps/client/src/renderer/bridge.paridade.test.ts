@@ -225,6 +225,7 @@ const SO_NA_SECRETARIA: Record<string, string> = {
   "atalhosGlobais.suspender": "idem",
   "atalhosGlobais.abrirAcessibilidade": "idem",
   "atalhosGlobais.aoAccionar": "idem",
+  "atalhosGlobais.aoFalar": "a página não consegue ler a tecla fora da janela",
   overlay: "uma página do browser não abre uma janela por cima de outra app (a overlay de jogo)",
   "overlay.estado": "idem",
   "overlay.caras": "idem",

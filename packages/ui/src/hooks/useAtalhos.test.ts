@@ -97,6 +97,16 @@ describe("os atalhos de voz, configuráveis", () => {
     expect(falar.mock.calls).toEqual([[true], [false], [true], [false]])
   })
 
+  it("larga a mesma tecla física depois de largar Shift", () => {
+    const transicoes: boolean[] = []
+    renderHook(() => useAtalhos({ falar: premida => transicoes.push(premida) }, () =>
+      ({ ...ATALHOS_POR_OMISSAO, falar: "Shift+A" })))
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "A", code: "KeyA", shiftKey: true }))
+    document.dispatchEvent(new KeyboardEvent("keyup", { key: "a", code: "KeyA" }))
+    expect(transicoes).toEqual([true, false])
+  })
+
   it("numa caixa de texto, o que escreve é da caixa; uma tecla de função ou Mod/Alt é atalho na mesma", () => {
     /*
       Changed in 1.0.6. Before, a function key in a text box did not fire; but

@@ -151,11 +151,11 @@ export function useAtalhos(
       // In the text box, formatting wins: a key the formatting hook already handled
       // (Mod+B moved onto the microphone, say) does not also fire the voice action.
       if (event.defaultPrevented && aEscrever(event.target)) return
-      accionar(qual, `tecla:${event.key}`, event.repeat, () => event.preventDefault())
+      accionar(qual, `tecla:${event.code || event.key}`, event.repeat, () => event.preventDefault())
     }
 
     const aoLargar = (event: KeyboardEvent): void => {
-      if (teclaAFalar !== null && teclaAFalar === `tecla:${event.key}`) largarFalar()
+      if (teclaAFalar !== null && teclaAFalar === `tecla:${event.code || event.key}`) largarFalar()
     }
 
     /*

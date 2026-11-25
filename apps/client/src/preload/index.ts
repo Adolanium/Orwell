@@ -229,14 +229,17 @@ contextBridge.exposeInMainWorld("enclaveHost", {
    * Global keyboard shortcuts. See `atalhos.ts` in the main process. The renderer says WHICH keys it wants; it doesn't name a channel, and the main process sanitizes the request.
    */
   atalhosGlobais: {
-    definir: (pedido: { microfone: string | null; som: string | null; overlay?: string | null } | null) =>
+    definir: (pedido: { microfone: string | null; som: string | null; overlay?: string | null; falar?: string | null } | null) =>
       ipcRenderer.invoke(
         CANAIS_DE_ATALHOS.definir,
-        pedido === null ? null : { microfone: pedido.microfone, som: pedido.som, overlay: pedido.overlay ?? null },
+        pedido === null ? null : { microfone: pedido.microfone, som: pedido.som, overlay: pedido.overlay ?? null, falar: pedido.falar ?? null },
       ),
     suspender: (sim: boolean) => ipcRenderer.invoke(CANAIS_DE_ATALHOS.suspender, sim === true),
     abrirAcessibilidade: () => ipcRenderer.invoke(CANAIS_DE_ATALHOS.abrirAcessibilidade),
     aoAccionar: (handler: (payload: unknown) => void) => subscribe(CANAIS_DE_ATALHOS.accionado, handler),
+    ...(process.platform === "win32" && {
+      aoFalar: (handler: (payload: unknown) => void) => subscribe(CANAIS_DE_ATALHOS.falar, handler),
+    }),
   },
   /**
    * The game overlay. See `overlay-janela.ts` in the main process. Send-only: the room summary (names, who's speaking, who's muted), small avatars, preferences, and the shortcut. The main process sanitizes everything, nothing comes back.
