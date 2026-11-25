@@ -3069,6 +3069,9 @@ export const pt = {
     languageNote:
       "Muda a língua da app. As mensagens não são traduzidas.",
     /* The colour theme: a choice about this device, beside the language. */
+    appearance: "Aparência",
+    window: "Janela",
+    windowOpacity: "Opacidade da janela",
     tema: "Tema",
     temas: { escuro: "Escuro", claro: "Claro", sistema: "Sistema", aurora: "Aurora" },
     temaNota: "Em Sistema, segue o tema do teu aparelho. Só muda este aparelho.",

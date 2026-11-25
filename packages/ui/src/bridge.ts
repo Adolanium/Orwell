@@ -1857,6 +1857,8 @@ export interface EnclaveBridge {
     /** Someone tapped share and needs to pick what to share. Requires a response. */
     aoPedir: (handler: (pedido: { id: string }) => void) => () => void
   }
+  /** Sets the native main window opacity on supported hosts. */
+  definirOpacidadeDaJanela?: (percentagem: number) => void
   /**
    * The System Settings panel where macOS grants the microphone or the camera
    * (1.3.26). Installed app on macOS only: the call names the refused device in

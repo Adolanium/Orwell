@@ -1660,6 +1660,9 @@ export const en: Traducao = {
     language: "Language",
     languageNote:
       "Changes the language of the app. Messages are not translated.",
+    appearance: "Appearance",
+    window: "Window",
+    windowOpacity: "Window opacity",
     tema: "Theme",
     temas: { escuro: "Dark", claro: "Light", sistema: "System", aurora: "Aurora" },
     temaNota: "System follows your device's theme. Only changes this device.",

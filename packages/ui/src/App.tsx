@@ -67,7 +67,7 @@ import type { CargoDoMembro } from "./lib/agruparMembros.js"
 import { prefsDeMediaParaONucleo } from "./lib/mediaPrefs.js"
 import { presencasVivas, quemEstaNaSala, semAPessoa } from "./lib/presenca.js"
 import { chaveDaSala, salaDaChamadaDe, salaUnicaDaChamadaDe } from "./lib/salaDaChamada.js"
-import { applyPrefs, estaEmPausa, marcarEsperasFeitas, readEsperasFeitas, readPrefs, usePrefs, writePrefs, type Prefs } from "./hooks/usePrefs.js"
+import { applyPrefs, PREFS_EVENT, estaEmPausa, marcarEsperasFeitas, readEsperasFeitas, readPrefs, usePrefs, writePrefs, type Prefs } from "./hooks/usePrefs.js"
 import { usePushFechada } from "./hooks/usePushFechada.js"
 import { useSessionEvents } from "./hooks/useSessionEvents.js"
 import { useSinoAvisa } from "./hooks/useSinoAvisa.js"
@@ -674,6 +674,20 @@ function AppSemProteccao({
   // decrypted state — messages, drafts, names — dies with it, and the fresh
   // mount finds an existing vault and lands on the unlock gate.
   const [generation, setGeneration] = useState(0)
+  useEffect(() => {
+    const definir = bridge.definirOpacidadeDaJanela
+    if (!definir) return
+    let aplicada: number | undefined
+    const reler = (): void => {
+      const { opacidadeDaJanela } = readPrefs()
+      if (aplicada === opacidadeDaJanela) return
+      definir(opacidadeDaJanela)
+      aplicada = opacidadeDaJanela
+    }
+    reler()
+    window.addEventListener(PREFS_EVENT, reler)
+    return () => window.removeEventListener(PREFS_EVENT, reler)
+  }, [bridge])
   /*
     The history sync between devices, read by the auto-lock (1.3.27). Here and not
     in the shell: the lock remounts the shell, and the gate still says the history

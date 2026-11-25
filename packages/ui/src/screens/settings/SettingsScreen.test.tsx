@@ -88,6 +88,29 @@ function renderSettings(
  * alerts. What these tests pin down is that only one section is in the document
  * at a time, and that is where all the difference lies.
  */
+describe("Configurações — Aparência", () => {
+  it("guarda a opacidade escolhida na app de Windows", () => {
+    renderSettings({
+      seccao: "aparencia",
+      bridge: { ...bridge, definirOpacidadeDaJanela: () => {} },
+    })
+
+    const opacidade = screen.getByRole("slider", { name: strings.settings.windowOpacity })
+    expect(opacidade.getAttribute("aria-valuetext")).toBe("100%")
+    fireEvent.change(opacidade, { target: { value: "84" } })
+
+    expect(opacidade.getAttribute("aria-valuetext")).toBe("84%")
+    expect(readPrefs().opacidadeDaJanela).toBe(84)
+  })
+
+  it("mostra o tema mas esconde a opacidade sem uma janela nativa", () => {
+    renderSettings({ seccao: "appearance" })
+
+    expect(screen.getByRole("heading", { name: strings.settings.tema })).toBeTruthy()
+    expect(screen.queryByRole("slider", { name: strings.settings.windowOpacity })).toBeNull()
+  })
+})
+
 describe("Configurações — uma secção de cada vez", () => {
   it("abre na Conta, e as outras secções não estão sequer no documento", () => {
     renderSettings()

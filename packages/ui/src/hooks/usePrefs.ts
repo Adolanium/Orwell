@@ -64,6 +64,8 @@ export interface Prefs {
   density: Density
   /** The colour theme of this device. See `Tema`. */
   tema: Tema
+  /** Opacity of the native window, as a percentage. */
+  opacidadeDaJanela: number
   /**
    * System alerts. ON by default (the requirement:
    * "notifications on by default at 100 percent"). On the browser they only
@@ -359,6 +361,7 @@ export const DEFAULT_PREFS: Prefs = {
   accent: 4,
   density: "confortavel",
   tema: TEMA_POR_OMISSAO,
+  opacidadeDaJanela: 100,
   notifications: true,
   avisosDaAppRevistos: false,
   notifyPreview: true,
@@ -550,6 +553,9 @@ export function readPrefs(storage: Pick<Storage, "getItem"> = localStorage): Pre
       accent,
       density,
       tema: temaValido(parsed?.tema),
+      opacidadeDaJanela: typeof parsed?.opacidadeDaJanela === "number" &&
+        Number.isInteger(parsed.opacidadeDaJanela) && parsed.opacidadeDaJanela >= 60 && parsed.opacidadeDaJanela <= 100
+        ? parsed.opacidadeDaJanela : DEFAULT_PREFS.opacidadeDaJanela,
       // On by factory default; on the desktop app, on once after review
       // (see `avisosDaAppRevistos`). After that, only an explicit `false` turns them off.
       notifications:
@@ -751,6 +757,7 @@ export type PreferenciaDaFase4 =
   | "reaccoesRapidas"
   | "tomDePele"
   | "tema"
+  | "opacidadeDaJanela"
 
 export function usePrefs(): {
   prefs: Prefs
