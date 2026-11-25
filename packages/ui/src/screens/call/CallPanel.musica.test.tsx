@@ -4,6 +4,7 @@ import { Call, type EstadoDaMusica, type Participant } from "@enclave/client-cor
 import type { UserAddress } from "@enclave/protocol"
 import type { EnclaveBridge, Profile } from "../../bridge.js"
 import { strings } from "../../strings.js"
+import { CallDock } from "./CallDock.js"
 import { CallPanel } from "./CallPanel.js"
 
 /**
@@ -97,6 +98,24 @@ function painel(call: EnclaveBridge["call"], participants: Participant[] = [part
   )
 }
 
+function palcoEDoca(call: EnclaveBridge["call"], participante: Participant, palcoVisivel: boolean): React.JSX.Element {
+  return (
+    <>
+      {palcoVisivel && painel(call, [participante])}
+      <CallDock
+        variante="lateral"
+        comAudio={!palcoVisivel}
+        channel="!geral:s"
+        participants={[participante]}
+        localStream={null}
+        nameFor={() => "Ana"}
+        onBack={() => {}}
+        onLeave={() => {}}
+      />
+    </>
+  )
+}
+
 describe('"Partilhar áudio" na barra', () => {
   it('está ao lado de "Partilhar ecrã", e abre a folha com as fontes', () => {
     render(painel(motor().call))
@@ -187,6 +206,43 @@ describe("a música de outra pessoa", () => {
     fireEvent.click(ouvir)
     expect(elemento.muted).toBe(false)
     expect(elemento.volume).toBeCloseTo(0.3)
+  })
+
+  it("mantém os volumes escolhidos quando a doca lateral fica responsável pelo som", () => {
+    const { call } = motor()
+    const ana = participante("@ana:s", { musica: fluxo("musica-da-ana"), aTocar: "Fado" })
+    const { container, rerender } = render(palcoEDoca(call, ana, true))
+    expect(container.querySelector(".call-dock-audio")).toBeNull()
+    fireEvent.change(screen.getByLabelText(strings.musica.volumeDaMusica("Ana")), { target: { value: "0.3" } })
+    fireEvent.change(screen.getByLabelText(strings.call.volumeOf("Ana")), { target: { value: "0" } })
+    expect(container.querySelector<HTMLAudioElement>("audio[data-musica='1']")?.volume).toBe(0.3)
+
+    rerender(palcoEDoca(call, ana, false))
+
+    expect(container.querySelector<HTMLAudioElement>(".call-dock-audio audio[data-musica='1']")?.volume).toBe(0.3)
+    expect(container.querySelectorAll<HTMLVideoElement>(".call-dock-audio video")[1]?.volume).toBe(0)
+  })
+
+  it("a doca aplica o silêncio antes de começar a tocar a música", () => {
+    const { call } = motor()
+    const ana = participante("@ana:s", { musica: fluxo("musica-da-ana"), aTocar: "Fado" })
+    const { container, rerender } = render(palcoEDoca(call, ana, true))
+    fireEvent.click(screen.getByRole("button", { name: strings.musicaNaChamada.silenciarDe("Ana") }))
+    expect(container.querySelector<HTMLAudioElement>("audio[data-musica='1']")?.muted).toBe(true)
+
+    const inicio: boolean[] = []
+    const tocar = vi.mocked(HTMLMediaElement.prototype.play)
+    tocar.mockImplementation(function (this: HTMLMediaElement) {
+      if (this instanceof HTMLAudioElement && this.dataset.musica === "1") inicio.push(this.muted)
+      return Promise.resolve()
+    })
+    try {
+      rerender(palcoEDoca(call, ana, false))
+      expect(container.querySelector<HTMLAudioElement>(".call-dock-audio audio[data-musica='1']")?.muted).toBe(true)
+      expect(inicio).toEqual([true])
+    } finally {
+      tocar.mockResolvedValue(undefined)
+    }
   })
 
   it("sem música a chegar não há cursor de música nem elemento", () => {

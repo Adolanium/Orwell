@@ -105,12 +105,19 @@ export function useVolumeDeSaida(): number {
   return valor
 }
 
+const ouvintesDeVolume = new Set<(volumes: Map<string, number>) => void>()
+
 export function useVolumes(): {
   volumes: Map<string, number>
   volumeDe: (endereco: string) => number
   definirVolume: (endereco: string, valor: number) => void
 } {
   const [volumes, setVolumes] = useState<Map<string, number>>(readVolumes)
+
+  useEffect(() => {
+    ouvintesDeVolume.add(setVolumes)
+    return () => { ouvintesDeVolume.delete(setVolumes) }
+  }, [])
 
   const definirVolume = useCallback((endereco: string, valor: number) => {
     // Merged against what is ON DISK, not against this copy, for the same reason
@@ -119,7 +126,7 @@ export function useVolumes(): {
     const seguinte = new Map(readVolumes())
     seguinte.set(endereco, valor)
     writeVolumes(seguinte)
-    setVolumes(seguinte)
+    for (const ouvinte of ouvintesDeVolume) ouvinte(seguinte)
   }, [])
 
   const volumeDe = useCallback((endereco: string) => volumes.get(endereco) ?? VOLUME_NORMAL, [volumes])
