@@ -177,8 +177,6 @@ describe("CallDock — os dois botões", () => {
         nameFor={(sender) => sender}
         onBack={() => {}}
         onLeave={() => {}}
-        micMuted
-        onToggleMic={() => {}}
       />,
     )
     const botoes = [...container.querySelectorAll("button")].map((botao) => botao.getAttribute("aria-label"))
@@ -224,13 +222,12 @@ describe("CallDock — desligar o som cala também a doca", () => {
 describe("CallDock — arrastável (matemática pura: jsdom não entrega pointer events)", () => {
   it("clamp prende ao viewport e nunca devolve coordenadas inválidas", () => {
     expect(clamp({ x: -500, y: -500 })).toEqual({ x: 8, y: 8 })
-    // 72 and not 56: the dock gained a second line (channel and room), and with the
-    // old value dragging it down hid exactly that. 272 and not 240: the waveform
+    // Reserve room for the connection, location and activity lines, plus the waveform
     // added 26 pixels on the left, and what went out of bounds when dragging right
     // was the hang up button.
     expect(clamp({ x: 99_999, y: 99_999 })).toEqual({
       x: Math.max(8, window.innerWidth - 272),
-      y: Math.max(8, window.innerHeight - 72),
+      y: Math.max(8, window.innerHeight - 92),
     })
     expect(clamp({ x: Number.NaN, y: Number.NaN })).toEqual({ x: 8, y: 8 })
   })

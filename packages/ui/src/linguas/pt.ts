@@ -818,7 +818,9 @@ export const pt = {
     aEsperaDaSala: "à espera desta sala",
     aEsperaDaSalaNota: "à espera de voltares a receber esta sala. Mostra a hora de envio.",
     discard: "Descartar",
-    newMessages: "↓ Novas mensagens",
+    newMessages: "Novas mensagens",
+    jumpLatest: "Ir para as últimas mensagens",
+    messageHistory: "Histórico de mensagens",
     loadOlder: "Carregar mais antigas",
     /** The top of a conversation when "load older" reached the start of what this device holds (17/11/2026). */
     inicioDoAparelho: "Não há mensagens mais antigas neste aparelho. As de antes de ele entrar não se lêem aqui.",
@@ -2525,6 +2527,9 @@ export const pt = {
     filtroConvites: "Convites",
     filtroAmigos: "Amigos",
     filtroVazio: "Nada aqui.",
+    soPorLer: "Só por ler",
+    contagemPorLer: (quantas: number): string => `${quantas} por ler`,
+    semPorLerNoFiltro: "Não há notificações por ler nesta vista.",
     hoje: "Hoje",
     ontem: "Ontem",
     porLer: "por ler",
@@ -2688,10 +2693,31 @@ export const pt = {
     caducadoMeu: (nome: string): string => `O convite a ${nome} expirou. Podes convidar outra vez.`,
   },
 
+  mudarDeConversa: {
+    titulo: "Ir para…",
+    campo: "Encontrar uma comunidade, sala ou conversa",
+    resultados: "Destinos",
+    vazio: "Não há destinos que correspondam à pesquisa.",
+    tipo: { comunidade: "Comunidade", directa: "Mensagem directa", texto: "Sala de texto", voz: "Sala de voz" },
+  },
+
   callDock: {
     /** The region's name, for whoever listens to the screen. It is not the line that is read. */
     ongoing: "Chamada a decorrer",
-    back: "Voltar ao canal",
+    back: "Voltar à chamada",
+    aReligar: "A voltar a ligar…",
+    aFalar: "A falar",
+    ouvemSe: (nomes: string): string => `A falar · ${nomes}`,
+    estaAFalar: (nome: string): string => `${nome} está a falar`,
+    microfone: {
+      aberto: "Microfone ligado",
+      calado: "Microfone silenciado",
+      aEspera: "Tecla de fala pronta",
+      semTecla: "Tecla de fala por definir",
+      semSom: "Som desligado",
+      ausente: "Microfone indisponível",
+      aPreparar: "A ligar o microfone…",
+    },
     /**
      * What is happening, on the dock's first line.
      *
@@ -2997,7 +3023,9 @@ export const pt = {
     */
     pushToTalk: "Premir para falar",
     pushToTalkNote: "Mantém a tecla escolhida premida para enviar o som do microfone.",
-    pushToTalkNoKey: "O microfone fica silenciado até escolheres uma tecla para falar nos Atalhos de teclado.",
+    pushToTalkNoKey: "Escolhe uma tecla para ligar o microfone enquanto a mantiveres premida.",
+    pttOuvirInicio: "Ouvir o som ao premir",
+    pttOuvirFim: "Ouvir o som ao largar",
     micMuted: "Silenciar o microfone",
     soundOff: "Desligar o som",
     echoCancellation: "Cancelar eco",

@@ -748,3 +748,46 @@ the same column as what it names reads like a separate thing. */
   opacity: 0.4;
   cursor: default;
 }
+.sidebar-header .sidebar-mudar-destino {
+  width: auto;
+  min-height: 34px;
+  flex: none;
+  padding-inline: var(--space-2);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+.mudar-de-conversa .field {
+  width: 100%;
+}
+
+.mudar-de-conversa-lista {
+  max-height: min(44dvh, 22rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  padding: 0;
+  margin: var(--space-2) 0;
+}
+
+.mudar-de-conversa-lista li {
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.mudar-de-conversa-lista li:hover,
+.mudar-de-conversa-lista li[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.mudar-de-conversa-lista small {
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+}

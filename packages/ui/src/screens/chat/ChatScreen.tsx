@@ -47,7 +47,7 @@ import { PinnedPanel } from "./PinnedPanel.js"
 import { BarraDasFixadas } from "./BarraDasFixadas.js"
 import { barraEscondida, chaveDaSala, gravarEscondida, lerEscondidas } from "../../lib/barraDasFixadas.js"
 import { ProcuraPanel } from "./ProcuraPanel.js"
-import { Timeline } from "./Timeline.js"
+import { Timeline, type PosicaoDaConversa } from "./Timeline.js"
 import { itensDeMedia, temMedia } from "./menuDeMedia.js"
 import { ligacaoDaMensagem } from "../../lib/ligacaoDaMensagem.js"
 import { votacaoDe, type Apuramento } from "../../lib/votacoes.js"
@@ -106,6 +106,7 @@ export function ChatScreen({
   onSoPalco,
   micMuted = false,
   micCalado,
+  falamNaChamada,
   soundOff = false,
   onToggleMic,
   onToggleSound,
@@ -119,6 +120,7 @@ export function ChatScreen({
   onDiscardEntry,
   draft,
   onDraftChange,
+  posicoesGuardadas,
   activeRoom = "",
   members,
   membersState,
@@ -273,6 +275,7 @@ export function ChatScreen({
    *  and the sidebar card reads the same ones. */
   micMuted?: boolean | undefined
   micCalado?: boolean | undefined
+  falamNaChamada?: ReadonlySet<string> | undefined
   soundOff?: boolean | undefined
   onToggleMic?: (() => void) | undefined
   onToggleSound?: (() => void) | undefined
@@ -293,6 +296,7 @@ export function ChatScreen({
   draft: string
   /** The composer gives its text back on a channel change, on send and on unmount, never per key. */
   onDraftChange: (channel: string, text: string) => void
+  posicoesGuardadas?: Map<string, PosicaoDaConversa> | undefined
   /**
    * The open room within the channel. Empty is the default room.
    *
@@ -1143,6 +1147,8 @@ export function ChatScreen({
           presencaPropria={address ? presenceFor?.(address) : undefined}
           micMuted={micMuted}
           micCalado={micCalado}
+          falantes={falamNaChamada}
+          euAFalar={address !== null && falamNaChamada?.has(address) === true}
           soundOff={soundOff}
           onToggleMic={onToggleMic}
           onToggleSound={onToggleSound}
@@ -1232,6 +1238,7 @@ export function ChatScreen({
           <Timeline
             channel={active}
             conversa={chaveDaConversa(active, activeRoom)}
+            posicoesGuardadas={posicoesGuardadas}
             lugar={sincronia.lugar}
             /* The same truth in both places: without an input bar, emptiness cannot
                ask to find it below. See `escritaTrancada`. */
@@ -1365,6 +1372,7 @@ export function ChatScreen({
             avisoDeContaNova={oficial && faseDaContaNova === "24h" ? strings.contaNova.avisoNaSala : undefined}
             nomeDe={nameFor}
             canal={active ?? ""}
+            conversa={active ? chaveDaConversa(active, activeRoom) : ""}
             rascunho={draft}
             onRascunho={onDraftChange}
             connection={connection}

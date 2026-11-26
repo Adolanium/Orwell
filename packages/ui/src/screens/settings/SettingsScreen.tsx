@@ -31,6 +31,8 @@ import { formatarBytes } from "../../lib/ficheiros.js"
 import { prefsDeMediaParaONucleo } from "../../lib/mediaPrefs.js"
 import { VERSAO_DA_APP } from "../../lib/versao.js"
 import { SeccaoDeSons } from "../../sons/SeccaoDeSons.js"
+import { motor } from "../../sons/motor.js"
+import type { EstadoDoMicDaDoca } from "../call/CallDock.js"
 import { ContaESeguranca } from "./ContaESeguranca.js"
 import { InstalarActualizacoes } from "./InstalarActualizacoes.js"
 import { AvisosComAppFechada } from "./AvisosComAppFechada.js"
@@ -79,6 +81,7 @@ export function SettingsScreen({
   onToggleMic,
   onToggleSound,
   premirParaFalar,
+  estadoDoMic,
   onEditProfile,
   seccao: pedida,
   onSeccao,
@@ -100,6 +103,7 @@ export function SettingsScreen({
   onToggleMic: () => void
   onToggleSound: () => void
   premirParaFalar: { ligado: boolean; onMudar: (ligado: boolean) => void }
+  estadoDoMic?: EstadoDoMicDaDoca | undefined
   /**
    * Opens the profile editor. The Account section had the address and little
    * else, and someone who came here to change their name could not find where.
@@ -151,6 +155,7 @@ export function SettingsScreen({
   */
   const menuNaGaveta = useMenuNaGaveta() && onSeccao !== undefined
   const [naLista, setNaLista] = useState(true)
+  const [destinoDaFala, setDestinoDaFala] = useState<HTMLUListElement | null>(null)
   const {
     prefs,
     setNotifications,
@@ -622,9 +627,21 @@ export function SettingsScreen({
                 </label>
                 <Interruptor {...premirParaFalar} rotulo={strings.settings.pushToTalk} />
                 {premirParaFalar.ligado && (
-                  <p className="field-note">{prefs.atalhosDeVoz.falar
-                    ? strings.settings.pushToTalkNote
-                    : strings.settings.pushToTalkNoKey}</p>
+                  <>
+                    <ul className="atalhos" ref={setDestinoDaFala} />
+                    <p className="field-note">{prefs.atalhosDeVoz.falar
+                      ? strings.settings.pushToTalkNote
+                      : strings.settings.pushToTalkNoKey}</p>
+                    {estadoDoMic && <p className="field-note">{strings.callDock.microfone[estadoDoMic]}</p>}
+                    <div className="ptt-previews">
+                      <Button variant="ghost" onClick={() => motor.ouvir("ptt-inicio", prefs.soundVolume)}>
+                        {strings.settings.pttOuvirInicio}
+                      </Button>
+                      <Button variant="ghost" onClick={() => motor.ouvir("ptt-fim", prefs.soundVolume)}>
+                        {strings.settings.pttOuvirFim}
+                      </Button>
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -833,7 +850,7 @@ export function SettingsScreen({
               </section>
             )}
 
-            <AtalhosDeVoz mapa={prefs.atalhosDeVoz} onMudar={setAtalhosDeVoz} atalhosGlobais={bridge.atalhosGlobais} />
+            <AtalhosDeVoz mapa={prefs.atalhosDeVoz} onMudar={setAtalhosDeVoz} atalhosGlobais={bridge.atalhosGlobais} destinoDaFala={destinoDaFala} />
           </>
         )}
 

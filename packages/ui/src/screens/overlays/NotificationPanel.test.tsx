@@ -65,6 +65,28 @@ function painel(messages: ChatMessage[], handlers: Partial<Parameters<typeof Not
   )
 }
 
+it("filtra as notificações por ler dentro do tipo escolhido e preserva o histórico", async () => {
+  const user = userEvent.setup()
+  const notices: AppNotification[] = [
+    { id: "mencao", at: 400, kind: "mention", actor: ANA, channel: "sala", read: false },
+    { id: "mencao-lida", at: 300, kind: "mention", actor: ANA, channel: "estudio", read: true },
+    { id: "chamada", at: 200, kind: "missed-call", actor: ANA, read: false },
+  ]
+  painel([], { notifications: notices })
+  const filtro = screen.getByRole("button", { name: strings.notifCenter.soPorLer })
+  await user.click(filtro)
+  expect(screen.getByRole("status").textContent).toBe("2 por ler")
+  expect(screen.queryByText(strings.notifCenter.mention("Ana", "estudio"))).toBeNull()
+  expect(screen.getByText(strings.notifCenter.chamadaPerdida("Ana"))).toBeTruthy()
+
+  await user.click(screen.getByRole("button", { name: strings.notifCenter.filtroMencoes }))
+  expect(screen.getByRole("status").textContent).toBe("1 por ler")
+  expect(screen.getByText(strings.notifCenter.mention("Ana", "sala"))).toBeTruthy()
+  expect(screen.queryByText(strings.notifCenter.chamadaPerdida("Ana"))).toBeNull()
+  await user.click(filtro)
+  expect(screen.getByText(strings.notifCenter.mention("Ana", "estudio"))).toBeTruthy()
+})
+
 describe("responder a um pedido de amizade a partir do sino", () => {
   const pedidoDaAna = [msg(ANA, { t: "friend.request", sentAt: 100 })]
 

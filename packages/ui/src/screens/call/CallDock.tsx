@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react"
 import type { Participant } from "@enclave/client-core"
 import { Andante } from "../../components/Andante.js"
 import { Onda } from "../../components/Onda.js"
-import { HangUpIcon, MicIcon } from "../../icons.js"
+import { HangUpIcon, HeadphonesIcon, MicIcon } from "../../icons.js"
 import { useNivelDeVoz } from "../../hooks/useNivelDeVoz.js"
 import { shortName } from "../../lib/format.js"
 import { strings } from "../../strings.js"
@@ -10,6 +10,8 @@ import { useVolumeDeSaida, useVolumes } from "../../hooks/useVolumes.js"
 import { chaveDoVolumeDaMusica, useMusicasCaladas } from "../../hooks/useMusicaDaChamada.js"
 import { MusicaQueChega } from "./PartilharAudio.js"
 import { VideoTile } from "./VideoTile.js"
+
+export type EstadoDoMicDaDoca = keyof typeof strings.callDock.microfone
 
 /** Where the dock was left, per tab: convenience, not content. */
 export const POSITION_KEY = "enclave.callDockPos"
@@ -26,23 +28,9 @@ export function readPosition(): { x: number; y: number } | null {
   }
 }
 
-/**
- * The size guaranteed to the view, not the dock size.
- *
- * Height went from 56 to 72 the day the dock got two lines: with the old value,
- * dragging it down left the line showing where it is (the one saying channel and
- * room) below the screen edge. It is the information the dock gained, and so it
- * cannot be cut off.
- *
- * Width went from 240 to 272 for the same reason and with a larger cost: the
- * waveform added 26 pixels on the left, the dock became 260, and what went out
- * of bounds dragging right was the opposite end, the hang up button, which is
- * exactly what you look for first in a dock. Measured in
- * `scripts/medir-voz-visivel.mjs`, which drags the dock to the corner and checks
- * it fits whole; if someone adds more stuff without changing this, that script fails.
- */
+/** Keep all three lines and the hang-up button inside the viewport when dragging. */
 const LARGURA_A_SALVO = 272
-const ALTURA_A_SALVO = 72
+const ALTURA_A_SALVO = 92
 
 /** Keep the dock reachable: never let it leave the viewport. */
 export function clamp(position: { x: number; y: number }): { x: number; y: number } {
@@ -74,6 +62,9 @@ export function CallDock({
   localStream,
   nameFor,
   soundOff = false,
+  falantes = [],
+  estadoDoMic,
+  aReligar = false,
   onBack,
   onLeave,
   variante = "flutuante",
@@ -115,6 +106,9 @@ export function CallDock({
    * the panel and the dock kept talking.
    */
   soundOff?: boolean | undefined
+  falantes?: readonly string[] | undefined
+  estadoDoMic?: EstadoDoMicDaDoca | undefined
+  aReligar?: boolean | undefined
   onBack: () => void
   /** The hang up button. Only the floating form draws it: on the side, it is in the panel queue. */
   onLeave: () => void
@@ -134,13 +128,6 @@ export function CallDock({
    * sound owner, and only one.
    */
   comAudio?: boolean | undefined
-  /**
-   * The microphone. The side card no longer draws it (October 27, 2026: the
-   * button is in the account band, below). It stays in the type so the shell
-   * that still passes it does not break; nothing here reads it.
-   */
-  micMuted?: boolean | undefined
-  onToggleMic?: (() => void) | undefined
 }): React.JSX.Element {
   const [position, setPosition] = useState<{ x: number; y: number } | null>(readPosition)
   // The side dock is mounted alongside the call panel and receives its volume changes.
@@ -189,6 +176,25 @@ export function CallDock({
    */
   const canal = channelLabel ?? shortName(channel)
   const onde = roomLabel ? strings.callDock.ondeComSala(canal, roomLabel) : canal
+  const mic = estadoDoMic ? strings.callDock.microfone[estadoDoMic] : ""
+  const falam = falantes.length > 0 ? strings.callDock.ouvemSe(falantes.join(", ")) : ""
+  const descricao = [onde, aReligar ? strings.callDock.aReligar : "", falam, mic].filter(Boolean).join(". ")
+  const actividade = (estadoDoMic || falam) && (
+    <span className="call-dock-activity" aria-hidden="true">
+      {falam && (
+        <span className="call-dock-speakers" title={falam}>
+          <span className="call-dock-speaker-names">{strings.callDock.ouvemSe(falantes.slice(0, 2).join(", "))}</span>
+          {falantes.length > 2 && <span className="call-dock-speaker-more">+{falantes.length - 2}</span>}
+        </span>
+      )}
+      {estadoDoMic && (
+        <span className="call-dock-mic" data-mic={estadoDoMic} title={mic}>
+          {estadoDoMic === "semSom" ? <HeadphonesIcon size={13} off /> : <MicIcon size={13} off={estadoDoMic !== "aberto"} />}
+          {!falam && <span>{mic}</span>}
+        </span>
+      )}
+    </span>
+  )
 
   const onPointerDown = (event: React.PointerEvent<HTMLElement>): void => {
     // Buttons keep their clicks; the dock's body is the drag handle.
@@ -294,7 +300,7 @@ export function CallDock({
       .join(" · ")
     return (
       <aside ref={dock} className="call-dock lateral" aria-label={strings.callDock.ongoing}>
-        <button type="button" className="call-dock-back" aria-label={strings.callDock.back} onClick={onBack}>
+        <button type="button" className="call-dock-back" aria-label={strings.callDock.back} aria-description={descricao} onClick={onBack}>
           <span className="call-dock-lines">
             <span className="call-dock-state">
               <span className="call-dock-ponto" aria-hidden="true" />
@@ -302,7 +308,7 @@ export function CallDock({
                   element, so it can break into two lines: bare text in a flex
                   does not shrink, and was cut in the middle of the word. */}
               <span className="call-dock-texto">
-                {latencia ? strings.callDock.ping(latencia.ms) : strings.callDock.ligado}
+                {aReligar ? strings.callDock.aReligar : latencia ? strings.callDock.ping(latencia.ms) : strings.callDock.ligado}
               </span>
               {/* The "·" separate and silent: it is decoration, and the count reads on its own. */}
               <span className="call-dock-separador" aria-hidden="true">
@@ -311,6 +317,7 @@ export function CallDock({
               <span className="call-dock-count">{strings.call.people(connected + 1)}</span>
             </span>
             <Andante className="call-dock-where" texto={ondeLateral} />
+            {actividade}
           </span>
         </button>
         {audio}
@@ -321,7 +328,7 @@ export function CallDock({
   return (
     <aside
       ref={dock}
-      className="call-dock"
+      className="call-dock flutuante"
       aria-label={strings.callDock.ongoing}
       style={position ? { left: position.x, top: position.y, right: "auto", bottom: "auto" } : undefined}
       onPointerDown={onPointerDown}
@@ -344,20 +351,22 @@ there was none.
           make when reading the dock, and a one-line target was too small to hit
           with the call going. */}
       <button
+        type="button"
         className="call-dock-back"
         data-tip={strings.callDock.back}
         aria-label={strings.callDock.back}
+        aria-description={descricao}
         onClick={onBack}
       >
-        <MicIcon size={14} />
         <span className="call-dock-lines">
           <span className="call-dock-state">
-            {aPartilharEcra ? strings.callDock.aPartilharEcra : strings.callDock.emChamada}
+            {aReligar ? strings.callDock.aReligar : aPartilharEcra ? strings.callDock.aPartilharEcra : strings.callDock.emChamada}
             <span className="call-dock-count">{strings.call.people(connected + 1)}</span>
           </span>
           <span className="call-dock-where" title={onde}>
             {onde}
           </span>
+          {actividade}
         </span>
       </button>
       <button

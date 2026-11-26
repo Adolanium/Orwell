@@ -184,7 +184,7 @@ describe("chamada", () => {
       sala: "Sala",
       entrada: 1,
       eu: { id: ANA, nome: "Ana Silva" },
-      outros: [{ id: MILSINDA, nome: nomeEmFalta(MILSINDA), stream: null, micCalado: false }],
+      outros: [{ id: MILSINDA, nome: nomeEmFalta(MILSINDA), micCalado: false }],
       falam: new Set(),
       micMuted: false,
       soundOff: false,

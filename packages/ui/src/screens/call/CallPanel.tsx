@@ -66,6 +66,8 @@ export function CallPanel({
   directory,
   micMuted = false,
   micCalado,
+  falantes,
+  euAFalar = false,
   soundOff = false,
   onToggleMic,
   onToggleSound,
@@ -133,6 +135,8 @@ export function CallPanel({
   micMuted?: boolean | undefined
   /** Whether our audio is actually going out, including push to talk. */
   micCalado?: boolean | undefined
+  falantes?: ReadonlySet<string> | undefined
+  euAFalar?: boolean | undefined
   soundOff?: boolean | undefined
   onToggleMic?: (() => void) | undefined
   onToggleSound?: (() => void) | undefined
@@ -519,7 +523,7 @@ export function CallPanel({
               profile={selfProfile}
               /* Our card says "you", except when there's something about us that only we
                  can know: the resolution going down. */
-              texto={limiteDeVideo ? strings.call.videoLimitado(limiteDeVideo.razao, limiteDeVideo.altura) : strings.call.self}
+              texto={limiteDeVideo ? strings.call.videoLimitado(limiteDeVideo.razao, limiteDeVideo.altura) : euAFalar ? strings.callDock.aFalar : strings.call.self}
               /* Our voice, measured from capture. `muted` not `micMuted`: muting the sound
                  silences the microphone as a side effect. */
               stream={localStream}
@@ -552,11 +556,11 @@ export function CallPanel({
                 profile={directory.get(participant.address)}
                 presence={presenceFor?.(participant.address)}
                 /* Four states where there were two. See `lib/estadoDaChamada.ts`. */
-                {...estadoDaPessoa({
+                {...(falantes?.has(participant.address) ? { texto: strings.callDock.aFalar, tom: "activo" } : estadoDaPessoa({
                   connected: participant.connected,
                   caminho,
                   esperaMs: esperaDe(participant.address),
-                })}
+                }))}
                 /* The voice coming from this person: it's the green ring on the card that
                    answers "who is speaking". */
                 stream={participant.stream}

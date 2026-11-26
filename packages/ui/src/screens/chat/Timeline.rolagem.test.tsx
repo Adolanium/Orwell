@@ -1,9 +1,10 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
-import { act, cleanup, fireEvent, render as baseRender } from "@testing-library/react"
+import { act, cleanup, fireEvent, render as baseRender, screen } from "@testing-library/react"
 import type { Profile } from "../../bridge.js"
 import type { ChatMessage, MediaItem } from "../../types.js"
 import { ToastProvider } from "../../components/Toast.js"
-import { Timeline } from "./Timeline.js"
+import { Timeline, type PosicaoDaConversa } from "./Timeline.js"
+import { strings } from "../../strings.js"
 
 /**
  * The conversation opens paused at the right place, and only auto-scrolls for
@@ -128,6 +129,16 @@ function rolarPara(top: number): void {
 }
 
 describe("abrir uma sala", () => {
+  it("retoma o sítio de leitura quando a conversa volta das Definições", () => {
+    const posicoesGuardadas = new Map<string, PosicaoDaConversa>()
+    const props = { conversa: "!canal:s|a", messages: mensagens("a", 30), posicoesGuardadas }
+    const primeira = render(timeline(props))
+    rolarPara(700)
+    primeira.unmount()
+    render(timeline({ ...props, messages: mensagens("a", 32) }))
+    expect(scroller().scrollTop).toBe(700)
+  })
+
   it("trocar de sala no mesmo canal abre a nova no fundo, de uma vez, sem deslizar", () => {
     const { rerender } = render(timeline({ conversa: "!canal:s|geral", messages: mensagens("geral", 3) }))
     rerender(timeline({ conversa: "!canal:s|conversa", messages: mensagens("conversa", 40) }))
@@ -166,6 +177,17 @@ describe("abrir uma sala", () => {
 })
 
 describe("o que chega com a sala aberta", () => {
+  it("volta às últimas mensagens a partir do histórico, mesmo sem chegadas novas", () => {
+    render(timeline({ conversa: "!canal:s|a", messages: mensagens("a", 30) }))
+    expect(screen.queryByRole("button", { name: strings.chat.jumpLatest })).toBeNull()
+    rolarPara(500)
+    const salto = screen.getByRole("button", { name: strings.chat.jumpLatest })
+    fireEvent.click(salto, { detail: 0 })
+    expect(distanciaAoFundo()).toBe(0)
+    expect(document.activeElement).toBe(screen.getByRole("region", { name: strings.chat.messageHistory }))
+    expect(screen.queryByRole("button", { name: strings.chat.jumpLatest })).toBeNull()
+  })
+
   it("quem está no fundo continua no fundo", () => {
     const { rerender } = render(timeline({ conversa: "!canal:s|a", messages: mensagens("a", 20) }))
     rerender(timeline({ conversa: "!canal:s|a", messages: mensagens("a", 21) }))
@@ -177,7 +199,7 @@ describe("o que chega com a sala aberta", () => {
     rolarPara(400)
     rerender(timeline({ conversa: "!canal:s|a", messages: mensagens("a", 22) }))
     expect(scroller().scrollTop).toBe(400)
-    expect(document.querySelector(".timeline-jump")).not.toBeNull()
+    expect(screen.getByRole("button", { name: `${strings.chat.newMessages}. ${strings.chat.jumpLatest}` })).toBeTruthy()
   })
 
   it("uma imagem que acaba de carregar mantém no fundo quem lá estava", () => {
