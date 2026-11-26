@@ -465,11 +465,6 @@ export function SettingsScreen({
             />
 
             {/*
-              The language. A choice about this device, that does not change
-              anything others see. It used to be in Appearance, which is gone;
-              now it is in Account, which is where you look for what is about
-              the app user.
-              
               Language names are each in their own language. See `strings.ts`.
               */}
             <section className="card settings-card">
@@ -489,6 +484,16 @@ export function SettingsScreen({
               <p className="field-note">{strings.settings.languageNote}</p>
             </section>
 
+            {/* The three quick reactions of the hover bar and the long press. */}
+            <ReaccoesRapidas
+              escolhidas={prefs.reaccoesRapidas}
+              onMudar={(reaccoesRapidas) => setPreferencia({ reaccoesRapidas })}
+            />
+          </>
+        )}
+
+        {seccao === "aparencia" && (
+          <>
             {/*
               The colour theme. Like the language, a choice about this device:
               it is not sent to the account. "System" follows the OS live
@@ -514,12 +519,26 @@ export function SettingsScreen({
               </div>
               <p className="field-note">{strings.settings.temaNota}</p>
             </section>
-
-            {/* The three quick reactions of the hover bar and the long press. */}
-            <ReaccoesRapidas
-              escolhidas={prefs.reaccoesRapidas}
-              onMudar={(reaccoesRapidas) => setPreferencia({ reaccoesRapidas })}
-            />
+            {bridge.definirOpacidadeDaJanela && (
+              <section className="card settings-card">
+                <h2>{strings.settings.window}</h2>
+                <div className="choice">
+                  <label className="field-label" htmlFor="settings-window-opacity">{strings.settings.windowOpacity}</label>
+                  <div className="sound-row">
+                    <input
+                      id="settings-window-opacity"
+                      type="range"
+                      min={60}
+                      max={100}
+                      value={prefs.opacidadeDaJanela}
+                      aria-valuetext={`${prefs.opacidadeDaJanela}%`}
+                      onChange={(event) => setPreferencia({ opacidadeDaJanela: event.currentTarget.valueAsNumber })}
+                    />
+                    <span className="sound-value" aria-hidden="true">{prefs.opacidadeDaJanela}%</span>
+                  </div>
+                </div>
+              </section>
+            )}
           </>
         )}
 

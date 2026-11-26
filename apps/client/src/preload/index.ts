@@ -49,6 +49,9 @@ contextBridge.exposeInMainWorld("enclaveHost", {
   tema: {
     definir: (tema: string) => ipcRenderer.send("tema:definir", tema),
   },
+  ...(process.platform === "win32" && {
+    definirOpacidadeDaJanela: (percentagem: number) => ipcRenderer.send("janela:opacidade", percentagem),
+  }),
   /** The app's language, for the update question before the window. See `lingua:definir` in main. */
   lingua: {
     definir: (lingua: string) => ipcRenderer.send("lingua:definir", lingua),

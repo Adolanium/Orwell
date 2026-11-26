@@ -62,6 +62,7 @@ describe("readPrefs / writePrefs", () => {
       videoQuality: "720p" as const,
       micMuted: true,
       modoDoMicrofone: "carregar" as const,
+      opacidadeDaJanela: 84,
       soundOff: false,
       inputDeviceId: "mic-abc",
       inputGain: 1.5,

@@ -1230,6 +1230,12 @@ function registerIpc(window: BrowserWindow): void {
     void writeFile(CAMINHO_DO_TEMA, escreverTema(tema), "utf8").catch(() => {})
   })
 
+  ipcMain.on("janela:opacidade", (evento, valor: unknown) => {
+    if (process.platform !== "win32" || window.isDestroyed() || evento.sender !== window.webContents) return
+    if (typeof valor !== "number" || !Number.isInteger(valor) || valor < 60 || valor > 100) return
+    window.setOpacity(valor / 100)
+  })
+
   tratar("clipboard:write", async (_event, texto: unknown) => {
     if (typeof texto !== "string" || texto.length > 100_000) throw new Error("clipboard text is invalid")
     clipboard.writeText(texto)

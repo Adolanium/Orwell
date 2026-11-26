@@ -197,6 +197,7 @@ const SO_NA_SECRETARIA: Record<string, string> = {
     has a TCC permission of its own, and the alert of a refusal opens its panel.
     See `apps/client/src/main/permissao-de-media.ts`.
   */
+  definirOpacidadeDaJanela: "a página não controla a opacidade da janela nativa",
   privacidadeDoSistema: "o browser pede o microfone sozinho; aqui o macOS tem uma permissão própria da app (TCC)",
   "privacidadeDoSistema.abrir": "idem",
 

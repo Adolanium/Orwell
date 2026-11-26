@@ -165,6 +165,7 @@ interface CanaisDoAnfitriao {
 interface HostApi {
   /** The colour theme, reported to the main process (`renderer/tema.ts`). Optional: tests and older preloads lack it. */
   tema?: { definir: (tema: string) => void }
+  definirOpacidadeDaJanela?: (percentagem: number) => void
   /** The app's language, reported to the main process (`renderer/tema.ts`). Optional for the same reason. */
   lingua?: { definir: (lingua: string) => void; doSistema?: () => string[] }
   vault: {
@@ -1228,6 +1229,7 @@ export function createDesktopBridge(): EnclaveBridge {
   return {
     vault: host.vault,
     ...(host.contas ? { contas: host.contas } : {}),
+    ...(host.definirOpacidadeDaJanela ? { definirOpacidadeDaJanela: host.definirOpacidadeDaJanela } : {}),
     applyMediaPrefs,
     ...(ecra ? { ecra } : {}),
     ...(host.permissaoDeMedia

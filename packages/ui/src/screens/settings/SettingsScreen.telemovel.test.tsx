@@ -66,7 +66,7 @@ afterEach(() => {
 beforeEach(() => localStorage.clear())
 
 describe("as secções das configurações no telemóvel", () => {
-  it("o ecrã abre com a lista das seis secções, sem precisar da gaveta", () => {
+  it("o ecrã abre com a lista de secções, sem precisar da gaveta", () => {
     simularEcra(true)
     render(<Ecra />)
     const lista = screen.getByRole("navigation", { name: strings.settings.seccoesDoEcra })
