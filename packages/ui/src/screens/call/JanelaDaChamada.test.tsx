@@ -160,7 +160,6 @@ describe('o cartão "Ligado · sala" da barra lateral', () => {
       nameFor={(quem) => quem}
       onBack={() => {}}
       onLeave={() => {}}
-      onToggleMic={() => {}}
       {...overrides}
     />
   )

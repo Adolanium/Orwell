@@ -55,7 +55,6 @@ function cartao(latencia: { ms: number; ate: "servidor" | "par" } | null = null)
       nameFor={(quem) => quem}
       onBack={() => {}}
       onLeave={() => {}}
-      onToggleMic={() => {}}
     />,
   )
   return document.querySelector<HTMLElement>(".call-dock.lateral")!

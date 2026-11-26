@@ -126,13 +126,17 @@ export function NotificationPanel({
 }): React.JSX.Element {
   const titulo = useId()
   const [filtro, setFiltro] = useState<FiltroDoSino>("tudo")
+  const [soPorLer, setSoPorLer] = useState(false)
+  const filtroPorLer = useRef<HTMLButtonElement>(null)
   const lista = useRef<HTMLDivElement>(null)
   const agora = Date.now()
 
-  const visiveis = useMemo(
+  const doTipo = useMemo(
     () => notifications.filter((entry) => entraNoFiltro(entry.kind, filtro)),
     [notifications, filtro],
   )
+  const porLer = doTipo.filter((entry) => !entry.read)
+  const visiveis = soPorLer ? porLer : doTipo
   const ofertasVisiveis = ofertas.filter((oferta) => ofertaEntraNoFiltro(oferta, filtro))
   const grupos = agruparPorDia(visiveis, agora)
   const nada = notifications.length === 0 && ofertas.length === 0
@@ -162,7 +166,7 @@ export function NotificationPanel({
       <header className="notif-head">
         <h2 id={titulo}>{strings.notifCenter.title}</h2>
         {notifications.some((entry) => !entry.read) && (
-          <Button variant="ghost" onClick={onMarkAllRead}>
+          <Button variant="ghost" onClick={() => { onMarkAllRead(); filtroPorLer.current?.focus() }}>
             {strings.notifCenter.markAllRead}
           </Button>
         )}
@@ -171,18 +175,34 @@ export function NotificationPanel({
         </button>
       </header>
 
-      <div className="notif-filtros" role="group" aria-label={strings.notifCenter.filtros}>
-        {FILTROS_DO_SINO.map((qual) => (
-          <button
-            key={qual}
-            type="button"
-            className={qual === filtro ? "notif-filtro on" : "notif-filtro"}
-            aria-pressed={qual === filtro}
-            onClick={() => setFiltro(qual)}
-          >
-            {rotuloDoFiltro(qual)}
-          </button>
-        ))}
+      <div className="notif-controlos">
+        <div className="notif-filtros" role="group" aria-label={strings.notifCenter.filtros}>
+          {FILTROS_DO_SINO.map((qual) => (
+            <button
+              key={qual}
+              type="button"
+              className={qual === filtro ? "notif-filtro on" : "notif-filtro"}
+              aria-pressed={qual === filtro}
+              onClick={() => setFiltro(qual)}
+            >
+              {rotuloDoFiltro(qual)}
+            </button>
+          ))}
+        </div>
+        {notifications.length > 0 && (
+          <div className="notif-leitura">
+            <button
+              ref={filtroPorLer}
+              type="button"
+              className={soPorLer ? "notif-filtro notif-filtro-por-ler on" : "notif-filtro notif-filtro-por-ler"}
+              aria-pressed={soPorLer}
+              onClick={() => setSoPorLer((antes) => !antes)}
+            >
+              {strings.notifCenter.soPorLer}
+            </button>
+            {!falhou && <span role="status">{strings.notifCenter.contagemPorLer(porLer.length)}</span>}
+          </div>
+        )}
       </div>
 
       <div className="notif-corpo" ref={lista} onKeyDown={andar}>
@@ -200,7 +220,7 @@ export function NotificationPanel({
         {!falhou && nada ? (
           <p className="notif-empty">{strings.notifCenter.empty}</p>
         ) : !falhou && nadaNoFiltro ? (
-          <p className="notif-empty">{strings.notifCenter.filtroVazio}</p>
+          <p className="notif-empty">{soPorLer ? strings.notifCenter.semPorLerNoFiltro : strings.notifCenter.filtroVazio}</p>
         ) : falhou && notifications.length === 0 ? null : (
           <>
             {ofertasVisiveis.length > 0 && (

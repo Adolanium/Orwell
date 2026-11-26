@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook } from "@testing-library/react"
 import type { EnclaveBridge, ResumoParaAOverlay } from "../bridge.js"
 import { montarWebAudioFalso, vozFalsa } from "./vozFalsa.js"
+import { useQuemFala } from "./useQuemFala.js"
+import type { PessoaParaAOverlay } from "./useOverlayDeJogo.js"
 
 afterEach(() => {
   cleanup()
@@ -32,9 +34,9 @@ describe("o resumo da sala, para a overlay", () => {
       entrada: 1,
       eu: { id: "eu", nome: "Eu" },
       outros: [
-        { id: "ana", nome: "Ana", stream: null, micCalado: false },
-        { id: "rui", nome: "Rui", stream: null, micCalado: true },
-        { id: "eu", nome: "Eu outra vez", stream: null, micCalado: false },
+        { id: "ana", nome: "Ana", micCalado: false },
+        { id: "rui", nome: "Rui", micCalado: true },
+        { id: "eu", nome: "Eu outra vez", micCalado: false },
       ],
       falam: new Set(["eu", "ana", "rui"]),
       micMuted: false,
@@ -65,10 +67,10 @@ describe("useOverlayDeJogo", () => {
     ponte,
     sala: { chave: "!canal/voz", nome: "Sala de jogo" } as { chave: string; nome: string } | null,
     eu: { id: "eu", nome: "Eu" },
-    outros: [] as { id: string; nome: string; stream: MediaStream | null; micCalado: boolean; cara?: string }[],
+    outros: new Array<PessoaParaAOverlay>(),
     micMuted: false,
     soundOff: false,
-    dbDaEntrada: () => null,
+    falam: new Set<string>(),
     ligada: true,
     opacidade: 0.6,
     textos,
@@ -103,7 +105,7 @@ describe("useOverlayDeJogo", () => {
     expect(estados.filter((estado) => estado === null)).toHaveLength(1)
   })
 
-  it("desligada nas Definições, não manda resumo nem mede ninguém", async () => {
+  it("desligada nas Definições, não manda resumo", async () => {
     const { useOverlayDeJogo } = await import("./useOverlayDeJogo.js")
     const { ponte, estados, preferencias } = ponteFalsa()
     renderHook(() => useOverlayDeJogo({ ...base(ponte), ligada: false }))
@@ -124,7 +126,7 @@ describe("useOverlayDeJogo", () => {
     const { ponte, caras } = ponteFalsa()
     const props = {
       ...base(ponte),
-      outros: [{ id: "ana", nome: "Ana", stream: null, micCalado: false, cara: "data:image/png;base64,AAAA" }],
+      outros: [{ id: "ana", nome: "Ana", micCalado: false, cara: "data:image/png;base64,AAAA" }],
     }
     const { rerender } = renderHook((p) => useOverlayDeJogo(p), { initialProps: props })
     await act(async () => {
@@ -145,9 +147,15 @@ describe("useOverlayDeJogo", () => {
     const { useOverlayDeJogo } = await import("./useOverlayDeJogo.js")
     const { ponte, estados } = ponteFalsa()
     const ana = vozFalsa("ana-overlay", 0)
-    renderHook(() =>
-      useOverlayDeJogo({ ...base(ponte), outros: [{ id: "ana", nome: "Ana", stream: ana.stream, micCalado: false }] }),
-    )
+    const { rerender } = renderHook(({ sala, micCalado }) => {
+      const falam = useQuemFala(sala, [{ id: "ana", stream: ana.stream, micCalado }])
+      useOverlayDeJogo({
+        ...base(ponte),
+        sala: { chave: sala, nome: sala },
+        outros: [{ id: "ana", nome: "Ana", micCalado }],
+        falam,
+      })
+    }, { initialProps: { sala: "Studio", micCalado: false } })
     const falaAna = (): boolean | undefined => estados.at(-1)?.pessoas.find((p) => p.id === "ana")?.aFalar
     act(() => {
       vi.advanceTimersByTime(300)
@@ -162,6 +170,16 @@ describe("useOverlayDeJogo", () => {
       ana.falar(0)
       vi.advanceTimersByTime(1000)
     })
+    expect(falaAna()).toBe(false)
+    act(() => {
+      ana.falar(60)
+      vi.advanceTimersByTime(300)
+    })
+    expect(falaAna()).toBe(true)
+    rerender({ sala: "Studio", micCalado: true })
+    expect(falaAna()).toBe(false)
+    rerender({ sala: "Lab", micCalado: false })
+    act(() => vi.advanceTimersByTime(300))
     expect(falaAna()).toBe(false)
   })
 })

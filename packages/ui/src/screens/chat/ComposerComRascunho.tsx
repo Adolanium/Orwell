@@ -4,6 +4,8 @@ import { Composer } from "./Composer.js"
 type Props = Omit<ComponentProps<typeof Composer>, "value" | "onChange"> & {
   /** The channel the text belongs to. */
   canal: string
+  /** Room-scoped draft key when the channel has separate text rooms. */
+  conversa?: string
   /** The draft the root keeps for `canal`: where the text starts. */
   rascunho: string
   /** Gives the text back to the root. Called only on a channel change, on send and on unmount. */
@@ -22,10 +24,10 @@ type Props = Omit<ComponentProps<typeof Composer>, "value" | "onChange"> & {
  * The composer itself stays controlled (`value`, `onChange`): only the owner of
  * the text moved.
  */
-export function ComposerComRascunho({ canal, rascunho, onRascunho, onSend, ...resto }: Props): React.JSX.Element {
+export function ComposerComRascunho({ canal, conversa = canal, rascunho, onRascunho, onSend, ...resto }: Props): React.JSX.Element {
   const [texto, setTexto] = useState(rascunho)
   /** The channel and text on screen, and the draft it started from (to skip a needless push). */
-  const vivo = useRef({ canal, texto: rascunho, inicial: rascunho })
+  const vivo = useRef({ conversa, texto: rascunho, inicial: rascunho })
   const devolver = useRef(onRascunho)
 
   useLayoutEffect(() => {
@@ -37,18 +39,18 @@ export function ComposerComRascunho({ canal, rascunho, onRascunho, onSend, ...re
   // new channel's draft takes its place before the paint.
   useLayoutEffect(() => {
     const antes = vivo.current
-    if (antes.canal === canal) return
-    if (antes.texto !== antes.inicial) devolver.current(antes.canal, antes.texto)
-    vivo.current = { canal, texto: rascunho, inicial: rascunho }
+    if (antes.conversa === conversa) return
+    if (antes.texto !== antes.inicial) devolver.current(antes.conversa, antes.texto)
+    vivo.current = { conversa, texto: rascunho, inicial: rascunho }
     setTexto(rascunho)
     // Only the channel decides: `rascunho` changes when the push above lands in the root.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canal])
+  }, [conversa])
 
   // Leaving the screen (settings, a locked composer): the text goes back too.
   useEffect(
     () => () => {
-      const { canal: c, texto: t, inicial } = vivo.current
+      const { conversa: c, texto: t, inicial } = vivo.current
       if (t === inicial) return
       vivo.current.inicial = t
       devolver.current(c, t)
@@ -65,7 +67,7 @@ export function ComposerComRascunho({ canal, rascunho, onRascunho, onSend, ...re
         onSend(body, extras)
         // Sent: the root forgets this channel's draft now, not on the next switch.
         vivo.current.inicial = ""
-        devolver.current(canal, "")
+        devolver.current(conversa, "")
       }}
     />
   )

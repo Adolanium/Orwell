@@ -14,7 +14,7 @@ import { AnexosDoItem } from "../../components/AnexoAPedido.js"
 import { Lightbox } from "../../components/Lightbox.js"
 import { PostImages } from "../../components/PostImages.js"
 import { useToast } from "../../components/Toast.js"
-import { CopyIcon, MoreIcon, PinIcon, ResponderIcon, SmileyIcon } from "../../icons.js"
+import { CopyIcon, MoreIcon, PinIcon, ResponderIcon, SetaBaixoIcon, SmileyIcon } from "../../icons.js"
 import type { FichaDeReaccao } from "@enclave/client-core"
 import { chaveDe, usePorLer } from "../../hooks/usePorLer.js"
 import { useMencoesVistas } from "../../hooks/useMencoesVistas.js"
@@ -912,9 +912,21 @@ function linhaNoTopo(scroller: HTMLElement | null, conversa: string): AncoraDeLi
   return null
 }
 
+export interface PosicaoDaConversa {
+  top: number
+  noFundo: boolean
+  chave: string | null
+}
+
+function janelaDaPosicao(messages: ChatMessage[], guardada: PosicaoDaConversa | undefined): string | null {
+  if (!guardada || guardada.noFundo) return chaveDoInicio(messages, null)
+  return guardada.chave === null ? null : chaveDoInicio(messages, guardada.chave)
+}
+
 function TimelineInteira({
   channel,
   conversa,
+  posicoesGuardadas,
   messages,
   pending,
   onRetry,
@@ -969,6 +981,7 @@ function TimelineInteira({
    * Absent, defaults to the channel: a direct has no rooms.
    */
   conversa?: string | undefined
+  posicoesGuardadas?: Map<string, PosicaoDaConversa> | undefined
   /**
    * This device's first place in the channel (S5, §2.5): the Welcome `seq`
    * and time. The conversation carries the "You entered here" marker at that
@@ -1319,9 +1332,11 @@ function TimelineInteira({
    * the bottom, even if messages arrived in the meantime and the bottom is now lower.
    */
   const conversaActual = conversa ?? channel
-  const positions = useRef(new Map<string, { top: number; noFundo: boolean; chave: string | null }>())
+  const posicoesLocais = useRef(new Map<string, PosicaoDaConversa>())
+  const positions = posicoesGuardadas ?? posicoesLocais.current
+  const guardada = positions.get(conversaActual)
   /** Conversations whose window already reached the first line: it stays open. */
-  const janelaAberta = useRef(new Set<string>())
+  const janelaAberta = useRef(new Set(guardada && !guardada.noFundo && guardada.chave === null ? [conversaActual] : []))
   /**
    * The reader is stuck to the bottom: what arrives, or grows, keeps them
    * there.
@@ -1333,7 +1348,7 @@ function TimelineInteira({
   const nearBottom = useRef(true)
   /** The last `scrollTop` seen, to know if what moved was upward. */
   const ultimoTopo = useRef(0)
-  const [showJump, setShowJump] = useState(false)
+  const [saltoParaOFim, setSaltoParaOFim] = useState<"latest" | "new" | null>(null)
 
   /**
    * The window: which lines are drawn.
@@ -1352,12 +1367,12 @@ function TimelineInteira({
    */
   const [janela, setJanela] = useState<{ conversa: string; chave: string | null }>(() => ({
     conversa: conversaActual,
-    chave: chaveDoInicio(messages, null),
+    chave: janelaDaPosicao(messages, guardada),
   }))
   if (janela.conversa !== conversaActual) {
     // New conversation: the last lines, or the window it had when we left it reading further up.
-    const guardada = positions.current.get(conversaActual)
-    setJanela({ conversa: conversaActual, chave: chaveDoInicio(messages, guardada && !guardada.noFundo ? guardada.chave : null) })
+    if (guardada && !guardada.noFundo && guardada.chave === null) janelaAberta.current.add(conversaActual)
+    setJanela({ conversa: conversaActual, chave: janelaDaPosicao(messages, guardada) })
   } else if (janela.chave === null && messages.length > JANELA && !janelaAberta.current.has(conversaActual)) {
     // The list arrived after the switch (read from the vault): close the window on its last lines.
     setJanela({ conversa: conversaActual, chave: chaveDoInicio(messages, null) })
@@ -1511,7 +1526,7 @@ function TimelineInteira({
     el.scrollTop = el.scrollHeight
     ultimoTopo.current = el.scrollTop
     nearBottom.current = true
-    setShowJump(false)
+    setSaltoParaOFim(null)
   }, [])
 
   /**
@@ -1537,13 +1552,14 @@ function TimelineInteira({
     return () => observador.disconnect()
   }, [colarAoFundo])
 
-  /** The gesture of the "new messages" button: here yes, it can slide. */
-  const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
+  /** The user chose to return to the latest messages. */
+  const scrollToBottom = useCallback((behavior: ScrollBehavior, focar: boolean) => {
     const el = container.current
     if (!el) return
     if (typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight, behavior })
     else el.scrollTop = el.scrollHeight
-    setShowJump(false)
+    if (focar) el.focus({ preventScroll: true })
+    setSaltoParaOFim(null)
     nearBottom.current = true
   }, [])
 
@@ -1556,18 +1572,23 @@ function TimelineInteira({
     if (!el || shownConversa.current === conversaActual) return
     // The one we leave: the DOM is already the new one, so what we saw last is right.
     if (shownConversa.current !== null) {
-      positions.current.set(shownConversa.current, { top: ultimoTopo.current, noFundo: nearBottom.current, chave: chaveDaJanelaQueSai.current })
+      positions.set(shownConversa.current, { top: ultimoTopo.current, noFundo: nearBottom.current, chave: chaveDaJanelaQueSai.current })
     }
     shownConversa.current = conversaActual
     // A new visit: the unread bar may show again, if there is something unread.
     saltoDispensado.current = false
-    const guardada = positions.current.get(conversaActual)
+    const guardada = positions.get(conversaActual)
     el.scrollTop = guardada && !guardada.noFundo ? guardada.top : el.scrollHeight
     ultimoTopo.current = el.scrollTop
     noFundoAoRolar.current = isNearBottom(el)
     nearBottom.current = !guardada || guardada.noFundo || isNearBottom(el)
-    setShowJump(false)
-  }, [conversaActual])
+    setSaltoParaOFim(nearBottom.current ? null : "latest")
+  }, [conversaActual, positions])
+  useLayoutEffect(() => () => {
+    const conversaQueSai = shownConversa.current
+    if (conversaQueSai === null) return
+    positions.set(conversaQueSai, { top: ultimoTopo.current, noFundo: nearBottom.current, chave: chaveDaJanelaQueSai.current })
+  }, [positions])
   // After the save above, never before it: the conversation we leave keeps its own window.
   useLayoutEffect(() => {
     chaveDaJanelaQueSai.current = janela.conversa === conversaActual ? janela.chave : null
@@ -1593,7 +1614,7 @@ function TimelineInteira({
     if (!previous || previous.conversa !== conversaActual || itemCount <= previous.count) return
     if (lastKey === previous.lastKey) return
     if (!nearBottom.current) {
-      setShowJump(true)
+      setSaltoParaOFim("new")
       return
     }
     colarAoFundo()
@@ -1758,7 +1779,8 @@ function TimelineInteira({
     // the bottom is the browser compensating for content that grew above, and
     // whoever was stuck stays stuck, the next `load` or the next message
     // restores the bottom.
-    if (isNearBottom(el)) nearBottom.current = true
+    const noFundoAgora = isNearBottom(el)
+    if (noFundoAgora) nearBottom.current = true
     else if (el.scrollTop < ultimoTopo.current) nearBottom.current = false
     ultimoTopo.current = el.scrollTop
     // The reader moved: the line held for "load older" is now this far from the top.
@@ -1768,14 +1790,14 @@ function TimelineInteira({
       if (linha) ancora.distancia = distanciaAoTopo(el, linha)
       else ancoraDasAntigas.current = null
     }
-    if (nearBottom.current) setShowJump(false)
+    if (noFundoAgora) setSaltoParaOFim(null)
+    else if (!nearBottom.current) setSaltoParaOFim((anterior) => anterior ?? "latest")
     /*
       Reading down to the end, with the window in front, is done with the unread
       bar for this visit, like Discord. Only the move INTO the bottom counts: the
       view that opens already at the bottom has not read what is above it, and a
       window behind others has not read anything.
     */
-    const noFundoAgora = isNearBottom(el)
     if (noFundoAgora && !noFundoAoRolar.current && janelaAFrente()) saltoDispensado.current = true
     noFundoAoRolar.current = noFundoAgora
     // Near the top of the window: draw the lines above, before the reader reaches the edge.
@@ -1796,8 +1818,8 @@ function TimelineInteira({
     podeCarregarAntigas: canLoadOlder,
   })
 
-  return (
-    <div className="timeline" ref={container} onScroll={onScroll}>
+  const listaDeMensagens = (
+    <div className="timeline" ref={container} onScroll={onScroll} tabIndex={-1} role="region" aria-label={strings.chat.messageHistory}>
       {/*
         Jump to what is unread.
 
@@ -2061,16 +2083,6 @@ function TimelineInteira({
         </article>
       ))}
 
-      {showJump && (
-        <button
-          type="button"
-          className="timeline-jump"
-          onClick={() => scrollToBottom(prefersReducedMotion() ? "auto" : "smooth")}
-        >
-          {strings.chat.newMessages}
-        </button>
-      )}
-
       {/* "Who is typing" is not here: it is a strip held by the composer (`QuemEscreve`), outside the scroller. */}
 
       {/* The same sheet as the feed. See `Lightbox`. */}
@@ -2084,6 +2096,26 @@ function TimelineInteira({
             return dona && ligacaoDe ? ligacaoDe(dona) : null
           })()}
         />
+      )}
+    </div>
+  )
+
+  return (
+    <div className="timeline-frame">
+      {listaDeMensagens}
+      {saltoParaOFim && (
+        <div className="timeline-jump-bar">
+          <button
+            type="button"
+            className="timeline-jump"
+            data-new={saltoParaOFim === "new" || undefined}
+            aria-label={saltoParaOFim === "new" ? `${strings.chat.newMessages}. ${strings.chat.jumpLatest}` : undefined}
+            onClick={(event) => scrollToBottom(prefersReducedMotion() ? "auto" : "smooth", event.detail === 0)}
+          >
+            <SetaBaixoIcon size={15} />
+            {saltoParaOFim === "new" ? strings.chat.newMessages : strings.chat.jumpLatest}
+          </button>
+        </div>
       )}
     </div>
   )

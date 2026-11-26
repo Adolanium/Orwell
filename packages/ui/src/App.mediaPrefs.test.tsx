@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { EnclaveBridge } from "./bridge.js"
 import { App } from "./App.js"
 import { PREFS_KEY, readPrefs } from "./hooks/usePrefs.js"
@@ -202,6 +202,22 @@ async function entrarNoEstudio() {
   if (canal) fireEvent.click(canal)
   fireEvent.click(await screen.findByRole("button", { name: /Estúdio/ }))
 }
+
+it("Ir para revela a sala de voz sem abrir o microfone ou entrar na chamada", async () => {
+  const chamada = montarChamada()
+  render(<App bridge={chamada.bridge} />)
+  await screen.findByRole("button", { name: strings.rail.chat })
+  fireEvent.keyDown(window, { key: "k", ctrlKey: true })
+  const pesquisa = screen.getByRole("combobox", { name: strings.mudarDeConversa.campo })
+  fireEvent.change(pesquisa, { target: { value: "estudio" } })
+  expect(await screen.findByRole("option", { name: /Estúdio.*Sala de voz/ })).toBeTruthy()
+  fireEvent.keyDown(pesquisa, { key: "Enter" })
+  const sala = await screen.findByRole("button", { name: /Estúdio/ })
+  await waitFor(() => expect(document.activeElement).toBe(sala))
+  expect(chamada.entradas).toEqual([])
+  fireEvent.click(sala)
+  expect(chamada.entradas).toEqual([true])
+})
 
 describe("premir para falar como modo do microfone", () => {
   beforeEach(() => {

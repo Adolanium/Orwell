@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement } from "react"
+import { createPortal } from "react-dom"
 import type { EnclaveBridge } from "../../bridge.js"
 import { Button } from "../../components/Button.js"
 import { useToast } from "../../components/Toast.js"
@@ -37,10 +38,12 @@ export function AtalhosDeVoz({
   mapa,
   onMudar,
   atalhosGlobais,
+  destinoDaFala,
 }: {
   mapa: MapaDeAtalhos
   onMudar: (mapa: MapaDeAtalhos) => void
   atalhosGlobais?: EnclaveBridge["atalhosGlobais"]
+  destinoDaFala?: HTMLUListElement | null
 }): ReactElement {
   const [aGravar, setAGravar] = useState<AccaoDeVoz | null>(null)
   const toast = useToast()
@@ -148,7 +151,7 @@ export function AtalhosDeVoz({
         {ACCOES_DE_VOZ.filter((accao) => naSecretaria || !SO_NA_SECRETARIA.includes(accao)).map((accao) => {
           const combinacao = mapa[accao]
           const emCaptura = aGravar === accao
-          return (
+          const linha = (
             <li key={accao} className="atalho" data-accao={accao}>
               <span className="atalho-rotulo">{strings.settings.atalhoAccao[accao]}</span>
               <span className="atalho-tecla" aria-live="polite">
@@ -176,6 +179,7 @@ export function AtalhosDeVoz({
               </span>
             </li>
           )
+          return accao === "falar" && destinoDaFala ? createPortal(linha, destinoDaFala, accao) : linha
         })}
       </ul>
       <div>

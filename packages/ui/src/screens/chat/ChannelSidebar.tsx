@@ -6,7 +6,7 @@ import { memo, useEffect, useRef, useState } from "react"
 import type { Activity, ChannelRoom, ConnectionState, Profile } from "../../bridge.js"
 import type { View } from "../../types.js"
 import { Button } from "../../components/Button.js"
-import { GripIcon, LockIcon, PersonAddIcon, PlusIcon } from "../../icons.js"
+import { GripIcon, LockIcon, MicIcon, PersonAddIcon, PlusIcon } from "../../icons.js"
 import { strings } from "../../strings.js"
 import { seccoes, type Seccao } from "../settings/seccoes.js"
 import { Avatar } from "../../components/Avatar.js"
@@ -107,13 +107,14 @@ export interface PresenteNaVoz {
   /** Only the room this device has joined supplies audio for a speaking indicator. */
   voz?: MediaStream | null | undefined
   dbDaEntrada?: (() => number | null) | undefined
+  aFalar?: boolean | undefined
 }
 
 function CaraNaVoz({ pessoa }: { pessoa: PresenteNaVoz }): React.JSX.Element {
   const alvo = useRef<HTMLSpanElement>(null)
-  useNivelDeVoz(alvo, pessoa.voz ?? null, { dbDaEntrada: pessoa.dbDaEntrada })
+  useNivelDeVoz(alvo, pessoa.calado ? null : (pessoa.voz ?? null), { dbDaEntrada: pessoa.dbDaEntrada })
   return (
-    <span className="voice-member-avatar" ref={alvo}>
+    <span className="voice-member-avatar" data-a-falar={pessoa.aFalar || undefined} ref={alvo}>
       <Avatar profile={pessoa.profile} fallback={pessoa.name[0] ?? "?"} />
     </span>
   )
@@ -274,7 +275,7 @@ function RoomRow({
             }
           : {})}
       >
-        <button className="room" onClick={onOpen}>
+        <button className="room" data-destino-sala={sala.room} onClick={onOpen}>
           {/* The circle of a voice room pulses when there are people in it: the
               animation says there is life there, instead of being decorative.
               See `.room-live`. */}
@@ -342,6 +343,11 @@ function RoomRow({
                     ring was extra noise in a short list. */}
                 <CaraNaVoz pessoa={quem} />
                 <span className="voice-member-name">{quem.name}</span>
+                {quem.aFalar && (
+                  <span className="voice-member-speaking" role="img" title={strings.callDock.estaAFalar(quem.name)} aria-label={strings.callDock.estaAFalar(quem.name)}>
+                    <MicIcon size={13} />
+                  </span>
+                )}
                 {quem.transmite && <MarcaDeTransmissao transmite={quem.transmite} />}
                 {/* The call marks, live (12/11/2026): the same ones as the member list. */}
                 {quem.calado && <MarcaDeChamada tipo="calado" nome={quem.name} className="voice-member-marca" size={13} />}
@@ -458,6 +464,9 @@ function ChannelSidebarInteira({
   connection,
   open,
   onClose,
+  onMudarDeConversa,
+  salaNaLista,
+  onSalaRevelada,
   onSelectChannel,
   onChannelMenu,
   onCompose,
@@ -485,6 +494,9 @@ function ChannelSidebarInteira({
   pedidoDeEstado,
   chamada = null,
 }: {
+  onMudarDeConversa?: (() => void) | undefined
+  salaNaLista?: { canal: string; sala: string; categoria: string } | null | undefined
+  onSalaRevelada?: (() => void) | undefined
   /**
    * The open destination, everything except Friends.
    *
@@ -753,6 +765,26 @@ function ChannelSidebarInteira({
   const closeRef = useRef(onClose)
   closeRef.current = onClose
 
+  useEffect(() => {
+    if (!salaNaLista || salaNaLista.canal !== active) return
+    const { canal, sala, categoria } = salaNaLista
+    const chaves = [chave.canal(canal), ...(categoria ? [chave.categoria(canal, categoria)] : []), chave.voz(canal, sala)]
+    if (chaves.some(isCollapsed)) {
+      for (const item of chaves) mostrar(item)
+      return
+    }
+    const botao = [...(aside.current?.querySelectorAll<HTMLButtonElement>("[data-destino-sala]") ?? [])]
+      .find((elemento) => elemento.dataset.destinoSala === sala)
+    if (!botao) return
+    // Wait for the quick switcher to restore its opener and the drawer to finish moving focus.
+    const quadro = requestAnimationFrame(() => {
+      botao.focus({ preventScroll: true })
+      botao.scrollIntoView?.({ block: "nearest" })
+      onSalaRevelada?.()
+    })
+    return () => cancelAnimationFrame(quadro)
+  }, [active, salaNaLista, isCollapsed, mostrar, onSalaRevelada, roomGroups])
+
   // Drawer behaviour, only while open (which only happens on narrow screens):
   // focus moves in, Escape closes, focus returns to the toggle that opened it.
   // Deliberately lighter than Modal — the rail stays reachable, so no trap.
@@ -795,6 +827,11 @@ function ChannelSidebarInteira({
                   : strings.sidebar.headerSettings}
           </span>
         </span>
+        {view === "chat" && onMudarDeConversa && (
+          <button type="button" className="header-add sidebar-mudar-destino" onClick={onMudarDeConversa}>
+            {strings.mudarDeConversa.titulo}
+          </button>
+        )}
         {view === "perfil" && (
           <button
             className="header-add"

@@ -2679,8 +2679,16 @@ numbers again. */
 
 /* -------------------------------------------------------------- timeline */
 
-.timeline {
+.timeline-frame {
   grid-area: timeline;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.timeline {
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -2864,13 +2872,25 @@ numbers again. */
   color: var(--danger);
 }
 
-/* Floating "new messages" chip: sticky inside the scroller, so it hovers at
-   the bottom of the viewport only while newer content sits below the fold. */
-.timeline-jump {
-  position: sticky;
-  bottom: var(--space-2);
-  align-self: center;
+/* The return control is outside the scrolling content, above the composer. */
+.timeline-jump-bar {
   flex: none;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-1) var(--space-4);
+  border-top: 1px solid var(--line);
+}
+
+.timeline-frame .timeline-jump-bar > button.timeline-jump {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.timeline-jump {
   border: 1px solid var(--line);
   border-radius: var(--radius-full);
   background: var(--bg-raised);
@@ -2884,6 +2904,11 @@ numbers again. */
 
 .timeline-jump:hover {
   background: var(--bg-hover);
+}
+
+.timeline-jump[data-new] {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .message-body {
@@ -8030,6 +8055,31 @@ button.tag-pill[aria-pressed="true"] {
   box-shadow: none;
 }
 
+.notif-controlos {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+  flex: none;
+}
+
+.notif-leitura {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+}
+
+.notif-leitura .notif-filtro-por-ler {
+  min-height: 36px;
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+}
+
 .notif-corpo {
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -10204,7 +10254,7 @@ button.pinned-texto:hover {
   min-width: 0;
 }
 
-.conversa > .timeline {
+.conversa > .timeline-frame {
   flex: 1 1 0;
   min-height: 0;
 }

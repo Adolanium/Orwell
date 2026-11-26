@@ -55,6 +55,7 @@ import { pedidoCabe } from "./lib/privacidade.js"
 import { useAtalhos } from "./hooks/useAtalhos.js"
 import { useAtalhosGlobais } from "./hooks/useAtalhosGlobais.js"
 import { useOverlayDeJogo } from "./hooks/useOverlayDeJogo.js"
+import { useQuemFala, type VozDaChamada } from "./hooks/useQuemFala.js"
 import { useAvisoDeVersao } from "./hooks/useAvisoDeVersao.js"
 import { useLingua } from "./hooks/useLingua.js"
 import { useVisualViewport } from "./hooks/useVisualViewport.js"
@@ -155,7 +156,7 @@ import type { TelaDoSetup } from "./screens/gate/Setup.js"
 import { pagina } from "./screens/gate/MudarDeConta.js"
 import { ContaSuspensa } from "./screens/gate/ContaSuspensa.js"
 import { SaiuDeBeta } from "./screens/gate/SaiuDeBeta.js"
-import { CallDock } from "./screens/call/CallDock.js"
+import { CallDock, type EstadoDoMicDaDoca } from "./screens/call/CallDock.js"
 import { useEcraLargo } from "./hooks/useEcraLargo.js"
 import { ChannelSidebar, type PresenteNaVoz } from "./screens/chat/ChannelSidebar.js"
 import { ChatScreen } from "./screens/chat/ChatScreen.js"
@@ -184,6 +185,9 @@ import { Separadores, type Separador } from "./screens/telemovel/Separadores.js"
 import { itensDoMicrofone, itensDoSom } from "./screens/profile/menuDeAudio.js"
 import { ProfileScreen, type CanalFundado } from "./screens/profile/ProfileScreen.js"
 import { VerifyModal } from "./screens/chat/VerifyModal.js"
+import { MudarDeConversa, chaveDoDestino, type DestinoDeConversa } from "./screens/chat/MudarDeConversa.js"
+import type { PosicaoDaConversa } from "./screens/chat/Timeline.js"
+import { categoriaVisivel } from "./screens/chat/categorias.js"
 import { ActivityMenu } from "./screens/profile/ActivityMenu.js"
 import { ProfileEditor } from "./screens/profile/ProfileEditor.js"
 import { SettingsScreen } from "./screens/settings/SettingsScreen.js"
@@ -1512,7 +1516,11 @@ function Shell({
   /** The channel drawer, on narrow screens only (the toggle is CSS-hidden when
    * the sidebar is a plain grid column, so this never opens when wide). */
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [mudarDeConversa, setMudarDeConversa] = useState(false)
+  const [destinosRecentes, setDestinosRecentes] = useState<string[]>([])
+  const [salaNaLista, setSalaNaLista] = useState<{ canal: string; sala: string; categoria: string } | null>(null)
   const { draftFor, setDraft } = useDrafts()
+  const posicoesDasConversas = useRef(new Map<string, PosicaoDaConversa>())
 
   /**
    * The channel a redeemed invite link should open once a member admits us.
@@ -1678,6 +1686,18 @@ function Shell({
   // Audio may only start after a gesture, so the engine waits for the first
   // click or keypress and builds its context there — never on mount.
   useEffect(() => armSounds(), [])
+  useEffect(() => {
+    if (stage !== "ready") return
+    const aoTeclar = (evento: KeyboardEvent): void => {
+      if (evento.defaultPrevented || evento.repeat || evento.isComposing || evento.shiftKey || evento.altKey) return
+      if (!(evento.ctrlKey || evento.metaKey) || evento.key.toLowerCase() !== "k") return
+      if (evento.target instanceof Element && evento.target.closest('[role="dialog"], [role="alertdialog"]')) return
+      evento.preventDefault()
+      setMudarDeConversa(true)
+    }
+    window.addEventListener("keydown", aoTeclar)
+    return () => window.removeEventListener("keydown", aoTeclar)
+  }, [stage])
   useEffect(() => {
     if (modoDoMicrofone === "carregar") prepararSonsDeFala()
   }, [modoDoMicrofone])
@@ -7999,12 +8019,18 @@ function Shell({
     if (medidas === undefined || medidas.entradaDb <= -119) return null
     return medidas.anelDb ?? medidas.entradaDb
   }, [audioDaChamada])
+  const chaveDaChamada = callChannel === null ? null : chaveDaSala(callChannel, callRoom)
+  const vozesDaChamada = useMemo<readonly VozDaChamada[]>(() => [
+    ...(address ? [{ id: address, stream: localStream, micCalado, db: dbDaEntradaDaChamada }] : []),
+    ...participants.map((par) => ({ id: par.address, stream: par.stream, micCalado: par.micMuted || !par.connected })),
+  ], [address, localStream, micCalado, dbDaEntradaDaChamada, participants])
+  const falamNaChamada = useQuemFala(chaveDaChamada, vozesDaChamada)
   useOverlayDeJogo({
     ponte: bridge.overlay,
     sala:
-      callChannel === null
+      callChannel === null || chaveDaChamada === null
         ? null
-        : { chave: chaveDaSala(callChannel, callRoom), nome: salaDaDoca ?? labelFor(callChannel) },
+        : { chave: chaveDaChamada, nome: salaDaDoca ?? labelFor(callChannel) },
     eu: {
       id: address ?? "",
       nome: profile.displayName || strings.call.selfFallback,
@@ -8019,13 +8045,12 @@ function Shell({
         id: quem,
         nome: nameFor(quem),
         cara: directory.get(quem)?.avatarDataUrl,
-        stream: par?.stream ?? null,
         micCalado: par?.micMuted ?? false,
       }
     }),
     micMuted: micCalado,
     soundOff,
-    dbDaEntrada: dbDaEntradaDaChamada,
+    falam: falamNaChamada,
     ligada: prefsDaPresenca.overlayDeJogoLigada,
     opacidade: prefsDaPresenca.opacidadeDaOverlay,
     textos: { entrou: strings.overlayDeJogo.entrou, saiu: strings.overlayDeJogo.saiu },
@@ -8312,10 +8337,11 @@ function Shell({
                 profile: directory.get(address),
                 presence: presenceFor(address),
                 ...(euTransmito ? { transmite: euTransmito } : {}),
-                calado: micMuted,
+                calado: micCalado,
                 semSom: soundOff,
                 voz: localStream,
                 dbDaEntrada: dbDaEntradaDaChamada,
+                aFalar: falamNaChamada.has(address),
               },
             ]
           : []
@@ -8339,6 +8365,7 @@ function Shell({
                 ...(participante ? {
                   calado: participante.micMuted,
                   voz: participante.micMuted ? null : participante.stream,
+                  aFalar: falamNaChamada.has(quem),
                 } : {}),
               }
             }),
@@ -8364,7 +8391,7 @@ function Shell({
           }
         })
     },
-    [active, callChannel, callRoom, localStream, dbDaEntradaDaChamada, screenStream, minhaMusica, micMuted, soundOff, address, nameFor, directory, presenceFor, naSalaDaChamada, participants, vozPorSala, transmitePorSala],
+    [active, callChannel, callRoom, localStream, dbDaEntradaDaChamada, screenStream, minhaMusica, micCalado, soundOff, address, nameFor, directory, presenceFor, naSalaDaChamada, participants, vozPorSala, transmitePorSala, falamNaChamada],
   )
   /** "New room" already in a category: its `+` in the sidebar, or its menu (1.3.25). */
   const abrirNovaSalaNaCategoria = (category: string): void => {
@@ -8427,6 +8454,8 @@ function Shell({
     menuDoMicrofone: useEstavel((at: { x: number; y: number }) => setAudioMenu({ qual: "mic", at })),
     menuDoSom: useEstavel((at: { x: number; y: number }) => setAudioMenu({ qual: "som", at })),
     abrirDefinicoes: useEstavel(() => setView("config")),
+    mudarDeConversa: useEstavel(() => setMudarDeConversa(true)),
+    salaRevelada: useEstavel(() => setSalaNaLista(null)),
     latencia: useEstavel((dentro: boolean) => (dentro ? comecarLatencia() : pararLatencia())),
     // Defined further down, after the gate's early return; called only on events.
     guardarEstado: useEstavel((statusText: string) => guardarEstado(statusText)),
@@ -8760,6 +8789,7 @@ function Shell({
       onSoPalco={() => setSoPalco((aberto) => !aberto)}
       micMuted={micMuted}
       micCalado={micCalado}
+      falamNaChamada={falamNaChamada}
       soundOff={soundOff}
       onToggleMic={alternarMicrofone}
       onToggleSound={alternarSom}
@@ -8785,8 +8815,9 @@ function Shell({
       }}
       onRetryEntry={outbox.retry}
       onDiscardEntry={outbox.discard}
-      draft={draftFor(active)}
+      draft={draftFor(active ? chaveDaConversa(active, activeRoom) : null)}
       onDraftChange={setDraft}
+      posicoesGuardadas={posicoesDasConversas.current}
       activeRoom={activeRoom}
       onPrompt={setPrompt}
       canCreateChannel={canCreateChannel}
@@ -9067,6 +9098,57 @@ function Shell({
    */
   const docaLateral = ecraLargo && view !== "pessoas" && !callPopup && !soPalco
   const docaFlutuante = !docaLateral && !painelDaChamadaNoEcra
+  const estadoDoMicNaChamada = (): EstadoDoMicDaDoca => {
+    if (chamadaNaSalaAfk) return "ausente"
+    if (soundOff) return "semSom"
+    if (micMuted) return "calado"
+    if (micCalado) return teclaDaFala ? "aEspera" : "semTecla"
+    return localStream?.getAudioTracks().some((faixa) => faixa.enabled && faixa.readyState === "live") ? "aberto" : "aPreparar"
+  }
+  const falantesDaDoca = Array.from(falamNaChamada).sort().map((quem) => nomeVisivel(nameFor(quem)))
+  const destinos: DestinoDeConversa[] = mudarDeConversa ? [
+    ...rooms.flatMap((canal): DestinoDeConversa[] => {
+      const comunidade = labelFor(canal)
+      const categorias = new Map((bridge.channels.categories?.(canal) ?? [])
+        .filter((categoria) => categoria.removed !== true).map((categoria) => [categoria.category, categoria.roles]))
+      const quem = { papeis: address ? (bridge.channels.rolesFor?.(canal, address) ?? []) : [], administra: bridge.channels.mayEdit?.(canal) ?? false }
+      const salas = canal === active
+        ? roomGroups.flatMap((grupo) => grupo.rooms)
+        : (bridge.channels.rooms?.(canal) ?? []).filter((sala) => categoriaVisivel(categorias.get(sala.category), quem))
+      return [
+        { tipo: "comunidade", canal, nome: comunidade },
+        ...salas.map((sala): DestinoDeConversa => ({
+          tipo: sala.kind === "voice" ? "voz" : "texto",
+          canal,
+          sala: sala.room,
+          categoria: sala.category,
+          comunidade,
+          nome: nomeDaSala([sala], sala.room) ?? sala.name,
+        })),
+      ]
+    }),
+    ...directs.map(({ channel, peer }): DestinoDeConversa => ({ tipo: "directa", canal: channel, nome: peer ? nomeVisivel(nameFor(peer)) : labelFor(channel) })),
+  ] : []
+  const abrirDestino = (destino: DestinoDeConversa): void => {
+    const chave = chaveDoDestino(destino)
+    setDestinosRecentes((antes) => [chave, ...antes.filter((outro) => outro !== chave)].slice(0, 12))
+    setMudarDeConversa(false)
+    fecharPessoa()
+    abrirConversa(destino.canal)
+    if (destino.tipo === "voz") {
+      // Show the voice roster. Joining is still an explicit click in the tree.
+      setSalaNaLista({ canal: destino.canal, sala: destino.sala, categoria: destino.categoria })
+      setSidebarOpen(!ecraLargo && !telemovel)
+      setConversaNoTelemovel(false)
+      return
+    }
+    setSalaNaLista(null)
+    setSidebarOpen(false)
+    if (destino.tipo === "texto") {
+      setActiveRooms((antes) => ({ ...antes, [destino.canal]: destino.sala }))
+      setConversaNoTelemovel(true)
+    }
+  }
   const docaDaChamada = (variante: "flutuante" | "lateral"): React.JSX.Element | null =>
     callChannel === null ? null : (
       <CallDock
@@ -9089,9 +9171,9 @@ function Shell({
            this, muting the sound would silence the panel and the dock would
            keep talking, the card saying "muted" and sound coming out. */
         soundOff={soundOff}
-        micMuted={micMuted}
-        /* There is no microphone in the AFK room: the button leaves the dock. */
-        {...(chamadaNaSalaAfk ? {} : { onToggleMic: alternarMicrofone })}
+        estadoDoMic={estadoDoMicNaChamada()}
+        falantes={falantesDaDoca}
+        aReligar={avisoDeChamada?.code === "call-sfu-a-religar"}
         onBack={() => {
           setCallPopup(false)
           // Go back to where that conversation lives: a two-person call is in
@@ -9213,6 +9295,9 @@ function Shell({
             <GearIcon />
           </button>
         </nav>
+        {mudarDeConversa && (
+          <MudarDeConversa destinos={destinos} recentes={destinosRecentes} onEscolher={abrirDestino} onFechar={() => setMudarDeConversa(false)} />
+        )}
 
         {/* Click-away for the drawer. Only rendered while open; CSS removes
             it entirely on wide screens, where the sidebar is a column.
@@ -9254,6 +9339,9 @@ function Shell({
         {view !== "pessoas" && (!telemovel || view === "chat") && (
         <ChannelSidebar
           view={view}
+          onMudarDeConversa={barra.mudarDeConversa}
+          salaNaLista={salaNaLista}
+          onSalaRevelada={barra.salaRevelada}
           /* On the phone, only the community chosen on the rail: its line (with the
              community menu) and its channels under it. */
           rooms={telemovel ? (canal !== null && rooms.includes(canal) ? [canal] : []) : rooms}
@@ -9384,6 +9472,7 @@ function Shell({
             onToggleMic={alternarMicrofone}
             onToggleSound={alternarSom}
             premirParaFalar={{ ligado: modoDoMicrofone === "carregar", onMudar: escolherModoDoMicrofone }}
+            estadoDoMic={callChannel !== null ? estadoDoMicNaChamada() : undefined}
             onEditProfile={() => setEditingProfile(true)}
             bloqueados={amizade.bloqueados}
             nomeDe={nameFor}

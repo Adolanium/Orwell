@@ -1,9 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import type { EnclaveBridge, ResumoParaAOverlay } from "../bridge.js"
-import { obterContextoDeAudio } from "../lib/contextoDeAudio.js"
 import { vemDoEndereco } from "../lib/format.js"
-import { ChaoDeRuido, dbDeRms, inicioDaEscala, nivelDaVoz } from "../lib/medidorDeDb.js"
-import { criarDetectorDeFala, mesmoConjunto } from "../lib/quemFala.js"
 
 /**
  * The game overlay, from the shell side: what it shows, and who speaks.
@@ -20,18 +17,10 @@ import { criarDetectorDeFala, mesmoConjunto } from "../lib/quemFala.js"
  * No keys, no messages, no addresses. In browser `ponte` does not exist and
  * this does nothing.
  *
- * **Who speaks** is measured as in the cards (`useNivelDeVoz`): one analyser
- * per voice, on a CLONE of the track, at the same scale (`nivelDaVoz`). The
- * difference is the clock. Cards measure each frame (`requestAnimationFrame`),
- * and with the window behind the game there are no frames: Chromium stops them
- * in a hidden window. Here we measure with `setInterval` at 10 Hz. A page
- * playing sound is not throttled, and in a call with someone speaking there is
- * sound playing; in a silent room Chromium may space the clock to 1 s, and the
- * first ring lights with that delay. This was measured.
+ * Speaking identities come from the same call sampler as the in-app indicators.
  */
 
-const PERIODO_DA_MEDIDA_MS = 100
-/** The cropped face side, in pixels. The pill draws it at 40 px; 64 is for high-density screens. */
+/** The cropped face side, in pixels. */
 const LADO_DA_CARA = 64
 
 export interface PessoaParaAOverlay {
@@ -39,8 +28,6 @@ export interface PessoaParaAOverlay {
   nome: string
   /** The side profile face, as a data URL, or nothing. */
   cara?: string | undefined
-  /** The voice from this person (`null`: still connecting). */
-  stream: MediaStream | null
   micCalado: boolean
 }
 
@@ -110,101 +97,6 @@ export function reduzirCara(cara: string): Promise<string | null> {
   })
 }
 
-/**
- * Who is speaking, at 10 Hz, only while `activo`.
- *
- * `vozes` must be stable between renders (a `useMemo` with a key made of the
- * stream ids), for the reason in `useNivelDeVoz`.
- */
-function useQuemFala(
-  activo: boolean,
-  vozes: ReadonlyMap<string, MediaStream>,
-  proprio: { id: string; db: () => number | null } | null,
-): ReadonlySet<string> {
-  const [falam, setFalam] = useState<ReadonlySet<string>>(() => new Set())
-  const proprioRef = useRef(proprio)
-  proprioRef.current = proprio
-
-  useEffect(() => {
-    if (!activo) {
-      setFalam((antes) => (antes.size === 0 ? antes : new Set()))
-      return
-    }
-    const ctx = vozes.size > 0 ? obterContextoDeAudio() : null
-    const medidores: {
-      id: string
-      analisador: AnalyserNode
-      fonte: MediaStreamAudioSourceNode
-      faixas: MediaStreamTrack[]
-      chao: ChaoDeRuido
-      detector: ReturnType<typeof criarDetectorDeFala>
-    }[] = []
-    const agora = (): number => globalThis.performance?.now() ?? Date.now()
-    if (ctx) {
-      for (const [id, stream] of vozes) {
-        const audio = stream.getAudioTracks()
-        if (audio.length === 0) continue
-        const clones = audio.map((faixa) => faixa.clone())
-        try {
-          const fonte = ctx.createMediaStreamSource(new MediaStream(clones))
-          const analisador = ctx.createAnalyser()
-          analisador.fftSize = 512
-          fonte.connect(analisador)
-          medidores.push({ id, analisador, fonte, faixas: clones, chao: new ChaoDeRuido(agora()), detector: criarDetectorDeFala() })
-        } catch {
-          for (const clone of clones) clone.stop()
-        }
-      }
-    }
-    const detectorProprio = criarDetectorDeFala()
-    const chaoProprio = new ChaoDeRuido(agora())
-    const amostras = new Float32Array(512)
-    const bytes = new Uint8Array(512)
-
-    const medir = (): void => {
-      const instante = agora()
-      const novos = new Set<string>()
-      for (const medidor of medidores) {
-        let soma = 0
-        if (typeof medidor.analisador.getFloatTimeDomainData === "function") {
-          medidor.analisador.getFloatTimeDomainData(amostras)
-          for (const amostra of amostras) soma += amostra * amostra
-        } else {
-          medidor.analisador.getByteTimeDomainData(bytes)
-          for (const amostra of bytes) {
-            const desvio = (amostra - 128) / 128
-            soma += desvio * desvio
-          }
-        }
-        const db = dbDeRms(Math.sqrt(soma / amostras.length))
-        medidor.chao.observar(db, instante)
-        const nivel = nivelDaVoz(db, inicioDaEscala(medidor.chao.valor(instante)))
-        if (medidor.detector.observar(nivel, instante)) novos.add(medidor.id)
-      }
-      // Our voice: the chain level, before the gate, as in our card.
-      const meu = proprioRef.current
-      const db = meu?.db() ?? null
-      if (meu && db !== null && Number.isFinite(db)) {
-        chaoProprio.observar(db, instante)
-        const nivel = nivelDaVoz(db, inicioDaEscala(chaoProprio.valor(instante)))
-        if (detectorProprio.observar(nivel, instante)) novos.add(meu.id)
-      }
-      setFalam((antes) => (mesmoConjunto(antes, novos) ? antes : novos))
-    }
-    const relogio = setInterval(medir, PERIODO_DA_MEDIDA_MS)
-    return () => {
-      clearInterval(relogio)
-      for (const medidor of medidores) {
-        medidor.fonte.disconnect()
-        medidor.analisador.disconnect()
-        for (const faixa of medidor.faixas) faixa.stop()
-      }
-    }
-  }, [activo, vozes])
-
-  return falam
-}
-
 export function useOverlayDeJogo(opcoes: {
   ponte: EnclaveBridge["overlay"]
   /** The voice room we are in, or `null` outside a call. The key tells rooms with the same name apart. */
@@ -213,15 +105,14 @@ export function useOverlayDeJogo(opcoes: {
   outros: readonly PessoaParaAOverlay[]
   micMuted: boolean
   soundOff: boolean
-  /** Our input level, in dBFS, before the gate (`call.audio.medir().entradaDb`). */
-  dbDaEntrada: () => number | null
+  falam: ReadonlySet<string>
   ligada: boolean
   opacidade: number
   textos: { entrou: string; saiu: string }
   /** For tests: the face shrinking. */
   reduzir?: (cara: string) => Promise<string | null>
 }): void {
-  const { ponte, sala, eu, outros, ligada } = opcoes
+  const { ponte, sala, eu, outros, ligada, falam } = opcoes
   const activo = ponte !== undefined && ligada && sala !== null
 
   // Preferences, whenever they change: the main process holds them and decides.
@@ -239,18 +130,6 @@ export function useOverlayDeJogo(opcoes: {
     entradas.current = { ...entradas.current, chave: null }
   }
   const entrada = entradas.current.numero
-
-  const chaveDasVozes = outros.map((pessoa) => `${pessoa.id}=${pessoa.stream?.id ?? ""}`).join("|")
-  // The key says when the list changed: `outros` is a new array each render.
-  const vozes = useMemo(() => {
-    const mapa = new Map<string, MediaStream>()
-    for (const pessoa of outros) if (pessoa.stream) mapa.set(pessoa.id, pessoa.stream)
-    return mapa
-  }, [chaveDasVozes])
-  const dbDaEntrada = useRef(opcoes.dbDaEntrada)
-  dbDaEntrada.current = opcoes.dbDaEntrada
-  const proprio = useMemo(() => ({ id: eu.id, db: () => dbDaEntrada.current() }), [eu.id])
-  const falam = useQuemFala(activo, vozes, proprio)
 
   // The summary, only when it changes.
   const resumo = activo && sala
