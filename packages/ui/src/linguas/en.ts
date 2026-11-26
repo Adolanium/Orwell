@@ -1781,6 +1781,8 @@ export const en: Traducao = {
       actualizacao: "Update available",
       "mic-silenciado": "Mute the microphone",
       "mic-ligado": "Unmute the microphone",
+      "ptt-inicio": "Push to talk starts",
+      "ptt-fim": "Push to talk ends",
       "tudo-silenciado": "Mute all (microphone and sound)",
       "tudo-ligado": "Unmute all (microphone and sound)",
       "amigo-online": "A friend comes online",

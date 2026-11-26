@@ -3252,6 +3252,8 @@ export const pt = {
       actualizacao: "Actualização disponível",
       "mic-silenciado": "Silenciar o microfone",
       "mic-ligado": "Ligar o microfone",
+      "ptt-inicio": "Iniciar a fala com a tecla",
+      "ptt-fim": "Terminar a fala com a tecla",
       "tudo-silenciado": "Silenciar tudo (microfone e som)",
       "tudo-ligado": "Ligar tudo (microfone e som)",
       "amigo-online": "Um amigo fica online",

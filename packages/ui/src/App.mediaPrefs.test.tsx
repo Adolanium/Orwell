@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import type { EnclaveBridge } from "./bridge.js"
 import { App } from "./App.js"
 import { PREFS_KEY, readPrefs } from "./hooks/usePrefs.js"
+import { vozFalsa } from "./hooks/vozFalsa.js"
+import { motor } from "./sons/motor.js"
 import { strings } from "./strings.js"
 import { moradaDeTeste } from "../testes/moradas.js"
 
@@ -143,13 +145,24 @@ function montarChamada() {
   const canal = "!conversa:casa.pt"
   const entradas: boolean[] = []
   let aEnviar = true
+  let captura: MediaStream | null = null
+  const { stream } = vozFalsa("microfone local")
+  for (const faixa of stream.getAudioTracks()) Object.assign(faixa, { readyState: "live" })
   let ouvinteDaFala: ((premida: boolean) => void) | undefined
   const base = ponte({
-    setMuted: (calado) => { aEnviar = !calado },
+    setMuted: (calado) => {
+      aEnviar = !calado
+      for (const faixa of captura?.getAudioTracks() ?? []) faixa.enabled = aEnviar
+    },
     setCameraOff: () => {},
-    join: async () => { entradas.push(aEnviar) },
-    leave: async () => {},
+    join: async () => {
+      entradas.push(aEnviar)
+      captura = stream
+      for (const faixa of captura.getAudioTracks()) faixa.enabled = aEnviar
+    },
+    leave: async () => { captura = null },
   })
+  Object.defineProperty(base.call, "localStream", { get: () => captura })
   const bridge: EnclaveBridge = {
     ...base,
     channels: {
@@ -196,7 +209,9 @@ describe("premir para falar como modo do microfone", () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
-  it("só envia áudio durante a pressão da tecla, na janela ou no fundo", async () => {
+  it("abre o microfone e confirma cada pressão e largada, na janela ou no fundo", async () => {
+    const tocar = vi.spyOn(motor, "tocar")
+    const sonsDaFala = () => tocar.mock.calls.map(([som]) => som.tipo).filter((tipo) => tipo.startsWith("ptt-"))
     localStorage.setItem(PREFS_KEY, JSON.stringify({
       chosen: true,
       entrarSilenciado: true,
@@ -210,6 +225,9 @@ describe("premir para falar como modo do microfone", () => {
     expect(modo.getAttribute("aria-checked")).toBe("true")
     expect(chamada.aEnviar()).toBe(false)
     expect(readPrefs().modoDoMicrofone).toBe("carregar")
+    chamada.falarNoFundo(true)
+    chamada.falarNoFundo(false)
+    expect(sonsDaFala()).toEqual([])
 
     await entrarNoEstudio()
     expect(chamada.entradas).toEqual([false])
@@ -218,13 +236,25 @@ describe("premir para falar como modo do microfone", () => {
     expect(chamada.aEnviar()).toBe(true)
     fireEvent.keyUp(document, { key: "F8", code: "F8" })
     expect(chamada.aEnviar()).toBe(false)
+    expect(sonsDaFala()).toEqual(["ptt-inicio", "ptt-fim"])
+    chamada.falarNoFundo(true)
     chamada.falarNoFundo(true)
     expect(chamada.aEnviar()).toBe(true)
     chamada.falarNoFundo(false)
     expect(chamada.aEnviar()).toBe(false)
+    expect(sonsDaFala()).toEqual(["ptt-inicio", "ptt-fim", "ptt-inicio", "ptt-fim"])
 
-    fireEvent.click(await abrirDefinicoesDeMedia())
+    const modoNaChamada = await abrirDefinicoesDeMedia()
+    fireEvent.click(screen.getByRole("checkbox", { name: strings.settings.micMuted }))
+    chamada.falarNoFundo(true)
+    chamada.falarNoFundo(false)
+    expect(chamada.aEnviar()).toBe(false)
+    fireEvent.click(screen.getByRole("checkbox", { name: strings.settings.micMuted }))
+    fireEvent.click(modoNaChamada)
     expect(chamada.aEnviar()).toBe(true)
+    chamada.falarNoFundo(true)
+    chamada.falarNoFundo(false)
+    expect(sonsDaFala()).toEqual(["ptt-inicio", "ptt-fim", "ptt-inicio", "ptt-fim"])
   })
 
   it("ao mudar de silenciado para premir para falar, basta a tecla", async () => {

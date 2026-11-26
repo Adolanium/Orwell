@@ -419,7 +419,7 @@ describe("a saída por Web Audio", () => {
     expect(() => saida.calar("chamada")).not.toThrow()
   })
 
-  it("renderiza cada som uma vez, e toca o buffer guardado", async () => {
+  it("toca de imediato o som pré-carregado e guarda os que renderiza ao tocar", async () => {
     const renderizados: TipoDeSom[] = []
     const iniciados: unknown[] = []
     const buffer = {} as AudioBuffer
@@ -445,14 +445,16 @@ describe("a saída por Web Audio", () => {
         return buffer
       },
     })
-    saida.preparar()
+    saida.precarregar("ptt-inicio")
     await new Promise((r) => setTimeout(r, 0))
-    expect(new Set(renderizados).size).toBe(renderizados.length)
+    expect(iniciados).toEqual([])
+    expect(saida.tocar("ptt-inicio", 0.2)).toBe(true)
+    expect(iniciados).toEqual([buffer])
     expect(saida.tocar("directa", 0.2)).toBe(true)
     await new Promise((r) => setTimeout(r, 0))
     saida.tocar("directa", 0.2)
-    expect(iniciados).toEqual([buffer, buffer])
-    expect(renderizados.filter((t) => t === "directa")).toHaveLength(1)
+    expect(iniciados).toEqual([buffer, buffer, buffer])
+    expect(renderizados).toEqual(["ptt-inicio", "directa"])
   })
 })
 

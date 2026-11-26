@@ -54,6 +54,8 @@ export const PREFERENCIAS_DE_SOM_POR_OMISSAO: PreferenciasDeSom = {
     actualizacao: true,
     "mic-silenciado": true,
     "mic-ligado": true,
+    "ptt-inicio": true,
+    "ptt-fim": true,
     "tudo-silenciado": true,
     "tudo-ligado": true,
     "amigo-online": true,
